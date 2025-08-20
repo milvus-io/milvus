@@ -351,6 +351,12 @@ func (t *createCollectionTask) handleNamespaceProperty() error {
 			"namespace field name is reserved and cannot be user-defined")
 	}
 
+	hasIsolation := hasIsolationProperty(t.GetProperties()...)
+	if hasIsolation {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"isolation property is not supported with namespace field")
+	}
+
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	enabled, has, err := parseNamespaceProp(t.GetProperties()...)
 	if err != nil {
@@ -367,9 +373,11 @@ func (t *createCollectionTask) handleNamespaceProperty() error {
 
 	if enabled {
 		addNamespaceField(t.schema)
+		addIsolationProperty(t.schema)
 		log.Ctx(t.TraceCtx()).Info("added namespace field",
 			zap.String("collectionName", t.schema.Name),
 			zap.String("fieldName", common.NamespaceFieldName))
+
 	}
 	return nil
 }
@@ -1152,6 +1160,15 @@ func hasNamespaceField(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
+func hasIsolationProperty(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.PartitionKeyIsolationKey {
+			return true
+		}
+	}
+	return false
+}
+
 func addNamespaceField(schema *schemapb.CollectionSchema) {
 	fid := int64(-1)
 	for _, f := range schema.Fields {
@@ -1179,6 +1196,13 @@ func addNamespaceField(schema *schemapb.CollectionSchema) {
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
 		},
+	})
+}
+
+func addIsolationProperty(schema *schemapb.CollectionSchema) {
+	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.PartitionKeyIsolationKey,
+		Value: "true",
 	})
 }
 
