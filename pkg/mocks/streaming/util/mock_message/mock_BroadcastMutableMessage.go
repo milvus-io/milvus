@@ -389,6 +389,69 @@ func (_c *MockBroadcastMutableMessage_MessageTypeWithVersion_Call) RunAndReturn(
 	return _c
 }
 
+// OverwriteBroadcastHeader provides a mock function with given fields: broadcastID, rks
+func (_m *MockBroadcastMutableMessage) OverwriteBroadcastHeader(broadcastID uint64, rks ...message.ResourceKey) message.BroadcastMutableMessage {
+	_va := make([]interface{}, len(rks))
+	for _i := range rks {
+		_va[_i] = rks[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, broadcastID)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for OverwriteBroadcastHeader")
+	}
+
+	var r0 message.BroadcastMutableMessage
+	if rf, ok := ret.Get(0).(func(uint64, ...message.ResourceKey) message.BroadcastMutableMessage); ok {
+		r0 = rf(broadcastID, rks...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.BroadcastMutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OverwriteBroadcastHeader'
+type MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call struct {
+	*mock.Call
+}
+
+// OverwriteBroadcastHeader is a helper method to define mock.On call
+//   - broadcastID uint64
+//   - rks ...message.ResourceKey
+func (_e *MockBroadcastMutableMessage_Expecter) OverwriteBroadcastHeader(broadcastID interface{}, rks ...interface{}) *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call {
+	return &MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call{Call: _e.mock.On("OverwriteBroadcastHeader",
+		append([]interface{}{broadcastID}, rks...)...)}
+}
+
+func (_c *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call) Run(run func(broadcastID uint64, rks ...message.ResourceKey)) *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ResourceKey, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ResourceKey)
+			}
+		}
+		run(args[0].(uint64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call) Return(_a0 message.BroadcastMutableMessage) *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call) RunAndReturn(run func(uint64, ...message.ResourceKey) message.BroadcastMutableMessage) *MockBroadcastMutableMessage_OverwriteBroadcastHeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Payload provides a mock function with no fields
 func (_m *MockBroadcastMutableMessage) Payload() []byte {
 	ret := _m.Called()

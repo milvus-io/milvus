@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -32,8 +33,7 @@ type Server struct {
 	broadcastService  service.BroadcastService
 
 	// basic component variables can be used at service level.
-	balancer    *syncutil.Future[balancer.Balancer]
-	broadcaster *syncutil.Future[broadcaster.Broadcaster]
+	balancer *syncutil.Future[balancer.Balancer]
 }
 
 // Init initializes the streamingcoord server.
@@ -74,7 +74,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 			s.logger.Warn("recover broadcaster failed", zap.Error(err))
 			return struct{}{}, err
 		}
-		s.broadcaster.Set(broadcaster)
+		broadcast.Register(broadcaster)
 		s.logger.Info("recover broadcaster done")
 		return struct{}{}, nil
 	}))
@@ -95,12 +95,8 @@ func (s *Server) Stop() {
 	} else {
 		s.logger.Info("balancer not ready, skip close")
 	}
-	if s.broadcaster.Ready() {
-		s.logger.Info("start close broadcaster...")
-		s.broadcaster.Get().Close()
-	} else {
-		s.logger.Info("broadcaster not ready, skip close")
-	}
+	s.logger.Info("start close broadcaster...")
+	broadcast.Release()
 	s.logger.Info("release streamingcoord resource...")
 	resource.Release()
 	s.logger.Info("streamingcoord server stopped")

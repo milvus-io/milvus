@@ -22,9 +22,10 @@ var (
 
 // ExtraAppendResult is the extra append result.
 type ExtraAppendResult struct {
-	TimeTick uint64
-	TxnCtx   *message.TxnContext
-	Extra    protoreflect.ProtoMessage
+	TimeTick               uint64
+	TxnCtx                 *message.TxnContext
+	Extra                  protoreflect.ProtoMessage
+	LastConfirmedMessageID message.MessageID
 }
 
 // NotPersistedHint is the hint of not persisted message.
@@ -64,6 +65,12 @@ func ModifyAppendResultExtra[M protoreflect.ProtoMessage](ctx context.Context, m
 		return
 	}
 	result.(*ExtraAppendResult).Extra = new
+}
+
+// ReplaceAppendResultLastConfirmedMessageID set last confirmed message id to context
+func ReplaceAppendResultLastConfirmedMessageID(ctx context.Context, lastConfirmedMessageID message.MessageID) {
+	result := ctx.Value(extraAppendResultValue)
+	result.(*ExtraAppendResult).LastConfirmedMessageID = lastConfirmedMessageID
 }
 
 // ReplaceAppendResultTimeTick set time tick to context

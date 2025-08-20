@@ -132,6 +132,9 @@ type BroadcastMutableMessage interface {
 	// WithBroadcastID sets the broadcast id of the message.
 	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage
 
+	// OverwriteBroadcastHeader overwrites the broadcast header of the message.
+	OverwriteBroadcastHeader(broadcastID uint64, rks ...ResourceKey) BroadcastMutableMessage
+
 	// SplitIntoMutableMessage splits the broadcast message into multiple mutable messages.
 	// The broadcast id will be set into the properties of each message.
 	SplitIntoMutableMessage() []MutableMessage
@@ -201,6 +204,9 @@ type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
 
 	// OverwriteHeader overwrites the message header.
 	OverwriteHeader(header H)
+
+	// BroadcastMessage returns the broadcast message.
+	BroadcastMessage() BroadcastMutableMessage
 }
 
 // specializedMutableMessage is the specialized mutable message interface.

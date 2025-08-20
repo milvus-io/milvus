@@ -440,6 +440,7 @@ message ProduceMessageResponseResult {
     uint64 timetick       = 2;  // the timetick of that message sent.
     messages.TxnContext txnContext = 3;  // the txn context of the message.
     google.protobuf.Any extra      = 4;  // the extra message.
+    common.MessageID last_confirmed_id = 5;  // the last confirmed message id.
 }
 
 // CloseProducerResponse is the result of the CloseProducer RPC.
