@@ -1003,11 +1003,17 @@ func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, WrapTypeErr("boolArray", chunk.DataType().Name(), pcr.field)
 		}
 		offsets := listReader.Offsets()
-		getArrayData(offsets, func(i int) (bool, error) {
+		err = getArrayData(offsets, func(i int) (bool, error) {
+			if boolReader.IsNull(i) {
+				return false, WrapNullElementErr(pcr.field)
+			}
 			return boolReader.Value(i), nil
 		}, func(arr []bool, valid bool) {
 			data = append(data, arr)
 		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -1039,12 +1045,18 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 				return nil, nil, WrapTypeErr("boolArray", chunk.DataType().Name(), pcr.field)
 			}
 			offsets := listReader.Offsets()
-			getArrayData(offsets, func(i int) (bool, error) {
+			err = getArrayData(offsets, func(i int) (bool, error) {
+				if boolReader.IsNull(i) {
+					return false, WrapNullElementErr(pcr.field)
+				}
 				return boolReader.Value(i), nil
 			}, func(arr []bool, valid bool) {
 				data = append(data, arr)
 				validData = append(validData, valid)
 			})
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if len(data) != len(validData) {
@@ -1079,46 +1091,82 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		switch valueReader.DataType().ID() {
 		case arrow.INT8:
 			int8Reader := valueReader.(*array.Int8)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int8Reader.IsNull(i) {
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int8Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT16:
 			int16Reader := valueReader.(*array.Int16)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int16Reader.IsNull(i) {
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int16Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT32:
 			int32Reader := valueReader.(*array.Int32)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int32Reader.IsNull(i) {
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int32Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT64:
 			int64Reader := valueReader.(*array.Int64)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int64Reader.IsNull(i) {
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int64Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.FLOAT32:
 			float32Reader := valueReader.(*array.Float32)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if float32Reader.IsNull(i) {
+					return 0.0, WrapNullElementErr(pcr.field)
+				}
 				return T(float32Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.FLOAT64:
 			float64Reader := valueReader.(*array.Float64)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if float64Reader.IsNull(i) {
+					return 0.0, WrapNullElementErr(pcr.field)
+				}
 				return T(float64Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
 		}
@@ -1160,52 +1208,88 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 			switch valueReader.DataType().ID() {
 			case arrow.INT8:
 				int8Reader := valueReader.(*array.Int8)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int8Reader.IsNull(i) {
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int8Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT16:
 				int16Reader := valueReader.(*array.Int16)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int16Reader.IsNull(i) {
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int16Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT32:
 				int32Reader := valueReader.(*array.Int32)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int32Reader.IsNull(i) {
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int32Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT64:
 				int64Reader := valueReader.(*array.Int64)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int64Reader.IsNull(i) {
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int64Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.FLOAT32:
 				float32Reader := valueReader.(*array.Float32)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if float32Reader.IsNull(i) {
+						return 0.0, WrapNullElementErr(pcr.field)
+					}
 					return T(float32Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.FLOAT64:
 				float64Reader := valueReader.(*array.Float64)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if float64Reader.IsNull(i) {
+						return 0.0, WrapNullElementErr(pcr.field)
+					}
 					return T(float64Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			default:
 				return nil, nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
 			}
@@ -1241,6 +1325,9 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		offsets := listReader.Offsets()
 		err = getArrayData(offsets, func(i int) (string, error) {
+			if stringReader.IsNull(i) {
+				return "", WrapNullElementErr(pcr.field)
+			}
 			val := stringReader.Value(i)
 			if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
 				return val, err
@@ -1288,6 +1375,9 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 			}
 			offsets := listReader.Offsets()
 			err = getArrayData(offsets, func(i int) (string, error) {
+				if stringReader.IsNull(i) {
+					return "", WrapNullElementErr(pcr.field)
+				}
 				val := stringReader.Value(i)
 				if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
 					return val, err

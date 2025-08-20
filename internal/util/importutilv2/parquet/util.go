@@ -42,6 +42,11 @@ func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) erro
 			expect, field.GetName(), actual))
 }
 
+func WrapNullElementErr(field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(
+		fmt.Sprintf("array element is not allowed to be null value for field '%s'", field.GetName()))
+}
+
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
@@ -237,21 +242,21 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     elemType,
-			Nullable: true,
+			Nullable: false,
 			Metadata: arrow.Metadata{},
 		}), nil
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Uint8Type{},
-			Nullable: true,
+			Nullable: false,
 			Metadata: arrow.Metadata{},
 		}), nil
 	case schemapb.DataType_FloatVector:
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Float32Type{},
-			Nullable: true,
+			Nullable: false,
 			Metadata: arrow.Metadata{},
 		}), nil
 	case schemapb.DataType_SparseFloatVector:
@@ -260,7 +265,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Int8Type{},
-			Nullable: true,
+			Nullable: false,
 			Metadata: arrow.Metadata{},
 		}), nil
 	default:
@@ -323,8 +328,8 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			return err
 		}
 		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
-				field.Name, field.DataType.String(), arrField.Type.String()))
+			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
+				field.Name, toArrDataType.String(), arrField.Type.String()))
 		}
 	}
 	return nil
