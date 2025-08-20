@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -41,7 +42,7 @@ func TestStreamingNodeManager(t *testing.T) {
 			}
 		})
 	b.EXPECT().RegisterStreamingEnabledNotifier(mock.Anything).Return()
-	m.SetBalancerReady(b)
+	balance.Register(b)
 
 	streamingNodes := m.GetStreamingQueryNodeIDs()
 	assert.Empty(t, streamingNodes)

@@ -353,57 +353,63 @@ func (s *Server) initDataCoord() error {
 // initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
 func (s *Server) initMessageCallback() {
-	registry.RegisterDropPartitionV1AckCallback(func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
-		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{msg.Header().PartitionId})
-	})
-
-	registry.RegisterImportV1AckCallback(func(ctx context.Context, msg message.ImmutableImportMessageV1) error {
-		body := msg.MustBody()
-		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			CollectionID:   body.GetCollectionID(),
-			CollectionName: body.GetCollectionName(),
-			PartitionIDs:   body.GetPartitionIDs(),
-			ChannelNames:   []string{msg.VChannel()},
-			Schema:         body.GetSchema(),
-			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-				return &internalpb.ImportFile{
-					Id:    file.GetId(),
-					Paths: file.GetPaths(),
-				}
-			}),
-			Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-			DataTimestamp: body.GetBase().GetTimestamp(),
-			JobID:         body.GetJobID(),
-		})
-		err = merr.CheckRPCCall(importResp, err)
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return nil
+	registry.RegisterDropPartitionV1AckCallback(func(ctx context.Context, result message.BroadcastResultDropPartitionMessageV1) error {
+		partitionID := result.Message.Header().PartitionId
+		for vchannel := range result.Results {
+			return s.NotifyDropPartition(ctx, vchannel, []int64{partitionID})
 		}
-		if err != nil {
-			log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return err
-		}
-		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
 		return nil
 	})
 
-	registry.RegisterImportV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
+	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
+		body := result.Message.MustBody()
+		for vchannel := range result.Results {
+			importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+				CollectionID:   body.GetCollectionID(),
+				CollectionName: body.GetCollectionName(),
+				PartitionIDs:   body.GetPartitionIDs(),
+				ChannelNames:   []string{vchannel},
+				Schema:         body.GetSchema(),
+				Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+					return &internalpb.ImportFile{
+						Id:    file.GetId(),
+						Paths: file.GetPaths(),
+					}
+				}),
+				Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+				DataTimestamp: body.GetBase().GetTimestamp(),
+				JobID:         body.GetJobID(),
+			})
+			err = merr.CheckRPCCall(importResp, err)
+			if errors.Is(err, merr.ErrCollectionNotFound) {
+				log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+				return nil
+			}
+			if err != nil {
+				log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+				return err
+			}
+			log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
+		}
+		return nil
+	})
+
+	registry.RegisterImportV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) (message.BroadcastMutableMessage, error) {
 		b := msg.MustBody()
 		options := funcutil.Map2KeyValuePair(b.GetOptions())
 		_, err := importutilv2.GetTimeoutTs(options)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, b.GetFiles(), options)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return nil
+		return msg.BroadcastMessage(), nil
 	})
 }
 

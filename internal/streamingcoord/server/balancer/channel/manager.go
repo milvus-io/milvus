@@ -171,6 +171,17 @@ func (cm *ChannelManager) IsStreamingEnabledOnce() bool {
 	return cm.streamingVersion != nil
 }
 
+// ReplicateRole returns the replicate role of the channel manager.
+func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	if cm.replicateConfig == nil {
+		return replicateutil.RolePrimary
+	}
+	return cm.replicateConfig.GetCurrentCluster().Role()
+}
+
 // TriggerWatchUpdate triggers the watch update.
 // Because current watch must see new incoming streaming node right away,
 // so a watch updating trigger will be called if there's new incoming streaming node.

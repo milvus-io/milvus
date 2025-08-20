@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -558,7 +559,7 @@ func TestGcPartitionData(t *testing.T) {
 	b.EXPECT().RegisterStreamingEnabledNotifier(mock.Anything).Run(func(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 		notifier.Cancel()
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
+	balance.Register(b)
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	broadcast := mock_streaming.NewMockBroadcast(t)

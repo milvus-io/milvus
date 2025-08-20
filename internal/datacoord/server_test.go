@@ -61,7 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -2868,7 +2868,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	server.initMessageCallback()
 
 	// Test DropPartition message callback
-	dropPartitionMsg, err := message.NewDropPartitionMessageBuilderV1().
+	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
 		WithVChannel("test_channel").
 		WithHeader(&message.DropPartitionMessageHeader{
 			CollectionId: 1,
@@ -2879,9 +2879,15 @@ func TestServer_InitMessageCallback(t *testing.T) {
 				MsgType: commonpb.MsgType_DropPartition,
 			},
 		}).
-		BuildMutable()
-	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, dropPartitionMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
+		WithBroadcast([]string{"test_channel"}, message.NewImportJobIDResourceKey(1)).
+		MustBuildBroadcast()
+	err := registry.CallMessageAckCallback(ctx, dropPartitionMsg, map[string]*message.AppendResult{
+		"test_channel": {
+			MessageID:              walimplstest.NewTestMessageID(1),
+			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:               1,
+		},
+	})
 	assert.Error(t, err) // server not healthy
 
 	// Test Import message check callback
@@ -2895,11 +2901,12 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		WithBroadcast([]string{"ch-0"}, resourceKey).
 		BuildBroadcast()
-	err = registry.CallMessageCheckCallback(ctx, msg)
+	newMsg, err := registry.CallMessageCheckCallback(ctx, msg)
 	assert.NoError(t, err)
+	assert.NotNil(t, newMsg)
 
 	// Test Import message ack callback
-	importMsg, err := message.NewImportMessageBuilderV1().
+	importMsg := message.NewImportMessageBuilderV1().
 		WithVChannel("test_channel").
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
@@ -2907,8 +2914,15 @@ func TestServer_InitMessageCallback(t *testing.T) {
 				MsgType: commonpb.MsgType_Import,
 			},
 		}).
-		BuildMutable()
-	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, importMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
+		WithBroadcast([]string{"test_channel"}, resourceKey).
+		MustBuildBroadcast()
+	err = registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
+		"test_channel": {
+			MessageID:              walimplstest.NewTestMessageID(1),
+			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:               1,
+		},
+	},
+	)
 	assert.Error(t, err) // server not healthy
 }

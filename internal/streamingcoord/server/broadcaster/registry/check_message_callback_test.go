@@ -17,9 +17,9 @@ func TestCheckMessageCallbackRegistration(t *testing.T) {
 
 	// Test registering a callback
 	called := false
-	callback := func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
+	callback := func(ctx context.Context, msg message.BroadcastImportMessageV1) (message.BroadcastMutableMessage, error) {
 		called = true
-		return nil
+		return msg.BroadcastMessage(), nil
 	}
 
 	// Register callback for DropPartition message type
@@ -37,15 +37,17 @@ func TestCheckMessageCallbackRegistration(t *testing.T) {
 		WithBroadcast([]string{"v1"}).MustBuildBroadcast()
 
 	// Call the callback
-	err := CallMessageCheckCallback(context.Background(), msg)
+	newMsg, err := CallMessageCheckCallback(context.Background(), msg)
 	assert.NoError(t, err)
 	assert.True(t, called)
+	assert.NotNil(t, newMsg)
 
 	resetMessageCheckCallbacks()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	err = CallMessageCheckCallback(ctx, msg)
+	newMsg, err = CallMessageCheckCallback(ctx, msg)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
+	assert.Nil(t, newMsg)
 }

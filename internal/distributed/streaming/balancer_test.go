@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -54,7 +55,7 @@ func TestBalancer(t *testing.T) {
 	})
 
 	snmanager.ResetStreamingNodeManager()
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(sbalancer)
+	balance.Register(sbalancer)
 
 	balancer := balancerImpl{
 		walAccesserImpl: &walAccesserImpl{},
