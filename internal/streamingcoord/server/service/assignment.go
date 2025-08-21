@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/replicate"
 	"github.com/milvus-io/milvus/internal/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -56,7 +57,7 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	config := req.GetReplicateConfiguration()
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(config)...)
-	validator := NewReplicateConfigValidator(config)
+	validator := replicate.NewReplicateConfigValidator(config)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err

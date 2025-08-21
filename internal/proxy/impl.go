@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -7028,5 +7029,9 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 
 // CreateReplicateStream establishes a replication stream on the target Milvus cluster.
 func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
-	panic("not implemented")
+	s, err := replicate.CreateReplicateServer(stream)
+	if err != nil {
+		return err
+	}
+	return s.Execute()
 }

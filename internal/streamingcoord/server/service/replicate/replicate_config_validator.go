@@ -1,4 +1,4 @@
-package service
+package replicate
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -15,6 +16,7 @@ type ReplicateConfigValidator struct {
 	clusterMap       map[string]*milvuspb.MilvusCluster
 	clusterIDs       map[string]struct{}
 	config           *milvuspb.ReplicateConfiguration
+	balancer         *balancer.Balancer
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
