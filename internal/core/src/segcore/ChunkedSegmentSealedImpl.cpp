@@ -846,7 +846,7 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     auto [scalar_indexings, ngram_fields] =
         lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
     scalar_indexings->erase(field_id);
