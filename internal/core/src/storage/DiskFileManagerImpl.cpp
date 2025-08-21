@@ -476,7 +476,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                                   GetFieldDataMeta().segment_id,
                                   GetFieldDataMeta().field_id) +
                               "raw_data";
-            if (dt == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+            if (dt == milvus::DataType::VECTOR_SPARSE_U32_F32) {
                 local_data_path += ".sparse_u32_f32";
             }
             local_chunk_manager->CreateFile(local_data_path);
@@ -484,13 +484,13 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         init_file_info(data_type);
         file_created = true;
     }
-    if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type == milvus::DataType::VECTOR_SPARSE_U32_F32) {
         dim =
             (uint32_t)(std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
                            field_data)
                            ->Dim());
         auto sparse_rows =
-            static_cast<const knowhere::sparse::SparseRow<float>*>(
+            static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                 field_data->Data());
         for (size_t i = 0; i < field_data->Length(); ++i) {
             auto row = sparse_rows[i];
@@ -967,6 +967,8 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {
