@@ -40,11 +40,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -7003,7 +7005,20 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 
 // UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
 func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
-	resp, err := node.mixCoord.UpdateReplicateConfiguration(ctx, req)
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateReplicateConfiguration")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	err := streaming.WAL().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
+	if err != nil {
+		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	return merr.Status(nil), nil
 }
 
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.

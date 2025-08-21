@@ -18,15 +18,13 @@ package controllerimpl
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
@@ -80,24 +78,7 @@ func (c *controller) run() {
 		log.Ctx(c.ctx).Error("failed to get replicate configuration", zap.Error(err))
 		return
 	}
-	log.Ctx(c.ctx).Info("updating configuration...", wrapConfigLogFields(config)...)
+	log.Ctx(c.ctx).Info("updating configuration...", replicateutil.ConfigLogFields(config)...)
 	resource.Resource().ReplicateManagerClient().UpdateReplications(config)
-	log.Ctx(c.ctx).Info("configuration updated", wrapConfigLogFields(config)...)
-}
-
-func wrapConfigLogFields(config *milvuspb.ReplicateConfiguration) []zap.Field {
-	fields := make([]zap.Field, 0)
-	fields = append(fields, zap.Int("clusterCount", len(config.GetClusters())))
-	fields = append(fields, zap.Strings("clusters", lo.Map(config.GetClusters(), func(cluster *milvuspb.MilvusCluster, _ int) string {
-		return cluster.GetClusterID()
-	})))
-	fields = append(fields, zap.Int("topologyCount", len(config.GetCrossClusterTopology())))
-	fields = append(fields, zap.Strings("topologies", lo.Map(config.GetCrossClusterTopology(), func(topology *milvuspb.CrossClusterTopology, _ int) string {
-		return fmt.Sprintf("%s->%s", topology.GetSourceClusterID(), topology.GetTargetClusterID())
-	})))
-	for _, cluster := range config.GetClusters() {
-		fields = append(fields, zap.String("clusterInfo", fmt.Sprintf("clusterID: %s, uri: %s, pchannels: %v",
-			cluster.GetClusterID(), cluster.GetConnectionParam().GetUri(), cluster.GetPchannels())))
-	}
-	return fields
+	log.Ctx(c.ctx).Info("configuration updated", replicateutil.ConfigLogFields(config)...)
 }

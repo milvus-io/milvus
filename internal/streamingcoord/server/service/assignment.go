@@ -4,11 +4,14 @@ import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
+	"github.com/milvus-io/milvus/internal/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -52,13 +55,16 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 // UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	config := req.GetReplicateConfiguration()
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(config)...)
 	validator := NewReplicateConfigValidator(config)
 	if err := validator.Validate(); err != nil {
+		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err
 	}
 	err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, config)
 	if err != nil {
 		return nil, err
 	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(config)...)
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
