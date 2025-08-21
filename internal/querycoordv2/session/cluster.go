@@ -95,7 +95,8 @@ func (c *QueryCluster) Stop() {
 
 func (c *QueryCluster) updateLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second))
+	interval := paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -108,6 +109,16 @@ func (c *QueryCluster) updateLoop() {
 				if c.nodeManager.Get(id) == nil {
 					c.clients.close(id)
 				}
+			}
+			// apply dynamic update only when changed
+			newInterval := paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second)
+			if newInterval != interval {
+				interval = newInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
 			}
 		}
 	}
