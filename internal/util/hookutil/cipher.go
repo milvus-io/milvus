@@ -213,6 +213,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 					Value: defaultRootKey,
 				},
 			)
+			return dbProperties, nil
 		}
 		return nil, fmt.Errorf("Empty default root key for encrypted database without kms key")
 	}

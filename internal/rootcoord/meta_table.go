@@ -395,7 +395,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	}
 
 	// Call back cipher plugin when dropping database succeeded
-	if hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
+	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
