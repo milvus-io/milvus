@@ -54,7 +54,7 @@ class ProtoParser {
     ParseExprs(const proto::plan::Expr& expr_pb,
                TypeCheckFunction type_check = TypeIsBool);
 
-    std::shared_ptr<rescores::Scorer> 
+    std::shared_ptr<rescores::Scorer>
     ParseScorer(const proto::plan::ScoreFunction& function);
 
  private:

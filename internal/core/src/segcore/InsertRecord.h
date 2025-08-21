@@ -271,49 +271,51 @@ class OffsetOrderedArray : public OffsetMap {
                BitsetTypeView& bitset,
                Condition condition) const override {
         check_search();
-        auto lower_bound_comp = [](const std::pair<T, int64_t>& elem, const T& value) {
+        auto lower_bound_comp = [](const std::pair<T, int64_t>& elem,
+                                   const T& value) {
             return elem.first < value;
         };
-        auto upper_bound_comp = [](const T& value, const std::pair<T, int64_t>& elem) {
+        auto upper_bound_comp = [](const T& value,
+                                   const std::pair<T, int64_t>& elem) {
             return value < elem.first;
         };
 
         const T& target = std::get<T>(pk);
         if (op == proto::plan::OpType::Equal) {
-            auto it =
-                std::lower_bound(array_.begin(), array_.end(), target, lower_bound_comp);
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
             for (; it != array_.end() && it->first == target; ++it) {
                 if (condition(it->second)) {
                     bitset[it->second] = true;
                 }
             }
         } else if (op == proto::plan::OpType::GreaterEqual) {
-            auto it =
-                std::lower_bound(array_.begin(), array_.end(), target, lower_bound_comp);
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
             for (; it < array_.end(); ++it) {
                 if (condition(it->second)) {
                     bitset[it->second] = true;
                 }
             }
         } else if (op == proto::plan::OpType::GreaterThan) {
-            auto it =
-                std::upper_bound(array_.begin(), array_.end(), target, upper_bound_comp);
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
             for (; it < array_.end(); ++it) {
                 if (condition(it->second)) {
                     bitset[it->second] = true;
                 }
             }
         } else if (op == proto::plan::OpType::LessEqual) {
-            auto it =
-                std::upper_bound(array_.begin(), array_.end(), target, upper_bound_comp);
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
             for (auto ptr = array_.begin(); ptr < it; ++ptr) {
                 if (condition(ptr->second)) {
                     bitset[ptr->second] = true;
                 }
             }
         } else if (op == proto::plan::OpType::LessThan) {
-            auto it =
-            std::lower_bound(array_.begin(), array_.end(), target, lower_bound_comp);
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
             for (auto ptr = array_.begin(); ptr < it; ++ptr) {
                 if (condition(ptr->second)) {
                     bitset[ptr->second] = true;

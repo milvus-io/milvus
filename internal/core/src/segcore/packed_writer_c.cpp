@@ -149,8 +149,10 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 
         auto import_schema = arrow::ImportSchema(schema);
         if (!import_schema.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          "Failed to import schema: " + import_schema.status().ToString());
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileWriteFailed,
+                "Failed to import schema: " +
+                    import_schema.status().ToString());
         }
         auto arrow_schema = import_schema.ValueOrDie();
 
@@ -161,8 +163,10 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
         for (int i = 0; i < num_fields; i++) {
             auto array = arrow::ImportArray(&arrays[i], &array_schemas[i]);
             if (!array.ok()) {
-                return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                                "Failed to import array " + std::to_string(i) + ": " + array.status().ToString());
+                return milvus::FailureCStatus(
+                    milvus::ErrorCode::FileWriteFailed,
+                    "Failed to import array " + std::to_string(i) + ": " +
+                        array.status().ToString());
             }
             all_arrays.push_back(array.ValueOrDie());
         }
