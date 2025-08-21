@@ -57,12 +57,19 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	config := req.GetReplicateConfiguration()
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(config)...)
-	validator := replicate.NewReplicateConfigValidator(config)
+
+	balancer, err := s.balancer.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pchannels := balancer.GetPChannels()
+
+	validator := replicate.NewReplicateConfigValidator(config, pchannels)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err
 	}
-	err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, config)
+	err = resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, config)
 	if err != nil {
 		return nil, err
 	}

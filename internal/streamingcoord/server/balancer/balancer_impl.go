@@ -75,6 +75,11 @@ type balancerImpl struct {
 	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 }
 
+// GetPChannels returns all pchannels.
+func (b *balancerImpl) GetPChannels() []string {
+	return b.channelMetaManager.GetPChannels()
+}
+
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)

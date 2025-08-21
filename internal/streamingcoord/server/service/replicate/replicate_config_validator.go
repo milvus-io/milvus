@@ -13,6 +13,7 @@ import (
 // ReplicateConfigValidator validates ReplicateConfiguration according to business rules
 type ReplicateConfigValidator struct {
 	currentClusterID string
+	currentPChannels []string
 	clusterMap       map[string]*milvuspb.MilvusCluster
 	clusterIDs       map[string]struct{}
 	config           *milvuspb.ReplicateConfiguration
@@ -20,9 +21,10 @@ type ReplicateConfigValidator struct {
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
-func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration) *ReplicateConfigValidator {
+func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration, currentPChannels []string) *ReplicateConfigValidator {
 	validator := &ReplicateConfigValidator{
 		currentClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		currentPChannels: currentPChannels,
 		clusterMap:       make(map[string]*milvuspb.MilvusCluster),
 		clusterIDs:       make(map[string]struct{}),
 		config:           config,
@@ -157,12 +159,13 @@ func (v *ReplicateConfigValidator) validateClusterUniqueness() error {
 
 // validateRelevance validates that clusters must contain current Milvus cluster
 func (v *ReplicateConfigValidator) validateRelevance() error {
-	if v.currentClusterID == "" {
-		return nil
+	currentCluster, exists := v.clusterMap[v.currentClusterID]
+	if !exists {
+		return fmt.Errorf("current Milvus cluster '%s' must be included in the clusters list", v.currentClusterID)
 	}
 
-	if _, exists := v.clusterIDs[v.currentClusterID]; !exists {
-		return fmt.Errorf("current Milvus cluster '%s' must be included in the clusters list", v.currentClusterID)
+	if !equalIgnoreOrder(v.currentPChannels, currentCluster.GetPchannels()) {
+		return fmt.Errorf("current pchannels do not match the pchannels in the config, current pchannels: %v, config pchannels: %v", v.currentPChannels, currentCluster.GetPchannels())
 	}
 
 	return nil
@@ -259,4 +262,21 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 	}
 
 	return nil
+}
+
+func equalIgnoreOrder(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int)
+	for _, v := range a {
+		counts[v]++
+	}
+	for _, v := range b {
+		if counts[v] == 0 {
+			return false
+		}
+		counts[v]--
+	}
+	return true
 }

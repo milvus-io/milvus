@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -91,6 +92,16 @@ type ChannelManager struct {
 	// null if no streaming service has been run.
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
+}
+
+// GetPChannels returns all pchannels.
+func (cm *ChannelManager) GetPChannels() []string {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	return lo.Map(lo.Keys(cm.channels), func(id ChannelID, _ int) string {
+		return id.String()
+	})
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.

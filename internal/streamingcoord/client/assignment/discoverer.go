@@ -158,9 +158,14 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 					Channels: channels,
 				}
 			}
+			newIncomingReplicateClusters := make(map[string][]string, len(resp.FullAssignment.ReplicateClusters))
+			for _, cluster := range resp.FullAssignment.ReplicateClusters {
+				newIncomingReplicateClusters[cluster.GetClusterID()] = cluster.GetPchannels()
+			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
-				Version:     newIncomingVersion,
-				Assignments: newIncomingAssignments,
+				Version:                   newIncomingVersion,
+				Assignments:               newIncomingAssignments,
+				ReplicateClusterPChannels: newIncomingReplicateClusters,
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:
 			// nothing to do now, just wait io.EOF.

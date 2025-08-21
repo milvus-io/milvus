@@ -21,6 +21,9 @@ var (
 // Balancer is a local component, it should promise all channel can be assigned, and reach the final consistency.
 // Balancer should be thread safe.
 type Balancer interface {
+	// GetPChannels returns all pchannels.
+	GetPChannels() []string
+
 	// UpdateBalancePolicy update the balance policy.
 	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error
 

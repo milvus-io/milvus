@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -36,7 +37,8 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(v typeutil.VersionInt64Pai
 					Global: v.Global,
 					Local:  v.Local,
 				},
-				Assignments: assignments,
+				Assignments:       assignments,
+				ReplicateClusters: replicateClusters,
 			},
 		},
 	})

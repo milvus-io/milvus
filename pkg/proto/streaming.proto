@@ -221,8 +221,9 @@ message AssignmentDiscoverResponse {
 // FullStreamingNodeAssignmentWithVersion is the full assignment info of a log
 // node with version.
 message FullStreamingNodeAssignmentWithVersion {
-    VersionPair version                          = 1;
-    repeated StreamingNodeAssignment assignments = 2;
+    VersionPair version                              = 1;
+    repeated StreamingNodeAssignment assignments     = 2;
+    repeated milvus.MilvusCluster replicate_clusters = 3;
 }
 
 message CloseAssignmentDiscoverResponse {}

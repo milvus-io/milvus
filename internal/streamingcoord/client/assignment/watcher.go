@@ -18,8 +18,9 @@ func newWatcher() *watcher {
 	return &watcher{
 		cond: syncutil.NewContextCond(&sync.Mutex{}),
 		lastVersionedAssignment: types.VersionedStreamingNodeAssignments{
-			Version:     typeutil.VersionInt64Pair{Global: -1, Local: -1},
-			Assignments: make(map[int64]types.StreamingNodeAssignment),
+			Version:                   typeutil.VersionInt64Pair{Global: -1, Local: -1},
+			Assignments:               make(map[int64]types.StreamingNodeAssignment),
+			ReplicateClusterPChannels: make(map[string][]string),
 		},
 	}
 }
@@ -40,6 +41,19 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	last := w.lastVersionedAssignment
 	w.cond.L.Unlock()
 	return &last, nil
+}
+
+func (w *watcher) GetLatestReplicateClusters(ctx context.Context) (map[string][]string, error) {
+	w.cond.L.Lock()
+	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
+		len(w.lastVersionedAssignment.ReplicateClusterPChannels) == 0 {
+		if err := w.cond.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	last := w.lastVersionedAssignment
+	w.cond.L.Unlock()
+	return last.ReplicateClusterPChannels, nil
 }
 
 // AssignmentDiscover watches the assignment discovery.

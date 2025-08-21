@@ -35,8 +35,9 @@ type AssignmentRebalanceTrigger interface {
 
 // VersionedStreamingNodeAssignments is the relation between server and channels with version.
 type VersionedStreamingNodeAssignments struct {
-	Version     typeutil.VersionInt64Pair
-	Assignments map[int64]StreamingNodeAssignment
+	Version                   typeutil.VersionInt64Pair
+	Assignments               map[int64]StreamingNodeAssignment
+	ReplicateClusterPChannels map[string][]string // cluster name -> pchannel names
 }
 
 // StreamingNodeAssignment is the relation between server and channels.
