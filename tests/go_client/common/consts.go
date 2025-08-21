@@ -14,6 +14,7 @@ const (
 	DefaultTextFieldName          = "text"
 	DefaultVarcharFieldName       = "varchar"
 	DefaultJSONFieldName          = "json"
+	DefaultGeometryFieldName      = "geometry"
 	DefaultArrayFieldName         = "array"
 	DefaultFloatVecFieldName      = "floatVec"
 	DefaultBinaryVecFieldName     = "binaryVec"

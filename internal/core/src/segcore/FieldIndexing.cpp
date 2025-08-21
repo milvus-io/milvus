@@ -21,6 +21,9 @@
 #include "segcore/FieldIndexing.h"
 #include "index/VectorMemIndex.h"
 #include "IndexConfigGenerator.h"
+#include "index/RTreeIndex.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::segcore {
 using std::unique_ptr;
@@ -374,6 +377,243 @@ VectorFieldIndexing::has_raw_data() const {
 }
 
 template <typename T>
+ScalarFieldIndexing<T>::ScalarFieldIndexing(
+    const FieldMeta& field_meta,
+    const FieldIndexMeta& field_index_meta,
+    int64_t segment_max_row_count,
+    const SegcoreConfig& segcore_config,
+    const VectorBase* field_raw_data)
+    : FieldIndexing(field_meta, segcore_config),
+      built_(false),
+      sync_with_index_(false),
+      config_(std::make_unique<FieldIndexMeta>(field_index_meta)) {
+    recreate_index(field_meta.get_data_type(), field_raw_data);
+}
+
+template <typename T>
+void
+ScalarFieldIndexing<T>::recreate_index(DataType data_type,
+                                       const VectorBase* field_raw_data) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+            // Create chunk manager for file operations
+            auto chunk_manager =
+                milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                    .GetChunkManager();
+
+            // Create FieldDataMeta for RTree index
+            storage::FieldDataMeta field_data_meta;
+            field_data_meta.field_id = field_meta_.get_id().get();
+
+            // Create a minimal field schema from FieldMeta
+            field_data_meta.field_schema.set_fieldid(
+                field_meta_.get_id().get());
+            field_data_meta.field_schema.set_name(field_meta_.get_name().get());
+            field_data_meta.field_schema.set_data_type(
+                static_cast<proto::schema::DataType>(
+                    field_meta_.get_data_type()));
+            field_data_meta.field_schema.set_nullable(
+                field_meta_.is_nullable());
+
+            // Create IndexMeta for RTree index
+            storage::IndexMeta index_meta;
+            index_meta.segment_id = 0;
+            index_meta.field_id = field_meta_.get_id().get();
+            index_meta.build_id = 0;
+            index_meta.index_version = 1;
+            index_meta.key = "rtree_index";
+            index_meta.field_name = field_meta_.get_name().get();
+            index_meta.field_type = field_meta_.get_data_type();
+            index_meta.index_non_encoding = false;
+
+            // Create FileManagerContext with all required components
+            storage::FileManagerContext ctx(
+                field_data_meta, index_meta, chunk_manager);
+
+            index_ = std::make_unique<index::RTreeIndex<std::string>>(ctx);
+            built_ = false;
+            sync_with_index_ = false;
+            index_cur_ = 0;
+            LOG_INFO(
+                "Created R-Tree index for geometry data type: {} with "
+                "FileManagerContext",
+                data_type);
+            return;
+        }
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        index_ = index::CreateStringIndexSort();
+    } else {
+        index_ = index::CreateScalarIndexSort<T>();
+    }
+
+    built_ = false;
+    sync_with_index_ = false;
+    index_cur_ = 0;
+
+    LOG_INFO("Created scalar index for data type: {}", data_type);
+}
+
+template <typename T>
+void
+ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
+                                           int64_t size,
+                                           const VectorBase* vec_base,
+                                           const DataArray* stream_data) {
+    // Special handling for geometry fields (stored as std::string)
+    if constexpr (std::is_same_v<T, std::string>) {
+        if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+            // Cast to R-Tree index for geometry data
+            auto* rtree_index =
+                dynamic_cast<index::RTreeIndex<std::string>*>(index_.get());
+            if (!rtree_index) {
+                LOG_ERROR("Failed to cast to R-Tree index for geometry field");
+                return;
+            }
+
+            // Extract geometry data from stream_data
+            if (stream_data->has_scalars() &&
+                stream_data->scalars().has_geometry_data()) {
+                const auto& geometry_array =
+                    stream_data->scalars().geometry_data();
+                const auto& valid_data = stream_data->valid_data();
+
+                // Initialize R-Tree index on first data arrival (no threshold waiting)
+                if (!built_) {
+                    try {
+                        // Initialize R-Tree for building immediately when first data arrives
+                        rtree_index->InitForBuildIndex();
+                        built_ = true;
+                        sync_with_index_ = true;
+                        LOG_INFO(
+                            "Initialized R-Tree index for immediate "
+                            "incremental "
+                            "building");
+                    } catch (std::exception& error) {
+                        LOG_ERROR("R-Tree index initialization error: {}",
+                                  error.what());
+                        recreate_index(field_meta_.get_data_type(), vec_base);
+                        return;
+                    }
+                }
+
+                // Always add geometries incrementally (no bulk build phase)
+                int64_t added_count = 0;
+                for (int64_t i = 0; i < size; ++i) {
+                    int64_t global_offset = reserved_offset + i;
+                    bool is_valid = valid_data.empty() || valid_data[i];
+
+                    if (is_valid && i < geometry_array.data_size()) {
+                        const auto& wkb_data = geometry_array.data(i);
+                        try {
+                            rtree_index->AddGeometry(wkb_data, global_offset);
+                            added_count++;
+                        } catch (std::exception& error) {
+                            LOG_WARN("Failed to add geometry at offset {}: {}",
+                                     global_offset,
+                                     error.what());
+                        }
+                    }
+                }
+
+                index_cur_.fetch_add(added_count);
+                sync_with_index_.store(true);
+
+                LOG_DEBUG("Added {} geometries to R-Tree index immediately",
+                          added_count);
+            }
+            return;
+        }
+    }
+
+    // For other scalar fields, not implemented yet
+    LOG_WARN(
+        "ScalarFieldIndexing::AppendSegmentIndex from DataArray not "
+        "implemented for non-geometry scalar fields. Type: {}",
+        field_meta_.get_data_type());
+}
+
+template <typename T>
+void
+ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
+                                           int64_t size,
+                                           const VectorBase* vec_base,
+                                           const FieldDataPtr& field_data) {
+    // Special handling for geometry fields (stored as std::string)
+    if constexpr (std::is_same_v<T, std::string>) {
+        if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+            // Cast to R-Tree index for geometry data
+            auto* rtree_index =
+                dynamic_cast<index::RTreeIndex<std::string>*>(index_.get());
+            if (!rtree_index) {
+                LOG_ERROR("Failed to cast to R-Tree index for geometry field");
+                return;
+            }
+
+            // Extract geometry data from field_data
+            const void* raw_data = field_data->Data();
+            if (raw_data) {
+                const auto* string_array =
+                    static_cast<const std::string*>(raw_data);
+
+                // Initialize R-Tree index on first data arrival (no threshold waiting)
+                if (!built_) {
+                    try {
+                        // Initialize R-Tree for building immediately when first
+                        // data arrives
+                        rtree_index->InitForBuildIndex();
+                        built_ = true;
+                        sync_with_index_ = true;
+                        LOG_INFO(
+                            "Initialized R-Tree index for immediate "
+                            "incremental "
+                            "building from FieldData");
+                    } catch (std::exception& error) {
+                        LOG_ERROR("R-Tree index initialization error: {}",
+                                  error.what());
+                        recreate_index(field_meta_.get_data_type(), vec_base);
+                        return;
+                    }
+                }
+
+                // Always add geometries incrementally (no bulk build phase)
+                int64_t added_count = 0;
+                for (int64_t i = 0; i < size; ++i) {
+                    int64_t global_offset = reserved_offset + i;
+                    bool is_valid = field_data->is_valid(i);
+
+                    if (is_valid) {
+                        try {
+                            rtree_index->AddGeometry(string_array[i],
+                                                     global_offset);
+                            added_count++;
+                        } catch (std::exception& error) {
+                            LOG_WARN("Failed to add geometry at offset {}: {}",
+                                     global_offset,
+                                     error.what());
+                        }
+                    }
+                }
+
+                index_cur_.fetch_add(added_count);
+                sync_with_index_.store(true);
+
+                LOG_INFO(
+                    "Added {} geometries to R-Tree index immediately from "
+                    "FieldData",
+                    added_count);
+            }
+            return;
+        }
+    }
+
+    // For other scalar fields, not implemented yet
+    PanicInfo(Unsupported,
+              "ScalarFieldIndexing::AppendSegmentIndex from FieldDataPtr not "
+              "implemented for non-geometry scalar fields. Type: {}",
+              field_meta_.get_data_type());
+}
+
+template <typename T>
 void
 ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
                                         int64_t ack_end,
@@ -426,34 +666,76 @@ CreateIndex(const FieldMeta& field_meta,
     }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
-            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta,
-                                                               segcore_config);
+            return std::make_unique<ScalarFieldIndexing<bool>>(
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::INT8:
             return std::make_unique<ScalarFieldIndexing<int8_t>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::INT16:
             return std::make_unique<ScalarFieldIndexing<int16_t>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::INT32:
             return std::make_unique<ScalarFieldIndexing<int32_t>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::INT64:
             return std::make_unique<ScalarFieldIndexing<int64_t>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::FLOAT:
-            return std::make_unique<ScalarFieldIndexing<float>>(field_meta,
-                                                                segcore_config);
+            return std::make_unique<ScalarFieldIndexing<float>>(
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::DOUBLE:
             return std::make_unique<ScalarFieldIndexing<double>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         case DataType::VARCHAR:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
-                field_meta, segcore_config);
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
+        case DataType::GEOMETRY:
+            return std::make_unique<ScalarFieldIndexing<std::string>>(
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
         default:
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported scalar type in index: {}",
                                   field_meta.get_data_type()));
     }
 }
+
+// Explicit template instantiation for ScalarFieldIndexing
+template class ScalarFieldIndexing<std::string>;
 
 }  // namespace milvus::segcore
