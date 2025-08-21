@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -102,7 +103,8 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 		if uri == "" {
 			return fmt.Errorf("cluster '%s' has empty URI", clusterID)
 		}
-		if !v.isValidURI(uri) {
+		_, err := url.ParseRequestURI(uri)
+		if err != nil {
 			return fmt.Errorf("cluster '%s' has invalid URI format: '%s'", clusterID, uri)
 		}
 
@@ -255,29 +257,4 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 	}
 
 	return nil
-}
-
-// isValidURI checks if the given string is a valid URI format
-func (v *ReplicateConfigValidator) isValidURI(uri string) bool {
-	if uri == "" {
-		return false
-	}
-
-	parts := strings.Split(uri, "://")
-	if len(parts) != 2 {
-		return false
-	}
-
-	scheme := parts[0]
-	rest := parts[1]
-
-	if scheme == "" || strings.ContainsAny(scheme, " \t\n\r") {
-		return false
-	}
-
-	if rest == "" {
-		return false
-	}
-
-	return true
 }
