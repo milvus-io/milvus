@@ -88,7 +88,7 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 		{Key: EncryptionEnabledKey, Value: "true"},
 		{Key: EncryptionRootKeyKey, Value: "existing-root-key"},
 	}
-	result, err := TidyDBCipherProperties(dbPropertiesWithRootKey)
+	result, err := TidyDBCipherProperties(1, dbPropertiesWithRootKey)
 	s.NoError(err)
 	s.Equal(dbPropertiesWithRootKey, result)
 
@@ -97,7 +97,7 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	dbPropertiesWithoutRootKey := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
 	}
-	result, err = TidyDBCipherProperties(dbPropertiesWithoutRootKey)
+	result, err = TidyDBCipherProperties(1, dbPropertiesWithoutRootKey)
 	s.NoError(err)
 	s.Len(result, 2) // should have EncryptionEnabledKey + added default root key
 	s.Equal(EncryptionEnabledKey, result[0].Key)
@@ -105,7 +105,7 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 
 	// Test without encryption enabled
 	dbPropertiesWithoutEncryption := []*commonpb.KeyValuePair{}
-	result, err = TidyDBCipherProperties(dbPropertiesWithoutEncryption)
+	result, err = TidyDBCipherProperties(1, dbPropertiesWithoutEncryption)
 	s.NoError(err)
 	s.NotNil(result)
 	s.Equal(dbPropertiesWithoutEncryption, result)
@@ -121,25 +121,13 @@ func (s *CipherSuite) TestIsDBEncyptionEnabled() {
 	s.False(IsDBEncyptionEnabled(dbProperties))
 }
 
-func (s *CipherSuite) TestGetEZRootKeyByDBProperties() {
-	dbProperties := []*commonpb.KeyValuePair{
-		{Key: EncryptionRootKeyKey, Value: "rootKey"},
-	}
-	rootKey := GetEZRootKeyByDBProperties(dbProperties)
-	s.Equal("rootKey", rootKey)
-
-	emptyProperties := []*commonpb.KeyValuePair{}
-	defaultRootKey := GetEZRootKeyByDBProperties(emptyProperties)
-	s.Equal(paramtable.GetCipherParams().DefaultRootKey.GetValue(), defaultRootKey)
-}
-
 func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
 	// Reset cipher to nil to test error case
 	storeCipher(nil)
 	dbProperties := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
 	}
-	_, err := TidyDBCipherProperties(dbProperties)
+	_, err := TidyDBCipherProperties(1, dbProperties)
 	s.Error(err)
 	s.Equal(ErrCipherPluginMissing, err)
 }
