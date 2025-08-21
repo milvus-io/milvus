@@ -42,6 +42,7 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 
 #include "segcore/Types.h"
@@ -67,11 +68,12 @@ struct DeferRelease {
 
 using namespace milvus;
 TEST(test_chunk_segment, TestSearchOnSealed) {
-    DeferRelease defer;
-
     int dim = 16;
     int chunk_num = 3;
     int chunk_size = 100;
+
+    DeferRelease defer;
+
     int total_row_count = chunk_num * chunk_size;
     int bitset_size = (total_row_count + 7) / 8;
 
@@ -428,4 +430,62 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+TEST_P(TestChunkSegment, TestPkRange) {
+    using namespace milvus::segcore;
+    bool pk_is_string = GetParam();
+    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Test cases for sorted PK
+    BitsetType bitset_sorted(chunk_num * test_data_count);
+    BitsetTypeView bitset_sorted_view(bitset_sorted);
+    
+    // Test Equal operation
+    if (pk_is_string) {
+        segment_impl->pk_range(proto::plan::OpType::Equal, 
+                                     PkType("test1"), 
+                                     Timestamp(99999), 
+                                     bitset_sorted_view);
+        EXPECT_EQ(1, bitset_sorted_view.count());
+    } else {
+        segment_impl->pk_range(proto::plan::OpType::Equal, 
+                                     PkType(1), 
+                                     Timestamp(99999), 
+                                     bitset_sorted_view);
+        EXPECT_EQ(1, bitset_sorted_view.count());
+    }
+
+    // Test LessEqual operation
+    bitset_sorted.reset();
+    if (pk_is_string) {
+        segment_impl->pk_range(proto::plan::OpType::LessEqual, 
+                                     PkType("test100"), 
+                                     Timestamp(99999), 
+                                     bitset_sorted_view);
+        // only 'test0', 'test1', 'test10' are less than 'test100'
+        EXPECT_EQ(bitset_sorted_view.count(), 4);
+    } else {
+        segment_impl->pk_range(proto::plan::OpType::LessEqual, 
+                                     PkType(100), 
+                                     Timestamp(99999), 
+                                     bitset_sorted_view);
+        EXPECT_EQ(bitset_sorted_view.count(), 101);
+    }
+
+    bitset_sorted.reset();
+    if (pk_is_string) {
+        segment_impl->pk_range(proto::plan::OpType::Equal, 
+                              PkType(std::string("non_existent_pk")), 
+                              Timestamp(99999), 
+                              bitset_sorted_view);
+        EXPECT_EQ(0, bitset_sorted_view.count());
+    } else {
+        segment_impl->pk_range(proto::plan::OpType::Equal, 
+                              PkType(int64_t(999999)), 
+                              Timestamp(99999), 
+                              bitset_sorted_view);
+        EXPECT_EQ(0, bitset_sorted_view.count());
+    }
 }
