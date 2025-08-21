@@ -2647,6 +2647,41 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
+    """ Test case of load partition interface """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_load_loaded_partition(self):
+        """
+        target: test load partition after load partition
+        method: 1. create collection and two partitions
+                4. release collection and load one partition twice
+                5. query on the non-loaded partition (should fail)
+                6. load the whole collection (should succeed)
+        expected: No exception on repeated partition load, error on querying non-loaded partition, success on collection load
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        # 2. create partitions
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        # 5. load partition1 twice
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.load_partitions(client, collection_name, [partition_name_1])
+        # 6. query on the non-loaded partition2 (should fail)
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 7. load the whole collection (should succeed)
+        self.load_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
     """
