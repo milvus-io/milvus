@@ -103,6 +103,9 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 		zap.Uint64("timestamp", position.GetTimestamp()),
 	)
 	handler := adaptor.NewMsgPackAdaptorHandler()
+	if position.GetChannelName() == message.ControlChannel {
+		panic("should never seek from control channel at delegator msgstream adaptor")
+	}
 	pchannel := funcutil.ToPhysicalChannel(position.GetChannelName())
 	m.scanner = WAL().Read(ctx, ReadOption{
 		PChannel:      pchannel,

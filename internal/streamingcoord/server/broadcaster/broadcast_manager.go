@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -86,17 +87,40 @@ func (bm *broadcastTaskManager) assignID(ctx context.Context, msg message.Broadc
 	return msg, nil
 }
 
-// Ack acknowledges the message at the specified vchannel.
-func (bm *broadcastTaskManager) Ack(ctx context.Context, broadcastID uint64, vchannel string) error {
+// LegacyAck is the legacy ack function for the broadcast task.
+// It will not be used after upgrading to 2.6.1, only used for compatibility.
+func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	task, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
 		bm.Logger().Warn("broadcast task not found, it may already acked, ignore the request", zap.Uint64("broadcastID", broadcastID), zap.String("vchannel", vchannel))
 		return nil
 	}
-	if err := task.Ack(ctx, vchannel); err != nil {
+	msg := task.GetImmutableMessageFromVChannel(vchannel)
+	if msg == nil {
+		task.Logger().Warn("vchannel is already acked, ignore the ack request", zap.String("vchannel", vchannel))
+		return nil
+	}
+	return bm.Ack(ctx, msg)
+}
+
+// Ack acknowledges the message at the specified vchannel.
+func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+	if err := registry.CallMessageAckCallback(ctx, msg); err != nil {
+		bm.Logger().Warn("message ack callback failed", log.FieldMessage(msg), zap.Error(err))
 		return err
 	}
+	bm.Logger().Warn("message ack callback success", log.FieldMessage(msg))
 
+	broadcastID := msg.BroadcastHeader().BroadcastID
+	vchannel := msg.VChannel()
+	task, ok := bm.getBroadcastTaskByID(broadcastID)
+	if !ok {
+		bm.Logger().Warn("broadcast task not found, it may already acked, ignore the request", zap.Uint64("broadcastID", broadcastID), zap.String("vchannel", vchannel))
+		return nil
+	}
+	if err := task.Ack(ctx, msg); err != nil {
+		return err
+	}
 	if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		bm.removeBroadcastTask(broadcastID)
 	}
@@ -131,7 +155,6 @@ func (bm *broadcastTaskManager) addBroadcastTask(ctx context.Context, msg messag
 	}
 	bm.tasks[header.BroadcastID] = newIncomingTask
 	bm.cond.L.Unlock()
-	// TODO: perform a task checker here to make sure the task is vaild to be broadcasted in future.
 	return newIncomingTask, nil
 }
 

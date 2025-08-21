@@ -54,14 +54,15 @@ func (c *GRPCBroadcastServiceImpl) Broadcast(ctx context.Context, msg message.Br
 	}, nil
 }
 
-func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.ImmutableMessage) error {
 	client, err := c.service.GetService(ctx)
 	if err != nil {
 		return err
 	}
 	_, err = client.Ack(ctx, &streamingpb.BroadcastAckRequest{
-		BroadcastId: req.BroadcastID,
-		Vchannel:    req.VChannel,
+		BroadcastId: msg.BroadcastHeader().BroadcastID,
+		Vchannel:    msg.VChannel(),
+		Message:     msg.IntoImmutableMessageProto(),
 	})
 	return err
 }

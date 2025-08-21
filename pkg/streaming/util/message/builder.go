@@ -65,6 +65,8 @@ func NewImmutableMesasge(
 	}
 }
 
+func NewReplicateMessage()
+
 // newMutableMessageBuilder creates a new builder.
 // Should only used at client side.
 func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasgeBuilder[H, B] {

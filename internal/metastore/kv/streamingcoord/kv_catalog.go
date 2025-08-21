@@ -19,6 +19,7 @@ import (
 // NewCataLog creates a new catalog instance
 // streamingcoord-meta
 // ├── version
+// ├── cchannel
 // ├── broadcast
 // │   ├── task-1
 // │   └── task-2
@@ -41,6 +42,31 @@ func NewReplicationCatalog(metaKV kv.MetaKv) metastore.ReplicationCatalog {
 // catalog is a kv based catalog.
 type catalog struct {
 	metaKV kv.MetaKv
+}
+
+// GetCChannel returns the control channel
+func (c *catalog) GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error) {
+	value, err := c.metaKV.Load(ctx, CChannelMetaPrefix)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	info := &streamingpb.CChannelMeta{}
+	if err = proto.Unmarshal([]byte(value), info); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal cchannel meta failed")
+	}
+	return info, nil
+}
+
+// SaveCChannel saves the control channel
+func (c *catalog) SaveCChannel(ctx context.Context, info *streamingpb.CChannelMeta) error {
+	v, err := proto.Marshal(info)
+	if err != nil {
+		return errors.Wrapf(err, "marshal cchannel meta failed")
+	}
+	return c.metaKV.Save(ctx, CChannelMetaPrefix, string(v))
 }
 
 // GetVersion returns the streaming version
@@ -162,8 +188,7 @@ func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*milvuspb.Repl
 	value, err := c.metaKV.Load(ctx, key)
 	if err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			// Return an empty replicate configuration if the key is not found.
-			return &milvuspb.ReplicateConfiguration{}, nil
+			return nil, nil
 		}
 		return nil, err
 	}

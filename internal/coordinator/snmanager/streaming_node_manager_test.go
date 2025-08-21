@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -23,13 +25,17 @@ func TestStreamingNodeManager(t *testing.T) {
 
 	ch := make(chan pChannelInfoAssigned, 1)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Run(
-		func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) {
+		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case p := <-ch:
-					cb(p.version, p.pchannels)
+					cb(balancer.WatchChannelAssignmentsCallbackParam{
+						Version:            p.version,
+						CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+						Relations:          p.pchannels,
+					})
 				}
 			}
 		})

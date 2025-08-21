@@ -73,6 +73,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	balancer.UpdateReplicateConfiguration(ctx, config)
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(config)...)
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }

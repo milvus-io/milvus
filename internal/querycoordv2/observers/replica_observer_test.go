@@ -33,10 +33,12 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -212,9 +214,9 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
-	balancer := mock_balancer.NewMockBalancer(suite.T())
+	b := mock_balancer.NewMockBalancer(suite.T())
 	change := make(chan struct{})
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		versions := []typeutil.VersionInt64Pair{
 			{Global: 1, Local: 2},
 			{Global: 1, Local: 3},
@@ -250,13 +252,17 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 			},
 		}
 		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
+			cb(balancer.WatchChannelAssignmentsCallbackParam{
+				Version:            versions[i],
+				CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+				Relations:          pchans[i],
+			})
 			<-change
 		}
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 
 	ctx := context.Background()
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))

@@ -115,6 +115,14 @@ func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	return err
 }
 
+func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("assignment service client is closing")
+	}
+	defer c.lifetime.Done()
+	return c.watcher.GetLatestReplicateConfiguration(ctx)
+}
+
 // Close closes the assignment service.
 func (c *AssignmentServiceImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)

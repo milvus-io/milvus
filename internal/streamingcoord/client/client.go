@@ -37,6 +37,9 @@ type AssignmentService interface {
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
 
+	// GetReplicateConfiguration returns the replicate configuration.
+	GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error)
+
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
 
@@ -50,7 +53,7 @@ type BroadcastService interface {
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Ack sends a broadcast ack to the streaming service.
-	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }
 
 // Client is the interface of log service client.

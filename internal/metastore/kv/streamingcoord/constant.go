@@ -5,5 +5,6 @@ const (
 	PChannelMetaPrefix        = MetaPrefix + "pchannel/"
 	BroadcastTaskPrefix       = MetaPrefix + "broadcast-task/"
 	VersionPrefix             = MetaPrefix + "version/"
+	CChannelMetaPrefix        = MetaPrefix + "cchannel/"
 	ReplicateConfigurationKey = MetaPrefix + "replicate-configuration"
 )

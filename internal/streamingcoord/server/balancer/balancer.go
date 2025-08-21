@@ -5,15 +5,21 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
 	_                 Balancer = (*balancerImpl)(nil)
 	ErrBalancerClosed          = errors.New("balancer is closed")
+)
+
+type (
+	WatchChannelAssignmentsCallbackParam = channel.WatchChannelAssignmentsCallbackParam
+	WatchChannelAssignmentsCallback      = channel.WatchChannelAssignmentsCallback
 )
 
 // Balancer is a load balancer to balance the load of log node.
@@ -41,10 +47,13 @@ type Balancer interface {
 	GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool)
 
 	// WatchChannelAssignments watches the balance result.
-	WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error
+	WatchChannelAssignments(ctx context.Context, cb WatchChannelAssignmentsCallback) error
 
 	// MarkAsAvailable marks the pchannels as available, and trigger a rebalance.
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
+
+	// UpdateReplicateConfiguration updates the replicate configuration.
+	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration)
 
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error

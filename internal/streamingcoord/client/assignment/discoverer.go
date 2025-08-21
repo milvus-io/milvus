@@ -165,6 +165,7 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 			c.w.Update(types.VersionedStreamingNodeAssignments{
 				Version:                   newIncomingVersion,
 				Assignments:               newIncomingAssignments,
+				CChannel:                  resp.FullAssignment.Cchannel,
 				ReplicateClusterPChannels: newIncomingReplicateClusters,
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:

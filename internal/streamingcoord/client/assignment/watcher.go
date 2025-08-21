@@ -6,6 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -18,9 +19,9 @@ func newWatcher() *watcher {
 	return &watcher{
 		cond: syncutil.NewContextCond(&sync.Mutex{}),
 		lastVersionedAssignment: types.VersionedStreamingNodeAssignments{
-			Version:                   typeutil.VersionInt64Pair{Global: -1, Local: -1},
-			Assignments:               make(map[int64]types.StreamingNodeAssignment),
-			ReplicateClusterPChannels: make(map[string][]string),
+			Version:                typeutil.VersionInt64Pair{Global: -1, Local: -1},
+			Assignments:            make(map[int64]types.StreamingNodeAssignment),
+			ReplicateConfiguration: &milvuspb.ReplicateConfiguration{},
 		},
 	}
 }
@@ -43,17 +44,17 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	return &last, nil
 }
 
-func (w *watcher) GetLatestReplicateClusters(ctx context.Context) (map[string][]string, error) {
+func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
 	w.cond.L.Lock()
 	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
-		len(w.lastVersionedAssignment.ReplicateClusterPChannels) == 0 {
+		w.lastVersionedAssignment.ReplicateConfiguration == nil {
 		if err := w.cond.Wait(ctx); err != nil {
 			return nil, err
 		}
 	}
 	last := w.lastVersionedAssignment
 	w.cond.L.Unlock()
-	return last.ReplicateClusterPChannels, nil
+	return last.ReplicateConfiguration, nil
 }
 
 // AssignmentDiscover watches the assignment discovery.
