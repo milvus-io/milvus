@@ -885,8 +885,8 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         partition_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the first character "
+                                                f"of a collection name must be an underscore or letter"}
         self.load_partitions(client, name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -915,8 +915,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = "a".join("a" for i in range(256))
         partition_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters: "
                                                 f"invalid parameter"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
@@ -934,8 +933,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={name}]"}
         self.load_partitions(client, collection_name, name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -952,8 +950,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[database=default]"
-                                                f"[collection={collection_name}]"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -970,9 +967,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -997,7 +992,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
 
 
-class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
+class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
     """
