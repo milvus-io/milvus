@@ -240,6 +240,7 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateReplicateConfiguration"
+	StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName       = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateWALBalancePolicy"
 	StreamingCoordAssignmentService_AssignmentDiscover_FullMethodName           = "/milvus.proto.streaming.StreamingCoordAssignmentService/AssignmentDiscover"
 )
 
@@ -258,6 +259,9 @@ type StreamingCoordAssignmentServiceClient interface {
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
 	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
+	// UpdateWALBalancePolicy is used to update the WAL balance policy.
+	// The policy is used to control the balance of the WAL.
+	UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error)
 	// AssignmentDiscover is used to discover all log nodes managed by the
 	// streamingcoord. Channel assignment information will be pushed to client
 	// by stream.
@@ -275,6 +279,15 @@ func NewStreamingCoordAssignmentServiceClient(cc grpc.ClientConnInterface) Strea
 func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error) {
 	out := new(UpdateReplicateConfigurationResponse)
 	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingCoordAssignmentServiceClient) UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error) {
+	out := new(UpdateWALBalancePolicyResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -327,6 +340,9 @@ type StreamingCoordAssignmentServiceServer interface {
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
 	UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
+	// UpdateWALBalancePolicy is used to update the WAL balance policy.
+	// The policy is used to control the balance of the WAL.
+	UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error)
 	// AssignmentDiscover is used to discover all log nodes managed by the
 	// streamingcoord. Channel assignment information will be pushed to client
 	// by stream.
@@ -339,6 +355,9 @@ type UnimplementedStreamingCoordAssignmentServiceServer struct {
 
 func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateReplicateConfiguration not implemented")
+}
+func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateWALBalancePolicy not implemented")
 }
 func (UnimplementedStreamingCoordAssignmentServiceServer) AssignmentDiscover(StreamingCoordAssignmentService_AssignmentDiscoverServer) error {
 	return status.Errorf(codes.Unimplemented, "method AssignmentDiscover not implemented")
@@ -369,6 +388,24 @@ func _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler(srv i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, req.(*milvuspb.UpdateReplicateConfigurationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingCoordAssignmentService_UpdateWALBalancePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateWALBalancePolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateWALBalancePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateWALBalancePolicy(ctx, req.(*UpdateWALBalancePolicyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -409,6 +446,10 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateReplicateConfiguration",
 			Handler:    _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler,
+		},
+		{
+			MethodName: "UpdateWALBalancePolicy",
+			Handler:    _StreamingCoordAssignmentService_UpdateWALBalancePolicy_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -24,6 +24,7 @@ packages:
     interfaces:
       Client:
       BroadcastService:
+      AssignmentService:
   github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast:
     interfaces:
       Watcher:

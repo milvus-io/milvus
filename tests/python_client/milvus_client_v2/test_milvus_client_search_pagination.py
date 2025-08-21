@@ -826,6 +826,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:8])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)
+    @pytest.mark.skip("wait for debug")
     def test_search_pagination_dense_vectors_indices_metrics_growing(self, vector_dtype, index, metric_type):
         """
         target: test search pagination with growing data

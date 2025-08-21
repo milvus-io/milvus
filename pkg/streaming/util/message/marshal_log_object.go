@@ -16,7 +16,9 @@ func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		return nil
 	}
 	enc.AddString("type", m.MessageType().String())
-	enc.AddString("vchannel", m.VChannel())
+	if m.properties.Exist(messageVChannel) {
+		enc.AddString("vchannel", m.VChannel())
+	}
 	if m.properties.Exist(messageTimeTick) {
 		enc.AddUint64("timetick", m.TimeTick())
 	}
@@ -25,6 +27,7 @@ func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	}
 	if broadcast := m.BroadcastHeader(); broadcast != nil {
 		enc.AddInt64("broadcastID", int64(broadcast.BroadcastID))
+		enc.AddString("broadcastVChannels", strings.Join(broadcast.VChannels, ","))
 	}
 	enc.AddInt("size", len(m.payload))
 	marshalSpecializedHeader(m.MessageType(), m.Version(), m.properties[messageHeader], enc)

@@ -284,8 +284,6 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 		r.handleSchemaChange(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
-	default:
-		panic("unreachable: some message type can not be consumed, there's a critical bug.")
 	}
 }
 

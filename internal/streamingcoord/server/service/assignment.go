@@ -69,3 +69,16 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(config)...)
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
+
+// UpdateWALBalancePolicy is used to update the WAL balance policy.
+func (s *assignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error) {
+	balancer, err := s.balancer.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = balancer.UpdateBalancePolicy(ctx, req); err != nil {
+		return nil, err
+	}
+	return &streamingpb.UpdateWALBalancePolicyResponse{}, nil
+}

@@ -587,6 +587,12 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
 
+    virtual void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const = 0;
+
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
