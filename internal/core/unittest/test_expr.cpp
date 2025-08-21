@@ -17346,7 +17346,7 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
     test_gis_operation("POLYGON((-2 -2, 2 -2, 2 2, -2 2, -2 -2))",
                        proto::plan::GISFunctionFilterExpr_GISOp_Within,
                        [](int i) -> bool {
-                           // Only geometry at index 0,1 (polygon containing (0,0))
+                           // Only geometry at index 0,1,3 (polygon containing (0,0))
                            return (i % 4 == 0) || (i % 4 == 1) || (i % 4 == 3);
                        });
 

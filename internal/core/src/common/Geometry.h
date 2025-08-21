@@ -129,7 +129,8 @@ class Geometry {
     // used for test
     std::string
     to_wkb_string() const {
-        std::unique_ptr<unsigned char[]> wkb(new unsigned char[geometry_->WkbSize()]);
+        std::unique_ptr<unsigned char[]> wkb(
+            new unsigned char[geometry_->WkbSize()]);
         geometry_->exportToWkb(wkbNDR, wkb.get());
         return std::string(reinterpret_cast<const char*>(wkb.get()),
                            geometry_->WkbSize());

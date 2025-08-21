@@ -11,20 +11,20 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
-type ColumnGeometryBytesSuite struct {
+type ColumnGeometryWKTSuite struct {
 	suite.Suite
 }
 
-func (s *ColumnGeometryBytesSuite) SetupSuite() {
+func (s *ColumnGeometryWKTSuite) SetupSuite() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-func (s *ColumnGeometryBytesSuite) TestAttrMethods() {
-	columnName := fmt.Sprintf("column_Geometrybs_%d", rand.Int())
+func (s *ColumnGeometryWKTSuite) TestAttrMethods() {
+	columnName := fmt.Sprintf("column_Geometrywkt_%d", rand.Int())
 	columnLen := 8 + rand.Intn(10)
 
-	v := make([][]byte, columnLen)
-	column := NewColumnGeometryBytes(columnName, v)
+	v := make([]string, columnLen)
+	column := NewColumnGeometryWKT(columnName, v)
 
 	s.Run("test_meta", func() {
 		ft := entity.FieldTypeGeometry
@@ -61,22 +61,16 @@ func (s *ColumnGeometryBytesSuite) TestAttrMethods() {
 	})
 
 	s.Run("test_append_value", func() {
-		item := make([]byte, 10)
+		item := "POINT (30.123 -10.456)"
 		err := column.AppendValue(item)
 		s.NoError(err)
 		s.Equal(columnLen+1, column.Len())
 		val, err := column.ValueByIdx(columnLen)
 		s.NoError(err)
 		s.Equal(item, val)
-
-		err = column.AppendValue("POINT (30.123 -10.456)")
-		s.NoError(err)
-
-		err = column.AppendValue(1)
-		s.Error(err)
 	})
 }
 
-func TestColumnGeometryBytes(t *testing.T) {
-	suite.Run(t, new(ColumnGeometryBytesSuite))
+func TestColumnGeometryWKT(t *testing.T) {
+	suite.Run(t, new(ColumnGeometryWKTSuite))
 }

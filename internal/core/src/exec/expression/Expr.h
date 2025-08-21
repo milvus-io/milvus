@@ -307,16 +307,17 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
-                                                          : current_data_chunk_;
-        auto current_chunk_pos = is_index_mode_ && use_index_
+        auto is_sealed = segment_->type() == SegmentType::Sealed;
+        auto current_chunk = is_index_mode_ && use_index_ && is_sealed
+                                 ? current_index_chunk_
+                                 : current_data_chunk_;
+        auto current_chunk_pos = is_index_mode_ && use_index_ && is_sealed
                                      ? current_index_chunk_pos_
                                      : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
             current_rows =
-                is_index_mode_ && use_index_ &&
-                        segment_->type() == SegmentType::Sealed
+                is_index_mode_ && use_index_ && is_sealed
                     ? current_chunk_pos
                     : segment_->num_rows_until_chunk(field_id_, current_chunk) +
                           current_chunk_pos;

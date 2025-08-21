@@ -344,7 +344,8 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline OGRGeometry* makeGeometryValid(OGRGeometry* geometry) {
+inline OGRGeometry*
+makeGeometryValid(OGRGeometry* geometry) {
     if (!geometry || geometry->IsValid())
         return geometry;
 
