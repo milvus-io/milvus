@@ -417,7 +417,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
             false,
             milvus::storage::FileManagerContext());
         auto sparse_data =
-            dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(vec);
+            dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
         index->BuildWithDataset(
             knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
         for (int i = 0; i < add_cont; i++) {
@@ -567,7 +567,7 @@ TEST_P(GrowingIndexTest, GetVector) {
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
             auto fakevec =
-                dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(vec);
+                dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
             auto offset = segment->PreInsert(per_batch);
             segment->Insert(offset,
                             per_batch,
