@@ -1389,7 +1389,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.level",
 		DefaultValue: "info",
 		Version:      "2.0.0",
-		Doc: `Milvus log level. Option: debug, info, warn, error, panic, and fatal.
+		Doc: `Milvus log level. Option: trace, debug, info, warn, error, panic, and fatal.
 It is recommended to use debug level under test and development environments, and info level in production environment.`,
 		Export: true,
 	}

@@ -851,7 +851,7 @@ msgChannel:
 
 # Configures the system log output.
 log:
-  # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
+  # Milvus log level. Option: trace, debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
   level: info
   file:
