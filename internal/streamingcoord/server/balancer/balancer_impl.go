@@ -50,6 +50,7 @@ func RecoverBalancer(
 		policy:                 policy,
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		freezeNodes:            typeutil.NewSet[int64](),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
@@ -71,6 +72,7 @@ type balancerImpl struct {
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
+	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -95,6 +97,19 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
 }
 
+// UpdateBalancePolicy update the balance policy.
+func (b *balancerImpl) UpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+	return b.sendRequestAndWaitFinish(ctx, newOpUpdateBalancePolicy(ctx, req))
+}
+
+// MarkAsUnavailable mark the pchannels as unavailable.
 func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
@@ -330,9 +345,9 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
 	b.Logger().Info("collect all status...")
-	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx)
+	nodeStatus, err := b.fetchStreamingNodeStatus(ctx)
 	if err != nil {
-		return false, errors.Wrap(err, "fail to collect all status")
+		return false, err
 	}
 
 	// call the balance strategy to generate the expected layout.
@@ -358,6 +373,29 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+}
+
+// fetchStreamingNodeStatus fetch the streaming node status.
+func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
+	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "fail to collect all status")
+	}
+
+	// mark the frozen node as frozen in the node status.
+	for _, node := range nodeStatus {
+		if b.freezeNodes.Contain(node.ServerID) && node.IsHealthy() {
+			node.Err = types.ErrFrozen
+		}
+	}
+	// clean up the freeze node that has been removed from session.
+	for serverID := range b.freezeNodes {
+		if _, ok := nodeStatus[serverID]; !ok {
+			b.Logger().Info("freeze node has been removed from session", zap.Int64("serverID", serverID))
+			b.freezeNodes.Remove(serverID)
+		}
+	}
+	return nodeStatus, nil
 }
 
 // applyBalanceResultToStreamingNode apply the balance result to streaming node.
