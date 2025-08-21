@@ -76,6 +76,16 @@ func (d *diskUsageFetcher) Start() {
 			return
 		case <-ticker.C:
 			d.fetch()
+			// apply dynamic update only when changed
+			newInterval := paramtable.Get().QueryNodeCfg.DiskSizeFetchInterval.GetAsDuration(time.Second)
+			if newInterval != interval {
+				interval = newInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
+			}
 		}
 	}
 }
