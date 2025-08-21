@@ -43,7 +43,6 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
-#include <folly/SharedMutex.h>
 #include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
@@ -111,7 +110,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                "Can't get metric_type in index_params");
     auto metric_type = info.index_params.at("metric_type");
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
@@ -163,7 +162,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         return;
     }
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
@@ -458,7 +457,7 @@ ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
         }
     }
     {
-        folly::SharedMutex::WriteHolder lck(&mutex_);
+        std::unique_lock lck(mutex_);
         update_row_count(num_rows);
     }
 }
@@ -548,14 +547,14 @@ ChunkedSegmentSealedImpl::num_rows_until_chunk(FieldId field_id,
 
 bool
 ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     return mmap_fields_.find(field_id) != mmap_fields_.end();
 }
 
 PinWrapper<SpanBase>
 ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
                                           int64_t chunk_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
@@ -571,7 +570,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
         std::nullopt) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
@@ -587,7 +586,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
         std::nullopt) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
@@ -603,7 +602,7 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
@@ -618,7 +617,7 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
@@ -633,7 +632,7 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
 PinWrapper<const index::IndexBase*>
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
                "Cannot find scalar_indexing with field_id: " +
                    std::to_string(field_id.get()));
@@ -647,7 +646,7 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
 
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     auto iter = scalar_indexings_.find(field_id);
     if (iter == scalar_indexings_.end()) {
         return PinWrapper<index::NgramInvertedIndex*>(nullptr);
@@ -666,7 +665,7 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndexForJson(
     FieldId field_id, const std::string& nested_path) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     auto iter = ngram_indexings_.find(field_id);
     if (iter == ngram_indexings_.end() ||
         iter->second.find(nested_path) == iter->second.end()) {
@@ -688,13 +687,13 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
 
 int64_t
 ChunkedSegmentSealedImpl::get_row_count() const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     return num_rows_.value_or(0);
 }
 
 int64_t
 ChunkedSegmentSealedImpl::get_deleted_count() const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     return deleted_record_.size();
 }
 
@@ -835,7 +834,7 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Dropping system field is not supported, field id: {}",
                field_id.get());
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock<std::shared_mutex> lck(mutex_);
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
@@ -856,7 +855,7 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
                "Field meta of offset:" + std::to_string(field_id.get()) +
                    " is not vector type");
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     vector_indexings_.drop_field_indexing(field_id);
     set_bit(index_ready_bitset_, field_id, false);
 }
@@ -1021,12 +1020,10 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = fields_.at(pk_field_id);
     std::vector<SegOffset> pk_offsets;
-
     switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
         case DataType::INT64: {
             auto target = std::get<int64_t>(pk);
             // get int64 pks
-
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 auto pw = pk_column->DataOfChunk(i);
@@ -1047,13 +1044,11 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                     }
                 }
             }
-
             break;
         }
         case DataType::VARCHAR: {
             auto target = std::get<std::string>(pk);
             // get varchar pks
-
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
@@ -1080,8 +1075,212 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                     schema_->get_fields().at(pk_field_id).get_data_type()));
         }
     }
-
     return pk_offsets;
+}
+
+void
+ChunkedSegmentSealedImpl::pk_range(proto::plan::OpType op,
+                                   const PkType& pk,
+                                   Timestamp timestamp,
+                                   BitsetTypeView& bitset) const {
+    if (!is_sorted_by_pk_) {
+        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        return;
+    }
+
+    search_sorted_pk_range(op, pk, bitset, [this, timestamp](int64_t offset) {
+        return insert_record_.timestamps_[offset] <= timestamp;
+    });
+}
+
+template <typename Condition>
+void
+ChunkedSegmentSealedImpl::search_sorted_pk_range(proto::plan::OpType op,
+                                                 const PkType& pk,
+                                                 BitsetTypeView& bitset,
+                                                 Condition condition) const {
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = fields_.at(pk_field_id);
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64: {
+            // get int64 pks
+            auto target = std::get<int64_t>(pk);
+
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto pw = pk_column->DataOfChunk(i);
+                auto src = reinterpret_cast<const int64_t*>(pw.get());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                if (op == proto::plan::OpType::GreaterEqual) {
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        if (condition(offset)) {
+                            bitset[offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::GreaterThan) {
+                    auto it = std::upper_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        if (condition(offset)) {
+                            bitset[offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::LessEqual) {
+                    auto it = std::upper_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    if (it == src) {
+                        break;
+                    }
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (auto ptr = src; ptr < it; ++ptr) {
+                        auto offset = ptr - src + num_rows_until_chunk;
+                        if (condition(offset)) {
+                            bitset[offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::LessThan) {
+                    auto it =
+                        std::lower_bound(src, src + chunk_row_num, target);
+                    if (it == src) {
+                        break;
+                    }
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (auto ptr = src; ptr < it; ++ptr) {
+                        auto offset = ptr - src + num_rows_until_chunk;
+                        if (condition(offset)) {
+                            bitset[offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::Equal) {
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        if (condition(offset)) {
+                            bitset[offset] = true;
+                        }
+                    }
+                    if (it != src + chunk_row_num && *it > target) {
+                        break;
+                    }
+                } else {
+                    ThrowInfo(ErrorCode::Unsupported,
+                              fmt::format("unsupported op type {}", op));
+                }
+            }
+            break;
+        }
+        case DataType::VARCHAR: {
+            // get varchar pks
+            auto target = std::get<std::string>(pk);
+
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto pw = pk_column->GetChunk(i);
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+
+                if (op == proto::plan::OpType::Equal) {
+                    auto offset = string_chunk->lower_bound_string(target);
+                    for (; offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (condition(segment_offset)) {
+                            bitset[segment_offset] = true;
+                        }
+                    }
+                    if (offset < string_chunk->RowNums() &&
+                        string_chunk->operator[](offset) > target) {
+                        break;
+                    }
+                } else if (op == proto::plan::OpType::GreaterEqual) {
+                    auto offset = string_chunk->lower_bound_string(target);
+                    for (; offset < string_chunk->RowNums(); ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (condition(segment_offset)) {
+                            bitset[segment_offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::GreaterThan) {
+                    auto offset = string_chunk->upper_bound_string(target);
+                    for (; offset < string_chunk->RowNums(); ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (condition(segment_offset)) {
+                            bitset[segment_offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::LessEqual) {
+                    auto pos = string_chunk->upper_bound_string(target);
+                    if (pos == 0) {
+                        break;
+                    }
+                    for (auto offset = 0; offset < pos; ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (condition(segment_offset)) {
+                            bitset[segment_offset] = true;
+                        }
+                    }
+                } else if (op == proto::plan::OpType::LessThan) {
+                    auto pos = string_chunk->lower_bound_string(target);
+                    if (pos == 0) {
+                        break;
+                    }
+                    for (auto offset = 0; offset < pos; ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (condition(segment_offset)) {
+                            bitset[segment_offset] = true;
+                        }
+                    }
+                } else {
+                    ThrowInfo(ErrorCode::Unsupported,
+                              fmt::format("unsupported op type {}", op));
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
+    }
 }
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
@@ -1278,7 +1477,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
 void
 ChunkedSegmentSealedImpl::ClearData() {
     {
-        folly::SharedMutex::WriteHolder lck(&mutex_);
+        std::unique_lock lck(mutex_);
         field_data_ready_bitset_.reset();
         index_ready_bitset_.reset();
         binlog_index_bitset_.reset();
@@ -1308,7 +1507,7 @@ ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
 
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -1382,7 +1581,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
 void
 ChunkedSegmentSealedImpl::LoadTextIndex(
     FieldId field_id, std::unique_ptr<index::TextMatchIndex> index) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
@@ -1677,14 +1876,14 @@ ChunkedSegmentSealedImpl::bulk_subscript(
 
 bool
 ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     return get_bit(index_ready_bitset_, field_id) |
            get_bit(binlog_index_bitset_, field_id);
 }
 
 bool
 ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     if (SystemProperty::Instance().IsSystem(field_id)) {
         return is_system_field_ready();
     } else {
@@ -1694,7 +1893,7 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
 
 std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
 ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     bool exists;
     if (SystemProperty::Instance().IsSystem(field_id)) {
         exists = is_system_field_ready();
@@ -1712,7 +1911,7 @@ ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
     if (IsVectorDataType(field_meta.get_data_type())) {
@@ -1835,7 +2034,7 @@ ChunkedSegmentSealedImpl::debug() const {
 void
 ChunkedSegmentSealedImpl::LoadSegmentMeta(
     const proto::segcore::LoadSegmentMeta& segment_meta) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     std::vector<int64_t> slice_lengths;
     for (auto& info : segment_meta.metas()) {
         slice_lengths.push_back(info.row_count());
@@ -1958,7 +2157,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         }
         std::shared_ptr<ChunkedColumnInterface> vec_data{};
         {
-            folly::SharedMutex::ReadHolder lck(&mutex_);
+            std::shared_lock lck(mutex_);
             vec_data = fields_.at(field_id);
         }
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
@@ -1971,7 +2170,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         auto index_metric = field_binlog_config->GetMetricType();
 
         if (enable_binlog_index()) {
-            folly::SharedMutex::WriteHolder lck(&mutex_);
+            std::unique_lock lck(mutex_);
 
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
@@ -2052,7 +2251,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool enable_mmap,
     bool is_proxy_column) {
     {
-        folly::SharedMutex::WriteHolder lck(&mutex_);
+        std::unique_lock lck(mutex_);
         AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
                        !get_bit(field_data_ready_bitset_, field_id),
                    "non system field {} data already loaded",
@@ -2098,7 +2297,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
                "field {} data already loaded",
                field_id.get());
@@ -2123,7 +2322,7 @@ ChunkedSegmentSealedImpl::init_timestamp_index(
     index.build_with(timestamps.data(), num_rows);
 
     // use special index
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     AssertInfo(insert_record_.timestamps_.empty(), "already exists");
     insert_record_.timestamps_.set_data_raw(
         0, timestamps.data(), timestamps.size());
@@ -2135,7 +2334,7 @@ ChunkedSegmentSealedImpl::init_timestamp_index(
 
 void
 ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
 
     field_data_ready_bitset_.resize(sch->size());
     index_ready_bitset_.resize(sch->size());
@@ -2156,7 +2355,7 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
 
 void
 ChunkedSegmentSealedImpl::FinishLoad() {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;

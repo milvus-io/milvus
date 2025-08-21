@@ -160,7 +160,8 @@ func (ob *TargetObserver) Stop() {
 func (ob *TargetObserver) schedule(ctx context.Context) {
 	log.Info("Start update next target loop")
 
-	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second))
+	interval := params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -189,6 +190,17 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 			ob.loadedDispatcher.AddTask(loadedIDs...)
 			ob.loadingDispatcher.AddTask(loadingIDs...)
+
+			// apply dynamic update only when changed
+			newInterval := params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second)
+			if newInterval != interval {
+				interval = newInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
+			}
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",

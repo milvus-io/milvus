@@ -717,6 +717,11 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 		}
 	}
 
+	// Note: Node manager doesn't persist node list, so after query coord restart, we cannot
+	// update all node statuses in resource manager based on session and node manager's node list.
+	// Therefore, manual status checking of all nodes in resource manager is needed.
+	s.meta.ResourceManager.CheckNodesInResourceGroup(s.ctx)
+
 	return nil
 }
 
@@ -783,7 +788,8 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second))
+		interval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -795,6 +801,16 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 				success := s.updateBalanceConfig()
 				if success {
 					return
+				}
+				// apply dynamic update only when changed
+				newInterval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+				if newInterval != interval {
+					interval = newInterval
+					select {
+					case <-ticker.C:
+					default:
+					}
+					ticker.Reset(interval)
 				}
 			}
 		}

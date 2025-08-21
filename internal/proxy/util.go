@@ -2629,3 +2629,12 @@ func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema
 	results.Results.FieldsData = fieldsData
 	results.Results.OutputFields = outputFields
 }
+
+func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Timestamptz {
+			return true
+		}
+	}
+	return false
+}
