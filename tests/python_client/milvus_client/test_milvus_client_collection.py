@@ -2346,6 +2346,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
         # Step 2: Test point 1 - loaded partitions can be searched/queried
+        self.release_collection(client, collection_name)
         self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
@@ -2458,8 +2459,10 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2],
                    check_task=CheckTasks.err_res, check_items=error)
-        
+    
         self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2])
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2485,6 +2488,10 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
         self.release_partitions(client, collection_name, [partition_name_2])
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
         self.load_partitions(client, collection_name, [partition_name_2])
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2])
@@ -2677,9 +2684,95 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_2],
                    check_task=CheckTasks.err_res, check_items=error)
-        # 7. load the whole collection (should succeed)
+        # 7. load partition2 twice
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_2])
+        # 8. load the whole collection (should succeed)
         self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_load_collection_after_load_partition_drop_another(self):
+        """
+        target: test release/load collection after loading one partition and dropping another
+        method: 1) load partitions 2) drop one partition 3) release another partition 4) load collection 5) query
+        expected: no exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # Create collection and partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        # Load one partition, drop the other, then release the loaded partition
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.drop_partition(client, collection_name, partition_name_2)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Load the whole collection and run a query
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_partition_operations(self):
+        """
+        target: comprehensive test for load collection after various partition operations
+        method: combines three V1 test scenarios:
+                1. load partition -> release partition -> load collection -> search
+                2. load partition -> release partitions -> query (should fail) -> load collection -> query
+                3. load partition -> drop partition -> query (should fail) -> drop another -> load collection -> query
+        expected: all operations should work correctly with proper error handling
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # Create collection and partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.release_collection(client, collection_name)
+        # Scenario 1: load partition -> release partition -> load collection -> search
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.load_collection(client, collection_name)
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                   partition_names=[partition_name_1, partition_name_2])
+        # Scenario 2: load partition -> release partitions -> query (should fail) -> load collection -> query
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        error = {ct.err_code: 65535, ct.err_msg: 'collection not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2],
+                  check_task=CheckTasks.err_res, check_items=error)
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2])
+        # Scenario 3: load partition -> drop partition -> query (should fail) -> drop another -> load collection -> query
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_name_1} not found'}
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2],
+                  check_task=CheckTasks.err_res, check_items=error)
+        self.drop_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
 
 
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
