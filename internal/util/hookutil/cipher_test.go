@@ -112,7 +112,7 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	}
 	result, err = TidyDBCipherProperties(1, dbPropertiesWithoutRootKey)
 	s.Error(err)
-    s.Nil(result)
+	s.Nil(result)
 
 	// Test without encryption enabled
 	dbPropertiesWithoutEncryption := []*commonpb.KeyValuePair{}
