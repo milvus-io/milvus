@@ -835,6 +835,11 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
+	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
+	for _, field := range coll.Fields {
+		field.IsFunctionOutput = false
+	}
+
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
 			return err
