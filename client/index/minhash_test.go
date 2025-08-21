@@ -19,8 +19,9 @@ package index
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 func TestMinHashLSHIndex(t *testing.T) {

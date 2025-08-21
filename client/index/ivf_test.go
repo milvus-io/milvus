@@ -19,8 +19,9 @@ package index
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 func TestIvfRabitQ(t *testing.T) {
@@ -42,4 +43,18 @@ func TestIvfRabitQ(t *testing.T) {
 	assert.NotEmpty(t, result)
 	assert.Equal(t, "SQ8", result[ivfRefineTypeKey])
 	assert.Equal(t, "true", result[ivfRefineKey])
+}
+
+func TestIvfRabitQAnnParam(t *testing.T) {
+	ap := NewIvfRabitQAnnParam(16)
+	result := ap.Params()
+	assert.Equal(t, 16, result[ivfNprobeKey])
+
+	ap = ap.WithRabitQueryBits(8)
+	result = ap.Params()
+	assert.Equal(t, 8, result[ivfRbqQueryBitsKey])
+
+	ap = ap.WithRefineK(256)
+	result = ap.Params()
+	assert.Equal(t, 256, result[ivfRbqRefineKKey])
 }
