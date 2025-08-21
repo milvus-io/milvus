@@ -23,74 +23,74 @@ import (
 )
 
 func TestMinPriorityQueue(t *testing.T) {
-	pq := newPriorityQueue()
+	pq := NewPriorityQueue()
 
 	for i := 0; i < 5; i++ {
 		priority := i % 3
 		nodeItem := newNodeItem(priority, int64(i))
-		pq.push(&nodeItem)
+		pq.Push(&nodeItem)
 	}
 
-	item := pq.pop()
+	item := pq.Pop()
 	assert.Equal(t, item.getPriority(), 0)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(0))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 0)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(3))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(1))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(4))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 2)
 	println(item.getPriority())
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(2))
 }
 
 func TestPopPriorityQueue(t *testing.T) {
-	pq := newPriorityQueue()
+	pq := NewPriorityQueue()
 
 	for i := 0; i < 1; i++ {
 		priority := 1
 		nodeItem := newNodeItem(priority, int64(i))
-		pq.push(&nodeItem)
+		pq.Push(&nodeItem)
 	}
 
-	item := pq.pop()
+	item := pq.Pop()
 	assert.Equal(t, item.getPriority(), 1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(0))
-	pq.push(item)
+	pq.Push(item)
 
 	// if it's round robin, but not working
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(0))
 }
 
 func TestMaxPriorityQueue(t *testing.T) {
-	pq := newPriorityQueue()
+	pq := NewPriorityQueue()
 
 	for i := 0; i < 5; i++ {
 		priority := i % 3
 		nodeItem := newNodeItem(-priority, int64(i))
-		pq.push(&nodeItem)
+		pq.Push(&nodeItem)
 	}
 
-	item := pq.pop()
+	item := pq.Pop()
 	assert.Equal(t, item.getPriority(), -2)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(2))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), -1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(4))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), -1)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(1))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 0)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(3))
-	item = pq.pop()
+	item = pq.Pop()
 	assert.Equal(t, item.getPriority(), 0)
 	assert.Equal(t, item.(*nodeItem).nodeID, int64(0))
 }
