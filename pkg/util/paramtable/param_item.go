@@ -160,7 +160,6 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 
 // SetTempValue set the value for this ParamItem,
 // Once value set, ParamItem will use the value instead of underlying config manager.
-// Usage: should only use for unittest, swap empty string will remove the value.
 func (pi *ParamItem) SwapTempValue(s string) string {
 	if s == "" {
 		if old := pi.tempValue.Swap(nil); old != nil {

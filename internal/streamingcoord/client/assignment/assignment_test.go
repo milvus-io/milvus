@@ -24,6 +24,7 @@ func TestAssignmentService(t *testing.T) {
 	s.EXPECT().GetService(mock.Anything).Return(c, nil)
 	cc := mock_streamingpb.NewMockStreamingCoordAssignmentService_AssignmentDiscoverClient(t)
 	c.EXPECT().AssignmentDiscover(mock.Anything).Return(cc, nil)
+	c.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Return(&streamingpb.UpdateWALBalancePolicyResponse{}, nil)
 	k := 0
 	closeCh := make(chan struct{})
 	cc.EXPECT().Send(mock.Anything).Return(nil)
@@ -93,6 +94,13 @@ func TestAssignmentService(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, finalAssignments.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
 
+	assign, err := assignmentService.GetLatestAssignments(ctx)
+	assert.NoError(t, err)
+	assert.True(t, assign.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
+
+	err = assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
+	assert.NoError(t, err)
+
 	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
 
 	// Repeated report error at the same term should be ignored.
@@ -112,6 +120,14 @@ func TestAssignmentService(t *testing.T) {
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 
 	err = assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+	se = status.AsStreamingError(err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
+
+	assignmentService.GetLatestAssignments(ctx)
+	se = status.AsStreamingError(err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
+
+	assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	se = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 }

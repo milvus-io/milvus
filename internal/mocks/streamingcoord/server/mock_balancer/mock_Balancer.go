@@ -5,8 +5,10 @@ package mock_balancer
 import (
 	context "context"
 
-	syncutil "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	mock "github.com/stretchr/testify/mock"
+
+	syncutil "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 
@@ -237,6 +239,53 @@ func (_c *MockBalancer_Trigger_Call) Return(_a0 error) *MockBalancer_Trigger_Cal
 }
 
 func (_c *MockBalancer_Trigger_Call) RunAndReturn(run func(context.Context) error) *MockBalancer_Trigger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateBalancePolicy provides a mock function with given fields: ctx, req
+func (_m *MockBalancer) UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateBalancePolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_UpdateBalancePolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBalancePolicy'
+type MockBalancer_UpdateBalancePolicy_Call struct {
+	*mock.Call
+}
+
+// UpdateBalancePolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *streamingpb.UpdateWALBalancePolicyRequest
+func (_e *MockBalancer_Expecter) UpdateBalancePolicy(ctx interface{}, req interface{}) *MockBalancer_UpdateBalancePolicy_Call {
+	return &MockBalancer_UpdateBalancePolicy_Call{Call: _e.mock.On("UpdateBalancePolicy", ctx, req)}
+}
+
+func (_c *MockBalancer_UpdateBalancePolicy_Call) Run(run func(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest)) *MockBalancer_UpdateBalancePolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.UpdateWALBalancePolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_UpdateBalancePolicy_Call) Return(_a0 error) *MockBalancer_UpdateBalancePolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) error) *MockBalancer_UpdateBalancePolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

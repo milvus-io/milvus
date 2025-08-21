@@ -149,6 +149,53 @@ func (_c *MockWALAccesser_AppendMessagesWithOption_Call) RunAndReturn(run func(c
 	return _c
 }
 
+// Balancer provides a mock function with no fields
+func (_m *MockWALAccesser) Balancer() streaming.Balancer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Balancer")
+	}
+
+	var r0 streaming.Balancer
+	if rf, ok := ret.Get(0).(func() streaming.Balancer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.Balancer)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_Balancer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Balancer'
+type MockWALAccesser_Balancer_Call struct {
+	*mock.Call
+}
+
+// Balancer is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) Balancer() *MockWALAccesser_Balancer_Call {
+	return &MockWALAccesser_Balancer_Call{Call: _e.mock.On("Balancer")}
+}
+
+func (_c *MockWALAccesser_Balancer_Call) Run(run func()) *MockWALAccesser_Balancer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_Balancer_Call) Return(_a0 streaming.Balancer) *MockWALAccesser_Balancer_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_Balancer_Call) RunAndReturn(run func() streaming.Balancer) *MockWALAccesser_Balancer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Broadcast provides a mock function with no fields
 func (_m *MockWALAccesser) Broadcast() streaming.Broadcast {
 	ret := _m.Called()

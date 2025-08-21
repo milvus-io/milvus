@@ -2106,7 +2106,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         # 5. Load with replica_number=3 (should fail if only 2 querynodes available)
         error = {ct.err_code: 999,
                  ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
-                             "service resource insufficient[currentStreamingNode=1][expectedStreamingNode=3]"}
+                             "service resource insufficient[currentStreamingNode=2][expectedStreamingNode=3]"}
         self.load_collection(client, collection_name, replica_number=3,
                            check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
