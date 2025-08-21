@@ -59,6 +59,10 @@ type walAccesserImpl struct {
 	dispatchExecutionPool *conc.Pool[struct{}]
 }
 
+func (w *walAccesserImpl) Balancer() Balancer {
+	return balancerImpl{w}
+}
+
 func (w *walAccesserImpl) WALName() string {
 	return util.MustSelectWALName()
 }
