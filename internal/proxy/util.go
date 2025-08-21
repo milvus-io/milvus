@@ -2484,3 +2484,12 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 
 	return 0
 }
+
+func hasGeometryField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Geometry {
+			return true
+		}
+	}
+	return false
+}
