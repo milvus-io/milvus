@@ -188,6 +188,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_sorted_pk(const PkType& pk, Condition condition) const;
 
+    void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const override;
+
+    template <typename Condition>
+    void
+    search_sorted_pk_range(proto::plan::OpType op,
+                           const PkType& pk,
+                           BitsetTypeView& bitset,
+                           Condition condition) const;
+
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id,
                const int64_t* ids,

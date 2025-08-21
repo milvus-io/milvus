@@ -446,7 +446,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
+	// prevent user creating collection with timestamptz field for now (not implemented)
+	if hasTimestamptzField(t.schema) {
+		return merr.WrapErrParameterInvalidMsg("timestamptz field is still in development")
+	}
 	return nil
 }
 

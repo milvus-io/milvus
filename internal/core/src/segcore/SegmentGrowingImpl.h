@@ -404,6 +404,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.search_pk(pk, timestamp);
     }
 
+    void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const override {
+        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+    }
+
     bool
     is_field_exist(FieldId field_id) const override {
         return schema_->get_fields().find(field_id) !=
