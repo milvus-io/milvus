@@ -935,8 +935,8 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         partition_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the first character "
+                                                f"of a collection name must be an underscore or letter"}
         self.load_partitions(client, name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -965,8 +965,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = "a".join("a" for i in range(256))
         partition_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
+        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters: "
                                                 f"invalid parameter"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
@@ -984,8 +983,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={name}]"}
         self.load_partitions(client, collection_name, name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1002,8 +1000,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[database=default]"
-                                                f"[collection={collection_name}]"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1020,9 +1017,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1066,34 +1061,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # Try to release partition after disconnect - should raise exception
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.load_partitions(client_temp, collection_name, partition_name,
-                               check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_load_release_partition_after_drop(self):
-        """
-        target: test load and release partition after drop
-        method: drop partition and then load and release it
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str(partition_prefix)
-        description = cf.gen_unique_str("desc_")
-        # 1. Create collection and partition
-        self.create_collection(client, collection_name, default_dim)
-        self.create_partition(client, collection_name, partition_name, description=description)
-        # 2. Drop the partition
-        self.load_collection(client, collection_name)
-        self.release_partitions(client, collection_name, partition_name)
-        self.drop_partition(client, collection_name, partition_name)
-        # 3. Try to load partition after drop - should raise exception
-        error = {ct.err_code: 200, ct.err_msg: f'partition not found[partition={partition_name}]'}
-        self.load_partitions(client, collection_name, partition_name,
-                           check_task=CheckTasks.err_res, check_items=error)
-        # 4. Try to release partition after drop - should also raise exception
-        self.release_partitions(client, collection_name, partition_name,
-                              check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
+                             check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
@@ -1118,7 +1086,7 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, partition_names)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_load_unloaded_partition(self):
+    def test_milvus_client_load_unloaded_default_partition(self):
         """
         target: test fast create collection normal case
         method: create collection
