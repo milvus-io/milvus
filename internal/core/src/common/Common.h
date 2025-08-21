@@ -18,8 +18,7 @@
 
 #include <atomic>
 #include <iostream>
-#include <utility>
-#include <variant>
+#include <utility> #include <variant>
 #include "common/Consts.h"
 #include "storage/ThreadPool.h"
 
@@ -31,6 +30,7 @@ extern std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
+extern std::atomic<bool> ENABLE_PARQUET_STATS_SKIP_INDEX;
 
 void
 SetIndexSliceSize(const int64_t size);
@@ -50,6 +50,8 @@ SetDefaultGrowingJSONKeyStatsEnable(bool val);
 void
 SetDefaultConfigParamTypeCheck(bool val);
 
+void
+SetDefaultEnableParquetStatsSkipIndex(bool val);
 void
 SetLogLevel(const char* level);
 

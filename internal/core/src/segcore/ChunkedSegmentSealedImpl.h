@@ -34,6 +34,7 @@
 #include "common/IndexMeta.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/CacheSlot.h"
+#include "parquet/statistics.h"
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
 #include "folly/concurrency/ConcurrentHashMap.h"
@@ -49,6 +50,7 @@ using namespace milvus::cachinglayer;
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
+    using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
@@ -507,7 +509,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         size_t num_rows,
         DataType data_type,
         bool enable_mmap,
-        bool is_proxy_column);
+        bool is_proxy_column,
+        std::optional<ParquetStatistics> statistics = {});
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {
