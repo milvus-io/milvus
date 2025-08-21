@@ -26,7 +26,7 @@ namespace milvus::segcore {
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                                           SearchResult& results) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
@@ -51,7 +51,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
 void
 SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                           SearchResult& results) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
@@ -86,7 +86,7 @@ SegmentInternalInterface::Search(
     Timestamp timestamp,
     int32_t consistency_level,
     Timestamp collection_ttl) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(
@@ -105,7 +105,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    bool ignore_non_pk,
                                    int32_t consistency_level,
                                    Timestamp collection_ttl) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(
@@ -263,7 +263,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* Plan,
                                    const int64_t* offsets,
                                    int64_t size) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
@@ -329,7 +329,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lck(mutex_);
     if (IsVariableDataType(data_type)) {
         if (variable_fields_avg_size_.find(field_id) ==
             variable_fields_avg_size_.end()) {
@@ -352,7 +352,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lck(mutex_);
     if (IsVariableDataType(data_type)) {
         AssertInfo(num_rows > 0,
                    "The num rows of field data should be greater than 0");
@@ -418,7 +418,7 @@ SegmentInternalInterface::GetSkipIndex() const {
 
 index::TextMatchIndex*
 SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
         throw SegcoreError(
@@ -528,7 +528,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
 index::JsonKeyStatsInvertedIndex*
 SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
-    folly::SharedMutex::ReadHolder lck(&mutex_);
+    std::shared_lock lock(mutex_);
     auto iter = json_indexes_.find(field_id);
     if (iter == json_indexes_.end()) {
         return nullptr;
