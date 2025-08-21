@@ -2655,3 +2655,12 @@ func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
 	}
 	return false
 }
+
+func hasGeometryField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Geometry {
+			return true
+		}
+	}
+	return false
+}
