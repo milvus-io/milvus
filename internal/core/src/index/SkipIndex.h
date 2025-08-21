@@ -46,7 +46,7 @@ struct FieldChunkMetrics {
     bool hasValue_;
     int64_t null_count_;
 
-    FieldChunkMetrics() : hasValue_(false){};
+    FieldChunkMetrics() : hasValue_(false) {};
 
     template <typename T>
     std::pair<MetricsDataType<T>, MetricsDataType<T>>
