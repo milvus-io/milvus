@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -81,6 +82,19 @@ func (ez *EZ) AsMessageConfig() *message.CipherConfig {
 type CipherContext struct {
 	EZ
 	key []byte
+}
+
+func ContainsCipherProperties(properties []*commonpb.KeyValuePair, deletedKeys []string) bool {
+	for _, property := range properties {
+		if property.Key == EncryptionEnabledKey ||
+			property.Key == EncryptionEzIDKey ||
+			property.Key == EncryptionRootKeyKey {
+			return true
+		}
+	}
+	return lo.ContainsBy(deletedKeys, func(data string) bool {
+		return lo.Contains([]string{EncryptionEnabledKey, EncryptionEzIDKey, EncryptionRootKeyKey}, data)
+	})
 }
 
 func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID int64) *EZ {

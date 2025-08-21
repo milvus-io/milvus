@@ -90,18 +90,28 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	}
 	result, err := TidyDBCipherProperties(1, dbPropertiesWithRootKey)
 	s.NoError(err)
-	s.Equal(dbPropertiesWithRootKey, result)
+	s.Equal(3, len(result))
+	for _, kv := range result {
+		switch kv.Key {
+		case EncryptionEnabledKey:
+			s.Equal(kv.Value, "true")
+		case EncryptionEzIDKey:
+			s.Equal(kv.Value, "1")
+		case EncryptionRootKeyKey:
+			s.Equal(kv.Value, "existing-root-key")
+		default:
+			s.Fail("unexpected key")
+		}
+	}
 
 	// Test with encryption enabled and test cipher available
+	// Default rootkey is empty
 	InitTestCipher()
 	dbPropertiesWithoutRootKey := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
 	}
 	result, err = TidyDBCipherProperties(1, dbPropertiesWithoutRootKey)
-	s.NoError(err)
-	s.Len(result, 2) // should have EncryptionEnabledKey + added default root key
-	s.Equal(EncryptionEnabledKey, result[0].Key)
-	s.Equal(EncryptionRootKeyKey, result[1].Key)
+	s.Error(err)
 
 	// Test without encryption enabled
 	dbPropertiesWithoutEncryption := []*commonpb.KeyValuePair{}
@@ -146,4 +156,24 @@ func (s *CipherSuite) TestIsClusterEncyptionEnabled() {
 	// Test when cipher is not nil
 	InitTestCipher()
 	s.True(IsClusterEncyptionEnabled())
+}
+
+func (s *CipherSuite) TestContainsCipherProperty() {
+	tests := []struct {
+		props    []*commonpb.KeyValuePair
+		keys     []string
+		expected bool
+	}{
+		{[]*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "true"}}, nil, true},
+		{[]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "123"}}, nil, true},
+		{[]*commonpb.KeyValuePair{{Key: EncryptionRootKeyKey, Value: "abc"}}, nil, true},
+		{nil, []string{EncryptionEnabledKey}, true},
+		{nil, []string{EncryptionEzIDKey}, true},
+		{nil, []string{EncryptionRootKeyKey}, true},
+		{[]*commonpb.KeyValuePair{{Key: "key1", Value: "value1"}}, []string{"others"}, false},
+	}
+
+	for _, test := range tests {
+		s.Equal(test.expected, ContainsCipherProperties(test.props, test.keys))
+	}
 }
