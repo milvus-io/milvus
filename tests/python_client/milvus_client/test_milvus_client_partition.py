@@ -6,6 +6,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from pymilvus.client.types import LoadState
+
 
 prefix = "milvus_client_api_partition"
 partition_prefix = "milvus_client_api_partition"
@@ -560,6 +562,52 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, partition_name,
                                 check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_partition_after_disconnect(self):
+        """
+        target: test release partition without connection
+        method: release partition with correct params, with a disconnected instance
+        expected: release raise exception
+        """
+        client_temp = self._client(alias="client_release_partition")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # Create collection and partition
+        self.create_collection(client_temp, collection_name, default_dim)
+        self.create_partition(client_temp, collection_name, partition_name)
+        # Load partition first
+        self.load_partitions(client_temp, collection_name, [partition_name])
+        # Close the client connection
+        self.close(client_temp)
+        # Try to release partition after disconnect - should raise exception
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.release_partitions(client_temp, collection_name, partition_name,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_load_release_partition_after_collection_drop(self):
+        """
+        target: test load and release partition after collection drop
+        method: load and release the partition after the collection has been dropped
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str(partition_prefix)
+        description = cf.gen_unique_str("desc_")
+        # 1. Create collection and partition
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name, description=description)
+        # 2. Drop the collection
+        self.drop_collection(client, collection_name)
+        # 3. Try to load partition after collection drop - should raise exception
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
+        self.load_partitions(client, collection_name, partition_name,
+                           check_task=CheckTasks.err_res, check_items=error)
+        # 4. Try to release partition after collection drop - should raise exception
+        self.release_partitions(client, collection_name, partition_name,
+                              check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -600,9 +648,9 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_partition_release_unloaded_partition(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test releasing a partition that has not been loaded
+        method: create a collection and a partition, do not load the partition, then release the partition twice
+        expected: releasing an unloaded partition should succeed and be idempotent
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -618,9 +666,11 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_partition_release_unloaded_collection(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: Test releasing partitions after the collection has been released (unloaded)
+        method: 1. Create a collection and a partition
+                2. Release the entire collection (unload)
+                3. Attempt to release the partition after the collection is unloaded
+        expected: Releasing a partition after the collection is unloaded should succeed and be idempotent
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -942,9 +992,9 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_partitions_partition_not_existed(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: drop successfully
+        target: test loading a non-existent partition
+        method: create a collection, then attempt to load a partition that does not exist
+        expected: returns an error indicating the partition is not found
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -996,15 +1046,58 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partition_after_disconnect(self):
+        """
+        target: test load partition without connection
+        method: load partition with correct params, with a disconnected instance
+        expected: load raises exception
+        """
+        client_temp = self._client(alias="client_load_partition")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # Create collection and partition
+        self.create_collection(client_temp, collection_name, default_dim)
+        self.create_partition(client_temp, collection_name, partition_name)
+        # Load partition first
+        self.load_partitions(client_temp, collection_name, [partition_name])
+        # Close the client connection
+        self.close(client_temp)
+        # Try to release partition after disconnect - should raise exception
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.load_partitions(client_temp, collection_name, partition_name,
+                               check_task=CheckTasks.err_res, check_items=error)
 
-class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_release_partition_after_drop(self):
+        """
+        target: test load and release partition after drop
+        method: drop partition and then load and release it
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str(partition_prefix)
+        description = cf.gen_unique_str("desc_")
+        # 1. Create collection and partition
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name, description=description)
+        # 2. Drop the partition
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_name)
+        self.drop_partition(client, collection_name, partition_name)
+        # 3. Try to load partition after drop - should raise exception
+        error = {ct.err_code: 200, ct.err_msg: f'partition not found[partition={partition_name}]'}
+        self.load_partitions(client, collection_name, partition_name,
+                           check_task=CheckTasks.err_res, check_items=error)
+        # 4. Try to release partition after drop - should also raise exception
+        self.release_partitions(client, collection_name, partition_name,
+                              check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
 
-    """
-    ******************************************************************
-    #  The following are invalid base cases
-    ******************************************************************
-    """
+
+class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
+    """ Test case of load partition valid cases """
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_load_multiple_partition(self):
@@ -1061,3 +1154,55 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, partition_name)
         self.load_collection(client, collection_name)
         self.load_partitions(client, collection_name, partition_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize('binary_index_type', ct.binary_supported_index_types)
+    @pytest.mark.parametrize('metric_type', ct.binary_metrics)
+    def test_milvus_client_load_partition_after_index_binary(self, binary_index_type, metric_type):
+        """
+        target: test load binary collection partition after index created
+        method: insert and create index, load binary collection partition with correct params
+        expected: no error raised
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str(partition_prefix)
+        # 1. Create collection with binary vector
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        # 2. Create partition
+        self.create_partition(client, collection_name, partition_name)
+        # 3. Insert some data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, data, partition_name=partition_name)
+        self.flush(client, collection_name)
+        # 4. Create binary index
+        index_params = self.prepare_index_params(client)[0]
+        binary_index = {"index_type": binary_index_type, "metric_type": metric_type, "params": {"nlist": 128}}
+        # Handle special case for BIN_IVF_FLAT with structure metrics
+        if binary_index_type == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
+            # This combination should raise an error, so create with default instead
+            error = {ct.err_code: 65535,
+                     ct.err_msg: f"metric type {metric_type} not found or not supported, supported: [HAMMING JACCARD]"}
+            index_params.add_index(field_name=ct.default_binary_vec_field_name, 
+                                 index_type=binary_index_type, metric_type=metric_type, params={"nlist": 128})
+            self.create_index(client, collection_name, index_params,
+                            check_task=CheckTasks.err_res, check_items=error)
+            # Create with default binary index instead
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(field_name=ct.default_binary_vec_field_name, **ct.default_bin_flat_index)
+            self.create_index(client, collection_name, index_params)
+        else:
+            index_params.add_index(field_name=ct.default_binary_vec_field_name, **binary_index)
+            self.create_index(client, collection_name, index_params)
+        # 5. Load the partition
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 6. Verify partition is loaded by checking load state
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        self.drop_collection(client, collection_name)
