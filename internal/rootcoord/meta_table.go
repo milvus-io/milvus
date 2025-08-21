@@ -1625,8 +1625,8 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 }
 
 func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListPrivilegeGroups(ctx)
 }
