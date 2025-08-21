@@ -180,6 +180,7 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	// plan ok with schema, check ann field
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType
+	elementType := vectorField.ElementType
 
 	var vectorType planpb.VectorType
 	if !typeutil.IsVectorType(dataType) {
@@ -198,6 +199,15 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		vectorType = planpb.VectorType_SparseFloatVector
 	case schemapb.DataType_Int8Vector:
 		vectorType = planpb.VectorType_Int8Vector
+	case schemapb.DataType_ArrayOfVector:
+		switch elementType {
+		case schemapb.DataType_FloatVector:
+			vectorType = planpb.VectorType_EmbListFloatVector
+		default:
+			log.Error("Invalid elementType", zap.Any("elementType", elementType))
+			return nil, err
+		}
+
 	default:
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
 		return nil, err

@@ -175,7 +175,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 	return res, nil
 }
 
-func CalcColumnSize(column *schemapb.FieldData) int {
+func CalcScalarSize(column *schemapb.FieldData) int {
 	res := 0
 	switch column.GetType() {
 	case schemapb.DataType_Bool:
@@ -198,7 +198,7 @@ func CalcColumnSize(column *schemapb.FieldData) int {
 		}
 	case schemapb.DataType_Array:
 		for _, array := range column.GetScalars().GetArrayData().GetData() {
-			res += CalcColumnSize(&schemapb.FieldData{
+			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
 				Type:  column.GetScalars().GetArrayData().GetElementType(),
 			})
@@ -228,6 +228,8 @@ func calcVectorSize(column *schemapb.VectorField, vectorType schemapb.DataType) 
 		panic("unimplemented")
 	case schemapb.DataType_Int8Vector:
 		res += len(column.GetInt8Vector())
+	case schemapb.DataType_ArrayOfVector:
+		panic("unreachable")
 	default:
 		panic("Unknown data type:" + vectorType.String())
 	}
@@ -256,7 +258,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 				return 0, errors.New("offset out range of field datas")
 			}
 			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
-			res += CalcColumnSize(&schemapb.FieldData{
+			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
 				Type:  fs.GetScalars().GetArrayData().GetElementType(),
 			})
@@ -312,11 +314,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 		return nil, errors.New("schema is nil")
 	}
 
-	allFields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)+5)
-	allFields = append(allFields, schema.Fields...)
-	for _, structField := range schema.GetStructArrayFields() {
-		allFields = append(allFields, structField.GetFields()...)
-	}
+	allFields := GetAllFieldSchemas(schema)
 
 	schemaHelper := SchemaHelper{
 		schema:              schema,
@@ -523,6 +521,10 @@ func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+func IsArrayOfVectorType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_ArrayOfVector
 }
 
 // return VectorTypeSize for each dim (byte)

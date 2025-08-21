@@ -113,7 +113,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                               search_info,
                                               index_info,
                                               bitset_view,
-                                              DataType::VECTOR_SPARSE_FLOAT));
+                                              DataType::VECTOR_SPARSE_FLOAT,
+                                              DataType::NONE));
             return;
         }
         auto result = BruteForceSearch(query_dataset,
@@ -121,7 +122,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                        search_info,
                                        index_info,
                                        bitset_view,
-                                       DataType::VECTOR_SPARSE_FLOAT);
+                                       DataType::VECTOR_SPARSE_FLOAT,
+                                       DataType::NONE);
         for (int i = 0; i < nq; i++) {
             auto ref = SearchRef(base.get(), *(query.get() + i), nb, topk);
             auto ans = result.get_seg_offsets() + i * topk;
@@ -135,7 +137,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                         search_info,
                                         index_info,
                                         bitset_view,
-                                        DataType::VECTOR_SPARSE_FLOAT);
+                                        DataType::VECTOR_SPARSE_FLOAT,
+                                        DataType::NONE);
         for (int i = 0; i < nq; i++) {
             auto ref = RangeSearchRef(
                 base.get(), *(query.get() + i), nb, 0.1, 0.5, topk);

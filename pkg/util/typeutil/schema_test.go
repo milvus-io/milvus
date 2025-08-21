@@ -1677,7 +1677,7 @@ func TestCalcColumnSize(t *testing.T) {
 	for _, field := range schema.GetFields() {
 		values := fieldValues[field.GetFieldID()]
 		fieldData := genFieldData(field.GetName(), field.GetFieldID(), field.GetDataType(), values, 0)
-		size := CalcColumnSize(fieldData)
+		size := CalcScalarSize(fieldData)
 		expected := 0
 		switch field.GetDataType() {
 		case schemapb.DataType_VarChar:

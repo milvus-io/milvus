@@ -294,6 +294,7 @@ func TestExpr_TextMatch(t *testing.T) {
 func TestExpr_PhraseMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
+	enableMatch(schema)
 	assert.NoError(t, err)
 
 	exprStrs := []string{

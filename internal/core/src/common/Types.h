@@ -493,7 +493,8 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
            metric_type == knowhere::metric::COSINE ||
-           metric_type == knowhere::metric::BM25;
+           metric_type == knowhere::metric::BM25 ||
+           metric_type == knowhere::metric::MAX_SIM;
 }
 
 inline bool

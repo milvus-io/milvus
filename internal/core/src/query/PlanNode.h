@@ -77,6 +77,12 @@ struct Int8VectorANNS : VectorPlanNode {
     accept(PlanNodeVisitor&) override;
 };
 
+struct EmbListFloatVectorANNS : VectorPlanNode {
+ public:
+    void
+    accept(PlanNodeVisitor&) override;
+};
+
 struct RetrievePlanNode : PlanNode {
  public:
     void

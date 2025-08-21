@@ -104,7 +104,8 @@ func (ob *CollectionObserver) Start() {
 		go func() {
 			defer ob.wg.Done()
 
-			ticker := time.NewTicker(observePeriod)
+			interval := observePeriod
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
@@ -114,6 +115,16 @@ func (ob *CollectionObserver) Start() {
 
 				case <-ticker.C:
 					ob.Observe(ctx)
+					// apply dynamic update only when changed
+					newInterval := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
+					if newInterval != interval {
+						interval = newInterval
+						select {
+						case <-ticker.C:
+						default:
+						}
+						ticker.Reset(interval)
+					}
 				}
 			}
 		}()

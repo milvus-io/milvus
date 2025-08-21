@@ -92,6 +92,15 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
         ThrowInfo(Unsupported,
                   "Call get_dim on FieldData<VectorArray> is not supported");
     }
+
+    const VectorArray*
+    value_at(ssize_t offset) const {
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
+        return &data_[offset];
+    }
 };
 
 template <>

@@ -20,6 +20,7 @@ extern "C" {
 CStatus
 ValidateIndexParams(const char* index_type,
                     enum CDataType data_type,
+                    enum CDataType element_type,
                     const uint8_t* index_params,
                     const uint64_t length);
 

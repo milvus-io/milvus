@@ -500,19 +500,20 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	identifier := ctx.Identifier().GetText()
+	column, err := v.translateIdentifier(identifier)
 	if err != nil {
 		return err
 	}
 	columnInfo := toColumnInfo(column)
-	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return fmt.Errorf("field %v does not enable text match", columnInfo.FieldId)
-	}
 	if !typeutil.IsStringType(column.dataType) {
 		return errors.New("text match operation on non-string is unsupported")
 	}
 	if column.dataType == schemapb.DataType_Text {
 		return errors.New("text match operation on text field is not supported yet")
+	}
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return fmt.Errorf("field \"%s\" does not enable match", identifier)
 	}
 
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
@@ -535,13 +536,20 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 }
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	identifier := ctx.Identifier().GetText()
+	column, err := v.translateIdentifier(identifier)
 	if err != nil {
 		return err
 	}
+
+	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
 		return errors.New("phrase match operation on non-string is unsupported")
 	}
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return fmt.Errorf("field \"%s\" does not enable match", identifier)
+	}
+
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
 		return err

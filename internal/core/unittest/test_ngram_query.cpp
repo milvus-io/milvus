@@ -45,13 +45,13 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
 
-    auto field_meta = gen_field_meta(collection_id,
-                                     partition_id,
-                                     segment_id,
-                                     field_id.get(),
-                                     DataType::VARCHAR,
-                                     DataType::NONE,
-                                     false);
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
@@ -147,15 +147,16 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
                                        nb,
                                        8192,
                                        0);
-
-        std::optional<TargetBitmap> bitset_opt =
-            index->ExecuteQuery(literal, op_type, &segment_expr);
-        if (forward_to_br) {
-            ASSERT_TRUE(!bitset_opt.has_value());
-        } else {
-            auto bitset = std::move(bitset_opt.value());
-            for (size_t i = 0; i < nb; i++) {
-                ASSERT_EQ(bitset[i], expected_result[i]);
+        if (op_type != proto::plan::OpType::Equal) {
+            std::optional<TargetBitmap> bitset_opt =
+                index->ExecuteQuery(literal, op_type, &segment_expr);
+            if (forward_to_br) {
+                ASSERT_TRUE(!bitset_opt.has_value());
+            } else {
+                auto bitset = std::move(bitset_opt.value());
+                for (size_t i = 0; i < nb; i++) {
+                    ASSERT_EQ(bitset[i], expected_result[i]);
+                }
             }
         }
     }
@@ -237,8 +238,13 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
 
     // within min-max_gram
     {
+        // equal, all should fail
+        std::vector<bool> expected_result{false, false, false, false, false};
+        test_ngram_with_data(
+            data, "ary", proto::plan::OpType::Equal, expected_result);
+
         // inner match
-        std::vector<bool> expected_result{true, true, true, true, true};
+        expected_result = {true, true, true, true, true};
         test_ngram_with_data(
             data, "ary", proto::plan::OpType::InnerMatch, expected_result);
 
@@ -412,6 +418,10 @@ TEST(NgramIndex, TestNgramJson) {
                            proto::plan::OpType>>
         test_cases;
     proto::plan::GenericValue value;
+    value.set_string_val("liz");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{}, proto::plan::OpType::Equal));
+
     value.set_string_val("nothing");
     test_cases.push_back(std::make_tuple(
         value, std::vector<int64_t>{}, proto::plan::OpType::InnerMatch));
