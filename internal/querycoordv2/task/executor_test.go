@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -501,4 +503,177 @@ func (suite *ExecutorTestSuite) TestBalanceTaskFallbackToLatestWhenNoServiceable
 
 func TestExecutorSuite(t *testing.T) {
 	suite.Run(t, new(ExecutorTestSuite))
+}
+
+// L0 segment specific tests for delegator selection during load
+func (suite *ExecutorTestSuite) TestLoadL0_SelectDelegatorMissingSegment() {
+	t := suite.T()
+	mockey.PatchConvey("TestLoadL0_SelectDelegatorMissingSegment", t, func() {
+		// Setup collection and replica
+		collectionID := int64(1)
+		segmentID := int64(100)
+		channelName := "test-channel"
+
+		collection := utils.CreateTestCollection(collectionID, 1)
+		suite.meta.CollectionManager.PutCollection(suite.ctx, collection)
+		suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(collectionID, 1))
+
+		replica := utils.CreateTestReplica(1, collectionID, []int64{1, 2})
+		suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+		// Setup nodes
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1, Address: "localhost", Hostname: "localhost"}))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2, Address: "localhost", Hostname: "localhost"}))
+		suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 1)
+		suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 2)
+
+		// Only one delegator view which is missing the L0 segment
+		viewMissing := utils.CreateTestLeaderView(2, collectionID, channelName, map[int64]int64{}, map[int64]*meta.Segment{})
+		viewMissing.UnServiceableError = nil
+		viewMissing.Version = 1
+		suite.dist.LeaderViewManager.Update(2, viewMissing)
+
+		// Mock broker responses using mockey
+		mockey.Mock((*meta.MockBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{Schema: utils.CreateTestSchema()}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetSegmentInfo).Return([]*datapb.SegmentInfo{{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: channelName,
+			Level:         datapb.SegmentLevel_L0,
+		}}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetIndexInfo).Return(nil, nil).Build()
+		mockey.Mock((*meta.MockBroker).ListIndexes).Return([]*indexpb.IndexInfo{{CollectionID: collectionID}}, nil).Build()
+
+		channel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
+		segments := []*datapb.SegmentInfo{{ID: segmentID, CollectionID: collectionID, PartitionID: 1, InsertChannel: channelName}}
+		mockey.Mock((*meta.MockBroker).GetRecoveryInfoV2).Return([]*datapb.VchannelInfo{channel}, segments, nil).Build()
+		suite.target.UpdateCollectionNextTarget(suite.ctx, collectionID)
+
+		// Capture LoadSegments target node
+		var capturedNode int64 = -1
+		mockey.Mock((*session.MockCluster).LoadSegments).To(func(m *session.MockCluster, ctx context.Context, node int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+			capturedNode = node
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		}).Build()
+
+		// Execute load segment
+		action := NewSegmentAction(1, ActionTypeGrow, channelName, segmentID)
+		task, err := NewSegmentTask(suite.ctx, time.Second*10, WrapIDSource(0), collectionID, replica, action)
+		suite.NoError(err)
+		_ = suite.executor.loadSegment(task, 0)
+
+		suite.Equal(int64(2), capturedNode)
+	})
+}
+
+func (suite *ExecutorTestSuite) TestLoadL0_FallbackWhenAllDelegatorsHaveSegment() {
+	t := suite.T()
+	mockey.PatchConvey("TestLoadL0_FallbackWhenAllDelegatorsHaveSegment", t, func() {
+		// Setup collection and replica
+		collectionID := int64(1)
+		segmentID := int64(101)
+		channelName := "test-channel"
+
+		collection := utils.CreateTestCollection(collectionID, 1)
+		suite.meta.CollectionManager.PutCollection(suite.ctx, collection)
+		suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(collectionID, 1))
+
+		replica := utils.CreateTestReplica(1, collectionID, []int64{1, 2})
+		suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+		// Setup nodes
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1, Address: "localhost", Hostname: "localhost"}))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2, Address: "localhost", Hostname: "localhost"}))
+		suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 1)
+		suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 2)
+
+		// Both delegators already have the L0 segment; should fallback to serviceable latest
+		view1 := utils.CreateTestLeaderView(1, collectionID, channelName, map[int64]int64{segmentID: 1}, map[int64]*meta.Segment{})
+		view1.UnServiceableError = nil
+		view1.Version = 2
+		suite.dist.LeaderViewManager.Update(1, view1)
+
+		view2 := utils.CreateTestLeaderView(2, collectionID, channelName, map[int64]int64{segmentID: 2}, map[int64]*meta.Segment{})
+		view2.UnServiceableError = errors.New("not serviceable")
+		view2.Version = 3
+		suite.dist.LeaderViewManager.Update(2, view2)
+
+		// Mock broker responses using mockey
+		mockey.Mock((*meta.MockBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{Schema: utils.CreateTestSchema()}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetSegmentInfo).Return([]*datapb.SegmentInfo{{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: channelName,
+			Level:         datapb.SegmentLevel_L0,
+		}}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetIndexInfo).Return(nil, nil).Build()
+		mockey.Mock((*meta.MockBroker).ListIndexes).Return([]*indexpb.IndexInfo{{CollectionID: collectionID}}, nil).Build()
+
+		channel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
+		segments := []*datapb.SegmentInfo{{ID: segmentID, CollectionID: collectionID, PartitionID: 1, InsertChannel: channelName}}
+		mockey.Mock((*meta.MockBroker).GetRecoveryInfoV2).Return([]*datapb.VchannelInfo{channel}, segments, nil).Build()
+		suite.target.UpdateCollectionNextTarget(suite.ctx, collectionID)
+
+		// Capture LoadSegments target node
+		var capturedNode int64 = -1
+		mockey.Mock((*session.MockCluster).LoadSegments).To(func(m *session.MockCluster, ctx context.Context, node int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+			capturedNode = node
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+		}).Build()
+
+		action := NewSegmentAction(1, ActionTypeGrow, channelName, segmentID)
+		task, err := NewSegmentTask(suite.ctx, time.Second*10, WrapIDSource(0), collectionID, replica, action)
+		suite.NoError(err)
+		_ = suite.executor.loadSegment(task, 0)
+
+		suite.Equal(int64(1), capturedNode)
+	})
+}
+
+func (suite *ExecutorTestSuite) TestLoadL0_NoDelegatorFound() {
+	t := suite.T()
+	mockey.PatchConvey("TestLoadL0_NoDelegatorFound", t, func() {
+		// Setup collection and replica
+		collectionID := int64(1)
+		segmentID := int64(102)
+		channelName := "test-channel"
+
+		collection := utils.CreateTestCollection(collectionID, 1)
+		suite.meta.CollectionManager.PutCollection(suite.ctx, collection)
+		suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(collectionID, 1))
+
+		replica := utils.CreateTestReplica(1, collectionID, []int64{1})
+		suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+		// Setup node
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1, Address: "localhost", Hostname: "localhost"}))
+		suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 1)
+
+		// No leader views set for the channel -> should return error early
+
+		// Mock broker responses using mockey
+		mockey.Mock((*meta.MockBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{Schema: utils.CreateTestSchema()}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetSegmentInfo).Return([]*datapb.SegmentInfo{{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: channelName,
+			Level:         datapb.SegmentLevel_L0,
+		}}, nil).Build()
+		mockey.Mock((*meta.MockBroker).GetIndexInfo).Return(nil, nil).Build()
+		mockey.Mock((*meta.MockBroker).ListIndexes).Return([]*indexpb.IndexInfo{{CollectionID: collectionID}}, nil).Build()
+
+		channel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
+		segments := []*datapb.SegmentInfo{{ID: segmentID, CollectionID: collectionID, PartitionID: 1, InsertChannel: channelName}}
+		mockey.Mock((*meta.MockBroker).GetRecoveryInfoV2).Return([]*datapb.VchannelInfo{channel}, segments, nil).Build()
+		suite.target.UpdateCollectionNextTarget(suite.ctx, collectionID)
+
+		action := NewSegmentAction(1, ActionTypeGrow, channelName, segmentID)
+		task, err := NewSegmentTask(suite.ctx, time.Second*10, WrapIDSource(0), collectionID, replica, action)
+		suite.NoError(err)
+		err = suite.executor.loadSegment(task, 0)
+		suite.Error(err)
+	})
 }

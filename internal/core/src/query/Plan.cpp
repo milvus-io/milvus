@@ -70,7 +70,11 @@ ParsePlaceholderGroup(const Plan* plan,
             auto& target = element.blob_;
             target.reserve(line_size * element.num_of_queries_);
             for (auto& line : info.values()) {
-                Assert(line_size == line.size());
+                AssertInfo(line_size == line.size(),
+                           "vector dimension mismatch, expected vector "
+                           "size(byte) {}, actual {}.",
+                           line_size,
+                           line.size());
                 target.insert(target.end(), line.begin(), line.end());
             }
         }

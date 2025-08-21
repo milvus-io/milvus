@@ -115,18 +115,16 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 }
 
 CStatus
-InitFileWriterConfig(const char* mode,
-                     uint64_t buffer_size_kb,
-                     int nr_threads) {
+InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
     try {
-        std::string mode_str(mode);
+        std::string mode_str(c_disk_write_config.mode);
         if (mode_str == "direct") {
             milvus::storage::FileWriter::SetMode(
                 milvus::storage::FileWriter::WriteMode::DIRECT);
             // buffer size checking is done in FileWriter::SetBufferSize,
             // and it will try to find a proper and valid buffer size
             milvus::storage::FileWriter::SetBufferSize(
-                buffer_size_kb * 1024);  // convert to bytes
+                c_disk_write_config.buffer_size_kb * 1024);  // convert to bytes
         } else if (mode_str == "buffered") {
             milvus::storage::FileWriter::SetMode(
                 milvus::storage::FileWriter::WriteMode::BUFFERED);
@@ -135,7 +133,15 @@ InitFileWriterConfig(const char* mode,
                                           "Invalid mode");
         }
         milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
-            nr_threads);
+            c_disk_write_config.nr_threads);
+        // configure rate limiter
+        milvus::storage::io::WriteRateLimiter::GetInstance().Configure(
+            c_disk_write_config.rate_limiter_config.refill_period_us,
+            c_disk_write_config.rate_limiter_config.avg_bps,
+            c_disk_write_config.rate_limiter_config.max_burst_bps,
+            c_disk_write_config.rate_limiter_config.high_priority_ratio,
+            c_disk_write_config.rate_limiter_config.middle_priority_ratio,
+            c_disk_write_config.rate_limiter_config.low_priority_ratio);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

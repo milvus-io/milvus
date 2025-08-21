@@ -11,6 +11,7 @@
 
 #pragma once
 #include <cstdint>
+#include "common/Slice.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
@@ -21,6 +22,13 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+namespace json {
+bool
+IsDataTypeSupported(JsonCastType cast_type, DataType data_type, bool is_array);
+}  // namespace json
+
+const std::string INDEX_NON_EXIST_OFFSET_FILE_NAME =
+    "json_index_non_exist_offsets";
 class JsonInvertedIndexParseErrorRecorder {
  public:
     struct ErrorInstance {
@@ -125,11 +133,66 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         return cast_type_;
     }
 
+    BinarySet
+    Serialize(const Config& config) override {
+        folly::SharedMutex::ReadHolder lock(this->mutex_);
+        auto index_valid_data_length =
+            this->null_offset_.size() * sizeof(size_t);
+        std::shared_ptr<uint8_t[]> index_valid_data(
+            new uint8_t[index_valid_data_length]);
+        memcpy(index_valid_data.get(),
+               this->null_offset_.data(),
+               index_valid_data_length);
+
+        auto non_exist_data_length =
+            this->non_exist_offsets_.size() * sizeof(size_t);
+        std::shared_ptr<uint8_t[]> non_exist_data(
+            new uint8_t[non_exist_data_length]);
+        memcpy(non_exist_data.get(),
+               this->non_exist_offsets_.data(),
+               non_exist_data_length);
+        lock.unlock();
+        BinarySet res_set;
+        if (index_valid_data_length > 0) {
+            res_set.Append(INDEX_NULL_OFFSET_FILE_NAME,
+                           index_valid_data,
+                           index_valid_data_length);
+        }
+        if (non_exist_data_length > 0) {
+            res_set.Append(INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                           non_exist_data,
+                           non_exist_data_length);
+        }
+        milvus::Disassemble(res_set);
+        return res_set;
+    }
+
+    // Returns a bitmap indicating which rows have values that are indexed.
+    const TargetBitmap
+    Exists();
+
+ protected:
+    void
+    LoadIndexMetas(const std::vector<std::string>& index_files,
+                   const Config& config) override final;
+
+    void
+    RetainTantivyIndexFiles(
+        std::vector<std::string>& index_files) override final;
+
  private:
     std::string nested_path_;
     JsonInvertedIndexParseErrorRecorder error_recorder_;
     JsonCastType cast_type_;
     JsonCastFunction cast_function_;
+
+    // Stores the offsets of rows in which this JSON path does not exist.
+    // This includes rows that are null, does not have this JSON path, or have
+    // null values for this JSON path.
+    //
+    // For example, if the JSON path is "/a", this vector will store rows like
+    // null, {}, {"a": null}, etc.
+    std::vector<size_t> non_exist_offsets_;
 };
 
 }  // namespace milvus::index

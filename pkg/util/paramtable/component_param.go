@@ -246,6 +246,13 @@ type commonConfig struct {
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
 	DiskWriteNumThreads   ParamItem `refreshable:"true"`
 
+	DiskWriteRateLimiterRefillPeriodUs      ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterAvgKBps             ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMaxBurstKBps        ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterHighPriorityRatio   ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -695,6 +702,62 @@ In this case, the maximum concurrency of disk write operations is determined by 
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
+
+	p.DiskWriteRateLimiterRefillPeriodUs = ParamItem{
+		Key:          "common.diskWriteRateLimiter.refillPeriodUs",
+		Version:      "2.5.17",
+		DefaultValue: "100000",
+		Doc:          "refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterRefillPeriodUs.Init(base.mgr)
+
+	p.DiskWriteRateLimiterAvgKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.avgKBps",
+		Version:      "2.5.17",
+		DefaultValue: "262144",
+		Doc:          "average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterAvgKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMaxBurstKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.maxBurstKBps",
+		Version:      "2.5.17",
+		DefaultValue: "524288",
+		Doc:          "max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMaxBurstKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterHighPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.highPriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc: `amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+The ratio is the multiplication factor of the configured bandwidth.
+For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.`,
+		Export: true,
+	}
+	p.DiskWriteRateLimiterHighPriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMiddlePriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.middlePriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMiddlePriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterLowPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.lowPriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterLowPriorityRatio.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
@@ -2700,8 +2763,11 @@ type queryNodeConfig struct {
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
-	MaxTimestampLag       ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	// tsafe
+	MaxTimestampLag ParamItem `refreshable:"true"`
+	DowngradeTsafe  ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -3353,6 +3419,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxTimestampLag.Init(base.mgr)
+
+	p.DowngradeTsafe = ParamItem{
+		Key:          "queryNode.downgradeTsafe",
+		Version:      "2.5.17",
+		Doc:          "ops maintenance switch for downgrade tsafe in case of mq failure",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.DowngradeTsafe.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
@@ -4817,10 +4892,10 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ImportInsertBufferSize     ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
+	ImportInsertBufferSize      ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5100,15 +5175,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
-	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "dataNode.import.maxConcurrentTaskNum",
+	p.ImportConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.import.concurrencyPerCPUCore",
 		Version:      "2.4.0",
-		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "16",
+		Doc:          "The execution concurrency unit for import/pre-import tasks per CPU core.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+	p.ImportConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
 		Key:          "dataNode.import.maxImportFileSizeInGB",

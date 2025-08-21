@@ -78,7 +78,7 @@ class ChunkWriter : public ChunkWriterBase {
     }
 
     ChunkWriter(int dim, std::string file_path, bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
+        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim) {};
 
     void
     write(std::shared_ptr<arrow::RecordBatchReader> data) override {

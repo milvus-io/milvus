@@ -16703,7 +16703,15 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+
     EXPECT_EQ(final.count(), expect_count);
+    // not expr
+    auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, term_expr);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, not_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), N - expect_count);
 }
 
 TEST(JsonIndexTest, TestJsonNotEqualExpr) {
@@ -16768,7 +16776,7 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final =
         ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 2 * json_strs.size() - 4);
+    EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
 }
 
 class JsonIndexExistsTest : public ::testing::TestWithParam<std::string> {};

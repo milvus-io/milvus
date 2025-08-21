@@ -1315,26 +1315,15 @@ struct ArithHelperI64<ArithOpType::Mul, CmpOp> {
 };
 
 template <CompareOpType CmpOp>
-struct ArithHelperF32<ArithOpType::Div, CmpOp> {
-    static inline svbool_t
-    op_special(const svbool_t pred,
-               const svfloat32_t left,
-               const svfloat32_t right,
-               const svfloat32_t value) {
-        // this is valid for the positive denominator, == and != cases.
-        // left == right * value
-        return CmpHelper<CmpOp>::compare(
-            pred, left, svmul_f32_z(pred, right, value));
-    }
-
+struct ArithHelperI64<ArithOpType::Div, CmpOp> {
     static inline svbool_t
     op(const svbool_t pred,
-       const svfloat32_t left,
-       const svfloat32_t right,
-       const svfloat32_t value) {
+       const svint64_t left,
+       const svint64_t right,
+       const svint64_t value) {
         // left / right == value
         return CmpHelper<CmpOp>::compare(
-            pred, svdiv_f32_z(pred, left, right), value);
+            pred, svdiv_s64_z(pred, left, right), value);
     }
 };
 
