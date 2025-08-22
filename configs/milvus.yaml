@@ -1415,9 +1415,17 @@ function:
   rerank:
     model:
       providers:
+        cohere:
+          credential:  # The name in the crendential configuration item
+          url:  # Your cohere rerank url, Default is the official rerank url
+        siliconflow:
+          credential:  # The name in the crendential configuration item
+          url:  # Your siliconflow rerank url, Default is the official rerank url
         tei:
+          credential:  # The name in the crendential configuration item
           enable: true # Whether to enable TEI rerank service
         vllm:
+          credential:  # The name in the crendential configuration item
           enable: true # Whether to enable vllm rerank service
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer

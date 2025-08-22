@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -321,7 +321,7 @@ func TestInsertTask_Function(t *testing.T) {
 		}
 	}
 
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{
