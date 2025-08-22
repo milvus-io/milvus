@@ -42,6 +42,42 @@ type VersionedStreamingNodeAssignments struct {
 	ReplicateConfiguration *milvuspb.ReplicateConfiguration
 }
 
+// PChannelOfCChannel returns the pchannel of the cchannel.
+func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
+	return v.CChannel.Meta.Pchannel
+}
+
+// RoutePChannelByReplicate returns the pchannel of the cchannel.
+func (v *VersionedStreamingNodeAssignments) RoutePChannelByReplicate(sourcePChannel string, currentClusterID string) string {
+	var (
+		sourceCluster  *milvuspb.MilvusCluster
+		currentCluster *milvuspb.MilvusCluster
+		channelIndex   = -1
+	)
+	for _, cluster := range v.ReplicateConfiguration.GetClusters() {
+		if cluster.GetClusterId() == currentClusterID {
+			currentCluster = cluster
+		}
+		for i, pchannel := range cluster.GetPchannels() {
+			if pchannel == sourcePChannel {
+				sourceCluster = cluster
+				channelIndex = i
+				break
+			}
+		}
+	}
+	if currentCluster == nil {
+		panic(fmt.Sprintf("current cluster %s not found in replicate configuration", currentClusterID))
+	}
+	if channelIndex == -1 {
+		panic(fmt.Sprintf("source pchannel %s not found in replicate configuration", sourcePChannel))
+	}
+	if len(currentCluster.GetPchannels()) != len(sourceCluster.GetPchannels()) {
+		panic(fmt.Sprintf("pchannels count not match, current: %v, source: %v", currentCluster.GetPchannels(), sourceCluster.GetPchannels()))
+	}
+	return currentCluster.GetPchannels()[channelIndex]
+}
+
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
 	NodeInfo StreamingNodeInfo

@@ -11,7 +11,7 @@ import (
 
 func GetMilvusCluster(clusterID string, config *milvuspb.ReplicateConfiguration) *milvuspb.MilvusCluster {
 	for _, cluster := range config.GetClusters() {
-		if cluster.GetClusterID() == clusterID {
+		if cluster.GetClusterId() == clusterID {
 			return cluster
 		}
 	}
@@ -22,15 +22,15 @@ func ConfigLogFields(config *milvuspb.ReplicateConfiguration) []zap.Field {
 	fields := make([]zap.Field, 0)
 	fields = append(fields, zap.Int("clusterCount", len(config.GetClusters())))
 	fields = append(fields, zap.Strings("clusters", lo.Map(config.GetClusters(), func(cluster *milvuspb.MilvusCluster, _ int) string {
-		return cluster.GetClusterID()
+		return cluster.GetClusterId()
 	})))
 	fields = append(fields, zap.Int("topologyCount", len(config.GetCrossClusterTopology())))
 	fields = append(fields, zap.Strings("topologies", lo.Map(config.GetCrossClusterTopology(), func(topology *milvuspb.CrossClusterTopology, _ int) string {
-		return fmt.Sprintf("%s->%s", topology.GetSourceClusterID(), topology.GetTargetClusterID())
+		return fmt.Sprintf("%s->%s", topology.GetSourceClusterId(), topology.GetTargetClusterId())
 	})))
 	for _, cluster := range config.GetClusters() {
 		fields = append(fields, zap.String("clusterInfo", fmt.Sprintf("clusterID: %s, uri: %s, pchannels: %v",
-			cluster.GetClusterID(), cluster.GetConnectionParam().GetUri(), cluster.GetPchannels())))
+			cluster.GetClusterId(), cluster.GetConnectionParam().GetUri(), cluster.GetPchannels())))
 	}
 	return fields
 }

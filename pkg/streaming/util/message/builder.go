@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -65,7 +66,27 @@ func NewImmutableMesasge(
 	}
 }
 
-func NewReplicateMessage()
+// NewReplicateMessage creates a new replicate message.
+func NewReplicateMessage(clustrID string, im *milvuspb.ImmutableMessage) MutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
+	pmsg := msg.IntoImmutableMessageProto()
+	m := &messageImpl{
+		payload:    pmsg.GetPayload(),
+		properties: pmsg.GetProperties(),
+	}
+	rh, err := EncodeProto(&messagespb.ReplicateHeader{
+		ClusterId: clustrID,
+		MessageId: pmsg.GetId(),
+		TimeTick:  msg.TimeTick(),
+		Vchannel:  msg.VChannel(),
+	})
+	if err != nil {
+		panic("failed to encode replicate header")
+	}
+	m.properties.Set(messageReplicateMesssageHeader, rh)
+	return m
+}
 
 // newMutableMessageBuilder creates a new builder.
 // Should only used at client side.

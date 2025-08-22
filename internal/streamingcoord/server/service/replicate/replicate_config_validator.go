@@ -34,7 +34,7 @@ func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration, curren
 	clusters := config.GetClusters()
 	for _, cluster := range clusters {
 		if cluster != nil {
-			clusterID := cluster.GetClusterID()
+			clusterID := cluster.GetClusterId()
 			validator.clusterMap[clusterID] = cluster
 			validator.clusterIDs[clusterID] = struct{}{}
 		}
@@ -90,7 +90,7 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 		}
 
 		// clusterID validation: non-empty and no whitespace
-		clusterID := cluster.GetClusterID()
+		clusterID := cluster.GetClusterId()
 		if clusterID == "" {
 			return fmt.Errorf("cluster at index %d has empty clusterID", i)
 		}
@@ -183,8 +183,8 @@ func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*
 			return fmt.Errorf("topology at index %d is nil", i)
 		}
 
-		sourceClusterID := topology.GetSourceClusterID()
-		targetClusterID := topology.GetTargetClusterID()
+		sourceClusterID := topology.GetSourceClusterId()
+		targetClusterID := topology.GetTargetClusterId()
 
 		// Validate edge endpoints exist
 		if _, exists := v.clusterIDs[sourceClusterID]; !exists {
@@ -223,8 +223,8 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 
 	// Calculate degrees
 	for _, topology := range topologies {
-		source := topology.GetSourceClusterID()
-		target := topology.GetTargetClusterID()
+		source := topology.GetSourceClusterId()
+		target := topology.GetTargetClusterId()
 
 		outDegree[source]++
 		inDegree[target]++

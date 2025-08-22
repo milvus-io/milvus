@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -17,7 +18,12 @@ import (
 const replicateRespChanLength = 128
 
 func CreateReplicateServer(streamServer milvuspb.MilvusService_CreateReplicateStreamServer) (*ReplicateStreamServer, error) {
+	clusterID, err := contextutil.GetClusterID(streamServer.Context())
+	if err != nil {
+		return nil, err
+	}
 	return &ReplicateStreamServer{
+		clusterID:       clusterID,
 		streamServer:    streamServer,
 		replicateRespCh: make(chan *milvuspb.ReplicateResponse, replicateRespChanLength),
 		wg:              sync.WaitGroup{},
@@ -26,6 +32,7 @@ func CreateReplicateServer(streamServer milvuspb.MilvusService_CreateReplicateSt
 
 // ReplicateStreamServer is a ReplicateStreamServer of replicate messages.
 type ReplicateStreamServer struct {
+	clusterID       string
 	streamServer    milvuspb.MilvusService_CreateReplicateStreamServer
 	replicateRespCh chan *milvuspb.ReplicateResponse // All processing messages result should sent from theses channel.
 	wg              sync.WaitGroup
@@ -106,7 +113,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
 	log.Debug("recv replicate message from client", zap.String("messageID", reqMsg.GetId().GetId()))
-	msg := message.NewMutableMessageBeforeAppend(reqMsg.GetPayload(), reqMsg.GetProperties())
+	msg := message.NewReplicateMessage(p.clusterID, reqMsg)
 
 	// Append message to wal.
 	// Keep retrying until the message is appended successfully or the stream is closed.

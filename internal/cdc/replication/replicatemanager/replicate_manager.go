@@ -41,17 +41,17 @@ func NewReplicateManager() *replicateManager {
 func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
 	candidateClusters := make(map[string]*milvuspb.MilvusCluster)
 	for _, topology := range config.GetCrossClusterTopology() {
-		clusterID := topology.GetTargetClusterID()
+		clusterID := topology.GetTargetClusterId()
 		candidateClusters[clusterID] = replicateutil.GetMilvusCluster(clusterID, config)
 	}
 	// Add and start new cluster replicators that in candidates but not in clusterReplicators.
 	for _, cluster := range candidateClusters {
-		if _, ok := r.clusterReplicators[cluster.GetClusterID()]; ok {
+		if _, ok := r.clusterReplicators[cluster.GetClusterId()]; ok {
 			continue
 		}
 		clusterReplicator := NewClusterReplicator(cluster)
 		clusterReplicator.StartReplicateCluster()
-		r.clusterReplicators[cluster.GetClusterID()] = clusterReplicator
+		r.clusterReplicators[cluster.GetClusterId()] = clusterReplicator
 	}
 	// Stop and remove cluster replicators that are not in the candidate clusters.
 	for clusterID, clusterReplicator := range r.clusterReplicators {

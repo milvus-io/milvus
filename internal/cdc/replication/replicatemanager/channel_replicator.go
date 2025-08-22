@@ -72,7 +72,7 @@ func NewChannelReplicator(channel string, cluster *milvuspb.MilvusCluster) Chann
 }
 
 func (r *channelReplicator) StartReplicateChannel() {
-	logger := log.With(zap.String("cluster", r.cluster.GetClusterID()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("cluster", r.cluster.GetClusterId()), zap.String("channel", r.channel))
 	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
 		logger.Warn("replicate channel already started")
 		return
@@ -90,7 +90,7 @@ func (r *channelReplicator) StartReplicateChannel() {
 
 // replicateLoop starts the replicate loop.
 func (r *channelReplicator) replicateLoop() error {
-	logger := log.With(zap.String("cluster", r.cluster.GetClusterID()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("cluster", r.cluster.GetClusterId()), zap.String("channel", r.channel))
 	startFrom, err := r.getReplicateStartMessageID()
 	if err != nil {
 		return err
@@ -129,7 +129,7 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 	defer milvusClient.Close(r.ctx)
 
 	replicateInfo, err := milvusClient.GetReplicateInfo(r.ctx, &milvuspb.GetReplicateInfoRequest{
-		SourceClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		SourceClusterId: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 	})
 	if err != nil {
 		return nil, err
@@ -143,15 +143,15 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		}
 	}
 	if checkpoint == nil {
-		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s", r.channel, r.cluster.GetClusterID())
+		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s", r.channel, r.cluster.GetClusterId())
 	}
 
 	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(
 		streaming.WAL().WALName(),
-		[]byte(checkpoint.GetReplicateMessageID().GetId()),
+		[]byte(checkpoint.GetReplicateMessageId().GetId()),
 	)
 	log.Info("replicate messages from position",
-		zap.String("cluster", r.cluster.GetClusterID()),
+		zap.String("cluster", r.cluster.GetClusterId()),
 		zap.String("channel", r.channel),
 		zap.Any("checkpoint", checkpoint),
 		zap.Any("startFromMessageID", startFrom),

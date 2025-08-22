@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -48,10 +49,15 @@ type replicateStreamClient struct {
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
 func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusCluster, channel string) ReplicateStreamClient {
+	ctx1, cancel := context.WithCancel(ctx)
+	ctx1 = contextutil.WithClusterID(ctx1, cluster.GetClusterId())
+
 	rs := &replicateStreamClient{
 		cluster:         cluster,
 		channel:         channel,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
+		ctx:             ctx1,
+		cancel:          cancel,
 	}
 
 	rs.startInternal()
@@ -59,7 +65,7 @@ func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusClust
 }
 
 func (r *replicateStreamClient) startInternal() {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterID()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
 
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -167,7 +173,7 @@ func (r *replicateStreamClient) startRecvLoop(stopCh <-chan struct{}) <-chan err
 }
 
 func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterID()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -193,7 +199,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 }
 
 func (r *replicateStreamClient) recvLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterID()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
 	for {
 		select {
 		case <-r.ctx.Done():

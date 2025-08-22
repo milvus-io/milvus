@@ -158,15 +158,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 					Channels: channels,
 				}
 			}
-			newIncomingReplicateClusters := make(map[string][]string, len(resp.FullAssignment.ReplicateClusters))
-			for _, cluster := range resp.FullAssignment.ReplicateClusters {
-				newIncomingReplicateClusters[cluster.GetClusterID()] = cluster.GetPchannels()
+			newIncomingReplicateClusters := make(map[string][]string, len(resp.FullAssignment.ReplicateConfiguration.GetClusters()))
+			for _, cluster := range resp.FullAssignment.ReplicateConfiguration.GetClusters() {
+				newIncomingReplicateClusters[cluster.GetClusterId()] = cluster.GetPchannels()
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
-				Version:                   newIncomingVersion,
-				Assignments:               newIncomingAssignments,
-				CChannel:                  resp.FullAssignment.Cchannel,
-				ReplicateClusterPChannels: newIncomingReplicateClusters,
+				Version:                newIncomingVersion,
+				Assignments:            newIncomingAssignments,
+				CChannel:               resp.FullAssignment.Cchannel,
+				ReplicateConfiguration: resp.FullAssignment.ReplicateConfiguration,
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:
 			// nothing to do now, just wait io.EOF.
