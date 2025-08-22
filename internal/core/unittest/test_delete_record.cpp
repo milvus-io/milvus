@@ -45,7 +45,8 @@ TEST(DeleteMVCC, common_case) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -170,7 +171,8 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -294,7 +296,8 @@ TEST(DeleteMVCC, snapshot) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -351,7 +354,8 @@ TEST(DeleteMVCC, insert_after_snapshot) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -455,7 +459,8 @@ TEST(DeleteMVCC, perform) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -508,4 +513,167 @@ TEST(DeleteMVCC, perform) {
                                                                        start)
                      .count()
               << std::endl;
+}
+
+TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+    auto N = 50000;
+    InsertRecord<false> insert_record(*schema, N);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
+            for (size_t i = 0; i < pks.size(); ++i) {
+                auto timestamp = timestamps[i];
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
+                for (auto offset : offsets) {
+                    cb(offset, timestamp);
+                }
+            }
+        },
+        0);
+
+    // insert (0,0), (1,1), ..., (N-1,N-1)
+    std::vector<int64_t> age_data(N);
+    std::vector<Timestamp> tss(N);
+    for (int i = 0; i < N; ++i) {
+        age_data[i] = i;
+        tss[i] = i;
+        insert_record.insert_pk(age_data[i], i);
+    }
+    auto insert_offset = insert_record.reserved.fetch_add(N);
+    insert_record.timestamps_.set_data_raw(insert_offset, tss.data(), N);
+    auto field_data = insert_record.get_data_base(i64_fid);
+    field_data->set_data_raw(insert_offset, age_data.data(), N);
+    insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
+
+    // delete first DN pks with ts = i+1, ensure snapshots are created
+    auto DN = 40000;
+    std::vector<Timestamp> delete_ts(DN);
+    std::vector<PkType> delete_pk(DN);
+    for (int i = 0; i < DN; ++i) {
+        delete_pk[i] = age_data[i];
+        delete_ts[i] = i + 1;  // 1..DN
+    }
+    delete_record.StreamPush(delete_pk, delete_ts.data());
+
+    auto snapshots = delete_record.get_snapshots();
+    std::cout << "snapshots size: " << snapshots.size() << std::endl;
+    ASSERT_GE(snapshots.size(), 1);
+
+    // Query at ts smaller than first snapshot ts, expect only first deletion visible
+    Timestamp query_timestamp = 1;
+    BitsetType bitsets(N);
+    BitsetTypeView bitsets_view(bitsets);
+    int64_t insert_barrier = N;
+    delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+
+    for (int i = 0; i < N; i++) {
+        bool expected = (i == 0);
+        ASSERT_EQ(bitsets_view[i], expected) << i;
+    }
+}
+
+TEST(DeleteMVCC, SnapshotDumpProgress) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    const int N = 21000;
+    InsertRecord<false> insert_record(*schema, N);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
+            for (size_t i = 0; i < pks.size(); ++i) {
+                auto timestamp = timestamps[i];
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
+                for (auto offset : offsets) {
+                    cb(offset, timestamp);
+                }
+            }
+        },
+        0);
+
+    // insert pk=i at ts=i
+    std::vector<int64_t> age_data(N);
+    std::vector<Timestamp> tss(N);
+    for (int i = 0; i < N; ++i) {
+        age_data[i] = i;
+        tss[i] = i;
+        insert_record.insert_pk(age_data[i], i);
+    }
+    auto insert_offset = insert_record.reserved.fetch_add(N);
+    insert_record.timestamps_.set_data_raw(insert_offset, tss.data(), N);
+    auto field_data = insert_record.get_data_base(i64_fid);
+    field_data->set_data_raw(insert_offset, age_data.data(), N);
+    insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
+
+    // 1) Push exactly 10000 deletes -> no snapshot expected (threshold is > 10000)
+    const int B = 10000;  // current DUMP_BATCH_SIZE
+    std::vector<Timestamp> delete_ts1(B);
+    std::vector<PkType> delete_pk1(B);
+    for (int i = 0; i < B; ++i) {
+        delete_pk1[i] = age_data[i];
+        delete_ts1[i] = i + 1;
+    }
+    delete_record.StreamPush(delete_pk1, delete_ts1.data());
+    auto snapshots = delete_record.get_snapshots();
+    ASSERT_EQ(0, snapshots.size());
+
+    // 2) Push one more delete -> one snapshot expected, covering first 10000
+    std::vector<Timestamp> delete_ts2(1);
+    std::vector<PkType> delete_pk2(1);
+    delete_pk2[0] = age_data[B];
+    delete_ts2[0] = B + 1;  // 10001
+    delete_record.StreamPush(delete_pk2, delete_ts2.data());
+    snapshots = delete_record.get_snapshots();
+    ASSERT_EQ(1, snapshots.size());
+    ASSERT_EQ(10000, snapshots[0].second.count());
+
+    // 3) Push 9500 more -> still one snapshot
+    const int more1 = 9500;
+    std::vector<Timestamp> delete_ts3(more1);
+    std::vector<PkType> delete_pk3(more1);
+    for (int i = 0; i < more1; ++i) {
+        delete_pk3[i] = age_data[B + 1 + i];
+        delete_ts3[i] = B + 2 + i;
+    }
+    delete_record.StreamPush(delete_pk3, delete_ts3.data());
+    snapshots = delete_record.get_snapshots();
+    ASSERT_EQ(1, snapshots.size());
+    ASSERT_EQ(10000, snapshots[0].second.count());
+
+    // 4) Push 500 more (total 10001 after previous 10000 dumped) -> second snapshot appears
+    const int more2 = 500;
+    std::vector<Timestamp> delete_ts4(more2);
+    std::vector<PkType> delete_pk4(more2);
+    for (int i = 0; i < more2; ++i) {
+        delete_pk4[i] = age_data[B + 1 + more1 + i];
+        delete_ts4[i] = B + 2 + more1 + i;
+    }
+    delete_record.StreamPush(delete_pk4, delete_ts4.data());
+    snapshots = delete_record.get_snapshots();
+    ASSERT_EQ(2, snapshots.size());
+    ASSERT_EQ(20000, snapshots[1].second.count());
 }

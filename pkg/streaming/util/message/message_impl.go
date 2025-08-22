@@ -29,6 +29,14 @@ func (m *messageImpl) Version() Version {
 	return newMessageVersionFromString(value)
 }
 
+// MessageTypeWithVersion returns the message type with version.
+func (m *messageImpl) MessageTypeWithVersion() MessageTypeWithVersion {
+	return MessageTypeWithVersion{
+		MessageType: m.MessageType(),
+		Version:     m.Version(),
+	}
+}
+
 // Payload returns payload of current message.
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
@@ -54,6 +62,14 @@ func (m *messageImpl) Properties() RProperties {
 // IsPersisted returns true if the message is persisted.
 func (m *messageImpl) IsPersisted() bool {
 	return !m.properties.Exist(messageNotPersisteted)
+}
+
+// IntoMessageProto converts the message to a protobuf message.
+func (m *messageImpl) IntoMessageProto() *messagespb.Message {
+	return &messagespb.Message{
+		Payload:    m.payload,
+		Properties: m.properties.ToRawMap(),
+	}
 }
 
 // EstimateSize returns the estimated size of current message.
@@ -351,6 +367,17 @@ func (m *immutableMessageImpl) overwriteLastConfirmedMessageID(id MessageID) {
 	m.properties.Delete(messageLastConfirmed)
 	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
 	m.WithLastConfirmed(id)
+}
+
+// IntoImmutableMessageProto converts the message to a protobuf immutable message.
+func (m *immutableMessageImpl) IntoImmutableMessageProto() *messagespb.ImmutableMessage {
+	return &messagespb.ImmutableMessage{
+		Id: &messagespb.MessageID{
+			Id: m.id.Marshal(),
+		},
+		Payload:    m.payload,
+		Properties: m.properties.ToRawMap(),
+	}
 }
 
 // immutableTxnMessageImpl is a immutable transaction message.

@@ -122,7 +122,7 @@ func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
-	im := message.MustAsImmutableCollectionSchemaChangeV2(msg.IntoImmutableMessage(msgID))
+	im := message.MustAsImmutableSchemaChangeMessageV2(msg.IntoImmutableMessage(msgID))
 	err := handler.HandleSchemaChange(context.Background(), im)
 	assert.Error(t, err)
 

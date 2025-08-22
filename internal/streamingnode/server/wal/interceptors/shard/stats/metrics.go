@@ -3,8 +3,8 @@ package stats
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -27,17 +27,19 @@ type metricsHelper struct {
 }
 
 // ObservePChannelBytesUpdate updates the bytes of a pchannel.
-func (m *metricsHelper) ObservePChannelBytesUpdate(pchannel string, insertMetrics utils.InsertMetrics) {
-	if insertMetrics.BinarySize <= 0 {
-		metrics.WALGrowingSegmentBytes.DeletePartialMatch(prometheus.Labels{metrics.WALChannelLabelName: pchannel})
-	} else {
-		m.growingBytes.WithLabelValues(pchannel).Set(float64(insertMetrics.BinarySize))
-	}
-
-	if insertMetrics.Rows <= 0 {
-		metrics.WALGrowingSegmentRowsTotal.DeletePartialMatch(prometheus.Labels{metrics.WALChannelLabelName: pchannel})
-	} else {
-		m.growingRowsTotal.WithLabelValues(pchannel).Set(float64(insertMetrics.Rows))
+func (m *metricsHelper) ObservePChannelBytesUpdate(pchannel string, am *aggregatedMetrics) {
+	for _, lv := range []datapb.SegmentLevel{datapb.SegmentLevel_L0, datapb.SegmentLevel_L1} {
+		metric := am.Get(lv)
+		if metric.BinarySize <= 0 {
+			metrics.WALGrowingSegmentBytes.DeletePartialMatch(prometheus.Labels{metrics.WALChannelLabelName: pchannel, metrics.WALSegmentLevelLabelName: lv.String()})
+		} else {
+			m.growingBytes.WithLabelValues(pchannel, lv.String()).Set(float64(metric.BinarySize))
+		}
+		if metric.Rows <= 0 {
+			metrics.WALGrowingSegmentRowsTotal.DeletePartialMatch(prometheus.Labels{metrics.WALChannelLabelName: pchannel, metrics.WALSegmentLevelLabelName: lv.String()})
+		} else {
+			m.growingRowsTotal.WithLabelValues(pchannel, lv.String()).Set(float64(metric.Rows))
+		}
 	}
 }
 

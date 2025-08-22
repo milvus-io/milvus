@@ -34,7 +34,7 @@ if "%1"=="restart" (
     call :delete
 ) else (
     echo Unknown command.
-    echo Please use standalone_embed.bat restart^|start^|stop^|upgrade^|delete
+    echo Please use standalone_embed.bat restart^|start^|stop^|delete
     exit /b 1
 )
 goto :eof
@@ -68,6 +68,7 @@ docker run -d ^
     -e ETCD_DATA_DIR=/var/lib/milvus/etcd ^
     -e ETCD_CONFIG_PATH=/milvus/configs/embedEtcd.yaml ^
     -e COMMON_STORAGETYPE=local ^
+    -e DEPLOY_MODE=STANDALONE ^
     -v "%cd%\volumes\milvus:/var/lib/milvus" ^
     -v "%cd%\embedEtcd.yaml:/milvus/configs/embedEtcd.yaml" ^
     -v "%cd%\user.yaml:/milvus/configs/user.yaml" ^
@@ -79,7 +80,7 @@ docker run -d ^
     --health-start-period=90s ^
     --health-timeout=20s ^
     --health-retries=3 ^
-    milvusdb/milvus:v2.5.5 ^
+    milvusdb/milvus:v2.6.0 ^
     milvus run standalone >nul
 if %errorlevel% neq 0 (
     echo Failed to start Milvus container.
@@ -144,11 +145,19 @@ echo Delete Milvus container successfully.
 goto :eof
 
 :delete
-call :delete_container
-rmdir /s /q "%cd%\volumes"
-del /q embedEtcd.yaml
-del /q user.yaml
-echo Delete successfully.
+set /p check="Please confirm if you'd like to proceed with the delete. This operation will delete the container and data. Confirm with 'y' for yes or 'n' for no. > "
+if /i "%check%"=="y" (
+    call :delete_container
+    rmdir /s /q "%cd%\volumes"
+    del /q embedEtcd.yaml
+    del /q user.yaml
+    echo Delete successfully.
+) else (
+    echo Exit delete
+    exit /b 0
+)
 goto :eof
+
+
 
 :EOF

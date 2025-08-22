@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -43,4 +45,17 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 		return err
 	}
 	return discover.NewAssignmentDiscoverServer(balancer, server).Execute()
+}
+
+// UpdateWALBalancePolicy is used to update the WAL balance policy.
+func (s *assignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error) {
+	balancer, err := s.balancer.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = balancer.UpdateBalancePolicy(ctx, req); err != nil {
+		return nil, err
+	}
+	return &streamingpb.UpdateWALBalancePolicyResponse{}, nil
 }

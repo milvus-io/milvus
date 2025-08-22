@@ -48,12 +48,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -136,8 +134,6 @@ type shardDelegator struct {
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
-	// dispatcherClient msgdispatcher.Client
-	factory msgstream.Factory
 
 	sf          conc.Singleflight[struct{}]
 	loader      segments.Loader
@@ -931,7 +927,7 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	// when 1. streaming service is disable,
 	// 2. consistency level is not strong,
 	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
-	if !streamingutil.IsStreamingServiceEnabled() || isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
+	if isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
@@ -949,6 +945,11 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	// already safe to search
 	latestTSafe := sd.latestTsafe.Load()
 	if latestTSafe >= ts {
+		return latestTSafe, nil
+	}
+	// check whethertsafe downgraded
+	if paramtable.Get().QueryNodeCfg.DowngradeTsafe.GetAsBool() {
+		log.WithRateGroup("downgradeTsafe", 1, 60).RatedWarn(10, "downgrade tsafe", zap.Uint64("latestTSafe", latestTSafe), zap.Uint64("ts", ts))
 		return latestTSafe, nil
 	}
 	// check lag duration too large
@@ -1145,8 +1146,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
-	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
+	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
@@ -1184,7 +1184,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		pkOracle:         pkoracle.NewPkOracle(),
 		latestTsafe:      atomic.NewUint64(startTs),
 		loader:           loader,
-		factory:          factory,
 		queryHook:        queryHook,
 		chunkManager:     chunkManager,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),

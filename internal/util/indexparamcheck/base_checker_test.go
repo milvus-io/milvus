@@ -47,9 +47,9 @@ func Test_baseChecker_CheckTrain(t *testing.T) {
 		test.params[common.IndexTypeKey] = "HNSW"
 		var err error
 		if test.params[common.IsSparseKey] == "True" {
-			err = c.CheckTrain(schemapb.DataType_SparseFloatVector, test.params)
+			err = c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, test.params)
 		} else {
-			err = c.CheckTrain(schemapb.DataType_FloatVector, test.params)
+			err = c.CheckTrain(schemapb.DataType_FloatVector, schemapb.DataType_None, test.params)
 		}
 		if test.errIsNil {
 			assert.NoError(t, err)
@@ -132,5 +132,5 @@ func Test_baseChecker_CheckValidDataType(t *testing.T) {
 
 func Test_baseChecker_StaticCheck(t *testing.T) {
 	// TODO
-	assert.Error(t, newBaseChecker().StaticCheck(schemapb.DataType_FloatVector, nil))
+	assert.Error(t, newBaseChecker().StaticCheck(schemapb.DataType_FloatVector, schemapb.DataType_None, nil))
 }

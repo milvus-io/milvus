@@ -48,6 +48,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "Json.h"
+#include "type_c.h"
 
 #include "CustomBitset.h"
 
@@ -492,7 +493,8 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
            metric_type == knowhere::metric::COSINE ||
-           metric_type == knowhere::metric::BM25;
+           metric_type == knowhere::metric::BM25 ||
+           metric_type == knowhere::metric::MAX_SIM;
 }
 
 inline bool

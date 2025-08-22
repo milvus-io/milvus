@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -15,21 +16,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type upsertTaskByStreamingService struct {
-	*upsertTask
-}
-
-func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
+func (ut *upsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-Execute")
 	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", ut.req.CollectionName))
 
-	insertMsgs, err := ut.packInsertMessage(ctx)
+	var ez *message.CipherConfig
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez = hookutil.GetEzByCollProperties(ut.schema.GetProperties(), ut.collectionID).AsMessageConfig()
+	}
+
+	insertMsgs, err := ut.packInsertMessage(ctx, ez)
 	if err != nil {
 		log.Warn("pack insert message failed", zap.Error(err))
 		return err
 	}
-	deleteMsgs, err := ut.packDeleteMessage(ctx)
+	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
 	if err != nil {
 		log.Warn("pack delete message failed", zap.Error(err))
 		return err
@@ -46,7 +48,7 @@ func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) ([]message.MutableMessage, error) {
+func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
@@ -81,9 +83,9 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -93,27 +95,27 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 	return msgs, nil
 }
 
-func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", it.ID()))
-	collID := it.upsertMsg.DeleteMsg.CollectionID
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
+func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
+	ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	// hash primary keys to channels
-	vChannels, err := it.chMgr.getVChannels(collID)
+	vChannels, err := ut.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Warn("get vChannels failed when deleteExecute", zap.Error(err))
-		it.result.Status = merr.Status(err)
+		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx,
-		it.upsertMsg.DeleteMsg.PrimaryKeys,
-		vChannels, it.idAllocator,
-		it.BeginTs(),
-		it.upsertMsg.DeleteMsg.CollectionID, it.upsertMsg.DeleteMsg.CollectionName,
-		it.upsertMsg.DeleteMsg.PartitionID, it.upsertMsg.DeleteMsg.PartitionName,
-		it.req.GetDbName(),
+		ut.upsertMsg.DeleteMsg.PrimaryKeys,
+		vChannels, ut.idAllocator,
+		ut.BeginTs(),
+		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
+		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
+		ut.req.GetDbName(),
 	)
 	if err != nil {
 		return nil, err
@@ -125,7 +127,7 @@ func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) (
 		for _, deleteMsg := range deleteMsgs {
 			msg, err := message.NewDeleteMessageBuilderV1().
 				WithHeader(&message.DeleteMessageHeader{
-					CollectionId: it.upsertMsg.DeleteMsg.CollectionID,
+					CollectionId: ut.upsertMsg.DeleteMsg.CollectionID,
 					Rows:         uint64(deleteMsg.NumRows),
 				}).
 				WithBody(deleteMsg.DeleteRequest).
@@ -141,7 +143,7 @@ func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) (
 	log.Debug("Proxy Upsert deleteExecute done",
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", vChannels),
-		zap.Int64("taskID", it.ID()),
+		zap.Int64("taskID", ut.ID()),
 		zap.Int64("numRows", numRows),
 		zap.Duration("prepare duration", tr.ElapseSpan()))
 

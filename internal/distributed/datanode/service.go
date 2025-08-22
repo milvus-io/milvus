@@ -32,13 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	dn "github.com/milvus-io/milvus/internal/datanode"
-	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -65,8 +62,6 @@ type Server struct {
 	factory     dependency.Factory
 
 	serverID atomic.Int64
-
-	mixCoordClient func() (types.MixCoordClient, error)
 }
 
 // NewServer new DataNode grpc server
@@ -77,9 +72,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
-		mixCoordClient: func() (types.MixCoordClient, error) {
-			return mix.NewClient(ctx1)
-		},
 	}
 
 	s.serverID.Store(paramtable.GetNodeID())
@@ -173,10 +165,6 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.datanode.SetEtcdClient(client)
 }
 
-func (s *Server) SetMixCoordInterface(ms types.MixCoordClient) error {
-	return s.datanode.SetMixCoordClient(ms)
-}
-
 // Run initializes and starts Datanode's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
@@ -253,27 +241,6 @@ func (s *Server) init() error {
 	err = s.startGrpc()
 	if err != nil {
 		return err
-	}
-
-	if !streamingutil.IsStreamingServiceEnabled() {
-		// --- MixCoord Client ---
-		if s.mixCoordClient != nil {
-			log.Info("initializing MixCoord client for DataNode")
-			mixCoordClient, err := s.mixCoordClient()
-			if err != nil {
-				log.Error("failed to create new MixCoord client", zap.Error(err))
-				panic(err)
-			}
-
-			if err = componentutil.WaitForComponentHealthy(s.ctx, mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
-				log.Error("failed to wait for MixCoord client to be ready", zap.Error(err))
-				panic(err)
-			}
-			log.Info("MixCoord client is ready for DataNode")
-			if err = s.SetMixCoordInterface(mixCoordClient); err != nil {
-				panic(err)
-			}
-		}
 	}
 
 	s.datanode.UpdateStateCode(commonpb.StateCode_Initializing)

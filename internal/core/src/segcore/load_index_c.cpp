@@ -99,40 +99,6 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info,
 }
 
 CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info,
-                int64_t collection_id,
-                int64_t partition_id,
-                int64_t segment_id,
-                int64_t field_id,
-                enum CDataType field_type,
-                bool enable_mmap,
-                const char* mmap_dir_path) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        load_index_info->collection_id = collection_id;
-        load_index_info->partition_id = partition_id;
-        load_index_info->segment_id = segment_id;
-        load_index_info->field_id = field_id;
-        load_index_info->field_type = milvus::DataType(field_type);
-        load_index_info->enable_mmap = enable_mmap;
-        load_index_info->mmap_dir_path = std::string(mmap_dir_path);
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
 appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -252,6 +218,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto field_type = load_index_info->field_type;
+        auto element_type = load_index_info->element_type;
         auto& index_params = load_index_info->index_params;
         bool find_index_type =
             index_params.count("index_type") > 0 ? true : false;
@@ -261,6 +228,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         LoadResourceRequest request =
             milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                 field_type,
+                element_type,
                 load_index_info->index_engine_version,
                 load_index_info->index_size,
                 index_params,
@@ -581,6 +549,8 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->field_id = info_proto->field().fieldid();
             load_index_info->field_type =
                 static_cast<milvus::DataType>(info_proto->field().data_type());
+            load_index_info->element_type = static_cast<milvus::DataType>(
+                info_proto->field().element_type());
             load_index_info->enable_mmap = info_proto->enable_mmap();
             load_index_info->mmap_dir_path = info_proto->mmap_dir_path();
             load_index_info->index_id = info_proto->indexid();

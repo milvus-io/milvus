@@ -919,3 +919,18 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.mixCoord.ListLoadedSegments(ctx, req)
 }
+
+// AddFileResource add file resource
+func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AddFileResource(ctx, req)
+}
+
+// RemoveFileResource remove file resource
+func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return s.mixCoord.RemoveFileResource(ctx, req)
+}
+
+// ListFileResources list file resources
+func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return s.mixCoord.ListFileResources(ctx, req)
+}

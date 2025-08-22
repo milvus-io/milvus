@@ -357,6 +357,10 @@ test-streaming:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t streaming)
 
+test-mixcoord:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -537,6 +541,10 @@ generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-ro
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
 	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
+
+generate-message-codegen: getdeps
+	@echo "Generating message codegen ..."
+	@(cd pkg/streaming/util/message/codegen && PATH=$(PWD)/bin:$(PATH) go generate .)
 
 MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
 mmap-migration:

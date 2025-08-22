@@ -71,6 +71,22 @@ func NewClusterImpl(sessionManager session.DataNodeManager, channelManager Chann
 
 // Startup inits the cluster with the given data nodes.
 func (c *ClusterImpl) Startup(ctx context.Context, nodes []*session.NodeInfo) error {
+	oldNodes := c.sessionManager.GetSessions()
+	newNodesMap := lo.SliceToMap(nodes, func(info *session.NodeInfo) (int64, *session.NodeInfo) {
+		return info.NodeID, info
+	})
+
+	// clean offline nodes
+	for _, node := range oldNodes {
+		if _, ok := newNodesMap[node.NodeID()]; !ok {
+			c.sessionManager.DeleteSession(&session.NodeInfo{
+				NodeID:  node.NodeID(),
+				Address: node.Address(),
+			})
+		}
+	}
+
+	// add new nodes
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}

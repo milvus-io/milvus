@@ -24,18 +24,36 @@ import (
 )
 
 type SearchIteratorOption interface {
+	// SearchOption returns the search option when iterate search
 	SearchOption() *searchOption
+	// Limit returns the overall limit of entries to iterate
+	Limit() int64
+	// ValidateParams performs the static params validation
+	ValidateParams() error
 }
 
 type searchIteratorOption struct {
 	*searchOption
-	batchSize int
+	batchSize     int
+	iteratorLimit int64
 }
 
 func (opt *searchIteratorOption) SearchOption() *searchOption {
 	opt.annRequest.topK = opt.batchSize
 	opt.WithSearchParam(IteratorSearchBatchSizeKey, fmt.Sprintf("%d", opt.batchSize))
 	return opt.searchOption
+}
+
+func (opt *searchIteratorOption) Limit() int64 {
+	return opt.iteratorLimit
+}
+
+// ValidateParams performs the static params validation
+func (opt *searchIteratorOption) ValidateParams() error {
+	if opt.batchSize <= 0 {
+		return fmt.Errorf("batch size must be greater than 0")
+	}
+	return nil
 }
 
 func (opt *searchIteratorOption) WithBatchSize(batchSize int) *searchIteratorOption {
@@ -109,11 +127,22 @@ func (opt *searchIteratorOption) WithSearchParam(key, value string) *searchItera
 	return opt
 }
 
+// WithIteratorLimit sets the limit of entries to iterate
+// if limit < 0, then it will be set to Unlimited
+func (opt *searchIteratorOption) WithIteratorLimit(limit int64) *searchIteratorOption {
+	if limit < 0 {
+		limit = Unlimited
+	}
+	opt.iteratorLimit = limit
+	return opt
+}
+
 func NewSearchIteratorOption(collectionName string, vector entity.Vector) *searchIteratorOption {
 	return &searchIteratorOption{
-		searchOption: NewSearchOption(collectionName, 100, []entity.Vector{vector}).
+		searchOption: NewSearchOption(collectionName, 1000, []entity.Vector{vector}).
 			WithSearchParam(IteratorKey, "true").
 			WithSearchParam(IteratorSearchV2Key, "true"),
-		batchSize: 1000,
+		batchSize:     1000,
+		iteratorLimit: Unlimited,
 	}
 }

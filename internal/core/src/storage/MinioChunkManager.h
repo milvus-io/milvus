@@ -163,8 +163,8 @@ class MinioChunkManager : public ChunkManager {
         return remote_root_path_;
     }
 
-    inline std::string
-    GetBucketName() {
+    virtual std::string
+    GetBucketName() const {
         return default_bucket_name_;
     }
 

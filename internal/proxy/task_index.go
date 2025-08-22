@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -63,8 +62,6 @@ type createIndexTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
@@ -205,10 +202,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 	if exist && specifyIndexType != "" {
+		// todo(SpadeA): mmap check for struct array index
 		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
 			log.Ctx(ctx).Warn("Invalid mmap type params", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
 			return merr.WrapErrParameterInvalidMsg("invalid mmap type params: %s", err.Error())
 		}
+		// todo(SpadeA): check for struct array index
 		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
 		// not enable hybrid index for user, used in milvus internally
 		if err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
@@ -330,16 +329,20 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 
 			var config map[string]string
-			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
+			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
+				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override float vector index params by autoindex
 				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
-			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
+			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
+				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
 				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
-			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
+			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) ||
+				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsBinaryVectorType(cit.fieldSchema.ElementType)) {
 				// override binary vector index params by autoindex
 				config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
-			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
+			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) ||
+				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsIntVectorType(cit.fieldSchema.ElementType)) {
 				// override int vector index params by autoindex
 				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 			}
@@ -399,6 +402,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
+			}
+		} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
+			// TODO(SpadeA): adjust it when more metric types are supported. Especially, when different metric types
+			// are supported for different element types.
+			if !funcutil.SliceContain(indexparamcheck.EmbListMetrics, metricType) {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector index does not support metric type: "+metricType)
 			}
 		}
 	}
@@ -503,7 +512,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 	}
 
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
-		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType)
+		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType, field.ElementType)
 		if !exist {
 			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
@@ -522,7 +531,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		return err
 	}
 
-	if err := checker.CheckTrain(field.DataType, indexParams); err != nil {
+	if err := checker.CheckTrain(field.DataType, field.ElementType, indexParams); err != nil {
 		log.Ctx(ctx).Info("create index with invalid parameters", zap.Error(err))
 		return err
 	}
@@ -580,7 +589,6 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(cit.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
 	return nil
 }
 
@@ -595,8 +603,6 @@ type alterIndexTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 
 	collectionID UniqueID
 }
@@ -711,7 +717,6 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.req)
 	return nil
 }
 
@@ -978,8 +983,6 @@ type dropIndexTask struct {
 	result   *commonpb.Status
 
 	collectionID UniqueID
-
-	replicateMsgStream msgstream.MsgStream
 }
 
 func (dit *dropIndexTask) TraceCtx() context.Context {
@@ -1073,7 +1076,6 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		ctxLog.Warn("drop index failed", zap.Error(err))
 		return err
 	}
-	SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
 	return nil
 }
 

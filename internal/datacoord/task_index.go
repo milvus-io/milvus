@@ -250,7 +250,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	schema := collectionInfo.Schema
 	var field *schemapb.FieldSchema
 
-	for _, f := range schema.Fields {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for _, f := range allFields {
 		if f.FieldID == fieldID {
 			field = f
 			break
@@ -263,7 +264,11 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1
-	if typeutil.IsFixDimVectorType(field.GetDataType()) {
+	dataType := field.GetDataType()
+	if typeutil.IsVectorArrayType(dataType) {
+		dataType = field.GetElementType()
+	}
+	if typeutil.IsFixDimVectorType(dataType) {
 		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
 			log.Warn("failed to get dim from field type params",
 				zap.String("field type", field.GetDataType().String()), zap.Error(err))

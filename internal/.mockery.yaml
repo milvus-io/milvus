@@ -12,6 +12,7 @@ packages:
       Utility:
       Broadcast:
       Local:
+      Scanner:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:
@@ -23,6 +24,7 @@ packages:
     interfaces:
       Client:
       BroadcastService:
+      AssignmentService:
   github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast:
     interfaces:
       Watcher:

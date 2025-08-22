@@ -21,7 +21,7 @@
 #include "Ready.h"
 #include "pb/cgo_msg.pb.h"
 #include <chrono>
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 namespace milvus::futures {
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 
 	"go.uber.org/zap"
 
@@ -42,6 +43,9 @@ type l0Reader struct {
 	bufferSize int
 	deltaLogs  []string
 	readIdx    int
+
+	// new filter-based approach
+	filters []L0Filter
 }
 
 func NewL0Reader(ctx context.Context,
@@ -49,6 +53,8 @@ func NewL0Reader(ctx context.Context,
 	pkField *schemapb.FieldSchema,
 	importFile *internalpb.ImportFile,
 	bufferSize int,
+	tsStart,
+	tsEnd uint64,
 ) (*l0Reader, error) {
 	r := &l0Reader{
 		ctx:        ctx,
@@ -56,6 +62,10 @@ func NewL0Reader(ctx context.Context,
 		pkField:    pkField,
 		bufferSize: bufferSize,
 	}
+
+	// Initialize filters
+	r.initFilters(tsStart, tsEnd)
+
 	if len(importFile.GetPaths()) != 1 {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("there should be one prefix, but got %s", importFile.GetPaths()))
@@ -70,6 +80,24 @@ func NewL0Reader(ctx context.Context,
 	}
 	r.deltaLogs = deltaLogs
 	return r, nil
+}
+
+// initFilters initializes the filter chain for L0 reader
+func (r *l0Reader) initFilters(tsStart, tsEnd uint64) {
+	// Add time range filter if specified
+	if tsStart != 0 || tsEnd != math.MaxUint64 {
+		r.filters = append(r.filters, FilterDeleteWithTimeRange(tsStart, tsEnd))
+	}
+}
+
+// filter applies all filters to a delete log record
+func (r *l0Reader) filter(dl *storage.DeleteLog) bool {
+	for _, f := range r.filters {
+		if !f(dl) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *l0Reader) Read() (*storage.DeleteData, error) {
@@ -107,6 +135,11 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				}
 				log.Error("error on importing L0 segment, fail to read deltalogs", zap.Error(err))
 				return nil, err
+			}
+
+			// Apply filters
+			if !r.filter(*dl) {
+				continue
 			}
 
 			deleteData.Append((*dl).Pk, (*dl).Ts)

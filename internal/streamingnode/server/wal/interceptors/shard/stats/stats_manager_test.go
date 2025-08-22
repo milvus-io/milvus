@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -80,40 +81,40 @@ func TestStatsManager(t *testing.T) {
 		m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 3}, createSegmentStats(100, 100, 300))
 	})
 
-	err := m.AllocRows(3, InsertMetrics{Rows: 50, BinarySize: 50})
+	err := m.AllocRows(3, ModifiedMetrics{Rows: 50, BinarySize: 50})
 	assert.NoError(t, err)
 	stat := m.GetStatsOfSegment(3)
-	assert.Equal(t, uint64(150), stat.Insert.BinarySize)
+	assert.Equal(t, uint64(150), stat.Modified.BinarySize)
 
-	err = m.AllocRows(5, InsertMetrics{Rows: 250, BinarySize: 250})
+	err = m.AllocRows(5, ModifiedMetrics{Rows: 250, BinarySize: 250})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
 
-	err = m.AllocRows(6, InsertMetrics{Rows: 150, BinarySize: 150})
+	err = m.AllocRows(6, ModifiedMetrics{Rows: 150, BinarySize: 150})
 	assert.NoError(t, err)
 
-	assert.Equal(t, uint64(250), m.vchannelStats["vchannel3"].BinarySize)
-	assert.Equal(t, uint64(100), m.vchannelStats["vchannel2"].BinarySize)
-	assert.Equal(t, uint64(250), m.vchannelStats["vchannel"].BinarySize)
+	assert.Equal(t, uint64(250), m.vchannelStats["vchannel3"].Insert.BinarySize)
+	assert.Equal(t, uint64(100), m.vchannelStats["vchannel2"].Insert.BinarySize)
+	assert.Equal(t, uint64(250), m.vchannelStats["vchannel"].Insert.BinarySize)
 
-	assert.Equal(t, uint64(350), m.pchannelStats["pchannel"].BinarySize)
-	assert.Equal(t, uint64(250), m.pchannelStats["pchannel2"].BinarySize)
+	assert.Equal(t, uint64(350), m.pchannelStats["pchannel"].Insert.BinarySize)
+	assert.Equal(t, uint64(250), m.pchannelStats["pchannel2"].Insert.BinarySize)
 
 	m.UpdateOnSync(3, SyncOperationMetrics{BinLogCounterIncr: 100})
 	m.UpdateOnSync(1000, SyncOperationMetrics{BinLogCounterIncr: 100})
 
-	err = m.AllocRows(3, InsertMetrics{Rows: 400, BinarySize: 400})
+	err = m.AllocRows(3, ModifiedMetrics{Rows: 400, BinarySize: 400})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
-	err = m.AllocRows(5, InsertMetrics{Rows: 250, BinarySize: 250})
+	err = m.AllocRows(5, ModifiedMetrics{Rows: 250, BinarySize: 250})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
-	err = m.AllocRows(6, InsertMetrics{Rows: 400, BinarySize: 400})
+	err = m.AllocRows(6, ModifiedMetrics{Rows: 400, BinarySize: 400})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
 
-	err = m.AllocRows(7, InsertMetrics{Rows: 400, BinarySize: 400})
+	err = m.AllocRows(7, ModifiedMetrics{Rows: 400, BinarySize: 400})
 	assert.ErrorIs(t, err, ErrTooLargeInsert)
 
 	assert.Panics(t, func() {
 		// alloc rows on a sealed segment should panic
-		m.AllocRows(1000, InsertMetrics{Rows: 0, BinarySize: 0})
+		m.AllocRows(1000, ModifiedMetrics{Rows: 0, BinarySize: 0})
 	})
 
 	m.UnregisterSealedSegment(3)
@@ -128,7 +129,7 @@ func TestStatsManager(t *testing.T) {
 	assert.NotEmpty(t, m.sealOperators)
 
 	assert.Panics(t, func() {
-		m.AllocRows(100, InsertMetrics{Rows: 100, BinarySize: 100})
+		m.AllocRows(100, ModifiedMetrics{Rows: 100, BinarySize: 100})
 	})
 
 	assert.Panics(t, func() {
@@ -181,7 +182,7 @@ func TestConcurrentStasManager(t *testing.T) {
 		}()
 		rows := 100 + rand.Int63n(100)
 		binarySize := 100 + rand.Int63n(100)
-		_ = m.AllocRows(segment.SegmentID, InsertMetrics{Rows: uint64(rows), BinarySize: uint64(binarySize)})
+		_ = m.AllocRows(segment.SegmentID, ModifiedMetrics{Rows: uint64(rows), BinarySize: uint64(binarySize)})
 
 		if rand.Int31n(2) > 0 {
 			m.UpdateOnSync(segment.SegmentID, SyncOperationMetrics{BinLogCounterIncr: 100})
@@ -232,8 +233,8 @@ func TestConcurrentStasManager(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, m.totalStats.Rows, uint64(0))
-	assert.Equal(t, m.totalStats.BinarySize, uint64(0))
+	assert.Equal(t, m.totalStats.Insert.Rows, uint64(0))
+	assert.Equal(t, m.totalStats.Insert.BinarySize, uint64(0))
 	assert.Empty(t, m.segmentStats)
 	assert.Empty(t, m.vchannelStats)
 	assert.Empty(t, m.pchannelStats)
@@ -243,7 +244,7 @@ func TestConcurrentStasManager(t *testing.T) {
 
 func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *SegmentStats {
 	return &SegmentStats{
-		Insert: InsertMetrics{
+		Modified: ModifiedMetrics{
 			Rows:       row,
 			BinarySize: binarySize,
 		},
@@ -251,5 +252,6 @@ func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *Seg
 		CreateTime:       time.Now(),
 		LastModifiedTime: time.Now(),
 		BinLogCounter:    0,
+		Level:            datapb.SegmentLevel_L1,
 	}
 }

@@ -201,7 +201,6 @@ func Test_NewServer(t *testing.T) {
 		mockProxy.EXPECT().Init().Return(nil)
 		mockProxy.EXPECT().Start().Return(nil)
 		mockProxy.EXPECT().Register().Return(nil)
-		mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 		mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 		mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 		mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -272,6 +271,12 @@ func Test_NewServer(t *testing.T) {
 	t.Run("DescribeCollection", func(t *testing.T) {
 		mockProxy.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.DescribeCollection(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("BatchDescribeCollection", func(t *testing.T) {
+		mockProxy.EXPECT().BatchDescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.BatchDescribeCollection(ctx, nil)
 		assert.NoError(t, err)
 	})
 
@@ -687,7 +692,6 @@ func Test_NewServer(t *testing.T) {
 		mockProxy.EXPECT().Init().Return(nil)
 		mockProxy.EXPECT().Start().Return(nil)
 		mockProxy.EXPECT().Register().Return(nil)
-		mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 		mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 		mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 		mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -821,7 +825,6 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 	mockProxy.EXPECT().Init().Return(nil)
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -886,7 +889,6 @@ func Test_NewServer_TLS_TwoWay(t *testing.T) {
 	mockProxy.EXPECT().Init().Return(nil)
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -914,7 +916,6 @@ func Test_NewServer_TLS_OneWay(t *testing.T) {
 	mockProxy.EXPECT().Init().Return(nil)
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -938,7 +939,6 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 
 	mockProxy := server.proxy.(*mocks.MockProxy)
 	mockProxy.EXPECT().Stop().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetAddress(mock.Anything).Return()
 
@@ -977,7 +977,6 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	mockProxy.EXPECT().Init().Return(nil)
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -1013,7 +1012,6 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	mockProxy.EXPECT().Init().Return(nil)
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
@@ -1046,7 +1044,6 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 
 	mockProxy := server.proxy.(*mocks.MockProxy)
 	mockProxy.EXPECT().Stop().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return().Maybe()
 	mockProxy.EXPECT().SetAddress(mock.Anything).Return().Maybe()
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 
@@ -1160,7 +1157,6 @@ func Test_Service_GracefulStop(t *testing.T) {
 	mockProxy.EXPECT().Start().Return(nil)
 	mockProxy.EXPECT().Stop().Return(nil)
 	mockProxy.EXPECT().Register().Return(nil)
-	mockProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
 	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
 	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
 	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()

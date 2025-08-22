@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -18,12 +19,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type insertTaskByStreamingService struct {
-	*insertTask
-}
-
 // we only overwrite the Execute function
-func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
+func (it *insertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 
@@ -54,12 +51,17 @@ func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
 		zap.Bool("is_parition_key", it.partitionKeys != nil),
 		zap.Duration("get cache duration", getCacheDur))
 
+	var ez *message.CipherConfig
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez = hookutil.GetEzByCollProperties(it.schema.GetProperties(), it.collectionID).AsMessageConfig()
+	}
+
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -81,6 +83,7 @@ func repackInsertDataForStreamingService(
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
+	ez *message.CipherConfig,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -111,6 +114,7 @@ func repackInsertDataForStreamingService(
 					},
 				}).
 				WithBody(insertRequest).
+				WithCipher(ez).
 				BuildMutable()
 			if err != nil {
 				return nil, err
@@ -127,6 +131,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
+	ez *message.CipherConfig,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -190,6 +195,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 						},
 					}).
 					WithBody(insertRequest).
+					WithCipher(ez).
 					BuildMutable()
 				if err != nil {
 					return nil, err

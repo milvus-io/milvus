@@ -108,8 +108,8 @@ class GcpNativeChunkManager : public ChunkManager {
     }
 
  public:
-    inline std::string
-    GetBucketName() {
+    virtual std::string
+    GetBucketName() const {
         return default_bucket_name_;
     }
 

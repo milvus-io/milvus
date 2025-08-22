@@ -24,12 +24,36 @@
 #include <thread>
 #include <vector>
 #include <utility>
+#include <cassert>
 
 #include "SafeQueue.h"
-#include "common/Common.h"
 #include "log/Log.h"
 
 namespace milvus {
+
+const int DEFAULT_CPU_NUM = 1;
+
+const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
+const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
+const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
+
+extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+
+extern int CPU_NUM;
+
+void
+SetHighPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetLowPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+InitCpuNum(const int core);
 
 class ThreadPool {
  public:

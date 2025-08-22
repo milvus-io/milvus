@@ -32,10 +32,19 @@ type milvusStatsKey struct{}
 // it should be attached to context so that request sizing could be avoided
 type RPCStats struct {
 	fullMethodName     string
+	databaseName       string
 	collectionName     string
 	inboundPayloadSize int
 	inboundLabel       string
 	nodeID             int64
+}
+
+func (s *RPCStats) SetDatabaseName(collName string) *RPCStats {
+	if s == nil {
+		return s
+	}
+	s.databaseName = collName
+	return s
 }
 
 func (s *RPCStats) SetCollectionName(collName string) *RPCStats {
@@ -143,7 +152,7 @@ func (h *grpcSizeStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats)
 		nodeIDValue := strconv.FormatInt(mstats.nodeID, 10)
 		ProxyReceiveBytes.WithLabelValues(
 			nodeIDValue,
-			mstats.inboundLabel, mstats.collectionName).Add(float64(mstats.inboundPayloadSize))
+			mstats.inboundLabel, mstats.databaseName, mstats.collectionName).Add(float64(mstats.inboundPayloadSize))
 		// set outbound payload size metrics for marked methods
 		if h.shouldRecordOutbound(mstats.fullMethodName) {
 			ProxyReadReqSendBytes.WithLabelValues(nodeIDValue).Add(float64(rs.Length))

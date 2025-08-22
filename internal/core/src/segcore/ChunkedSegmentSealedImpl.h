@@ -188,6 +188,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_sorted_pk(const PkType& pk, Condition condition) const;
 
+    void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const override;
+
+    template <typename Condition>
+    void
+    search_sorted_pk_range(proto::plan::OpType op,
+                           const PkType& pk,
+                           BitsetTypeView& bitset,
+                           Condition condition) const;
+
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id,
                const int64_t* ids,
@@ -207,7 +220,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     search_batch_pks(
         const std::vector<PkType>& pks,
-        const Timestamp* timestamps,
+        const std::function<Timestamp(const size_t idx)>& get_timestamp,
         bool include_same_ts,
         const std::function<void(const SegOffset offset, const Timestamp ts)>&
             callback) const;
@@ -395,6 +408,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
+                  const size_t* query_lims,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
@@ -410,7 +424,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     void

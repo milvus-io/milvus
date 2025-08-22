@@ -16,7 +16,9 @@ extern "C" {
 #endif
 #include "common/type_c.h"
 bool
-CheckVecIndexWithDataType(const char* index_type, enum CDataType data_type);
+CheckVecIndexWithDataType(const char* index_type,
+                          enum CDataType data_type,
+                          bool is_emb_list_data);
 
 #ifdef __cplusplus
 }

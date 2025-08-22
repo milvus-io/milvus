@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -50,6 +52,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	streaming.SetupNoopWALForTest()
+
+	os.Exit(m.Run())
+}
 
 type DelegatorSuite struct {
 	suite.Suite
@@ -164,11 +172,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 
@@ -203,11 +207,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
-			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-				return s.mq, nil
-			},
-		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
 	})
 
@@ -246,11 +246,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
-			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-				return s.mq, nil
-			},
-		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 	})
 }
@@ -638,6 +634,61 @@ func (s *DelegatorSuite) TestSearch() {
 		})
 
 		s.Error(err)
+	})
+
+	s.Run("downgrade_tsafe", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		pt := paramtable.Get()
+		pt.Save(pt.QueryNodeCfg.DowngradeTsafe.Key, "true")
+		defer pt.Reset(pt.QueryNodeCfg.DowngradeTsafe.Key)
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.EqualValues(1, req.Req.GetBase().GetTargetID())
+
+				if req.GetScope() == querypb.DataScope_Streaming {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
+				}
+				if req.GetScope() == querypb.DataScope_Historical {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
+				}
+			}).Return(&internalpb.SearchResults{}, nil)
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.EqualValues(2, req.Req.GetBase().GetTargetID())
+
+				s.Equal(querypb.DataScope_Historical, req.GetScope())
+				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
+			}).Return(&internalpb.SearchResults{}, nil)
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		results, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:               commonpbutil.NewMsgBase(),
+				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		s.NoError(err)
+		s.Equal(3, len(results))
 	})
 
 	s.Run("distribution_not_serviceable", func() {
@@ -1410,11 +1461,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 

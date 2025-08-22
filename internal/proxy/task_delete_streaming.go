@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -15,13 +16,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type deleteTaskByStreamingService struct {
-	*deleteTask
-}
-
 // Execute is a function to delete task by streaming service
 // we only overwrite the Execute function
-func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error) {
+func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
 	defer sp.End()
 
@@ -42,6 +39,17 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 		return err
 	}
 
+	var ez *message.CipherConfig
+	if hookutil.IsClusterEncyptionEnabled() {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+		if err != nil {
+			log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
+			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		}
+
+		ez = hookutil.GetEzByCollProperties(schema.GetProperties(), dt.collectionID).AsMessageConfig()
+	}
+
 	var msgs []message.MutableMessage
 	for hashKey, deleteMsgs := range result {
 		vchannel := dt.vChannels[hashKey]
@@ -53,6 +61,7 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).
+				WithCipher(ez).
 				BuildMutable()
 			if err != nil {
 				return err

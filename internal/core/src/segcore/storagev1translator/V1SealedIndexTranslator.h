@@ -44,6 +44,7 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
         bool enable_mmap;
         std::string mmap_dir_path;
         DataType field_type;
+        DataType element_type;
         std::map<std::string, std::string> index_params;
         std::vector<std::string> index_files;
         int64_t index_size;

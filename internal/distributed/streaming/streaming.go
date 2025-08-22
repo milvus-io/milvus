@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -18,8 +17,6 @@ var singleton WALAccesser = nil
 func Init() {
 	c, _ := kvfactory.GetEtcdAndPath()
 	singleton = newWALAccesser(c)
-	// Add the wal accesser to the broadcaster registry for making broadcast operation.
-	registry.Register(registry.AppendOperatorTypeStreaming, singleton)
 }
 
 // Release releases the resources of the wal accesser.
@@ -84,8 +81,33 @@ type Scanner interface {
 	Close()
 }
 
+// Balancer is the interface for managing the balancer of the wal.
+type Balancer interface {
+	// ListStreamingNode lists the streaming node.
+	ListStreamingNode(ctx context.Context) ([]types.StreamingNodeInfo, error)
+
+	// GetWALDistribution returns the wal distribution of the streaming node.
+	GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error)
+
+	// SuspendRebalance suspends the rebalance of the wal.
+	SuspendRebalance(ctx context.Context) error
+
+	// ResumeRebalance resumes the rebalance of the wal.
+	ResumeRebalance(ctx context.Context) error
+
+	// FreezeNodeIDs freezes the streaming node.
+	// The wal will not be assigned to the frozen nodes and the wal will be removed from the frozen nodes.
+	FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error
+
+	// DefreezeNodeIDs defreezes the streaming node.
+	DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) error
+}
+
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// Balancer returns the balancer management of the wal.
+	Balancer() Balancer
+
 	// WALName returns the name of the wal.
 	WALName() string
 

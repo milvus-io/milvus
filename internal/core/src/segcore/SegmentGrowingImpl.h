@@ -326,6 +326,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
+                  const size_t* query_lims,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
@@ -340,7 +341,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     bool
@@ -401,6 +402,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const override {
         return insert_record_.search_pk(pk, timestamp);
+    }
+
+    void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const override {
+        insert_record_.search_pk_range(pk, timestamp, op, bitset);
     }
 
     bool

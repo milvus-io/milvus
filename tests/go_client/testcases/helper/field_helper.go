@@ -1,12 +1,28 @@
 package helper
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
+
+/*
+Field-level option system usage examples:
+
+// usage: Set different options for multiple fields
+fieldOpts := TNewFieldOptions().
+	WithFieldOption("pk", TNewFieldsOption().TWithAutoID(true)).
+	WithFieldOption("floatVec", TNewFieldsOption().TWithDim(512)).
+	WithFieldOption("varchar", TNewFieldsOption().TWithMaxLen(500).TWithNullable(true))
+
+// Use when creating collections
+cp := NewCreateCollectionParams(Int64Vec)
+_, schema := CollPrepare.CreateCollectionWithFieldOptions(ctx, t, mc, cp, fieldOpts, TNewSchemaOption())
+*/
 
 type GetFieldNameOpt func(opt *getFieldNameOpt)
 
@@ -18,12 +34,6 @@ type getFieldNameOpt struct {
 func TWithElementType(eleType entity.FieldType) GetFieldNameOpt {
 	return func(opt *getFieldNameOpt) {
 		opt.elementType = eleType
-	}
-}
-
-func TWithIsDynamic(isDynamic bool) GetFieldNameOpt {
-	return func(opt *getFieldNameOpt) {
-		opt.isDynamic = isDynamic
 	}
 }
 
@@ -99,27 +109,32 @@ type CollectionFieldsType int32
 
 const (
 	// FieldTypeNone zero value place holder
-	Int64Vec              CollectionFieldsType = 1 // int64 + floatVec
-	VarcharBinary         CollectionFieldsType = 2 // varchar + binaryVec
-	Int64VecJSON          CollectionFieldsType = 3 // int64 + floatVec + json
-	Int64VecArray         CollectionFieldsType = 4 // int64 + floatVec + array
-	Int64VarcharSparseVec CollectionFieldsType = 5 // int64 + varchar + sparse vector
-	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
-	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
-	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
-	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
+	Int64Vec              CollectionFieldsType = 1  // int64 + floatVec
+	VarcharBinary         CollectionFieldsType = 2  // varchar + binaryVec
+	Int64VecJSON          CollectionFieldsType = 3  // int64 + floatVec + json
+	Int64VecArray         CollectionFieldsType = 4  // int64 + floatVec + array
+	Int64VarcharSparseVec CollectionFieldsType = 5  // int64 + varchar + sparse vector
+	Int64MultiVec         CollectionFieldsType = 6  // int64 + floatVec + binaryVec + fp16Vec + bf16vec
+	AllFields             CollectionFieldsType = 7  // all fields excepted sparse
+	Int64VecAllScalar     CollectionFieldsType = 8  // int64 + floatVec + all scalar fields
+	FullTextSearch        CollectionFieldsType = 9  // int64 + varchar + sparse vector + analyzer + function
+	TextEmbedding         CollectionFieldsType = 10 // int64 + varchar + float_vector + text_embedding_function
 )
 
 type GenFieldsOption struct {
-	AutoID         bool // is auto id
-	Dim            int64
-	IsDynamic      bool
-	MaxLength      int64 // varchar len or array capacity
-	MaxCapacity    int64
-	IsPartitionKey bool
-	EnableAnalyzer bool
-	AnalyzerParams map[string]any
-	ElementType    entity.FieldType
+	AutoID          bool // is auto id
+	Dim             int64
+	IsDynamic       bool
+	MaxLength       int64 // varchar len or array capacity
+	MaxCapacity     int64
+	IsPartitionKey  bool
+	IsClusteringKey bool
+	EnableAnalyzer  bool
+	EnableMatch     bool
+	AnalyzerParams  map[string]any
+	ElementType     entity.FieldType
+	Nullable        bool
+	DefaultValue    interface{}
 }
 
 func TNewFieldsOption() *GenFieldsOption {
@@ -133,6 +148,8 @@ func TNewFieldsOption() *GenFieldsOption {
 		EnableAnalyzer: false,
 		AnalyzerParams: make(map[string]any),
 		ElementType:    entity.FieldTypeNone,
+		Nullable:       false,
+		DefaultValue:   nil,
 	}
 }
 
@@ -156,6 +173,11 @@ func (opt *GenFieldsOption) TWithIsPartitionKey(isPartitionKey bool) *GenFieldsO
 	return opt
 }
 
+func (opt *GenFieldsOption) TWithIsClusteringKey(isClusteringKey bool) *GenFieldsOption {
+	opt.IsClusteringKey = isClusteringKey
+	return opt
+}
+
 func (opt *GenFieldsOption) TWithElementType(elementType entity.FieldType) *GenFieldsOption {
 	opt.ElementType = elementType
 	return opt
@@ -176,225 +198,476 @@ func (opt *GenFieldsOption) TWithEnableAnalyzer(enableAnalyzer bool) *GenFieldsO
 	return opt
 }
 
+func (opt *GenFieldsOption) TWithEnableMatch(enableMatch bool) *GenFieldsOption {
+	opt.EnableMatch = enableMatch
+	return opt
+}
+
 func (opt *GenFieldsOption) TWithAnalyzerParams(analyzerParams map[string]any) *GenFieldsOption {
 	opt.AnalyzerParams = analyzerParams
 	return opt
 }
 
+func (opt *GenFieldsOption) TWithNullable(nullable bool) *GenFieldsOption {
+	opt.Nullable = nullable
+	return opt
+}
+
+func (opt *GenFieldsOption) TWithDefaultValue(defaultValue interface{}) *GenFieldsOption {
+	opt.DefaultValue = defaultValue
+	return opt
+}
+
+// Field-level option system
+type FieldOption struct {
+	FieldName string
+	Options   *GenFieldsOption
+}
+
+type FieldOptions []FieldOption
+
+func TNewFieldOptions() FieldOptions {
+	return make(FieldOptions, 0)
+}
+
+func (fos FieldOptions) WithFieldOption(fieldName string, options *GenFieldsOption) FieldOptions {
+	return append(fos, FieldOption{
+		FieldName: fieldName,
+		Options:   options,
+	})
+}
+
+func (fos FieldOptions) GetFieldOption(fieldName string) *GenFieldsOption {
+	for _, fo := range fos {
+		if fo.FieldName == fieldName {
+			return fo.Options
+		}
+	}
+	return nil
+}
+
 // factory
 type FieldsFactory struct{}
 
-// product
-type CollectionFields interface {
-	GenFields(opts GenFieldsOption) []*entity.Field
+// Redesign: Create field combinations based on CollectionFieldsType and set properties based on FieldOptions
+func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, fieldOpts FieldOptions) []*entity.Field {
+	log.Info("GenFieldsForCollectionWithOptions", zap.Any("CollectionFieldsType", collectionFieldsType), zap.Any("FieldOptions", fieldOpts))
+
+	switch collectionFieldsType {
+	case Int64Vec:
+		return ff.createInt64VecFields(fieldOpts)
+	case VarcharBinary:
+		return ff.createVarcharBinaryFields(fieldOpts)
+	case Int64VecJSON:
+		return ff.createInt64VecJSONFields(fieldOpts)
+	case Int64VecArray:
+		return ff.createInt64VecArrayFields(fieldOpts)
+	case Int64VarcharSparseVec:
+		return ff.createInt64VarcharSparseVecFields(fieldOpts)
+	case Int64MultiVec:
+		return ff.createInt64MultiVecFields(fieldOpts)
+	case AllFields:
+		return ff.createAllFields(fieldOpts)
+	case Int64VecAllScalar:
+		return ff.createInt64VecAllScalarFields(fieldOpts)
+	case FullTextSearch:
+		return ff.createFullTextSearchFields(fieldOpts)
+	case TextEmbedding:
+		return ff.createTextEmbeddingFields(fieldOpts)
+	default:
+		return ff.createInt64VecFields(fieldOpts)
+	}
 }
 
-type FieldsInt64Vec struct{}
+// Create Int64Vec field combination
+func (ff FieldsFactory) createInt64VecFields(fieldOpts FieldOptions) []*entity.Field {
+	// pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeFloatVector)
 
-func (cf FieldsInt64Vec) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeFloatVector)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
+
 	return []*entity.Field{pkField, vecField}
 }
 
-type FieldsVarcharBinary struct{}
+// Create VarcharBinary field combination
+func (ff FieldsFactory) createVarcharBinaryFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeVarChar)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeBinaryVector)
 
-func (cf FieldsVarcharBinary) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeVarChar)).WithDataType(entity.FieldTypeVarChar).
-		WithIsPrimaryKey(true).WithMaxLength(option.MaxLength)
-	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeBinaryVector)).WithDataType(entity.FieldTypeBinaryVector).WithDim(option.Dim)
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeBinaryVector)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
+
 	return []*entity.Field{pkField, vecField}
 }
 
-type FieldsInt64VecJSON struct{}
+// Create Int64VecJSON field combination
+func (ff FieldsFactory) createInt64VecJSONFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeFloatVector)
+	jsonName := GetFieldNameByFieldType(entity.FieldTypeJSON)
 
-func (cf FieldsInt64VecJSON) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
-	jsonField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeJSON)).WithDataType(entity.FieldTypeJSON)
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeFloatVector)
+	jsonField := entity.NewField().WithName(jsonName).WithDataType(entity.FieldTypeJSON)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
+	ff.applyFieldOptions(jsonField, fieldOpts.GetFieldOption(jsonName))
+
 	return []*entity.Field{pkField, vecField, jsonField}
 }
 
-type FieldsInt64VecArray struct{}
+// Create Int64VecArray field combination
+func (ff FieldsFactory) createInt64VecArrayFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeFloatVector)
 
-func (cf FieldsInt64VecArray) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
-	fields := []*entity.Field{
-		pkField, vecField,
-	}
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeFloatVector)
+	fields := []*entity.Field{pkField, vecField}
+
+	// Add array fields
 	for _, eleType := range GetAllArrayElementType() {
-		arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
-		if eleType == entity.FieldTypeVarChar {
-			arrayField.WithMaxLength(option.MaxLength)
-		}
+		arrayName := GetFieldNameByElementType(eleType)
+		arrayField := entity.NewField().WithName(arrayName).WithDataType(entity.FieldTypeArray).WithElementType(eleType)
+
+		// Apply field options
+		ff.applyFieldOptions(arrayField, fieldOpts.GetFieldOption(arrayName))
 		fields = append(fields, arrayField)
 	}
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+
+	// Apply primary key and vector field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
+
 	return fields
 }
 
-type FieldsInt64VarcharSparseVec struct{}
+// Create Int64VarcharSparseVec field combination
+func (ff FieldsFactory) createInt64VarcharSparseVecFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	varcharName := GetFieldNameByFieldType(entity.FieldTypeVarChar)
+	sparseName := GetFieldNameByFieldType(entity.FieldTypeSparseVector)
 
-func (cf FieldsInt64VarcharSparseVec) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	varcharField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeVarChar)).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength)
-	sparseVecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeSparseVector)).WithDataType(entity.FieldTypeSparseVector)
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	varcharField := entity.NewField().WithName(varcharName).WithDataType(entity.FieldTypeVarChar)
+	sparseVecField := entity.NewField().WithName(sparseName).WithDataType(entity.FieldTypeSparseVector)
 
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(varcharField, fieldOpts.GetFieldOption(varcharName))
+	ff.applyFieldOptions(sparseVecField, fieldOpts.GetFieldOption(sparseName))
+
 	return []*entity.Field{pkField, varcharField, sparseVecField}
 }
 
-type FieldsInt64MultiVec struct{}
+// Create Int64MultiVec field combination
+func (ff FieldsFactory) createInt64MultiVecFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
 
-func (cf FieldsInt64MultiVec) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	fields := []*entity.Field{
-		pkField,
-	}
+	// Create primary key field
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fields := []*entity.Field{pkField}
+
+	// Add all vector fields
 	for _, fieldType := range GetAllVectorFieldType() {
 		if fieldType == entity.FieldTypeSparseVector {
 			continue
 		}
-		vecField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithDim(option.Dim)
+		vecName := GetFieldNameByFieldType(fieldType)
+		vecField := entity.NewField().WithName(vecName).WithDataType(fieldType)
+
+		// Apply field options
+		ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
 		fields = append(fields, vecField)
 	}
 
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Apply primary key field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+
 	return fields
 }
 
-type FieldsAllFields struct{} // except sparse vector field
-func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	fields := []*entity.Field{
-		pkField,
-	}
-	// scalar fields and array fields
+// Create AllFields field combination
+func (ff FieldsFactory) createAllFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+
+	// Create primary key field
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fields := []*entity.Field{pkField}
+
+	// Add scalar fields and array fields
 	for _, fieldType := range GetAllScalarFieldType() {
 		switch fieldType {
 		case entity.FieldTypeInt64:
 			continue
 		case entity.FieldTypeArray:
 			for _, eleType := range GetAllArrayElementType() {
-				arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
-				if eleType == entity.FieldTypeVarChar {
-					arrayField.WithMaxLength(option.MaxLength)
-				}
+				arrayName := GetFieldNameByElementType(eleType)
+				arrayField := entity.NewField().WithName(arrayName).WithDataType(entity.FieldTypeArray).WithElementType(eleType)
+
+				// Apply field options
+				ff.applyFieldOptions(arrayField, fieldOpts.GetFieldOption(arrayName))
 				fields = append(fields, arrayField)
 			}
-		case entity.FieldTypeVarChar:
-			varcharField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithMaxLength(option.MaxLength)
-			fields = append(fields, varcharField)
 		default:
-			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
+			scalarName := GetFieldNameByFieldType(fieldType)
+			scalarField := entity.NewField().WithName(scalarName).WithDataType(fieldType)
+
+			// Apply field options
+			ff.applyFieldOptions(scalarField, fieldOpts.GetFieldOption(scalarName))
 			fields = append(fields, scalarField)
 		}
 	}
+
+	// Add vector fields
 	for _, fieldType := range GetAllVectorFieldType() {
 		if fieldType == entity.FieldTypeSparseVector {
 			continue
 		}
-		vecField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithDim(option.Dim)
+		vecName := GetFieldNameByFieldType(fieldType)
+		vecField := entity.NewField().WithName(vecName).WithDataType(fieldType)
+
+		// Apply field options
+		ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
 		fields = append(fields, vecField)
 	}
 
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Apply primary key field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+
 	return fields
 }
 
-type FieldsInt64VecAllScalar struct{} // except sparse vector field
-func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	fields := []*entity.Field{
-		pkField,
-	}
-	// scalar fields and array fields
+// Create Int64VecAllScalar field combination
+func (ff FieldsFactory) createInt64VecAllScalarFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeFloatVector)
+
+	// Create primary key field
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fields := []*entity.Field{pkField}
+
+	// Add scalar fields and array fields
 	for _, fieldType := range GetAllScalarFieldType() {
 		switch fieldType {
 		case entity.FieldTypeInt64:
 			continue
 		case entity.FieldTypeArray:
 			for _, eleType := range GetAllArrayElementType() {
-				arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
-				if eleType == entity.FieldTypeVarChar {
-					arrayField.WithMaxLength(option.MaxLength)
-				}
+				arrayName := GetFieldNameByElementType(eleType)
+				arrayField := entity.NewField().WithName(arrayName).WithDataType(entity.FieldTypeArray).WithElementType(eleType)
+
+				// Apply field options
+				ff.applyFieldOptions(arrayField, fieldOpts.GetFieldOption(arrayName))
 				fields = append(fields, arrayField)
 			}
-		case entity.FieldTypeVarChar:
-			varcharField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithMaxLength(option.MaxLength)
-			fields = append(fields, varcharField)
 		default:
-			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
+			scalarName := GetFieldNameByFieldType(fieldType)
+			scalarField := entity.NewField().WithName(scalarName).WithDataType(fieldType)
+
+			// Apply field options
+			ff.applyFieldOptions(scalarField, fieldOpts.GetFieldOption(scalarName))
 			fields = append(fields, scalarField)
 		}
 	}
-	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
+
+	// Add vector field
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeFloatVector)
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
 	fields = append(fields, vecField)
 
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
+	// Apply primary key field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+
 	return fields
 }
 
-type FieldsFullTextSearch struct{}
+// Create FullTextSearch field combination
+func (ff FieldsFactory) createFullTextSearchFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	textName := common.DefaultTextFieldName
+	sparseName := common.DefaultTextSparseVecFieldName
 
-func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field {
-	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	textField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(true).WithAnalyzerParams(option.AnalyzerParams).WithEnableMatch(true)
-	sparseVecField := entity.NewField().WithName(common.DefaultTextSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
-	if option.AutoID {
-		pkField.WithIsAutoID(option.AutoID)
-	}
-	fields := []*entity.Field{
-		pkField,
-		textField,
-		sparseVecField,
-	}
-	return fields
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	textField := entity.NewField().WithName(textName).WithDataType(entity.FieldTypeVarChar).WithEnableAnalyzer(true).WithEnableMatch(true)
+	sparseVecField := entity.NewField().WithName(sparseName).WithDataType(entity.FieldTypeSparseVector)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(textField, fieldOpts.GetFieldOption(textName))
+	ff.applyFieldOptions(sparseVecField, fieldOpts.GetFieldOption(sparseName))
+
+	return []*entity.Field{pkField, textField, sparseVecField}
 }
 
-func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, option *GenFieldsOption) []*entity.Field {
-	log.Info("GenFieldsForCollection", zap.Any("GenFieldsOption", option))
-	switch collectionFieldsType {
-	case Int64Vec:
-		return FieldsInt64Vec{}.GenFields(*option)
-	case VarcharBinary:
-		return FieldsVarcharBinary{}.GenFields(*option)
-	case Int64VecJSON:
-		return FieldsInt64VecJSON{}.GenFields(*option)
-	case Int64VecArray:
-		return FieldsInt64VecArray{}.GenFields(*option)
-	case Int64VarcharSparseVec:
-		return FieldsInt64VarcharSparseVec{}.GenFields(*option)
-	case Int64MultiVec:
-		return FieldsInt64MultiVec{}.GenFields(*option)
-	case AllFields:
-		return FieldsAllFields{}.GenFields(*option)
-	case Int64VecAllScalar:
-		return FieldsInt64VecAllScalar{}.GenFields(*option)
-	case FullTextSearch:
-		return FieldsFullTextSearch{}.GenFields(*option)
+// Create TextEmbedding field combination
+func (ff FieldsFactory) createTextEmbeddingFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	textFieldName := "document"
+	denseFieldName := "dense"
+
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	textField := entity.NewField().WithName(textFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(fieldOpts.GetFieldOption(textFieldName).MaxLength)
+	vecField := entity.NewField().WithName(denseFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(fieldOpts.GetFieldOption(denseFieldName).Dim)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(textField, fieldOpts.GetFieldOption(textFieldName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(denseFieldName))
+
+	return []*entity.Field{pkField, textField, vecField}
+}
+
+// Apply field options to entity.Field
+func (ff FieldsFactory) applyFieldOptions(field *entity.Field, fieldOpt *GenFieldsOption) {
+	// Use default options if no field options provided
+	if fieldOpt == nil {
+		fieldOpt = TNewFieldsOption()
+	}
+
+	// WithDim
+	if fieldOpt.Dim > 0 && (field.DataType == entity.FieldTypeFloatVector ||
+		field.DataType == entity.FieldTypeBinaryVector ||
+		field.DataType == entity.FieldTypeFloat16Vector ||
+		field.DataType == entity.FieldTypeBFloat16Vector) {
+		field.WithDim(fieldOpt.Dim)
+	}
+
+	// WithMaxLength
+	if fieldOpt.MaxLength > 0 && (field.DataType == entity.FieldTypeVarChar ||
+		(field.DataType == entity.FieldTypeArray && field.ElementType == entity.FieldTypeVarChar)) {
+		field.WithMaxLength(fieldOpt.MaxLength)
+	}
+
+	// WithMaxCapacity
+	if fieldOpt.MaxCapacity > 0 && field.DataType == entity.FieldTypeArray {
+		field.WithMaxCapacity(fieldOpt.MaxCapacity)
+	}
+
+	// WithIsPartitionKey
+	if fieldOpt.IsPartitionKey {
+		field.WithIsPartitionKey(true)
+	}
+
+	// WithAnalyzerParams
+	if fieldOpt.EnableAnalyzer {
+		field.WithEnableAnalyzer(true)
+	}
+	if fieldOpt.EnableMatch {
+		field.WithEnableMatch(true)
+	}
+	if len(fieldOpt.AnalyzerParams) > 0 {
+		field.WithAnalyzerParams(fieldOpt.AnalyzerParams)
+	}
+
+	// WithNullable
+	if fieldOpt.Nullable {
+		field.WithNullable(true)
+	}
+
+	// WithIsAutoID
+	if field.PrimaryKey && fieldOpt.AutoID {
+		field.WithIsAutoID(true)
+	}
+
+	// WithDefaultValue
+	if fieldOpt.DefaultValue != nil {
+		ff.applyDefaultValue(field, fieldOpt.DefaultValue)
+	}
+}
+
+// WithDefaultValue
+// Note: When using TWithDefaultValue, you must explicitly specify the data type
+// For example: TWithDefaultValue(int32(2)) instead of TWithDefaultValue(2)
+// This is because Go's interface{} type inference defaults to int, not int32
+func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue interface{}) {
+	log.Info("applyDefaultValue", zap.Any("defaultValue", defaultValue), zap.String("fieldType", field.DataType.String()))
+	switch field.DataType {
+	case entity.FieldTypeBool:
+		if val, ok := defaultValue.(bool); ok {
+			field.WithDefaultValueBool(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "bool"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
+	case entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32:
+		// int8, int16, int32 are all converted to int32
+		var val int32
+		if v, ok := defaultValue.(int32); ok {
+			val = v
+			field.WithDefaultValueInt(val)
+		} else if v, ok := defaultValue.(int16); ok {
+			val = int32(v)
+			field.WithDefaultValueInt(val)
+		} else if v, ok := defaultValue.(int8); ok {
+			val = int32(v)
+			field.WithDefaultValueInt(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "int8 or int16 or int32"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
+	case entity.FieldTypeInt64:
+		if val, ok := defaultValue.(int64); ok {
+			field.WithDefaultValueLong(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "int64"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
+	case entity.FieldTypeFloat:
+		if val, ok := defaultValue.(float32); ok {
+			field.WithDefaultValueFloat(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "float32"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
+	case entity.FieldTypeDouble:
+		if val, ok := defaultValue.(float64); ok {
+			field.WithDefaultValueDouble(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "float64"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
+	case entity.FieldTypeVarChar:
+		if val, ok := defaultValue.(string); ok {
+			field.WithDefaultValueString(val)
+		} else {
+			log.Fatal("applyDefaultValue failed: type assertion failed",
+				zap.Any("defaultValue", defaultValue),
+				zap.String("expectedType", "string"),
+				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
+		}
 	default:
-		return FieldsInt64Vec{}.GenFields(*option)
+		log.Fatal("applyDefaultValue: unsupported field type for default value",
+			zap.String("fieldType", field.DataType.String()),
+			zap.Any("defaultValue", defaultValue))
 	}
 }

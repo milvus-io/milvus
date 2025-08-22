@@ -668,7 +668,11 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto obj = vector_array->mutable_int8_vector();
                 obj->assign(data, dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-                ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+                auto data = src_field_data->vectors().vector_array();
+                auto obj = vector_array->mutable_vector_array();
+                obj->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
+                obj->CopyFrom(data);
             } else {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));

@@ -59,6 +59,22 @@ func GetIP(ip string) string {
 	if len(ip) == 0 {
 		return GetLocalIP()
 	}
+
+	// Support setting CIDR in the IP field to match interfaces based on CIDR. For example: 192.168.0.0/16
+	_, ipnet, err := net.ParseCIDR(ip)
+	if err == nil {
+		addrs, err := net.InterfaceAddrs()
+		if err == nil {
+			for _, addr := range addrs {
+				addrip, ok := addr.(*net.IPNet)
+				if ok && ipnet.Contains(addrip.IP) {
+					return addrip.IP.String()
+				}
+			}
+		}
+		panic(errors.New(`Network port does not have an IP address that falls within the given CIDR range`))
+	}
+
 	netIP := net.ParseIP(ip)
 	// not a valid ip addr
 	if netIP == nil {
@@ -172,6 +188,18 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 	}
 
 	return "", fmt.Errorf("key %s not found", key)
+}
+
+// TryGetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
+// return false if key not exist
+func TryGetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, true
+		}
+	}
+
+	return "", false
 }
 
 // CheckCtxValid check if the context is valid

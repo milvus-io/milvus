@@ -544,7 +544,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 	t.needRequery = len(vectorOutputFields) > 0
@@ -634,7 +635,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues)
+	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore())
 	if planErr != nil {
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
@@ -765,6 +766,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.fillResult()
 	t.result.Results.OutputFields = t.userOutputFields
+	reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
 	t.result.CollectionName = t.request.GetCollectionName()
 
 	primaryFieldSchema, _ := t.schema.GetPkField()

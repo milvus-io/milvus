@@ -27,6 +27,7 @@
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
 #include "indexbuilder/types.h"
+#include "filemanager/FileManager.h"
 
 namespace milvus::index {
 
@@ -59,7 +60,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     CheckCompatible(version);
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
-        knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
+        knowhere::Pack(std::shared_ptr<milvus::FileManager>(file_manager_));
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
     if (get_index_obj.has_value()) {
@@ -96,8 +97,11 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             GetValueFromConfig<std::vector<std::string>>(config, "index_files");
         AssertInfo(index_files.has_value(),
                    "index file paths is empty when load disk ann index data");
-        file_manager_->CacheIndexToDisk(index_files.value(),
-                                        config[milvus::LOAD_PRIORITY]);
+        // If index is loaded with stream, we don't need to cache index to disk
+        if (!index_.LoadIndexWithStream()) {
+            file_manager_->CacheIndexToDisk(index_files.value(),
+                                            config[milvus::LOAD_PRIORITY]);
+        }
         read_file_span->End();
     }
 
@@ -241,7 +245,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                              SearchResult& search_result) const {
     AssertInfo(GetMetricType() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
-    auto num_queries = dataset->GetRows();
+    auto num_rows = dataset->GetRows();
     auto topk = search_info.topk_;
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
@@ -273,7 +277,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       res.what()));
             }
             return ReGenRangeSearchResult(
-                res.value(), topk, num_queries, GetMetricType());
+                res.value(), topk, num_rows, GetMetricType());
         } else {
             auto res = index_.Search(dataset, search_config, bitset);
             if (!res.has_value()) {
@@ -287,6 +291,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     }();
 
     auto ids = final->GetIds();
+    // In embedding list query, final->GetRows() can be different from dataset->GetRows().
+    auto num_queries = final->GetRows();
     float* distances = const_cast<float*>(final->GetDistance());
     final->SetIsOwner(true);
 

@@ -18,15 +18,12 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -37,8 +34,7 @@ type flushAllTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *datapb.FlushAllResponse
-
-	replicateMsgStream msgstream.MsgStream
+	chMgr    channelsMgr
 }
 
 func (t *flushAllTask) TraceCtx() context.Context {
@@ -83,22 +79,6 @@ func (t *flushAllTask) OnEnqueue() error {
 }
 
 func (t *flushAllTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (t *flushAllTask) Execute(ctx context.Context) error {
-	flushAllReq := &datapb.FlushAllRequest{
-		Base: commonpbutil.UpdateMsgBase(
-			t.Base,
-			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
-		),
-	}
-
-	resp, err := t.mixCoord.FlushAll(ctx, flushAllReq)
-	if err = merr.CheckRPCCall(resp, err); err != nil {
-		return fmt.Errorf("failed to call flush all to data coordinator: %s", err.Error())
-	}
-	t.result = resp
 	return nil
 }
 

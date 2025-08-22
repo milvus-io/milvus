@@ -1064,6 +1064,7 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -1196,7 +1197,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 
 	t.OtlpHeaders = ParamItem{
 		Key:          "trace.otlp.headers",
-		Version:      "2.4.0",
+		Version:      "2.6.0",
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
@@ -2891,8 +2892,11 @@ type queryNodeConfig struct {
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
-	MaxTimestampLag       ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	// tsafe
+	MaxTimestampLag ParamItem `refreshable:"true"`
+	DowngradeTsafe  ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -3222,6 +3226,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.EnableDisk = ParamItem{
+		Key:          "queryNode.enableDisk",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		Doc:          "enable querynode load disk index, and search on disk index",
+		Export:       true,
+	}
+	p.EnableDisk.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -3671,15 +3684,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.CPURatio.Init(base.mgr)
 
-	p.EnableDisk = ParamItem{
-		Key:          "queryNode.enableDisk",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Doc:          "enable querynode load disk index, and search on disk index",
-		Export:       true,
-	}
-	p.EnableDisk.Init(base.mgr)
-
 	p.IndexOffsetCacheEnabled = ParamItem{
 		Key:          "queryNode.indexOffsetCacheEnabled",
 		Version:      "2.5.0",
@@ -3745,6 +3749,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxTimestampLag.Init(base.mgr)
+
+	p.DowngradeTsafe = ParamItem{
+		Key:          "queryNode.downgradeTsafe",
+		Version:      "2.5.17",
+		Doc:          "ops maintenance switch for downgrade tsafe in case of mq failure",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.DowngradeTsafe.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
@@ -5076,7 +5089,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
 		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5140,7 +5153,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5785,10 +5798,16 @@ type streamingConfig struct {
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
+
+	// Flush control
+	FlushL0MaxLifetime ParamItem `refreshable:"true"`
+	FlushL0MaxRowNum   ParamItem `refreshable:"true"`
+	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
@@ -6025,6 +6044,36 @@ until the total bytes of growing segment is less than this threshold, 0.1 by def
 		Export:       true,
 	}
 	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+
+	p.FlushL0MaxLifetime = ParamItem{
+		Key:     "streaming.flush.l0.maxLifetime",
+		Version: "2.6.0",
+		Doc: `The max lifetime of l0 segment, 10 minutes by default.
+If the l0 segment is older than this time, it will be flushed.`,
+		DefaultValue: "10m",
+		Export:       true,
+	}
+	p.FlushL0MaxLifetime.Init(base.mgr)
+
+	p.FlushL0MaxRowNum = ParamItem{
+		Key:     "streaming.flush.l0.maxRowNum",
+		Version: "2.6.0",
+		Doc: `The max row num of l0 segment, 500000 by default.
+If the row num of l0 segment is greater than this num, it will be flushed.`,
+		DefaultValue: "500000",
+		Export:       true,
+	}
+	p.FlushL0MaxRowNum.Init(base.mgr)
+
+	p.FlushL0MaxSize = ParamItem{
+		Key:     "streaming.flush.l0.maxSize",
+		Version: "2.6.0",
+		Doc: `The max size of l0 segment, 32m by default.
+If the binary size of l0 segment is greater than this size, it will be flushed.`,
+		DefaultValue: "32m",
+		Export:       true,
+	}
+	p.FlushL0MaxSize.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

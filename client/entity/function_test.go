@@ -46,3 +46,33 @@ func TestFunctionSchema(t *testing.T) {
 		assert.Equal(t, function.Params, nf.Params)
 	}
 }
+
+func TestFunctionWithParamSliceHandling(t *testing.T) {
+	// Test slice value handling - the main change in this PR
+	f := NewFunction().WithParam("slice_key", []string{"a", "b", "c"})
+	assert.Equal(t, `["a","b","c"]`, f.Params["slice_key"])
+
+	// Test int slice
+	f = NewFunction().WithParam("int_slice_key", []int{1, 2, 3})
+	assert.Equal(t, "[1,2,3]", f.Params["int_slice_key"])
+
+	// Test float slice
+	f = NewFunction().WithParam("float_slice_key", []float64{1.1, 2.2, 3.3})
+	assert.Equal(t, "[1.1,2.2,3.3]", f.Params["float_slice_key"])
+
+	// Test empty slice
+	f = NewFunction().WithParam("empty_slice_key", []string{})
+	assert.Equal(t, "[]", f.Params["empty_slice_key"])
+
+	// Test the JSON marshal error fallback path
+	type unmarshalableType struct {
+		Channel chan int
+	}
+	f = NewFunction().WithParam("complex_slice_key", []unmarshalableType{{Channel: make(chan int)}})
+	// This should fallback to fmt.Sprintf since channels can't be JSON marshaled
+	assert.Contains(t, f.Params["complex_slice_key"], "0x")
+
+	// Test non-slice value (existing behavior should remain unchanged)
+	f = NewFunction().WithParam("string_key", "string_value")
+	assert.Equal(t, "string_value", f.Params["string_key"])
+}

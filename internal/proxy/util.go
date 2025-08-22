@@ -619,9 +619,6 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
-
-	// todo(SpadeA): add more check when index is enabled
-
 	return nil
 }
 
@@ -837,6 +834,11 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	})
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
+
+	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
+	for _, field := range coll.Fields {
+		field.IsFunctionOutput = false
+	}
 
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
@@ -1934,6 +1936,38 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	return ids, nil
 }
 
+// check whether insertMsg has all fields in schema
+func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
+	log := log.With(zap.String("collection", schema.GetName()))
+
+	// find bm25 generated fields
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(schema)...)
+	dataNameMap := make(map[string]*schemapb.FieldData)
+	for _, data := range fieldsData {
+		dataNameMap[data.GetFieldName()] = data
+	}
+
+	for _, fieldSchema := range schema.Fields {
+		if bm25Fields.Contain(fieldSchema.GetName()) {
+			continue
+		}
+
+		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
+				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
+				// autoGenField
+				continue
+			}
+
+			log.Info("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+		}
+	}
+
+	return nil
+}
+
 // for some varchar with analzyer
 // we need check char format before insert it to message queue
 // now only support utf-8
@@ -2286,184 +2320,6 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	return nil
 }
 
-func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-	if replicateMsgStream == nil || request == nil {
-		log.Ctx(ctx).Warn("replicate msg stream or request is nil", zap.Any("request", request))
-		return
-	}
-	msgBase := request.GetBase()
-	ts := msgBase.GetTimestamp()
-	if msgBase.GetReplicateInfo().GetIsReplicate() {
-		ts = msgBase.GetReplicateInfo().GetMsgTimestamp()
-	}
-	getBaseMsg := func(ctx context.Context, ts uint64) msgstream.BaseMsg {
-		return msgstream.BaseMsg{
-			Ctx:            ctx,
-			HashValues:     []uint32{0},
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-		}
-	}
-
-	var tsMsg msgstream.TsMsg
-	switch r := request.(type) {
-	case *milvuspb.AlterCollectionRequest:
-		tsMsg = &msgstream.AlterCollectionMsg{
-			BaseMsg:                getBaseMsg(ctx, ts),
-			AlterCollectionRequest: r,
-		}
-	case *milvuspb.AlterCollectionFieldRequest:
-		tsMsg = &msgstream.AlterCollectionFieldMsg{
-			BaseMsg:                     getBaseMsg(ctx, ts),
-			AlterCollectionFieldRequest: r,
-		}
-	case *milvuspb.RenameCollectionRequest:
-		tsMsg = &msgstream.RenameCollectionMsg{
-			BaseMsg:                 getBaseMsg(ctx, ts),
-			RenameCollectionRequest: r,
-		}
-	case *milvuspb.CreateDatabaseRequest:
-		tsMsg = &msgstream.CreateDatabaseMsg{
-			BaseMsg:               getBaseMsg(ctx, ts),
-			CreateDatabaseRequest: r,
-		}
-	case *milvuspb.DropDatabaseRequest:
-		tsMsg = &msgstream.DropDatabaseMsg{
-			BaseMsg:             getBaseMsg(ctx, ts),
-			DropDatabaseRequest: r,
-		}
-	case *milvuspb.AlterDatabaseRequest:
-		tsMsg = &msgstream.AlterDatabaseMsg{
-			BaseMsg:              getBaseMsg(ctx, ts),
-			AlterDatabaseRequest: r,
-		}
-	case *milvuspb.FlushRequest:
-		tsMsg = &msgstream.FlushMsg{
-			BaseMsg:      getBaseMsg(ctx, ts),
-			FlushRequest: r,
-		}
-	case *milvuspb.LoadCollectionRequest:
-		tsMsg = &msgstream.LoadCollectionMsg{
-			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadCollectionRequest: r,
-		}
-	case *milvuspb.ReleaseCollectionRequest:
-		tsMsg = &msgstream.ReleaseCollectionMsg{
-			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleaseCollectionRequest: r,
-		}
-	case *milvuspb.CreateIndexRequest:
-		tsMsg = &msgstream.CreateIndexMsg{
-			BaseMsg:            getBaseMsg(ctx, ts),
-			CreateIndexRequest: r,
-		}
-	case *milvuspb.DropIndexRequest:
-		tsMsg = &msgstream.DropIndexMsg{
-			BaseMsg:          getBaseMsg(ctx, ts),
-			DropIndexRequest: r,
-		}
-	case *milvuspb.LoadPartitionsRequest:
-		tsMsg = &msgstream.LoadPartitionsMsg{
-			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadPartitionsRequest: r,
-		}
-	case *milvuspb.ReleasePartitionsRequest:
-		tsMsg = &msgstream.ReleasePartitionsMsg{
-			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleasePartitionsRequest: r,
-		}
-	case *milvuspb.AlterIndexRequest:
-		tsMsg = &msgstream.AlterIndexMsg{
-			BaseMsg:           getBaseMsg(ctx, ts),
-			AlterIndexRequest: r,
-		}
-	case *milvuspb.CreateCredentialRequest:
-		tsMsg = &msgstream.CreateUserMsg{
-			BaseMsg:                 getBaseMsg(ctx, ts),
-			CreateCredentialRequest: r,
-		}
-	case *milvuspb.UpdateCredentialRequest:
-		tsMsg = &msgstream.UpdateUserMsg{
-			BaseMsg:                 getBaseMsg(ctx, ts),
-			UpdateCredentialRequest: r,
-		}
-	case *milvuspb.DeleteCredentialRequest:
-		tsMsg = &msgstream.DeleteUserMsg{
-			BaseMsg:                 getBaseMsg(ctx, ts),
-			DeleteCredentialRequest: r,
-		}
-	case *milvuspb.CreateRoleRequest:
-		tsMsg = &msgstream.CreateRoleMsg{
-			BaseMsg:           getBaseMsg(ctx, ts),
-			CreateRoleRequest: r,
-		}
-	case *milvuspb.DropRoleRequest:
-		tsMsg = &msgstream.DropRoleMsg{
-			BaseMsg:         getBaseMsg(ctx, ts),
-			DropRoleRequest: r,
-		}
-	case *milvuspb.OperateUserRoleRequest:
-		tsMsg = &msgstream.OperateUserRoleMsg{
-			BaseMsg:                getBaseMsg(ctx, ts),
-			OperateUserRoleRequest: r,
-		}
-	case *milvuspb.OperatePrivilegeRequest:
-		tsMsg = &msgstream.OperatePrivilegeMsg{
-			BaseMsg:                 getBaseMsg(ctx, ts),
-			OperatePrivilegeRequest: r,
-		}
-	case *milvuspb.OperatePrivilegeV2Request:
-		tsMsg = &msgstream.OperatePrivilegeV2Msg{
-			BaseMsg:                   getBaseMsg(ctx, ts),
-			OperatePrivilegeV2Request: r,
-		}
-	case *milvuspb.CreatePrivilegeGroupRequest:
-		tsMsg = &msgstream.CreatePrivilegeGroupMsg{
-			BaseMsg:                     getBaseMsg(ctx, ts),
-			CreatePrivilegeGroupRequest: r,
-		}
-	case *milvuspb.DropPrivilegeGroupRequest:
-		tsMsg = &msgstream.DropPrivilegeGroupMsg{
-			BaseMsg:                   getBaseMsg(ctx, ts),
-			DropPrivilegeGroupRequest: r,
-		}
-	case *milvuspb.OperatePrivilegeGroupRequest:
-		tsMsg = &msgstream.OperatePrivilegeGroupMsg{
-			BaseMsg:                      getBaseMsg(ctx, ts),
-			OperatePrivilegeGroupRequest: r,
-		}
-	case *milvuspb.CreateAliasRequest:
-		tsMsg = &msgstream.CreateAliasMsg{
-			BaseMsg:            getBaseMsg(ctx, ts),
-			CreateAliasRequest: r,
-		}
-	case *milvuspb.DropAliasRequest:
-		tsMsg = &msgstream.DropAliasMsg{
-			BaseMsg:          getBaseMsg(ctx, ts),
-			DropAliasRequest: r,
-		}
-	case *milvuspb.AlterAliasRequest:
-		tsMsg = &msgstream.AlterAliasMsg{
-			BaseMsg:           getBaseMsg(ctx, ts),
-			AlterAliasRequest: r,
-		}
-	default:
-		log.Warn("unknown request", zap.Any("request", request))
-		return
-	}
-	msgPack := &msgstream.MsgPack{
-		BeginTs: ts,
-		EndTs:   ts,
-		Msgs:    []msgstream.TsMsg{tsMsg},
-	}
-	msgErr := replicateMsgStream.Produce(ctx, msgPack)
-	// ignore the error if the msg stream failed to produce the msg,
-	// because it can be manually fixed in this error
-	if msgErr != nil {
-		log.Warn("send replicate msg failed", zap.Any("pack", msgPack), zap.Error(msgErr))
-	}
-}
-
 func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
 	if globalMetaCache != nil {
 		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
@@ -2668,6 +2524,14 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	return false
 }
 
+func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		fields = append(fields, fSchema.OutputFieldNames...)
+	}
+	return fields
+}
+
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	properties := make(map[string]string)
 	for _, pair := range pairs {
@@ -2684,4 +2548,98 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	}
 
 	return 0
+}
+
+// reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
+// It works with both QueryResults and SearchResults by operating on the common data structures
+func reconstructStructFieldDataCommon(
+	fieldsData []*schemapb.FieldData,
+	outputFields []string,
+	schema *schemapb.CollectionSchema,
+) ([]*schemapb.FieldData, []string) {
+	if len(outputFields) == 1 && outputFields[0] == "count(*)" {
+		return fieldsData, outputFields
+	}
+
+	if len(schema.StructArrayFields) == 0 {
+		return fieldsData, outputFields
+	}
+
+	regularFieldIDs := make(map[int64]interface{})
+	subFieldToStructMap := make(map[int64]int64)
+	groupedStructFields := make(map[int64][]*schemapb.FieldData)
+	structFieldNames := make(map[int64]string)
+	reconstructedOutputFields := make([]string, 0, len(fieldsData))
+
+	// record all regular field IDs
+	for _, field := range schema.Fields {
+		regularFieldIDs[field.GetFieldID()] = nil
+	}
+
+	// build the mapping from sub-field ID to struct field ID
+	for _, structField := range schema.StructArrayFields {
+		for _, subField := range structField.GetFields() {
+			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
+		}
+		structFieldNames[structField.GetFieldID()] = structField.GetName()
+	}
+
+	newFieldsData := make([]*schemapb.FieldData, 0, len(fieldsData))
+	for _, field := range fieldsData {
+		fieldID := field.GetFieldId()
+		if _, ok := regularFieldIDs[fieldID]; ok {
+			newFieldsData = append(newFieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
+		} else {
+			structFieldID := subFieldToStructMap[fieldID]
+			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		}
+	}
+
+	for structFieldID, fields := range groupedStructFields {
+		fieldData := &schemapb.FieldData{
+			FieldName: structFieldNames[structFieldID],
+			FieldId:   structFieldID,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		}
+		newFieldsData = append(newFieldsData, fieldData)
+		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
+	}
+
+	return newFieldsData, reconstructedOutputFields
+}
+
+// Wrapper for QueryResults
+func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.FieldsData,
+		results.OutputFields,
+		schema,
+	)
+	results.FieldsData = fieldsData
+	results.OutputFields = outputFields
+}
+
+// New wrapper for SearchResults
+func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
+	if results.Results == nil {
+		return
+	}
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.Results.FieldsData,
+		results.Results.OutputFields,
+		schema,
+	)
+	results.Results.FieldsData = fieldsData
+	results.Results.OutputFields = outputFields
+}
+
+func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Timestamptz {
+			return true
+		}
+	}
+	return false
 }

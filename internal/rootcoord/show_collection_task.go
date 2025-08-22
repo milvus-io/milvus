@@ -77,6 +77,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, coll.CreateTime)
 		physical, _ := tsoutil.ParseHybridTs(coll.CreateTime)
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
+		t.Rsp.ShardsNum = append(t.Rsp.ShardsNum, coll.ShardsNum)
 	}
 	return nil
 }

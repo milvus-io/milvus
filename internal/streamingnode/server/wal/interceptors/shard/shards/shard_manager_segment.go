@@ -12,11 +12,11 @@ import (
 
 // AssignSegmentRequest is a request to allocate segment.
 type AssignSegmentRequest struct {
-	CollectionID  int64
-	PartitionID   int64
-	InsertMetrics stats.InsertMetrics
-	TimeTick      uint64
-	TxnSession    TxnSession
+	CollectionID    int64
+	PartitionID     int64
+	ModifiedMetrics stats.ModifiedMetrics
+	TimeTick        uint64
+	TxnSession      TxnSession
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -135,7 +135,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	}
 	result, err := pm.AssignSegment(req)
 	if err == nil {
-		m.metrics.ObserveInsert(req.InsertMetrics.Rows, req.InsertMetrics.BinarySize)
+		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
 		return result, nil
 	}
 	return nil, err

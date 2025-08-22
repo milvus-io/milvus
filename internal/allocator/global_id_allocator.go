@@ -45,6 +45,12 @@ func NewGlobalIDAllocator(key string, base kv.TxnKV) *GlobalIDAllocator {
 	}
 }
 
+func NewTestGlobalIDAllocator(allocator tso.Allocator) *GlobalIDAllocator {
+	return &GlobalIDAllocator{
+		allocator: allocator,
+	}
+}
+
 // Initialize will initialize the created global TSO allocator.
 func (gia *GlobalIDAllocator) Initialize() error {
 	return gia.allocator.Initialize()

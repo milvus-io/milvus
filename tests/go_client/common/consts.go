@@ -72,6 +72,7 @@ const (
 	MaxTopK                 = 16384
 	MaxVectorFieldNum       = 4
 	MaxShardNum             = 16
+	DefaultBatchSize        = 1000
 )
 
 const (

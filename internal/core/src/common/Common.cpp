@@ -15,87 +15,83 @@
 // limitations under the License.
 
 #include "common/Common.h"
+#include "gflags/gflags.h"
 #include "log/Log.h"
 
 namespace milvus {
 
-int64_t FILE_SLICE_SIZE = DEFAULT_INDEX_FILE_SLICE_SIZE;
-float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
-float LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
-int CPU_NUM = DEFAULT_CPU_NUM;
-int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
-bool OPTIMIZE_EXPR_ENABLED = DEFAULT_OPTIMIZE_EXPR_ENABLED;
+std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
+std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
+    DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
+std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
 
-int64_t JSON_KEY_STATS_COMMIT_INTERVAL = DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL;
-bool GROWING_JSON_KEY_STATS_ENABLED = DEFAULT_GROWING_JSON_KEY_STATS_ENABLED;
-bool CONFIG_PARAM_TYPE_CHECK_ENABLED = DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED;
+std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL(
+    DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL);
+std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
+    DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
+std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
+    DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED);
 
 void
 SetIndexSliceSize(const int64_t size) {
-    FILE_SLICE_SIZE = size << 20;
-    LOG_INFO("set config index slice size (byte): {}", FILE_SLICE_SIZE);
-}
-
-void
-SetHighPriorityThreadCoreCoefficient(const float coefficient) {
-    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set high priority thread pool core coefficient: {}",
-             HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
-    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set middle priority thread pool core coefficient: {}",
-             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
-SetLowPriorityThreadCoreCoefficient(const float coefficient) {
-    LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set low priority thread pool core coefficient: {}",
-             LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
+    FILE_SLICE_SIZE.store(size << 20);
+    LOG_INFO("set config index slice size (byte): {}", FILE_SLICE_SIZE.load());
 }
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val) {
-    EXEC_EVAL_EXPR_BATCH_SIZE = val;
-    LOG_INFO("set default expr eval batch size: {}", EXEC_EVAL_EXPR_BATCH_SIZE);
-}
-
-void
-SetCpuNum(const int num) {
-    CPU_NUM = num;
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(val);
+    LOG_INFO("set default expr eval batch size: {}",
+             EXEC_EVAL_EXPR_BATCH_SIZE.load());
 }
 
 void
 SetDefaultOptimizeExprEnable(bool val) {
-    OPTIMIZE_EXPR_ENABLED = val;
-    LOG_INFO("set default optimize expr enabled: {}", OPTIMIZE_EXPR_ENABLED);
+    OPTIMIZE_EXPR_ENABLED.store(val);
+    LOG_INFO("set default optimize expr enabled: {}",
+             OPTIMIZE_EXPR_ENABLED.load());
 }
 
 void
 SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
-    JSON_KEY_STATS_COMMIT_INTERVAL = val;
+    JSON_KEY_STATS_COMMIT_INTERVAL.store(val);
     LOG_INFO("set default json key Stats commit interval: {}",
-             JSON_KEY_STATS_COMMIT_INTERVAL);
+             JSON_KEY_STATS_COMMIT_INTERVAL.load());
 }
 
 void
 SetDefaultGrowingJSONKeyStatsEnable(bool val) {
-    GROWING_JSON_KEY_STATS_ENABLED = val;
+    GROWING_JSON_KEY_STATS_ENABLED.store(val);
     LOG_INFO("set default growing json key index enable: {}",
-             GROWING_JSON_KEY_STATS_ENABLED);
+             GROWING_JSON_KEY_STATS_ENABLED.load());
 }
 
 void
 SetDefaultConfigParamTypeCheck(bool val) {
-    CONFIG_PARAM_TYPE_CHECK_ENABLED = val;
+    CONFIG_PARAM_TYPE_CHECK_ENABLED.store(val);
     LOG_INFO("set default config param type check enabled: {}",
-             CONFIG_PARAM_TYPE_CHECK_ENABLED);
+             CONFIG_PARAM_TYPE_CHECK_ENABLED.load());
 }
+
+void
+SetLogLevel(const char* level) {
+    LOG_INFO("set log level: {}", level);
+    if (strcmp(level, "debug") == 0) {
+        gflags::SetCommandLineOption("minloglevel", "0");
+        gflags::SetCommandLineOption("v", "5");
+    } else if (strcmp(level, "trace") == 0) {
+        gflags::SetCommandLineOption("minloglevel", "0");
+        gflags::SetCommandLineOption("v", "6");
+    } else {
+        gflags::SetCommandLineOption("v", "4");
+        if (strcmp(level, "info") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "0");
+        } else if (strcmp(level, "warn") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "1");
+        } else if (strcmp(level, "error") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "2");
+        }
+    }
+}
+
 }  // namespace milvus

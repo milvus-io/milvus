@@ -29,7 +29,7 @@
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
 #include "index/IndexFactory.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "index/Index.h"
@@ -564,6 +564,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
         file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(
             json_fid_.get());
         file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+        file_manager_ctx.fieldDataMeta.field_id = json_fid_.get();
         auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
             index::CreateIndexInfo{
                 .index_type = index::INVERTED_INDEX_TYPE,

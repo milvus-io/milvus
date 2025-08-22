@@ -22,7 +22,7 @@ func newNgramIndexChecker() *NgramIndexChecker {
 	return &NgramIndexChecker{}
 }
 
-func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_JSON {
 		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR or JSON field")
 	}
@@ -47,7 +47,7 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, params map[st
 		return merr.WrapErrParameterInvalidMsg("invalid min_gram or max_gram value for Ngram index, min_gram: %d, max_gram: %d", minGram, maxGram)
 	}
 
-	return c.scalarIndexChecker.CheckTrain(dataType, params)
+	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c *NgramIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

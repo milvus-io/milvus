@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -1462,6 +1463,9 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		for _, sid := range req.GetSegmentIDs() {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
+			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
+			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
+			// use timetick for GetFlushState in-future but not segment list.
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
 			}
@@ -2027,4 +2031,85 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
+}
+
+// AddFileResource add file resource to datacoord
+func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Ctx(ctx).Info("receive AddFileResource request",
+		zap.String("name", req.GetName()),
+		zap.String("path", req.GetPath()))
+
+	id, err := s.idAllocator.AllocOne()
+	if err != nil {
+		log.Ctx(ctx).Warn("AddFileResource alloc id failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	// Convert to model.FileResource
+	resource := &model.FileResource{
+		ID:   id,
+		Name: req.GetName(),
+		Path: req.GetPath(),
+		Type: req.GetType(),
+	}
+
+	err = s.meta.AddFileResource(ctx, resource)
+	if err != nil {
+		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Ctx(ctx).Info("AddFileResource success")
+	return merr.Success(), nil
+}
+
+// RemoveFileResource remove file resource from datacoord
+func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Ctx(ctx).Info("receive RemoveFileResource request",
+		zap.String("name", req.GetName()))
+
+	err := s.meta.RemoveFileResource(ctx, req.GetName())
+	if err != nil {
+		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Ctx(ctx).Info("RemoveFileResource success")
+	return merr.Success(), nil
+}
+
+// ListFileResources list file resources from datacoord
+func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Ctx(ctx).Info("receive ListFileResources request")
+
+	resources := s.meta.ListFileResource(ctx)
+
+	// Convert model.FileResource to milvuspb.FileResourceInfo
+	fileResources := make([]*milvuspb.FileResourceInfo, 0, len(resources))
+	for _, resource := range resources {
+		fileResources = append(fileResources, &milvuspb.FileResourceInfo{
+			Name: resource.Name,
+			Path: resource.Path,
+		})
+	}
+
+	log.Ctx(ctx).Info("ListFileResources success", zap.Int("count", len(fileResources)))
+	return &milvuspb.ListFileResourcesResponse{
+		Status:    merr.Success(),
+		Resources: fileResources,
+	}, nil
 }

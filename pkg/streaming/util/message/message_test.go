@@ -8,17 +8,18 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 func TestMessageType(t *testing.T) {
-	s := MessageTypeUnknown.marshal()
+	s := MessageType(messagespb.MessageType_Unknown).marshal()
 	assert.Equal(t, "0", s)
 	typ := unmarshalMessageType("0")
-	assert.Equal(t, MessageTypeUnknown, typ)
-	assert.False(t, MessageTypeUnknown.Valid())
+	assert.Equal(t, MessageType(messagespb.MessageType_Unknown), typ)
+	assert.False(t, MessageType(messagespb.MessageType_Unknown).Valid())
 
 	typ = unmarshalMessageType("882s9")
-	assert.Equal(t, MessageTypeUnknown, typ)
+	assert.Equal(t, MessageType(messagespb.MessageType_Unknown), typ)
 
 	s = MessageTypeTimeTick.marshal()
 	typ = unmarshalMessageType(s)
@@ -75,7 +76,7 @@ func TestBroadcast(t *testing.T) {
 	assert.Len(t, msgs[0].BroadcastHeader().ResourceKeys, 2)
 	assert.ElementsMatch(t, []string{"v1", "v2"}, []string{msgs[0].VChannel(), msgs[1].VChannel()})
 
-	MustAsMutableCreateCollectionMessageV1(msg)
+	MustAsBroadcastCreateCollectionMessageV1(msg)
 }
 
 func TestCiper(t *testing.T) {

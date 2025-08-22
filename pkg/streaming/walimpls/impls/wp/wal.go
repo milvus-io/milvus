@@ -31,11 +31,11 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	if w.Channel().AccessMode != types.AccessModeRW {
 		panic("write on a wal that is not in read-write mode")
 	}
-
+	pb := msg.IntoMessageProto()
 	r := w.p.Write(ctx,
-		&wp.WriterMessage{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+		&wp.WriteMessage{
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 	)
 	if r.Err != nil {

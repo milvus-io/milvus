@@ -44,7 +44,6 @@ import (
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -694,11 +693,6 @@ func (c *Core) startInternal() error {
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, c.session.GetServerID())
 	log.Info("rootcoord startup successfully")
-
-	// regster the core as a appendoperator for broadcast service.
-	// TODO: should be removed at 2.6.0.
-	// Add the wal accesser to the broadcaster registry for making broadcast operation.
-	registry.Register(registry.AppendOperatorTypeMsgstream, newMsgStreamAppendOperator(c))
 	return nil
 }
 
@@ -3318,6 +3312,16 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 	if len(userRoles) == 0 {
 		return privilegeColls, nil
 	}
+
+	// Get all custom privilege groups
+	customPrivilegeGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customPrivilegeGroupMap := lo.SliceToMap(customPrivilegeGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, struct{}) {
+		return group.GroupName, struct{}{}
+	})
+
 	for _, role := range userRoles[0].Roles {
 		if role.GetName() == util.RoleAdmin {
 			privilegeColls.Insert(util.AnyWord)
@@ -3343,11 +3347,8 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 			}
 			// should list collection level built-in privilege group or custom privilege group objects
 			if objectType != commonpb.ObjectType_Collection.String() {
-				customGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, priv)
-				if err != nil {
-					return nil, err
-				}
-				if !customGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
+				_, isCustomGroup := customPrivilegeGroupMap[priv]
+				if !isCustomGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
 					continue
 				}
 			}

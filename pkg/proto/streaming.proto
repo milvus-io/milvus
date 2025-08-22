@@ -4,11 +4,13 @@ package milvus.proto.streaming;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
+import "data_coord.proto";
 import "messages.proto";
 import "milvus.proto";
 import "schema.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/field_mask.proto";
 
 //
 // Common
@@ -87,8 +89,8 @@ enum BroadcastTaskState {
 
 // BroadcastTask is the task to broadcast the messake.
 message BroadcastTask {
-    messages.Message message = 1;      // message to be broadcast.
-    BroadcastTaskState state = 2;      // state of the task.
+    messages.Message message = 1;    // message to be broadcast.
+    BroadcastTaskState state = 2;    // state of the task.
     bytes acked_vchannel_bitmap = 3; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
 }
 
@@ -142,12 +144,34 @@ message BroadcastAckResponse {
 // Server: log coord. Running on every log node.
 // Client: all log publish/consuming node.
 service StreamingCoordAssignmentService {
+    // UpdateWALBalancePolicy is used to update the WAL balance policy.
+    // The policy is used to control the balance of the WAL.
+    rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {};
+
     // AssignmentDiscover is used to discover all log nodes managed by the
     // streamingcoord. Channel assignment information will be pushed to client
     // by stream.
     rpc AssignmentDiscover(stream AssignmentDiscoverRequest)
         returns (stream AssignmentDiscoverResponse) {}
 }
+
+// UpdateWALBalancePolicyRequest is the request to update the WAL balance policy.
+message UpdateWALBalancePolicyRequest {
+    WALBalancePolicyConfig config = 1;
+    WALBalancePolicyNodes nodes = 2;
+    google.protobuf.FieldMask update_mask = 3;
+}
+
+message WALBalancePolicyConfig {
+    bool allow_rebalance = 1;
+}
+
+message WALBalancePolicyNodes {
+    repeated int64 freeze_node_ids = 1;   // nodes that will be frozen.
+    repeated int64 defreeze_node_ids = 2; // nodes that will be defrozen.
+}
+
+message UpdateWALBalancePolicyResponse {}
 
 // AssignmentDiscoverRequest is the request of Discovery
 message AssignmentDiscoverRequest {
@@ -574,7 +598,7 @@ message SegmentAssignmentMeta {
     string vchannel              = 4;
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
-    int64 storage_version        = 7;
+    int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
 }
 
@@ -587,12 +611,14 @@ enum SegmentAssignmentState {
 // SegmentAssignmentStat is the stat of segment assignment.
 message SegmentAssignmentStat {
     uint64 max_binary_size                    = 1;
-    uint64 inserted_rows                      = 2;
-    uint64 inserted_binary_size               = 3;
+    uint64 modified_rows                      = 2;
+    uint64 modified_binary_size               = 3;
     int64 create_timestamp                    = 4;
     int64 last_modified_timestamp             = 5;
     uint64 binlog_counter                     = 6;
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
+    data.SegmentLevel level                   = 8; // The level of the segment, only L0 or L1.
+    uint64 max_rows                           = 9; // The max rows of the segment.
 }
 
 // The WALCheckpoint that is used to recovery the wal scanner.

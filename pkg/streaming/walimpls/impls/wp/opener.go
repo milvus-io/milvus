@@ -36,7 +36,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		log.Ctx(ctx).Error("failed to open log", zap.String("log_name", opt.Channel.Name), zap.Error(err))
 		return nil, err
 	}
-	p, err := l.OpenLogWriter(ctx)
+	p, err := l.OpenInternalLogWriter(ctx)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to open log writer", zap.String("log_name", opt.Channel.Name), zap.Error(err))
 		return nil, err
