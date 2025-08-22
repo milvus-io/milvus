@@ -142,7 +142,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
 
-    // TODO(tiered storage 1): should return a PinWrapper
     void
     BulkGetJsonData(FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,

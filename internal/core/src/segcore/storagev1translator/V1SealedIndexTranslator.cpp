@@ -123,7 +123,11 @@ V1SealedIndexTranslator::LoadVecIndex() {
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info, fileManagerContext);
-        index->SetCellSize(index_load_info_.index_size);
+        if (!index_load_info_.enable_mmap) {
+            index->SetCellSize({index_load_info_.index_size, 0});
+        } else {
+            index->SetCellSize({0, index_load_info_.index_size});
+        }
         index->Load(*binary_set_, config);
         return index;
     } catch (std::exception& e) {
@@ -162,7 +166,11 @@ V1SealedIndexTranslator::LoadScalarIndex() {
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info, milvus::storage::FileManagerContext());
-        index->SetCellSize(index_load_info_.index_size);
+        if (!index_load_info_.enable_mmap) {
+            index->SetCellSize({index_load_info_.index_size, 0});
+        } else {
+            index->SetCellSize({0, index_load_info_.index_size});
+        }
         index->Load(*binary_set_);
         return index;
     } catch (std::exception& e) {
