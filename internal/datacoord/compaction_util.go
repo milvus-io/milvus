@@ -17,8 +17,6 @@
 package datacoord
 
 import (
-	"strconv"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -52,7 +50,7 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
-	pluginContext := GetStoragePluginContext(properties, collectionID)
+	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
 	if pluginContext == nil {
 		return
 	}
@@ -70,27 +68,13 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 	case *workerpb.CreateStatsRequest:
 		job := msg.(*workerpb.CreateStatsRequest)
 		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.ImportRequest:
+		job := msg.(*datapb.ImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.PreImportRequest:
+		job := msg.(*datapb.PreImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
 		return
 	}
-}
-
-func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
-	if hookutil.IsClusterEncyptionEnabled() {
-		if ez := hookutil.GetEzByCollProperties(properties, collectionID); ez != nil {
-			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			pluginContext := []*commonpb.KeyValuePair{
-				{
-					Key:   hookutil.CipherConfigCreateEZ,
-					Value: strconv.FormatInt(ez.EzID, 10),
-				},
-				{
-					Key:   hookutil.CipherConfigUnsafeEZK,
-					Value: string(key),
-				},
-			}
-			return pluginContext
-		}
-	}
-	return nil
 }

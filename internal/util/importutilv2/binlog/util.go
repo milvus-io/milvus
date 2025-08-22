@@ -59,6 +59,7 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 	return rowsSet, validDataRowsSet, nil
 }
 
+// read delete data only
 func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
 	bytes, err := cm.Read(ctx, path) // TODO: dyh, checks if the error is a retryable error
 	if err != nil {

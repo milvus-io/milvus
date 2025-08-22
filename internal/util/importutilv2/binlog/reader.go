@@ -114,6 +114,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema,
+		storage.WithCollectionID(r.schema.GetID()),
 		storage.WithVersion(r.storageVersion),
 		storage.WithBufferSize(32*1024*1024),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {

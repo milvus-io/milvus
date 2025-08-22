@@ -288,7 +288,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 			return fileStats.GetImportFile()
 		})
 
-	return &datapb.PreImportRequest{
+	req := &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
 		CollectionID:  task.GetCollectionID(),
@@ -300,6 +300,8 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
 	}
+	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	return req
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
@@ -357,7 +359,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		storageVersion = storage.StorageV2
 	}
-	return &datapb.ImportRequest{
+	req := &datapb.ImportRequest{
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
 		CollectionID:    task.GetCollectionID(),
@@ -372,7 +374,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
-	}, nil
+	}
+	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	return req, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {

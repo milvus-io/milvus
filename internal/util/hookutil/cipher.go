@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -117,6 +118,30 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 	return nil
 }
 
+// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
+func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
+	if GetCipher() == nil {
+		return nil
+	}
+
+	if ez := GetEzByCollProperties(properties, collectionID); ez != nil {
+		key := GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+		pluginContext := []*commonpb.KeyValuePair{
+			{
+				Key:   CipherConfigCreateEZ,
+				Value: strconv.FormatInt(ez.EzID, 10),
+			},
+			{
+				Key:   CipherConfigUnsafeEZK,
+				Value: string(key),
+			},
+		}
+		return pluginContext
+	}
+
+	return nil
+}
+
 func GetDBCipherProperties(ezID uint64, kmsKey string) []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
@@ -156,30 +181,52 @@ func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 	return nil
 }
 
+func CreateLocalEZByPluginContext(context []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
+	if GetCipher() == nil {
+		return nil, nil
+	}
+	config := make(map[string]string)
+	ctx := &indexcgopb.StoragePluginContext{}
+	for _, value := range context {
+		if value.GetKey() == CipherConfigCreateEZ {
+			ezID, err := strconv.ParseInt(value.GetValue(), 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			config[CipherConfigCreateEZ] = value.GetValue()
+			ctx.EncryptionZoneId = ezID
+		}
+		if value.GetKey() == CipherConfigUnsafeEZK {
+			config[CipherConfigUnsafeEZK] = value.GetValue()
+			ctx.EncryptionKey = value.GetValue()
+		}
+	}
+	if len(config) == 2 {
+		return ctx, GetCipher().Init(config)
+	}
+	return nil, nil
+}
+
 func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 	if GetCipher() == nil {
 		return nil
 	}
 
-	var ezIdStr string
-	var rootKey string
+	config := make(map[string]string)
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEzIDKey {
-			ezIdStr = property.Value
+		if property.GetKey() == EncryptionEzIDKey {
+			config[CipherConfigCreateEZ] = property.Value
 		}
-		if property.Key == EncryptionRootKeyKey {
-			rootKey = property.Value
+		if property.GetKey() == EncryptionRootKeyKey {
+			config[CipherConfigKeyKmsKeyArn] = property.GetValue()
 		}
-	}
-	if len(ezIdStr) == 0 || len(rootKey) == 0 {
-		return nil
 	}
 
-	config := map[string]string{
-		CipherConfigCreateEZ:     ezIdStr,
-		CipherConfigKeyKmsKeyArn: rootKey,
+	if len(config) == 2 {
+		return GetCipher().Init(config)
 	}
-	return GetCipher().Init(config)
+
+	return nil
 }
 
 func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
