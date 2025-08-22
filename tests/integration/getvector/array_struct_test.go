@@ -186,7 +186,6 @@ func (s *TestArrayStructSuite) run() {
 	s.Require().NotEmpty(segments)
 
 	// create index for float vector field
-	// create index
 	_, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
