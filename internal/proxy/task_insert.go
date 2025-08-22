@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -165,10 +165,10 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	it.schema = schema.CollectionSchema
 
 	// Calculate embedding fields
-	if function.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-call-function-udf")
 		defer sp.End()
-		exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema)
 		if err != nil {
 			return err
 		}

@@ -655,7 +655,7 @@ func TestRerankFunctionModelNegative(t *testing.T) {
 		queries       []string
 		expectedError string
 	}{
-		{"invalid_endpoint", "tei", "http://invalid:8080", queries[:common.DefaultNq], "Call rerank model failed"},
+		{"invalid_endpoint", "tei", "http://invalid:8080", queries[:common.DefaultNq], "Call service failed"},
 		{"empty_endpoint", "tei", "", queries[:common.DefaultNq], "is not a valid http/https link"},
 	}
 
