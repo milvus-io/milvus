@@ -80,7 +80,7 @@ func (r *channelReplicator) StartReplicateChannel() {
 		return
 	}
 	walName := streaming.WAL().WALName()
-	r.walName = commonpb.WALName(commonpb.WALName_value[walName])
+	r.walName = message.GetWALName(walName)
 	logger.Info("start replicate channel")
 	go func() {
 		defer r.lifetime.Done()
@@ -100,9 +100,11 @@ func (r *channelReplicator) replicateLoop() error {
 		return err
 	}
 	ch := make(adaptor.ChanMessageHandler, 64)
+	deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
+	deliverPolicy = options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
 		PChannel:       r.channel,
-		DeliverPolicy:  options.DeliverPolicyStartFrom(startFrom),
+		DeliverPolicy:  deliverPolicy,
 		DeliverFilters: []options.DeliverFilter{},
 		MessageHandler: ch,
 	})

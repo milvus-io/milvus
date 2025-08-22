@@ -41,6 +41,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		appendExecutionPool:   conc.NewPool[struct{}](0),
 		dispatchExecutionPool: conc.NewPool[struct{}](0),
 	}
+	w.ReplicateService = &replicateService{w}
 	w.SetLogger(log.With(log.FieldComponent("wal-accesser")))
 	return w
 }
@@ -54,6 +55,7 @@ type walAccesserImpl struct {
 	// All services
 	streamingCoordClient client.Client
 	handlerClient        handler.HandlerClient
+	ReplicateService
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer

@@ -23,6 +23,32 @@ func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, conf
 	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
 }
 
+func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	config, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 func (s replicateService) GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.ReplicateWALCheckpoint, error) {
-	panic("not implemented")
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	checkpoint, err := s.handlerClient.GetWALCheckpoint(ctx, channelName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &streamingpb.ReplicateWALCheckpoint{
+		// TODO: sheep, assign replicate checkpoint.
+		ReplicateMessageID: checkpoint.MessageId,
+	}, nil
 }

@@ -37,7 +37,7 @@ type AssignmentService interface {
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
 
-	// GetReplicateConfiguration returns the replicate configuration.
+	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
 	GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error)
 
 	// GetLatestAssignments returns the latest assignment discovery result.
