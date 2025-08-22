@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"strings"
 
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkt"
@@ -62,8 +61,8 @@ func validateGeometryFieldSearchResult(array *[]*schemapb.FieldData) error {
 
 	for idx, fieldData := range *array {
 		if fieldData.Type == schemapb.DataType_Geometry {
-			wkbArray := fieldData.GetScalars().GetGeometryData().Data
-			wktArray := make([][]byte, len(wkbArray))
+			wkbArray := fieldData.GetScalars().GetGeometryData().GetData()
+			wktArray := make([]string, len(wkbArray))
 			for i, data := range wkbArray {
 				geomT, err := wkb.Unmarshal(data)
 				if err != nil {
@@ -76,7 +75,7 @@ func validateGeometryFieldSearchResult(array *[]*schemapb.FieldData) error {
 					log.Warn("translate the geomery  into its wkt failed")
 					return err
 				}
-				wktArray[i] = []byte(wktStr)
+				wktArray[i] = wktStr
 			}
 			// modify the field data
 			(*array)[idx] = &schemapb.FieldData{
@@ -84,8 +83,8 @@ func validateGeometryFieldSearchResult(array *[]*schemapb.FieldData) error {
 				FieldName: fieldData.GetFieldName(),
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_GeometryData{
-							GeometryData: &schemapb.GeometryArray{
+						Data: &schemapb.ScalarField_GeometryWktData{
+							GeometryWktData: &schemapb.GeometryWktArray{
 								Data: wktArray,
 							},
 						},
@@ -708,8 +707,9 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 }
 
 func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	geometryArray := field.GetScalars().GetGeometryData().GetData()
-	if geometryArray == nil {
+	geometryArray := field.GetScalars().GetGeometryWktData().GetData()
+	wkbArray := make([][]byte, len(geometryArray))
+	if geometryArray == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("geometry field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need geometry array", "got nil", msg)
 	}
@@ -717,24 +717,24 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 	for index, wktdata := range geometryArray {
 		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
 		// fmt.Println(strings.Trim(string(wktdata), "\""))
-		geomT, err := wkt.Unmarshal(strings.Trim(string(wktdata), "\""))
+		geomT, err := wkt.Unmarshal(wktdata)
 		if err != nil {
 			log.Warn("insert invalid Geometry data!! The wkt data has errors", zap.Error(err))
 			return merr.WrapErrIoFailedReason(err.Error())
 		}
-		geometryArray[index], err = wkb.Marshal(geomT, wkb.NDR)
+		wkbArray[index], err = wkb.Marshal(geomT, wkb.NDR)
 		if err != nil {
 			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
 			return merr.WrapErrIoFailedReason(err.Error())
 		}
 	}
 	// replace the field data with wkb data array
-	field = &schemapb.FieldData{
+	*field = schemapb.FieldData{
 		Type:      field.GetType(),
 		FieldName: field.GetFieldName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: geometryArray}},
+				Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: wkbArray}},
 			},
 		},
 		FieldId:   field.GetFieldId(),
