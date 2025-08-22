@@ -38,6 +38,7 @@ const pendingMessageQueueLength = 128
 type replicateStreamClient struct {
 	cluster *milvuspb.MilvusCluster
 	channel string
+	walName commonpb.WALName
 
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
 	pendingMessages MsgQueue
@@ -48,13 +49,14 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusCluster, channel string) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusCluster, walName commonpb.WALName, channel string) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
 	ctx1 = contextutil.WithClusterID(ctx1, cluster.GetClusterId())
 
 	rs := &replicateStreamClient{
 		cluster:         cluster,
 		channel:         channel,
+		walName:         walName,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
 		ctx:             ctx1,
 		cancel:          cancel,
@@ -123,7 +125,7 @@ func (r *replicateStreamClient) startInternal() {
 	}
 }
 
-func immutableMessageToProto(msg message.ImmutableMessage) *milvuspb.ReplicateRequest {
+func (r *replicateStreamClient) immutableMessageToProto(msg message.ImmutableMessage) *milvuspb.ReplicateRequest {
 	immutableMessage := msg.IntoImmutableMessageProto()
 	return &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
@@ -131,7 +133,7 @@ func immutableMessageToProto(msg message.ImmutableMessage) *milvuspb.ReplicateRe
 				Message: &milvuspb.ImmutableMessage{
 					Id: &milvuspb.MessageID{
 						Id:      immutableMessage.GetId().GetId(),
-						WALName: commonpb.WALName_Pulsar, // TODO: sheep, get wal name from config
+						WALName: r.walName,
 					},
 					Payload:    immutableMessage.GetPayload(),
 					Properties: immutableMessage.GetProperties(),
@@ -188,7 +190,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 				// context canceled, return nil
 				return nil
 			}
-			req := immutableMessageToProto(msg)
+			req := r.immutableMessageToProto(msg)
 			err = r.client.Send(req)
 			if err != nil {
 				logger.Warn("replicate stream send failed", zap.Error(err))

@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
@@ -52,6 +53,7 @@ var _ ChannelReplicator = (*channelReplicator)(nil)
 // channelReplicator is the implementation of ChannelReplicator.
 type channelReplicator struct {
 	channel string
+	walName commonpb.WALName
 	cluster *milvuspb.MilvusCluster
 
 	ctx      context.Context
@@ -77,6 +79,8 @@ func (r *channelReplicator) StartReplicateChannel() {
 		logger.Warn("replicate channel already started")
 		return
 	}
+	walName := streaming.WAL().WALName()
+	r.walName = commonpb.WALName(commonpb.WALName_value[walName])
 	logger.Info("start replicate channel")
 	go func() {
 		defer r.lifetime.Done()
@@ -104,7 +108,7 @@ func (r *channelReplicator) replicateLoop() error {
 	})
 	defer scanner.Close()
 
-	rsc := replicatestream.NewReplicateStreamClient(r.ctx, r.cluster, r.channel)
+	rsc := replicatestream.NewReplicateStreamClient(r.ctx, r.cluster, r.walName, r.channel)
 	defer rsc.Close()
 
 	for {
