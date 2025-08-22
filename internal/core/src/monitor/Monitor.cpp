@@ -139,6 +139,8 @@ std::map<std::string, std::string> groupbyLatencyLabels{
     {"type", "groupby_latency"}};
 std::map<std::string, std::string> iterativeFilterLatencyLabels{
     {"type", "iterative_filter_latency"}};
+std::map<std::string, std::string> rescoreLatencyLabels{
+    {"type", "rescore_latency"}};
 std::map<std::string, std::string> scalarProportionLabels{
     {"type", "scalar_proportion"}};
 std::map<std::string, std::string> getVectorLatencyLabels{
@@ -168,6 +170,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_iterative_filter,
                             internal_core_search_latency,
                             iterativeFilterLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_rescore,
+                            internal_core_search_latency,
+                            rescoreLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_search_latency_scalar_proportion,
     internal_core_search_latency,
