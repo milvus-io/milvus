@@ -103,6 +103,7 @@ func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {
 		PlanID:    123,
 		Type:      datapb.CompactionType_SortCompaction,
 		SlotUsage: 8,
+		Schema:    s.meta.GetSchema(),
 	}
 
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
@@ -377,6 +378,7 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{SegmentID: 100},
 		},
+		Schema: genTestCollectionMeta().GetSchema(),
 	}
 
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
