@@ -635,7 +635,6 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			t.allQueryCnt += res.GetAllRetrieveCount()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
-			log.Debug("result detail: ", zap.Any("FieldsData", res.FieldsData))
 			return true
 		})
 	}

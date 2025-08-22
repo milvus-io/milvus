@@ -225,7 +225,6 @@ func NewColumnTimestamptz(name string, values []int64) *ColumnTimestamptz {
 	}
 }
 
-
 /* Varchar */
 
 var _ (Column) = (*ColumnVarChar)(nil)

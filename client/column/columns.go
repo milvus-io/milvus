@@ -195,7 +195,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_Double:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetDoubleData().GetData(), begin, end, validData, NewColumnDouble, NewNullableColumnDouble)
-	
+
 	case schemapb.DataType_Timestamptz:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetTimestamptzData().GetData(), begin, end, validData, NewColumnTimestamptz, NewNullableColumnTimestamptz)
 

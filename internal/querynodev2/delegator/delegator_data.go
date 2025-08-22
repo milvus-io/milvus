@@ -87,12 +87,10 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
-	log.Debug("process insert", zap.Any("insertRecords", insertRecords))
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
 		if growing == nil {
-			log.Debug("shard's collection", zap.Any("collection's schema", sd.collection.Schema()))
 			var err error
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.

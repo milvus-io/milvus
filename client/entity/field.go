@@ -172,7 +172,7 @@ const (
 	// FieldTypeDouble field type double
 	FieldTypeDouble FieldType = 11
 	// FieldTypeTimestamptz field type timestamptz
-	FieldTypeTimestamptz FieldType = 15 
+	FieldTypeTimestamptz FieldType = 15
 	// FieldTypeString field type string
 	FieldTypeString FieldType = 20
 	// FieldTypeVarChar field type varchar

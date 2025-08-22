@@ -1469,9 +1469,11 @@ func (data *FloatFieldData) GetMemorySize() int {
 func (data *DoubleFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
+
 func (data *TimestamptzFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
+
 func (data *BinaryVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
 func (data *FloatVectorFieldData) GetMemorySize() int    { return binary.Size(data.Data) + 4 }
 func (data *Float16VectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }

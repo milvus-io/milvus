@@ -109,7 +109,6 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	log.Info("new collection created", zap.Int64("collectionID", collectionID), zap.Any("schema", schema), zap.Error(err))
 	if err != nil {
 		return err
 	}
