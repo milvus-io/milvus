@@ -19,10 +19,15 @@ package index
 import "strconv"
 
 const (
-	ivfNlistKey  = `nlist`
-	ivfPQMKey    = `m`
-	ivfPQNbits   = `nbits`
-	ivfNprobeKey = `nprobe`
+	ivfNlistKey      = `nlist`
+	ivfPQMKey        = `m`
+	ivfPQNbits       = `nbits`
+	ivfNprobeKey     = `nprobe`
+	ivfRefineKey     = `refine`
+	ivfRefineTypeKey = `refine_type`
+
+	ivfRbqQueryBitsKey = `rbq_query_bits`
+	ivfRbqRefineKKey   = `refine_k`
 )
 
 var _ Index = ivfFlatIndex{}
@@ -112,6 +117,45 @@ func NewIvfSQ8Index(metricType MetricType, nlist int) Index {
 	}
 }
 
+type ivfRabitQIndex struct {
+	baseIndex
+
+	nlist      int
+	refine     bool
+	refineType string
+}
+
+func (idx *ivfRabitQIndex) Params() map[string]string {
+	result := map[string]string{
+		MetricTypeKey: string(idx.metricType),
+		IndexTypeKey:  string(IvfRabitQ),
+		ivfNlistKey:   strconv.Itoa(idx.nlist),
+	}
+
+	if idx.refine {
+		result[ivfRefineKey] = strconv.FormatBool(idx.refine)
+		result[ivfRefineTypeKey] = idx.refineType
+	}
+	return result
+}
+
+func (idx *ivfRabitQIndex) WithRefineType(refineType string) *ivfRabitQIndex {
+	idx.refine = true
+	idx.refineType = refineType
+	return idx
+}
+
+func NewIvfRabitQIndex(metricType MetricType, nlist int) *ivfRabitQIndex {
+	return &ivfRabitQIndex{
+		baseIndex: baseIndex{
+			metricType: metricType,
+			indexType:  BinIvfFlat,
+		},
+
+		nlist: nlist,
+	}
+}
+
 var _ Index = binIvfFlat{}
 
 type binIvfFlat struct {
@@ -156,5 +200,29 @@ func NewIvfAnnParam(nprobe int) ivfAnnParam {
 			params: make(map[string]any),
 		},
 		nprobe: nprobe,
+	}
+}
+
+type ivfRabitQAnnParam struct {
+	ivfAnnParam
+}
+
+func (ap *ivfRabitQAnnParam) Params() map[string]any {
+	return ap.ivfAnnParam.Params()
+}
+
+func (ap *ivfRabitQAnnParam) WithRabitQueryBits(rbqQueryBits int) *ivfRabitQAnnParam {
+	ap.params[ivfRbqQueryBitsKey] = rbqQueryBits
+	return ap
+}
+
+func (ap *ivfRabitQAnnParam) WithRefineK(refineK int) *ivfRabitQAnnParam {
+	ap.params[ivfRbqRefineKKey] = refineK
+	return ap
+}
+
+func NewIvfRabitQAnnParam(nprobe int) *ivfRabitQAnnParam {
+	return &ivfRabitQAnnParam{
+		ivfAnnParam: NewIvfAnnParam(nprobe),
 	}
 }

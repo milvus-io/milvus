@@ -15,3 +15,9 @@
 // limitations under the License.
 
 package index
+
+import "testing"
+
+func TestGenericIndex(t *testing.T) {
+	// idx := NewGenericIndex("auto_scalar_index")
+}
