@@ -6479,20 +6479,11 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	var (
-		currentCluster   *milvuspb.MilvusCluster
-		currentClusterID = paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	)
-	for _, cluster := range config.GetClusters() {
-		if cluster.GetClusterId() == currentClusterID {
-			currentCluster = cluster
-			break
-		}
+	currentCluster, err := replicateutil.GetMilvusCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config)
+	if err != nil {
+		return nil, err
 	}
-	// TODO: sheep, wrap common function
-	if currentCluster == nil {
-		return nil, fmt.Errorf("current cluster %s not found in replicate configuration", req.GetSourceClusterId())
-	}
+
 	walName := message.GetWALName(streaming.WAL().WALName())
 	checkpoints := make([]*milvuspb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
 	for _, pchannel := range currentCluster.GetPchannels() {

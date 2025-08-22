@@ -15,7 +15,6 @@ type ReplicateConfigValidator struct {
 	currentClusterID string
 	currentPChannels []string
 	clusterMap       map[string]*milvuspb.MilvusCluster
-	clusterIDs       map[string]struct{}
 	config           *milvuspb.ReplicateConfiguration
 	balancer         *balancer.Balancer
 }
@@ -26,20 +25,13 @@ func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration, curren
 		currentClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		currentPChannels: currentPChannels,
 		clusterMap:       make(map[string]*milvuspb.MilvusCluster),
-		clusterIDs:       make(map[string]struct{}),
 		config:           config,
 	}
-
 	// Build cluster maps during initialization
-	clusters := config.GetClusters()
-	for _, cluster := range clusters {
-		if cluster != nil {
-			clusterID := cluster.GetClusterId()
-			validator.clusterMap[clusterID] = cluster
-			validator.clusterIDs[clusterID] = struct{}{}
-		}
+	for _, cluster := range config.GetClusters() {
+		clusterID := cluster.GetClusterId()
+		validator.clusterMap[clusterID] = cluster
 	}
-
 	return validator
 }
 
@@ -48,34 +40,27 @@ func (v *ReplicateConfigValidator) Validate() error {
 	if v.config == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
-
 	clusters := v.config.GetClusters()
 	if len(clusters) == 0 {
 		return fmt.Errorf("clusters list cannot be empty")
 	}
-
 	// Perform all validation checks
 	if err := v.validateClusterBasic(clusters); err != nil {
 		return err
 	}
-
 	if err := v.validateClusterUniqueness(); err != nil {
 		return err
 	}
-
 	if err := v.validateRelevance(); err != nil {
 		return err
 	}
-
 	topologies := v.config.GetCrossClusterTopology()
 	if err := v.validateTopologyEdgeUniqueness(topologies); err != nil {
 		return err
 	}
-
 	if err := v.validateTopologyTypeConstraint(topologies); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -83,12 +68,10 @@ func (v *ReplicateConfigValidator) Validate() error {
 func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.MilvusCluster) error {
 	var expectedPchannelCount int
 	var firstClusterID string
-
 	for i, cluster := range clusters {
 		if cluster == nil {
 			return fmt.Errorf("cluster at index %d is nil", i)
 		}
-
 		// clusterID validation: non-empty and no whitespace
 		clusterID := cluster.GetClusterId()
 		if clusterID == "" {
@@ -97,7 +80,6 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 		if strings.ContainsAny(clusterID, " \t\n\r") {
 			return fmt.Errorf("cluster at index %d has clusterID '%s' containing whitespace characters", i, clusterID)
 		}
-
 		// connection_param.uri validation: non-empty and basic URI format
 		connParam := cluster.GetConnectionParam()
 		if connParam == nil {
@@ -111,13 +93,11 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 		if err != nil {
 			return fmt.Errorf("cluster '%s' has invalid URI format: '%s'", clusterID, uri)
 		}
-
 		// pchannels validation: non-empty
 		pchannels := cluster.GetPchannels()
 		if len(pchannels) == 0 {
 			return fmt.Errorf("cluster '%s' has empty pchannels", clusterID)
 		}
-
 		// pchannels uniqueness within cluster
 		pchannelSet := make(map[string]bool)
 		for j, pchannel := range pchannels {
@@ -127,9 +107,12 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 			if pchannelSet[pchannel] {
 				return fmt.Errorf("cluster '%s' has duplicate pchannel: '%s'", clusterID, pchannel)
 			}
+			// Validate that pchannel starts with clusterID as prefix
+			if !strings.HasPrefix(pchannel, clusterID) {
+				return fmt.Errorf("cluster '%s' has pchannel '%s' that does not start with clusterID as prefix", clusterID, pchannel)
+			}
 			pchannelSet[pchannel] = true
 		}
-
 		// pchannels count consistency across all clusters
 		if i == 0 {
 			expectedPchannelCount = len(pchannels)
@@ -139,21 +122,18 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 				clusterID, len(pchannels), expectedPchannelCount, firstClusterID)
 		}
 	}
-
 	return nil
 }
 
 // validateClusterUniqueness validates that clusterID values across all clusters must be globally unique
 func (v *ReplicateConfigValidator) validateClusterUniqueness() error {
 	seenIDs := make(map[string]struct{})
-
-	for clusterID := range v.clusterIDs {
+	for clusterID := range v.clusterMap {
 		if _, exists := seenIDs[clusterID]; exists {
 			return fmt.Errorf("duplicate clusterID found: '%s'", clusterID)
 		}
 		seenIDs[clusterID] = struct{}{}
 	}
-
 	return nil
 }
 
@@ -163,11 +143,9 @@ func (v *ReplicateConfigValidator) validateRelevance() error {
 	if !exists {
 		return fmt.Errorf("current Milvus cluster '%s' must be included in the clusters list", v.currentClusterID)
 	}
-
 	if !equalIgnoreOrder(v.currentPChannels, currentCluster.GetPchannels()) {
 		return fmt.Errorf("current pchannels do not match the pchannels in the config, current pchannels: %v, config pchannels: %v", v.currentPChannels, currentCluster.GetPchannels())
 	}
-
 	return nil
 }
 
@@ -176,24 +154,20 @@ func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*
 	if len(topologies) == 0 {
 		return nil
 	}
-
 	edgeSet := make(map[string]struct{})
 	for i, topology := range topologies {
 		if topology == nil {
 			return fmt.Errorf("topology at index %d is nil", i)
 		}
-
 		sourceClusterID := topology.GetSourceClusterId()
 		targetClusterID := topology.GetTargetClusterId()
-
 		// Validate edge endpoints exist
-		if _, exists := v.clusterIDs[sourceClusterID]; !exists {
+		if _, exists := v.clusterMap[sourceClusterID]; !exists {
 			return fmt.Errorf("topology at index %d references non-existent source cluster: '%s'", i, sourceClusterID)
 		}
-		if _, exists := v.clusterIDs[targetClusterID]; !exists {
+		if _, exists := v.clusterMap[targetClusterID]; !exists {
 			return fmt.Errorf("topology at index %d references non-existent target cluster: '%s'", i, targetClusterID)
 		}
-
 		// Edge uniqueness
 		edgeKey := fmt.Sprintf("%s->%s", sourceClusterID, targetClusterID)
 		if _, exists := edgeSet[edgeKey]; exists {
@@ -201,7 +175,6 @@ func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*
 		}
 		edgeSet[edgeKey] = struct{}{}
 	}
-
 	return nil
 }
 
@@ -210,31 +183,25 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 	if len(topologies) == 0 {
 		return nil
 	}
-
 	// Build in-degree and out-degree maps
 	inDegree := make(map[string]int)
 	outDegree := make(map[string]int)
-
 	// Initialize all clusters with 0 degrees
-	for clusterID := range v.clusterIDs {
+	for clusterID := range v.clusterMap {
 		inDegree[clusterID] = 0
 		outDegree[clusterID] = 0
 	}
-
 	// Calculate degrees
 	for _, topology := range topologies {
 		source := topology.GetSourceClusterId()
 		target := topology.GetTargetClusterId()
-
 		outDegree[source]++
 		inDegree[target]++
 	}
-
 	// Find center node (out-degree = clusters-1, in-degree = 0)
 	var centerNode string
-	clusterCount := len(v.clusterIDs)
-
-	for clusterID := range v.clusterIDs {
+	clusterCount := len(v.clusterMap)
+	for clusterID := range v.clusterMap {
 		if outDegree[clusterID] == clusterCount-1 && inDegree[clusterID] == 0 {
 			if centerNode != "" {
 				// Multiple center nodes found
@@ -243,24 +210,20 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 			centerNode = clusterID
 		}
 	}
-
 	if centerNode == "" {
 		// No center node found
 		return fmt.Errorf("no center node found, star topology must have exactly one center node")
 	}
-
 	// Validate other nodes (in-degree = 1, out-degree = 0)
-	for clusterID := range v.clusterIDs {
+	for clusterID := range v.clusterMap {
 		if clusterID == centerNode {
 			continue
 		}
-
 		if inDegree[clusterID] != 1 || outDegree[clusterID] != 0 {
 			return fmt.Errorf("cluster '%s' does not follow star topology pattern (in-degree=%d, out-degree=%d)",
 				clusterID, inDegree[clusterID], outDegree[clusterID])
 		}
 	}
-
 	return nil
 }
 

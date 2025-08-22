@@ -158,10 +158,6 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 					Channels: channels,
 				}
 			}
-			newIncomingReplicateClusters := make(map[string][]string, len(resp.FullAssignment.ReplicateConfiguration.GetClusters()))
-			for _, cluster := range resp.FullAssignment.ReplicateConfiguration.GetClusters() {
-				newIncomingReplicateClusters[cluster.GetClusterId()] = cluster.GetPchannels()
-			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
 				Version:                newIncomingVersion,
 				Assignments:            newIncomingAssignments,

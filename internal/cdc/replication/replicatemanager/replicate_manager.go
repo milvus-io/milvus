@@ -42,7 +42,7 @@ func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfigur
 	candidateClusters := make(map[string]*milvuspb.MilvusCluster)
 	for _, topology := range config.GetCrossClusterTopology() {
 		clusterID := topology.GetTargetClusterId()
-		candidateClusters[clusterID] = replicateutil.GetMilvusCluster(clusterID, config)
+		candidateClusters[clusterID] = replicateutil.MustGetMilvusCluster(clusterID, config)
 	}
 	// Add and start new cluster replicators that in candidates but not in clusterReplicators.
 	for _, cluster := range candidateClusters {

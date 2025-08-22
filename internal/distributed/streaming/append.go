@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
+	"github.com/milvus-io/milvus/internal/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -22,8 +23,9 @@ func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (s
 		return assignments.PChannelOfCChannel(), nil
 	}
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	if assignments.ReplicateConfiguration != nil {
-		pchannel = assignments.RoutePChannelByReplicate(pchannel, w.clusterID)
+	repConfig := assignments.ReplicateConfiguration
+	if repConfig != nil {
+		pchannel = replicateutil.MustGetMappingChannel(w.clusterID, pchannel, repConfig)
 	}
 	return pchannel, nil
 }
