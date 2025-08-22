@@ -113,8 +113,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	validIDs := lo.Keys(r.insertLogs)
 	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
 
+	// TODO:[GOOSE] Backup related changes: No CollectionID and schema comes from to write collection
+	// means this reader cannot read encrypted files.
+	// StoragePlugin config is wrong for backuped binlogs
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema,
-		storage.WithCollectionID(r.schema.GetCollectionID()),
 		storage.WithVersion(r.storageVersion),
 		storage.WithBufferSize(32*1024*1024),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
