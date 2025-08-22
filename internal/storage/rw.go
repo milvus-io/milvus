@@ -75,7 +75,6 @@ func (o *rwOptions) validate() error {
 	}
 	if o.collectionID == 0 {
 		log.Warn("storage config collection id is empty when init BinlogReader")
-		return nil
 		// return merr.WrapErrServiceInternal("storage config collection id is empty")
 	}
 	if o.op == OpWrite && o.uploader == nil {
