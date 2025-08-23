@@ -25,7 +25,8 @@ func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (s
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 	repConfig := assignments.ReplicateConfiguration
 	if repConfig != nil {
-		pchannel = replicateutil.MustGetMappingChannel(w.clusterID, pchannel, repConfig)
+		// TODO: sheep, build mapping instead of getting it from config each time.
+		pchannel = replicateutil.MustGetTargetChannelName(w.clusterID, pchannel, repConfig)
 	}
 	return pchannel, nil
 }

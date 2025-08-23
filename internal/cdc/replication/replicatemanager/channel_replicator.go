@@ -22,7 +22,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
@@ -52,9 +51,10 @@ var _ ChannelReplicator = (*channelReplicator)(nil)
 
 // channelReplicator is the implementation of ChannelReplicator.
 type channelReplicator struct {
-	channel string
-	walName commonpb.WALName
-	cluster *milvuspb.MilvusCluster
+	sourceChannelName string
+	targetChannelName string
+	targetCluster     *milvuspb.MilvusCluster
+	rsm               replicatestream.ReplicateStreamClientManager
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -62,25 +62,29 @@ type channelReplicator struct {
 }
 
 // NewChannelReplicator creates a new ChannelReplicator.
-func NewChannelReplicator(channel string, cluster *milvuspb.MilvusCluster) ChannelReplicator {
+func NewChannelReplicator(sourceChannelName, targetChannelName string, targetCluster *milvuspb.MilvusCluster) ChannelReplicator {
 	ctx, cancel := context.WithCancel(context.Background())
+	rsm := replicatestream.NewReplicateStreamClientManager()
 	return &channelReplicator{
-		channel:  channel,
-		cluster:  cluster,
-		ctx:      ctx,
-		cancel:   cancel,
-		lifetime: typeutil.NewLifetime(),
+		sourceChannelName: sourceChannelName,
+		targetChannelName: targetChannelName,
+		targetCluster:     targetCluster,
+		rsm:               rsm,
+		ctx:               ctx,
+		cancel:            cancel,
+		lifetime:          typeutil.NewLifetime(),
 	}
 }
 
 func (r *channelReplicator) StartReplicateChannel() {
-	logger := log.With(zap.String("cluster", r.cluster.GetClusterId()), zap.String("channel", r.channel))
+	logger := log.With(
+		zap.String("sourceChannel", r.sourceChannelName),
+		zap.String("targetChannel", r.targetChannelName),
+	)
 	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
 		logger.Warn("replicate channel already started")
 		return
 	}
-	walName := streaming.WAL().WALName()
-	r.walName = message.GetWALName(walName)
 	logger.Info("start replicate channel")
 	go func() {
 		defer r.lifetime.Done()
@@ -94,7 +98,10 @@ func (r *channelReplicator) StartReplicateChannel() {
 
 // replicateLoop starts the replicate loop.
 func (r *channelReplicator) replicateLoop() error {
-	logger := log.With(zap.String("cluster", r.cluster.GetClusterId()), zap.String("channel", r.channel))
+	logger := log.With(
+		zap.String("sourceChannel", r.sourceChannelName),
+		zap.String("targetChannel", r.targetChannelName),
+	)
 	startFrom, err := r.getReplicateStartMessageID()
 	if err != nil {
 		return err
@@ -103,14 +110,14 @@ func (r *channelReplicator) replicateLoop() error {
 	deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
 	deliverPolicy = options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
-		PChannel:       r.channel,
+		PChannel:       r.sourceChannelName,
 		DeliverPolicy:  deliverPolicy,
 		DeliverFilters: []options.DeliverFilter{},
 		MessageHandler: ch,
 	})
 	defer scanner.Close()
 
-	rsc := replicatestream.NewReplicateStreamClient(r.ctx, r.cluster, r.walName, r.channel)
+	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.targetCluster, r.targetChannelName)
 	defer rsc.Close()
 
 	for {
@@ -128,7 +135,7 @@ func (r *channelReplicator) replicateLoop() error {
 }
 
 func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, error) {
-	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.cluster)
+	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.targetCluster)
 	if err != nil {
 		return nil, err
 	}
@@ -143,13 +150,13 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 
 	var checkpoint *milvuspb.ReplicateCheckpoint
 	for _, cp := range replicateInfo.GetCheckpoints() {
-		if cp.GetSourceChannelName() == r.channel {
+		if cp.GetSourceChannelName() == r.sourceChannelName {
 			checkpoint = cp
 			break
 		}
 	}
 	if checkpoint == nil {
-		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s", r.channel, r.cluster.GetClusterId())
+		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s", r.targetChannelName, r.targetCluster.GetClusterId())
 	}
 
 	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(
@@ -157,8 +164,8 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		[]byte(checkpoint.GetReplicateMessageId().GetId()),
 	)
 	log.Info("replicate messages from position",
-		zap.String("cluster", r.cluster.GetClusterId()),
-		zap.String("channel", r.channel),
+		zap.String("sourceChannel", r.sourceChannelName),
+		zap.String("targetChannel", r.targetChannelName),
 		zap.Any("checkpoint", checkpoint),
 		zap.Any("startFromMessageID", startFrom),
 	)
@@ -166,8 +173,8 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 }
 
 func (r *channelReplicator) StopReplicateChannel() {
-	r.cancel()
 	r.lifetime.SetState(typeutil.LifetimeStateStopped)
+	r.cancel()
 	r.lifetime.Wait()
 }
 

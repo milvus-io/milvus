@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -36,9 +37,9 @@ const pendingMessageQueueLength = 128
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
-	cluster *milvuspb.MilvusCluster
-	channel string
-	walName commonpb.WALName
+	targetCluster *milvuspb.MilvusCluster
+	targetChannel string
+	walName       commonpb.WALName
 
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
 	pendingMessages MsgQueue
@@ -49,13 +50,16 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusCluster, walName commonpb.WALName, channel string) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, targetCluster *milvuspb.MilvusCluster, targetChannel string) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
-	ctx1 = contextutil.WithClusterID(ctx1, cluster.GetClusterId())
+	ctx1 = contextutil.WithClusterID(ctx1, targetCluster.GetClusterId())
+
+	walNameStr := streaming.WAL().WALName()
+	walName := message.GetWALName(walNameStr)
 
 	rs := &replicateStreamClient{
-		cluster:         cluster,
-		channel:         channel,
+		targetCluster:   targetCluster,
+		targetChannel:   targetChannel,
 		walName:         walName,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
 		ctx:             ctx1,
@@ -67,7 +71,7 @@ func NewReplicateStreamClient(ctx context.Context, cluster *milvuspb.MilvusClust
 }
 
 func (r *replicateStreamClient) startInternal() {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("targetChannel", r.targetChannel))
 
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -81,7 +85,7 @@ func (r *replicateStreamClient) startInternal() {
 			logger.Info("replicate stream client closed by ctx done")
 			return
 		default:
-			milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.cluster)
+			milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.targetCluster)
 			if err != nil {
 				logger.Warn("create milvus client failed, retry...", zap.Error(err))
 				time.Sleep(backoff.NextBackOff())
@@ -175,7 +179,7 @@ func (r *replicateStreamClient) startRecvLoop(stopCh <-chan struct{}) <-chan err
 }
 
 func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("targetChannel", r.targetChannel))
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -201,7 +205,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 }
 
 func (r *replicateStreamClient) recvLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("clusterID", r.cluster.GetClusterId()), zap.String("channel", r.channel))
+	logger := log.With(zap.String("targetChannel", r.targetChannel))
 	for {
 		select {
 		case <-r.ctx.Done():

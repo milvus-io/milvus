@@ -38,15 +38,26 @@ func mustGetClusterByPChannel(pchannel string, config *milvuspb.ReplicateConfigu
 	panic(fmt.Sprintf("pchannel %s not found in replicate configuration", pchannel))
 }
 
-func MustGetMappingChannel(targetClusterID string, sourcePChannel string, config *milvuspb.ReplicateConfiguration) string {
-	sourceCluster := mustGetClusterByPChannel(sourcePChannel, config)
+func MustGetTargetChannelName(targetClusterID string, sourceChannelName string, config *milvuspb.ReplicateConfiguration) string {
+	sourceCluster := mustGetClusterByPChannel(sourceChannelName, config)
 	targetCluster := MustGetMilvusCluster(targetClusterID, config)
 	for i, pchannel := range sourceCluster.GetPchannels() {
-		if pchannel == sourcePChannel {
+		if pchannel == sourceChannelName {
 			return targetCluster.GetPchannels()[i]
 		}
 	}
-	panic(fmt.Sprintf("source pchannel %s not found, targetPchannels: %v", sourcePChannel, targetCluster.GetPchannels()))
+	panic(fmt.Sprintf("source pchannel %s not found, targetPchannels: %v", sourceChannelName, targetCluster.GetPchannels()))
+}
+
+func MustGetSourceChannelName(sourceClusterID string, targetChannelName string, config *milvuspb.ReplicateConfiguration) string {
+	sourceCluster := MustGetMilvusCluster(sourceClusterID, config)
+	targetCluster := mustGetClusterByPChannel(targetChannelName, config)
+	for i, pchannel := range targetCluster.GetPchannels() {
+		if pchannel == targetChannelName {
+			return sourceCluster.GetPchannels()[i]
+		}
+	}
+	panic(fmt.Sprintf("target pchannel %s not found, sourcePchannels: %v", targetChannelName, sourceCluster.GetPchannels()))
 }
 
 func ConfigLogFields(config *milvuspb.ReplicateConfiguration) []zap.Field {

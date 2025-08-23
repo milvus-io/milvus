@@ -39,23 +39,23 @@ func NewReplicateManager() *replicateManager {
 }
 
 func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
-	candidateClusters := make(map[string]*milvuspb.MilvusCluster)
+	targetClusters := make(map[string]*milvuspb.MilvusCluster)
 	for _, topology := range config.GetCrossClusterTopology() {
 		clusterID := topology.GetTargetClusterId()
-		candidateClusters[clusterID] = replicateutil.MustGetMilvusCluster(clusterID, config)
+		targetClusters[clusterID] = replicateutil.MustGetMilvusCluster(clusterID, config)
 	}
-	// Add and start new cluster replicators that in candidates but not in clusterReplicators.
-	for _, cluster := range candidateClusters {
-		if _, ok := r.clusterReplicators[cluster.GetClusterId()]; ok {
+	// Add and start new cluster replicators that in targetClusters but not in clusterReplicators.
+	for _, targetCluster := range targetClusters {
+		if _, ok := r.clusterReplicators[targetCluster.GetClusterId()]; ok {
 			continue
 		}
-		clusterReplicator := NewClusterReplicator(cluster)
+		clusterReplicator := NewClusterReplicator(targetCluster, config)
 		clusterReplicator.StartReplicateCluster()
-		r.clusterReplicators[cluster.GetClusterId()] = clusterReplicator
+		r.clusterReplicators[targetCluster.GetClusterId()] = clusterReplicator
 	}
 	// Stop and remove cluster replicators that are not in the candidate clusters.
 	for clusterID, clusterReplicator := range r.clusterReplicators {
-		if _, ok := candidateClusters[clusterID]; !ok {
+		if _, ok := targetClusters[clusterID]; !ok {
 			clusterReplicator.StopReplicateCluster()
 			delete(r.clusterReplicators, clusterID)
 		}

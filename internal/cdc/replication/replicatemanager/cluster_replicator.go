@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -38,8 +40,10 @@ var _ ClusterReplicator = (*clusterReplicator)(nil)
 
 // clusterReplicator is the implementation of ClusterReplicator.
 type clusterReplicator struct {
-	cluster            *milvuspb.MilvusCluster
+	targetCluster *milvuspb.MilvusCluster
+	// channelReplicators is a map of target channel name to target ChannelReplicator.
 	channelReplicators *typeutil.ConcurrentMap[string, ChannelReplicator]
+	configuration      *milvuspb.ReplicateConfiguration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -47,21 +51,24 @@ type clusterReplicator struct {
 }
 
 // NewClusterReplicator creates a new ClusterReplicator.
-func NewClusterReplicator(cluster *milvuspb.MilvusCluster) ClusterReplicator {
+func NewClusterReplicator(targetCluster *milvuspb.MilvusCluster, configuration *milvuspb.ReplicateConfiguration) ClusterReplicator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &clusterReplicator{
 		ctx:                ctx,
 		cancel:             cancel,
-		cluster:            cluster,
+		targetCluster:      targetCluster,
 		channelReplicators: typeutil.NewConcurrentMap[string, ChannelReplicator](),
+		configuration:      configuration,
 	}
 }
 
 func (r *clusterReplicator) StartReplicateCluster() {
-	for _, channel := range r.cluster.GetPchannels() {
-		channelReplicator := NewChannelReplicator(channel, r.cluster)
+	sourceCluster := replicateutil.MustGetMilvusCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), r.configuration)
+	for _, targetChannelName := range r.targetCluster.GetPchannels() {
+		sourceChannelName := replicateutil.MustGetSourceChannelName(sourceCluster.GetClusterId(), targetChannelName, r.configuration)
+		channelReplicator := NewChannelReplicator(sourceChannelName, targetChannelName, r.targetCluster)
 		channelReplicator.StartReplicateChannel()
-		r.channelReplicators.Insert(channel, channelReplicator)
+		r.channelReplicators.Insert(targetChannelName, channelReplicator)
 	}
 	r.wg.Add(1)
 	go r.updateMetricsLoop()

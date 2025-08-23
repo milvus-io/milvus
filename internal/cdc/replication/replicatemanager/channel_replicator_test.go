@@ -17,195 +17,122 @@
 package replicatemanager
 
 import (
+	"context"
 	"testing"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
+	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func newMockPulsarMessageID() *milvuspb.MessageID {
+	msgID := pulsar.EarliestMessageID().Serialize()
+	return &milvuspb.MessageID{
+		Id:      string(msgID),
+		WALName: commonpb.WALName_Pulsar,
+	}
+}
+
 func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	mockMilvusClient := cluster.NewMockMilvusClient(t)
-	mockClusterClient := cluster.NewMockClusterClient(t)
 	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
-		Return(&milvuspb.GetReplicateInfoResponse{}, nil).Maybe()
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil).Maybe()
+		Return(&milvuspb.GetReplicateInfoResponse{
+			Checkpoints: []*milvuspb.ReplicateCheckpoint{
+				{
+					SourceChannelName:  "test-source-channel",
+					TargetChannelName:  "test-target-channel",
+					ReplicateMessageId: newMockPulsarMessageID(),
+				},
+			},
+		}, nil)
+	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)
 
+	mockClusterClient := cluster.NewMockClusterClient(t)
+	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
+		Return(mockMilvusClient, nil)
 	resource.InitForTest(t,
 		resource.OptClusterClient(mockClusterClient),
 	)
 
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Close().Return()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
+	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner)
+	streaming.SetWALForTest(wal)
+
+	rs := replicatestream.NewMockReplicateStreamClient(t)
+	rs.EXPECT().Close().Return()
+	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
+	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
+
 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-	replicator := NewChannelReplicator("test-channel", cluster)
+	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
+	replicator.(*channelReplicator).rsm = rsm
 	assert.NotNil(t, replicator)
 
 	replicator.StartReplicateChannel()
-	state := replicator.GetState()
-	assert.Equal(t, typeutil.LifetimeStateWorking, state)
-
 	replicator.StopReplicateChannel()
-	state = replicator.GetState()
+
+	state := replicator.GetState()
 	assert.Equal(t, typeutil.LifetimeStateStopped, state)
 }
 
-// func TestChannelReplicator_getReplicateStartMessageID(t *testing.T) {
-// 	// This test is skipped since the method depends on global resources
-// 	// that are not available in test environment
-// 	t.Skip("Skipping test that depends on global resources")
-// }
+func TestChannelReplicator_ReplicateError(t *testing.T) {
+	mockMilvusClient := cluster.NewMockMilvusClient(t)
+	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
+		Return(&milvuspb.GetReplicateInfoResponse{
+			Checkpoints: []*milvuspb.ReplicateCheckpoint{
+				{
+					SourceChannelName:  "test-source-channel",
+					TargetChannelName:  "test-target-channel",
+					ReplicateMessageId: newMockPulsarMessageID(),
+				},
+			},
+		}, nil)
+	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)
 
-// func TestChannelReplicator_replicateLoop(t *testing.T) {
-// 	// This test is skipped since the method depends on global resources
-// 	// that are not available in test environment
-// 	t.Skip("Skipping test that depends on global resources")
-// }
+	mockClusterClient := cluster.NewMockClusterClient(t)
+	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
+		Return(mockMilvusClient, nil)
+	resource.InitForTest(t,
+		resource.OptClusterClient(mockClusterClient),
+	)
 
-// func TestChannelReplicator_ContextCancellation(t *testing.T) {
-// 	// This test is simplified since StartReplicateChannel depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
+	var handlerCh adaptor.ChanMessageHandler
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Close().Return()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
+	wal.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, opts streaming.ReadOption) streaming.Scanner {
+		handlerCh = opts.MessageHandler.(adaptor.ChanMessageHandler)
+		return scanner
+	})
+	streaming.SetWALForTest(wal)
 
-// 	// Stop replication directly
-// 	replicator.StopReplicateChannel()
+	rs := replicatestream.NewMockReplicateStreamClient(t)
+	rs.EXPECT().Replicate(mock.Anything).Return(assert.AnError)
+	rs.EXPECT().Close().Return()
+	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
+	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
 
-// 	// Verify state
-// 	state := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateStopped, state)
-// }
+	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
+	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
+	replicator.(*channelReplicator).rsm = rsm
+	assert.NotNil(t, replicator)
 
-// func TestChannelReplicator_ConcurrentOperations(t *testing.T) {
-// 	// This test is simplified since StartReplicateChannel depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
-
-// 	// Test concurrent access to GetState
-// 	done := make(chan bool, 2)
-
-// 	go func() {
-// 		state := replicator.GetState()
-// 		// State could be either Working or Stopped depending on timing
-// 		assert.True(t, state == typeutil.LifetimeStateWorking || state == typeutil.LifetimeStateStopped)
-// 		done <- true
-// 	}()
-
-// 	go func() {
-// 		replicator.StopReplicateChannel()
-// 		done <- true
-// 	}()
-
-// 	// Wait for all goroutines to complete
-// 	for i := 0; i < 2; i++ {
-// 		<-done
-// 	}
-
-// 	// Verify final state
-// 	state := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateStopped, state)
-// }
-
-// func TestChannelReplicator_EdgeCases(t *testing.T) {
-// 	tests := []struct {
-// 		name      string
-// 		channel   string
-// 		cluster   *milvuspb.MilvusCluster
-// 		expectNil bool
-// 	}{
-// 		{
-// 			name:      "empty channel",
-// 			channel:   "",
-// 			cluster:   &milvuspb.MilvusCluster{ClusterId: "test-cluster"},
-// 			expectNil: false,
-// 		},
-// 		{
-// 			name:      "nil cluster",
-// 			channel:   "test-channel",
-// 			cluster:   nil,
-// 			expectNil: false,
-// 		},
-// 		{
-// 			name:      "empty cluster ID",
-// 			channel:   "test-channel",
-// 			cluster:   &milvuspb.MilvusCluster{ClusterId: ""},
-// 			expectNil: false,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			replicator := NewChannelReplicator(tt.channel, tt.cluster)
-
-// 			if tt.expectNil {
-// 				assert.Nil(t, replicator)
-// 			} else {
-// 				assert.NotNil(t, replicator)
-// 				assert.Equal(t, tt.channel, replicator.(*channelReplicator).channel)
-// 				assert.Equal(t, tt.cluster, replicator.(*channelReplicator).cluster)
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestChannelReplicator_MessageHandling(t *testing.T) {
-// 	// This test is simplified since message handling depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
-
-// 	// Test basic functionality without starting replication
-// 	assert.NotNil(t, replicator)
-// 	state := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateWorking, state)
-
-// 	// Clean up
-// 	replicator.StopReplicateChannel()
-// }
-
-// func TestChannelReplicator_ErrorRecovery(t *testing.T) {
-// 	// This test is simplified since StartReplicateChannel depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
-
-// 	// Test basic state transitions
-// 	initialState := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateWorking, initialState)
-
-// 	// Stop replication
-// 	replicator.StopReplicateChannel()
-// 	stoppedState := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateStopped, stoppedState)
-// }
-
-// func TestChannelReplicator_ResourceCleanup(t *testing.T) {
-// 	// This test is simplified since StartReplicateChannel depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
-
-// 	// Test resource cleanup without starting replication
-// 	replicator.StopReplicateChannel()
-
-// 	// Verify final state
-// 	state := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateStopped, state)
-// }
-
-// func TestChannelReplicator_Integration(t *testing.T) {
-// 	// This test is simplified since StartReplicateChannel depends on global resources
-// 	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
-// 	replicator := NewChannelReplicator("test-channel", cluster)
-
-// 	// Test basic lifecycle without starting replication
-// 	initialState := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateWorking, initialState)
-
-// 	// Stop replication
-// 	replicator.StopReplicateChannel()
-// 	finalState := replicator.GetState()
-// 	assert.Equal(t, typeutil.LifetimeStateStopped, finalState)
-
-// 	// Verify lifecycle management
-// 	replicator.(*channelReplicator).lifetime.Wait()
-// }
+	assert.Panics(t, func() {
+		handlerCh <- nil // trigger replicate
+		replicator.StartReplicateChannel()
+	})
+}

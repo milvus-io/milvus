@@ -9,7 +9,7 @@ import (
 func GetWALName(name string) commonpb.WALName {
 	walName, ok := commonpb.WALName_value[name]
 	if !ok {
-		panic(fmt.Sprintf("invalid wal name: %s", walName))
+		panic(fmt.Sprintf("invalid wal name: %s", name))
 	}
 	return commonpb.WALName(walName)
 }
