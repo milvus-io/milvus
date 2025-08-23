@@ -78,6 +78,7 @@ packages:
       Manager:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
+      ReplicationCatalog:
       StreamingCoordCataLog:
       StreamingNodeCataLog:
   github.com/milvus-io/milvus/internal/util/segcore:

@@ -46,6 +46,20 @@ func OptReplicateManagerClient(replicateManagerClient replication.ReplicateManag
 	}
 }
 
+// OptReplicationCatalog provides the replication catalog to the resource.
+func OptReplicationCatalog(catalog metastore.ReplicationCatalog) optResourceInit {
+	return func(r *resourceImpl) {
+		r.catalog = catalog
+	}
+}
+
+// OptClusterClient provides the cluster client to the resource.
+func OptClusterClient(clusterClient cluster.ClusterClient) optResourceInit {
+	return func(r *resourceImpl) {
+		r.clusterClient = clusterClient
+	}
+}
+
 // OptController provides the controller to the resource.
 func OptController(controller controller.Controller) optResourceInit {
 	return func(r *resourceImpl) {

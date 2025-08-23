@@ -19,33 +19,18 @@ package cluster
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
-type ClusterClient interface {
-	CreateMilvusClient(ctx context.Context, cluster *milvuspb.MilvusCluster) (MilvusClient, error)
-}
-
-var _ ClusterClient = (*clusterClient)(nil)
-
-type clusterClient struct{}
-
-func NewClusterClient() ClusterClient {
-	return &clusterClient{}
-}
-
-func (c *clusterClient) CreateMilvusClient(ctx context.Context, cluster *milvuspb.MilvusCluster) (MilvusClient, error) {
-	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
-		Address: cluster.GetConnectionParam().GetUri(),
-		APIKey:  cluster.GetConnectionParam().GetToken(),
-	})
-	if err != nil {
-		log.Warn("failed to create milvus client", zap.Error(err))
-		return nil, err
-	}
-	return cli, nil
+type MilvusClient interface {
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) error
+	// GetReplicateInfo gets the replicate information from the milvus cluster.
+	GetReplicateInfo(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)
+	// CreateReplicateStream creates a replicate stream to the milvus cluster.
+	CreateReplicateStream(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error)
+	// Close closes the milvus client.
+	Close(ctx context.Context) error
 }

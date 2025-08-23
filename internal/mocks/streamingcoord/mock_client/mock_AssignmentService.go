@@ -5,8 +5,10 @@ package mock_client
 import (
 	context "context"
 
-	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mock "github.com/stretchr/testify/mock"
+
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
@@ -129,6 +131,64 @@ func (_c *MockAssignmentService_GetLatestAssignments_Call) RunAndReturn(run func
 	return _c
 }
 
+// GetReplicateConfiguration provides a mock function with given fields: ctx
+func (_m *MockAssignmentService) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateConfiguration")
+	}
+
+	var r0 *milvuspb.ReplicateConfiguration
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ReplicateConfiguration, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ReplicateConfiguration); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ReplicateConfiguration)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAssignmentService_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
+type MockAssignmentService_GetReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// GetReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockAssignmentService_Expecter) GetReplicateConfiguration(ctx interface{}) *MockAssignmentService_GetReplicateConfiguration_Call {
+	return &MockAssignmentService_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", ctx)}
+}
+
+func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Run(run func(ctx context.Context)) *MockAssignmentService_GetReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Return(_a0 *milvuspb.ReplicateConfiguration, _a1 error) *MockAssignmentService_GetReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAssignmentService_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*milvuspb.ReplicateConfiguration, error)) *MockAssignmentService_GetReplicateConfiguration_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReportAssignmentError provides a mock function with given fields: ctx, pchannel, err
 func (_m *MockAssignmentService) ReportAssignmentError(ctx context.Context, pchannel types.PChannelInfo, err error) error {
 	ret := _m.Called(ctx, pchannel, err)
@@ -173,6 +233,53 @@ func (_c *MockAssignmentService_ReportAssignmentError_Call) Return(_a0 error) *M
 }
 
 func (_c *MockAssignmentService_ReportAssignmentError_Call) RunAndReturn(run func(context.Context, types.PChannelInfo, error) error) *MockAssignmentService_ReportAssignmentError_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
+func (_m *MockAssignmentService) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+	ret := _m.Called(ctx, config)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReplicateConfiguration")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateConfiguration) error); ok {
+		r0 = rf(ctx, config)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAssignmentService_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
+type MockAssignmentService_UpdateReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// UpdateReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+//   - config *milvuspb.ReplicateConfiguration
+func (_e *MockAssignmentService_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockAssignmentService_UpdateReplicateConfiguration_Call {
+	return &MockAssignmentService_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
+}
+
+func (_c *MockAssignmentService_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *milvuspb.ReplicateConfiguration)) *MockAssignmentService_UpdateReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateConfiguration))
+	})
+	return _c
+}
+
+func (_c *MockAssignmentService_UpdateReplicateConfiguration_Call) Return(_a0 error) *MockAssignmentService_UpdateReplicateConfiguration_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAssignmentService_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateConfiguration) error) *MockAssignmentService_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

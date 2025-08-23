@@ -536,6 +536,9 @@ generate-mockery-pkg:
 generate-mockery-internal: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/.mockery.yaml
 
+generate-mockery-cdc: getdeps
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
+
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
 
 generate-yaml: milvus-tools

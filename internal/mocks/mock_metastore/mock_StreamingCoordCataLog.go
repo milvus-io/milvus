@@ -5,6 +5,8 @@ package mock_metastore
 import (
 	context "context"
 
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -77,6 +79,64 @@ func (_c *MockStreamingCoordCataLog_GetCChannel_Call) Return(_a0 *streamingpb.CC
 }
 
 func (_c *MockStreamingCoordCataLog_GetCChannel_Call) RunAndReturn(run func(context.Context) (*streamingpb.CChannelMeta, error)) *MockStreamingCoordCataLog_GetCChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetReplicateConfiguration provides a mock function with given fields: ctx
+func (_m *MockStreamingCoordCataLog) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateConfiguration")
+	}
+
+	var r0 *milvuspb.ReplicateConfiguration
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ReplicateConfiguration, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ReplicateConfiguration); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ReplicateConfiguration)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingCoordCataLog_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
+type MockStreamingCoordCataLog_GetReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// GetReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockStreamingCoordCataLog_Expecter) GetReplicateConfiguration(ctx interface{}) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
+	return &MockStreamingCoordCataLog_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", ctx)}
+}
+
+func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) Run(run func(ctx context.Context)) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) Return(_a0 *milvuspb.ReplicateConfiguration, _a1 error) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*milvuspb.ReplicateConfiguration, error)) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -393,6 +453,53 @@ func (_c *MockStreamingCoordCataLog_SavePChannels_Call) Return(_a0 error) *MockS
 }
 
 func (_c *MockStreamingCoordCataLog_SavePChannels_Call) RunAndReturn(run func(context.Context, []*streamingpb.PChannelMeta) error) *MockStreamingCoordCataLog_SavePChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveReplicateConfiguration provides a mock function with given fields: ctx, config
+func (_m *MockStreamingCoordCataLog) SaveReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+	ret := _m.Called(ctx, config)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveReplicateConfiguration")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateConfiguration) error); ok {
+		r0 = rf(ctx, config)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingCoordCataLog_SaveReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveReplicateConfiguration'
+type MockStreamingCoordCataLog_SaveReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// SaveReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+//   - config *milvuspb.ReplicateConfiguration
+func (_e *MockStreamingCoordCataLog_Expecter) SaveReplicateConfiguration(ctx interface{}, config interface{}) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
+	return &MockStreamingCoordCataLog_SaveReplicateConfiguration_Call{Call: _e.mock.On("SaveReplicateConfiguration", ctx, config)}
+}
+
+func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) Run(run func(ctx context.Context, config *milvuspb.ReplicateConfiguration)) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateConfiguration))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) Return(_a0 error) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateConfiguration) error) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
