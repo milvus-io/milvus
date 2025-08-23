@@ -248,7 +248,7 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 		return schemapb.DataType_Double, nil
 	default:
 		rt := npyio.TypeFrom(typeStr)
-		if rt == reflect.TypeOf((*string)(nil)).Elem() {
+		if rt == reflect.TypeFor[string]() {
 			// Note: JSON field and VARCHAR field are using string type numpy
 			return schemapb.DataType_VarChar, nil
 		}
