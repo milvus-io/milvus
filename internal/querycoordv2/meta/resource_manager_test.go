@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -221,6 +222,16 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	// RemoveResourceGroup will remove all nodes from the resource group.
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
 	suite.NoError(err)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   10,
+		Address:  "localhost",
+		Hostname: "localhost",
+		Labels: map[string]string{
+			sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+		},
+	}))
+	suite.manager.HandleNodeUp(ctx, 10)
 }
 
 func (suite *ResourceManagerSuite) TestNodeUpAndDown() {

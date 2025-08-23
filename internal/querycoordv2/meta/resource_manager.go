@@ -469,6 +469,9 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 }
 
 func (rm *ResourceManager) handleNodeUp(ctx context.Context, node int64) {
+	if nodeInfo := rm.nodeMgr.Get(node); nodeInfo == nil || nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+		return
+	}
 	rm.incomingNode.Insert(node)
 	// Trigger assign incoming node right away.
 	// error can be ignored here, because `AssignPendingIncomingNode`` will retry assign node.
@@ -1019,6 +1022,9 @@ func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
 				rm.handleNodeDown(ctx, node)
 			} else if info.GetState() == session.NodeStateStopping {
 				log.Warn("node is stopping", zap.Int64("node", node))
+				rm.handleNodeStopping(ctx, node)
+			} else if info.IsEmbeddedQueryNodeInStreamingNode() {
+				log.Warn("unreachable code, but just for dirty meta clean up", zap.Int64("node", node))
 				rm.handleNodeStopping(ctx, node)
 			}
 		}
