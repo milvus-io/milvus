@@ -181,7 +181,7 @@ func TestBalancer(t *testing.T) {
 	assert.False(t, f.Ready())
 
 	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
-	err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+	resp, err := b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: false,
 		},
@@ -191,6 +191,8 @@ func TestBalancer(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{1}, resp.FreezeNodeIds)
+	assert.False(t, resp.Config.AllowRebalance)
 	assert.False(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
 	b.Trigger(ctx)
 	err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
@@ -203,7 +205,7 @@ func TestBalancer(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, doneErr)
 
-	err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: true,
 		},
@@ -211,11 +213,12 @@ func TestBalancer(t *testing.T) {
 			Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance},
 		},
 	})
+	assert.True(t, resp.Config.AllowRebalance)
 	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
 	assert.NoError(t, err)
 	b.Trigger(ctx)
 
-	err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: false,
 		},
@@ -227,6 +230,8 @@ func TestBalancer(t *testing.T) {
 			DefreezeNodeIds: []int64{1},
 		},
 	})
+	assert.True(t, resp.Config.AllowRebalance)
+	assert.Empty(t, resp.FreezeNodeIds)
 	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
 	assert.NoError(t, err)
 	b.Trigger(ctx)

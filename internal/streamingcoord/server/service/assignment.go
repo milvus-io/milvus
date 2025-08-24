@@ -54,8 +54,5 @@ func (s *assignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req 
 		return nil, err
 	}
 
-	if err = balancer.UpdateBalancePolicy(ctx, req); err != nil {
-		return nil, err
-	}
-	return &streamingpb.UpdateWALBalancePolicyResponse{}, nil
+	return balancer.UpdateBalancePolicy(ctx, req)
 }

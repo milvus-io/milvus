@@ -6,4 +6,7 @@ const (
 	UpdateMaskPathWALBalancePolicyAllowRebalance = "config.allow_rebalance"
 )
 
-type UpdateWALBalancePolicyRequest = streamingpb.UpdateWALBalancePolicyRequest
+type (
+	UpdateWALBalancePolicyRequest  = streamingpb.UpdateWALBalancePolicyRequest
+	UpdateWALBalancePolicyResponse = streamingpb.UpdateWALBalancePolicyResponse
+)
