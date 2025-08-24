@@ -294,7 +294,7 @@ type LocalSegment struct {
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
-	fieldJSONStats     []int64
+	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
 }
 
 func NewSegment(ctx context.Context,
@@ -361,6 +361,7 @@ func NewSegment(ctx context.Context,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
 		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
@@ -1135,29 +1136,27 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 	defer s.ptrLock.Unpin()
 
-	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
+	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		log.Ctx(ctx).Warn("load json key index failed, json key stats is not enabled")
+		return nil
+	}
+
+	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
+
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-	exists := false
-	for _, field := range s.fieldJSONStats {
-		if field == jsonKeyStats.GetFieldID() {
-			exists = true
-			break
-		}
-	}
-	if exists {
-		log.Warn("JsonKeyIndexStats already loaded")
+	if info, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok && info.GetDataFormatVersion() >= common.JSONStatsDataFormatVersion {
+		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
+
 	f, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
 	if err != nil {
 		return err
 	}
 
-	// Json key stats index mmap config is based on the raw data mmap.
-	enableMmap := isDataMmapEnable(f)
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),
 		Version:      jsonKeyStats.GetVersion(),
@@ -1167,7 +1166,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
 		LoadPriority: s.loadInfo.Load().GetPriority(),
-		EnableMmap:   enableMmap,
+		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
+		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1181,7 +1181,13 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
 		return nil, nil
 	}).Await()
-	s.fieldJSONStats = append(s.fieldJSONStats, jsonKeyStats.GetFieldID())
+
+	s.fieldJSONStats[jsonKeyStats.GetFieldID()] = &querypb.JsonStatsInfo{
+		FieldID:           jsonKeyStats.GetFieldID(),
+		DataFormatVersion: jsonKeyStats.GetJsonKeyStatsDataFormat(),
+		BuildID:           jsonKeyStats.GetBuildID(),
+		VersionID:         jsonKeyStats.GetVersion(),
+	}
 	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
 }
 
@@ -1394,6 +1400,6 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
 }
 
-func (s *LocalSegment) GetFieldJSONIndexStats() []int64 {
+func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return s.fieldJSONStats
 }

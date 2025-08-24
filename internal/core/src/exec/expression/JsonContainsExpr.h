@@ -82,7 +82,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsByKeyIndex();
+    ExecJsonContainsByStats();
 
     template <typename ExprValueType>
     VectorPtr
@@ -94,7 +94,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsAllByKeyIndex();
+    ExecJsonContainsAllByStats();
 
     template <typename ExprValueType>
     VectorPtr
@@ -104,25 +104,25 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     ExecJsonContainsArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsArrayByKeyIndex();
+    ExecJsonContainsArrayByStats();
 
     VectorPtr
     ExecJsonContainsAllArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllArrayByKeyIndex();
+    ExecJsonContainsAllArrayByStats();
 
     VectorPtr
     ExecJsonContainsAllWithDiffType(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllWithDiffTypeByKeyIndex();
+    ExecJsonContainsAllWithDiffTypeByStats();
 
     VectorPtr
     ExecJsonContainsWithDiffType(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsWithDiffTypeByKeyIndex();
+    ExecJsonContainsWithDiffTypeByStats();
 
     VectorPtr
     EvalArrayContainsForIndexSegment(DataType data_type);
@@ -131,10 +131,17 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContainsForIndexSegmentImpl();
 
+    void
+    ExecuteSharedArrayFilterWithExecutor(
+        const std::string& pointer,
+        const std::function<bool(milvus::BsonView, uint32_t, uint32_t)>&
+            shared_executor);
+
  private:
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<MultiElement> arg_set_double_;
 };
 }  //namespace exec
 }  // namespace milvus

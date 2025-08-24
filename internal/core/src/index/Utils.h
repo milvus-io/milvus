@@ -201,6 +201,11 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config);
 
+// for unused
+void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {
+    ThrowInfo(ErrorCode::UnexpectedError, "SetBitsetUnused is not supported");
+}
+
 // For sealed segment, the doc_id is guaranteed to be less than bitset size which equals to the doc count of tantivy before querying.
 void inline SetBitsetSealed(void* bitset, const uint32_t* doc_id, uintptr_t n) {
     TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);

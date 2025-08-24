@@ -64,10 +64,6 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
-func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
-	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
-}
-
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

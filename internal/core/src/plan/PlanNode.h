@@ -431,8 +431,7 @@ class CountNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("VectorSearchNode:\n\t[source node:{}]",
-                           SourceToString());
+        return fmt::format("CountNode:\n\t[source node:{}]", SourceToString());
     }
 
  private:
@@ -445,7 +444,9 @@ class RescoresNode : public PlanNode {
         const PlanNodeId& id,
         const std::vector<std::shared_ptr<rescores::Scorer>> scorers,
         const std::vector<PlanNodePtr>& sources = std::vector<PlanNodePtr>{})
-        : PlanNode(id), scorers_(std::move(scorers)), sources_{std::move(sources)} {
+        : PlanNode(id),
+          scorers_(std::move(scorers)),
+          sources_{std::move(sources)} {
     }
 
     DataType

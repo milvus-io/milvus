@@ -79,8 +79,8 @@ class OpenDALChunkManager : public ChunkManager {
         return remote_root_path_;
     }
 
-    virtual std::string
-    GetBucketName() const {
+    std::string
+    GetBucketName() const override {
         return default_bucket_name_;
     }
 

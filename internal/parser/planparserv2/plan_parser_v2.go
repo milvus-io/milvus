@@ -13,9 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -26,6 +28,23 @@ var (
 		expr:     alwaysTrueExpr(),
 	}
 )
+
+type ExprParams struct {
+	UseJSONStats bool
+}
+
+func ParseExprParams(vals map[string]*schemapb.TemplateValue) *ExprParams {
+	ep := &ExprParams{
+		UseJSONStats: paramtable.Get().CommonCfg.UsingJSONStatsForQuery.GetAsBool(),
+	}
+
+	if vals != nil {
+		if v, ok := vals[common.ExprUseJSONStatsKey]; ok && v != nil {
+			ep.UseJSONStats = v.GetBoolVal()
+		}
+	}
+	return ep
+}
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	val, ok := exprCache.Get(exprStr)
@@ -149,11 +168,16 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 		return nil, err
 	}
 
+	exprParams := ParseExprParams(exprTemplateValues)
+
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_Query{
 			Query: &planpb.QueryPlanNode{
 				Predicates: expr,
 			},
+		},
+		PlanOptions: &planpb.PlanOption{
+			ExprUseJsonStats: exprParams.UseJSONStats,
 		},
 	}
 	return planNode, nil
@@ -222,6 +246,8 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		return nil, fmt.Errorf("don't support use segment scorer with group_by or search_iterator")
 	}
 
+	exprParams := ParseExprParams(exprTemplateValues)
+
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{
 			VectorAnns: &planpb.VectorANNS{
@@ -233,6 +259,9 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 			},
 		},
 		Scorers: scorers,
+		PlanOptions: &planpb.PlanOption{
+			ExprUseJsonStats: exprParams.UseJSONStats,
+		},
 	}
 	return planNode, nil
 }

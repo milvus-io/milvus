@@ -56,6 +56,7 @@ constexpr const char* NGRAM_INDEX_TYPE = "NGRAM";
 constexpr const char* MIN_GRAM = "min_gram";
 constexpr const char* MAX_GRAM = "max_gram";
 
+constexpr const char* JSON_KEY_STATS_INDEX_TYPE = "JsonKeyStats";
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";
 constexpr const char* PARTITION_ID = "partition_id";
