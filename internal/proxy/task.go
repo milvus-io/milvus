@@ -400,6 +400,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if hasGeometryField(t.schema) {
+		return merr.WrapErrParameterInvalidMsg("geometry field is not supported")
+	}
+
 	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
