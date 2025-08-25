@@ -109,7 +109,7 @@ class ReduceHelper {
     // Used for merge results,
     // define these here to avoid allocating them for each query
     std::vector<SearchResultPair> pairs_;
-    std::unordered_set<milvus::PkType> pk_set_;
+    // std::unordered_set<milvus::PkType> pk_set_;  // Removed: No longer doing primary key deduplication
     // dim0: num_segments_; dim1: total_nq_; dim2: offset
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     std::vector<int64_t> slice_nqs_;
