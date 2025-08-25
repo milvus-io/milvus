@@ -100,6 +100,9 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	var embP textEmbeddingProvider
 	var newProviderErr error
 	conf := paramtable.Get().FunctionCfg.GetTextEmbeddingProviderConfig(base.provider)
+	if !models.IsEnable(conf) {
+		return nil, fmt.Errorf("Text embedding model provider [%s] is disabled", base.provider)
+	}
 	credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 	switch base.provider {
 	case openAIProvider:

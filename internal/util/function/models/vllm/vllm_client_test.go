@@ -20,39 +20,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 func TestNewClient(t *testing.T) {
-	{
-		_, err := NewVLLMClient("mock_key", "http://localhost", "true")
-		assert.True(t, err == nil)
-	}
-	{
-		_, err := NewVLLMClient("mock_key", "http://localhost", "false")
-		assert.True(t, err != nil)
-	}
-	{
-		_, err := NewVLLMClient("mock_key", "http://localhost", "")
-		assert.True(t, err == nil)
-	}
-	{
-		os.Setenv(models.EnableVllmEnvStr, "true")
-		defer os.Unsetenv(models.EnableVllmEnvStr)
-		_, err := NewVLLMClient("mock_key", "http://localhost", "")
-		assert.True(t, err == nil)
-	}
-	{
-		os.Setenv(models.EnableVllmEnvStr, "false")
-		defer os.Unsetenv(models.EnableVllmEnvStr)
-		_, err := NewVLLMClient("mock_key", "http://localhost", "")
-		assert.True(t, err != nil)
-	}
+	_, err := NewVLLMClient("mock_key", "http://localhost")
+	assert.True(t, err == nil)
 }
 
 func TestEmbeddingOK(t *testing.T) {
@@ -87,7 +62,7 @@ func TestEmbeddingOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, err := NewVLLMClient("mock_key", url, "")
+		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
 		r, err := c.Embedding([]string{"sentence"}, nil, 0)
 		assert.NoError(t, err)
@@ -103,7 +78,7 @@ func TestEmbeddingFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, err := NewVLLMClient("mock_key", url, "")
+		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
 		_, err = c.Embedding([]string{"sentence"}, nil, 0)
 		assert.Error(t, err)
@@ -154,7 +129,7 @@ func TestRerankOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, err := NewVLLMClient("mock_key", url, "")
+		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
 		r, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.NoError(t, err)
@@ -175,7 +150,7 @@ func TestRerankFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, err := NewVLLMClient("mock_key", url, "")
+		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
 		_, err = c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.Error(t, err)
