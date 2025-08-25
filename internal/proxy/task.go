@@ -352,33 +352,31 @@ func (t *createCollectionTask) handleNamespaceProperty() error {
 	}
 
 	hasIsolation := hasIsolationProperty(t.GetProperties()...)
-	if hasIsolation {
-		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
-			"isolation property is not supported with namespace field")
-	}
-
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	enabled, has, err := parseNamespaceProp(t.GetProperties()...)
 	if err != nil {
 		return err
 	}
 
-	if !has {
+	if !has || !enabled {
 		return nil
 	}
 
-	if enabled && hasPartitionKey {
+	if hasIsolation {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"isolation property is not supported with namespace enabled")
+	}
+
+	if hasPartitionKey {
 		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
 	}
 
-	if enabled {
-		addNamespaceField(t.schema)
-		addIsolationProperty(t.schema)
-		log.Ctx(t.TraceCtx()).Info("added namespace field",
-			zap.String("collectionName", t.schema.Name),
-			zap.String("fieldName", common.NamespaceFieldName))
+	addNamespaceField(t.schema)
+	addIsolationProperty(t.schema)
+	log.Ctx(t.TraceCtx()).Info("added namespace field",
+		zap.String("collectionName", t.schema.Name),
+		zap.String("fieldName", common.NamespaceFieldName))
 
-	}
 	return nil
 }
 
