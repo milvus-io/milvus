@@ -40,7 +40,7 @@ void
 ResizeTheadPool(int64_t priority, float ratio);
 
 CStatus
-InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads);
+InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
 #ifdef __cplusplus
 };

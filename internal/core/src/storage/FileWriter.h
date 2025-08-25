@@ -16,23 +16,199 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <chrono>
+#include <cstring>
+#include <fcntl.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstring>
 #include <thread>
-#include <folly/executors/CPUThreadPoolExecutor.h>
-#include <folly/executors/SerialExecutor.h>
+#include <unistd.h>
 
 #include "common/EasyAssert.h"
-#include "storage/PayloadWriter.h"
+#include "log/Log.h"
+#include "pb/common.pb.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
+
+namespace io {
+enum class Priority { HIGH = 0, MIDDLE = 1, LOW = 2, NR_PRIORITY = 3 };
+
+inline Priority
+GetPriorityFromLoadPriority(milvus::proto::common::LoadPriority priority) {
+    return priority == milvus::proto::common::LoadPriority::HIGH
+               ? io::Priority::HIGH
+               : io::Priority::LOW;
+}
+
+class WriteRateLimiter {
+ public:
+    static WriteRateLimiter&
+    GetInstance() {
+        static WriteRateLimiter instance;
+        return instance;
+    }
+
+    void
+    Configure(int64_t refill_period_us,
+              int64_t avg_bps,
+              int64_t max_burst_bps,
+              int32_t high_priority_ratio,
+              int32_t middle_priority_ratio,
+              int32_t low_priority_ratio) {
+        if (refill_period_us <= 0 || avg_bps <= 0 || max_burst_bps <= 0 ||
+            avg_bps > max_burst_bps) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "All parameters must be positive, but got: "
+                      "refill_period_us: {}, "
+                      "avg_bps: {}, max_burst_bps: {}",
+                      refill_period_us,
+                      avg_bps,
+                      max_burst_bps);
+        }
+        std::unique_lock<std::mutex> lock(mutex_);
+        // avoid too small refill period, 1ms is used as the minimum refill period
+        refill_period_us_ = std::max<int64_t>(1000, refill_period_us);
+        refill_bytes_per_period_ = avg_bps * refill_period_us_ / 1000000;
+        if (refill_bytes_per_period_ <= 0) {
+            refill_bytes_per_period_ = 1;
+        }
+        expire_periods_ = max_burst_bps * refill_period_us_ / 1000000 /
+                          refill_bytes_per_period_;
+        if (expire_periods_ <= 0) {
+            expire_periods_ = 1;
+        }
+        available_bytes_ = 0;
+        last_refill_time_ = std::chrono::steady_clock::now();
+        priority_ratio_ = {
+            high_priority_ratio, middle_priority_ratio, low_priority_ratio};
+        LOG_INFO(
+            "Disk rate limiter configured with refill_period_us: {}, "
+            "refill_bytes_per_period: {},avg_bps: {}, max_burst_bps: {}, "
+            "expire_periods: {}, high_priority_ratio: {}, "
+            "middle_priority_ratio: {}, low_priority_ratio: {}",
+            refill_period_us_,
+            refill_bytes_per_period_,
+            avg_bps,
+            max_burst_bps,
+            expire_periods_,
+            high_priority_ratio,
+            middle_priority_ratio,
+            low_priority_ratio);
+    }
+
+    size_t
+    Acquire(size_t bytes,
+            size_t alignment_bytes = 1,
+            Priority priority = Priority::MIDDLE) {
+        if (static_cast<int>(priority) >=
+            static_cast<int>(Priority::NR_PRIORITY)) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "Invalid priority value: {}",
+                      static_cast<int>(priority));
+        }
+        // if priority ratio is <= 0, no rate limit is applied, return the original bytes
+        if (priority_ratio_[static_cast<int>(priority)] <= 0) {
+            return bytes;
+        }
+        AssertInfo(alignment_bytes > 0 && bytes >= alignment_bytes &&
+                       (bytes % alignment_bytes == 0),
+                   "alignment_bytes must be positive and bytes must be "
+                   "divisible by alignment_bytes");
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        // recheck the amplification ratio after taking the lock
+        auto amplification_ratio = priority_ratio_[static_cast<int>(priority)];
+        if (amplification_ratio <= 0) {
+            return bytes;
+        }
+
+        // calculate the available bytes by delta periods
+        std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now();
+        // steady_clock is monotonic, so the time delta is always >= 0
+        auto delta_periods = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                now - last_refill_time_)
+                .count() /
+            refill_period_us_);
+        // early return if the time delta is less than the refill period and
+        // the available bytes is less than the alignment bytes
+        if (delta_periods == 0 && available_bytes_ < alignment_bytes) {
+            return 0;
+        }
+        if (delta_periods > expire_periods_) {
+            available_bytes_ += expire_periods_ * refill_bytes_per_period_;
+        } else {
+            available_bytes_ += delta_periods * refill_bytes_per_period_;
+        }
+        // keep the available bytes in the range of [0, refill_bytes_per_period_ * expire_periods_]
+        available_bytes_ = std::min(
+            available_bytes_,
+            static_cast<size_t>(refill_bytes_per_period_ * expire_periods_));
+
+        // calculate the allowed bytes with amplification ratio
+        auto ret = std::min(bytes, available_bytes_ * amplification_ratio);
+        // align the allowed bytes to the alignment bytes
+        ret = (ret / alignment_bytes) * alignment_bytes;
+        // update available_bytes_ by removing the amplification ratio, the updated value is always >= 0
+        available_bytes_ -= ret / amplification_ratio;
+
+        // update the last refill time only if delta_periods > 0
+        if (delta_periods > 0) {
+            last_refill_time_ = now;
+        }
+
+        return ret;
+    }
+
+    size_t
+    GetRateLimitPeriod() const {
+        return refill_period_us_;
+    }
+
+    size_t
+    GetBytesPerPeriod() const {
+        return refill_bytes_per_period_;
+    }
+
+    void
+    Reset() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        available_bytes_ = refill_bytes_per_period_;
+        last_refill_time_ = std::chrono::steady_clock::now();
+    }
+
+    WriteRateLimiter(const WriteRateLimiter&) = delete;
+    WriteRateLimiter&
+    operator=(const WriteRateLimiter&) = delete;
+
+    ~WriteRateLimiter() = default;
+
+ private:
+    WriteRateLimiter() = default;
+
+    // Set the default rate limit to a valid, reasonable value.
+    // These values should always be overridden by the yaml configuration, but
+    // if not, the default can still serve as a reasonable "no-limit" fallback.
+    int64_t refill_period_us_ = 100000;                       // 100ms
+    int64_t refill_bytes_per_period_ = 1024ll * 1024 * 1024;  // 1GB
+    int32_t expire_periods_ = 10;                             // 10 periods
+    std::chrono::steady_clock::time_point last_refill_time_ =
+        std::chrono::steady_clock::now();
+    size_t available_bytes_ = 0;
+    std::array<int32_t, 3> priority_ratio_ = {-1, -1, -1};
+    std::mutex mutex_;
+};
+
+}  // namespace io
 
 /**
  * FileWriter is a class that sequentially writes data to new files, designed specifically for saving temporary data downloaded from remote storage.
@@ -42,7 +218,7 @@ namespace milvus::storage {
  *
  * The basic usage is:
  *
- * auto file_writer = FileWriter("path/to/file");
+ * auto file_writer = FileWriter("path/to/file", io::Priority::MIDDLE);
  * file_writer.Write(data, size);
  * ...
  * file_writer.Write(data, size);
@@ -57,8 +233,12 @@ class FileWriter {
     static constexpr size_t MAX_BUFFER_SIZE = 64 * 1024 * 1024;  // 64MB
     static constexpr size_t MIN_BUFFER_SIZE = 4 * 1024;          // 4KB
     static constexpr size_t DEFAULT_BUFFER_SIZE = 64 * 1024;     // 64KB
+    // for rate limiter
+    static constexpr int MAX_EMPTY_LOOPS = 20;
+    static constexpr int64_t MAX_WAIT_US = 5000000;  // 5s
 
-    explicit FileWriter(std::string filename);
+    explicit FileWriter(std::string filename,
+                        io::Priority priority = io::Priority::MIDDLE);
 
     ~FileWriter();
 
@@ -120,6 +300,10 @@ class FileWriter {
         mode_;  // The write mode, which can be 'buffered' (default) or 'direct'.
     static size_t
         buffer_size_;  // The buffer size used for direct I/O, which is only used when the write mode is 'direct'.
+
+    // for rate limiter
+    io::Priority priority_;
+    io::WriteRateLimiter& rate_limiter_;
 };
 
 class FileWriteWorkerPool {

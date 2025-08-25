@@ -37,6 +37,7 @@
 #include "index/Utils.h"
 #include "index/Index.h"
 #include "marisa/base.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "storage/FileWriter.h"
 
@@ -189,9 +190,14 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     {
-        auto file_writer = storage::FileWriter(file_name);
+        auto file_writer = storage::FileWriter(
+            file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
         file_writer.Write(index->data.get(), len);
         file_writer.Finish();
     }
@@ -225,8 +231,12 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
-    auto index_datas = file_manager_->LoadIndexToMemory(
-        index_files.value(), config[milvus::LOAD_PRIORITY]);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto index_datas =
+        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early
