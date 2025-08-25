@@ -13,8 +13,8 @@
 
 milvus_add_pkg_config("milvus-common")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( MILVUS-COMMON-VERSION res-mng-rfc )
-set( GIT_REPOSITORY "https://github.com/sparknack/milvus-common.git")
+set( MILVUS-COMMON-VERSION 1a9c830 )
+set( GIT_REPOSITORY "https://github.com/zilliztech/milvus-common.git")
 
 message(STATUS "milvus-common repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-common version: ${MILVUS-COMMON-VERSION}")
