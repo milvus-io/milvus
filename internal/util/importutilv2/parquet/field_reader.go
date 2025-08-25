@@ -149,9 +149,9 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		return data, nil, typeutil.VerifyFloats64(data.([]float64))
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
-			return ReadNullableVarcharData(c, count)
+			return ReadNullableStringData(c, count, true)
 		}
-		data, err := ReadVarcharData(c, count)
+		data, err := ReadStringData(c, count, true)
 		return data, nil, err
 	case schemapb.DataType_JSON:
 		// json has not support default_value
@@ -220,12 +220,13 @@ func ReadBoolData(pcr *FieldReader, count int64) (any, error) {
 	data := make([]bool, 0, count)
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
-		boolReader, ok := chunk.(*array.Boolean)
-		if boolReader.NullN() > 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
+		if chunk.NullN() > 0 {
+			return nil, WrapNullRowErr(pcr.field)
 		}
+		boolReader, ok := chunk.(*array.Boolean)
+
 		if !ok {
-			return nil, WrapTypeErr("bool", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		for i := 0; i < dataNums; i++ {
 			data = append(data, boolReader.Value(i))
@@ -275,7 +276,7 @@ func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
-				return nil, nil, WrapTypeErr("bool|null", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]bool, dataNums)...)
@@ -307,57 +308,42 @@ func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *Fiel
 	data := make([]T, 0, count)
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
+		if chunk.NullN() > 0 {
+			return nil, WrapNullRowErr(pcr.field)
+		}
 		switch chunk.DataType().ID() {
 		case arrow.INT8:
 			int8Reader := chunk.(*array.Int8)
-			if int8Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int8Reader.Value(i)))
 			}
 		case arrow.INT16:
 			int16Reader := chunk.(*array.Int16)
-			if int16Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int16Reader.Value(i)))
 			}
 		case arrow.INT32:
 			int32Reader := chunk.(*array.Int32)
-			if int32Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int32Reader.Value(i)))
 			}
 		case arrow.INT64:
 			int64Reader := chunk.(*array.Int64)
-			if int64Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int64Reader.Value(i)))
 			}
 		case arrow.FLOAT32:
 			float32Reader := chunk.(*array.Float32)
-			if float32Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(float32Reader.Value(i)))
 			}
 		case arrow.FLOAT64:
 			float64Reader := chunk.(*array.Float64)
-			if float64Reader.NullN() > 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
-			}
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(float64Reader.Value(i)))
 			}
 		default:
-			return nil, WrapTypeErr("integer|float", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 	}
 	if len(data) == 0 {
@@ -417,7 +403,7 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]T, dataNums)...)
 		default:
-			return nil, nil, WrapTypeErr("integer|float|null", chunk.DataType().Name(), pcr.field)
+			return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 	}
 	if len(data) != len(validData) {
@@ -426,6 +412,7 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 	if len(data) == 0 {
 		return nil, nil, nil
 	}
+
 	if pcr.field.GetDefaultValue() != nil {
 		defaultValue, err := nullutil.GetDefaultValue(pcr.field)
 		if err != nil {
@@ -486,10 +473,10 @@ func ReadStructData(pcr *FieldReader, count int64) ([]map[string]arrow.Array, er
 	for _, chunk := range chunked.Chunks() {
 		structReader, ok := chunk.(*array.Struct)
 		if structReader.NullN() > 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("has null value, but struct doesn't support nullable yet")
+			return nil, WrapNullRowErr(pcr.field)
 		}
 		if !ok {
-			return nil, WrapTypeErr("struct", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 
 		structType := structReader.DataType().(*arrow.StructType)
@@ -505,92 +492,34 @@ func ReadStructData(pcr *FieldReader, count int64) ([]map[string]arrow.Array, er
 	return data, nil
 }
 
-func ReadStringData(pcr *FieldReader, count int64) (any, error) {
+func ReadStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
 	}
 	data := make([]string, 0, count)
-	for _, chunk := range chunked.Chunks() {
-		dataNums := chunk.Data().Len()
-		stringReader, ok := chunk.(*array.String)
-		if stringReader.NullN() > 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
+	var maxLength int64
+	if isVarcharField {
+		maxLength, err = parameterutil.GetMaxLength(pcr.field)
+		if err != nil {
+			return nil, err
 		}
-		if !ok {
-			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
-		}
-		for i := 0; i < dataNums; i++ {
-			data = append(data, stringReader.Value(i))
-		}
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	return data, nil
-}
-
-func ReadNullableStringData(pcr *FieldReader, count int64) (any, []bool, error) {
-	chunked, err := pcr.columnReader.NextBatch(count)
-	if err != nil {
-		return nil, nil, err
-	}
-	data := make([]string, 0, count)
-	validData := make([]bool, 0, count)
-	for _, chunk := range chunked.Chunks() {
-		dataNums := chunk.Data().Len()
-		stringReader, ok := chunk.(*array.String)
-		if !ok {
-			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr("string|null", chunk.DataType().Name(), pcr.field)
-			}
-			validData = append(validData, make([]bool, dataNums)...)
-			data = append(data, make([]string, dataNums)...)
-		} else {
-			validData = append(validData, bytesToValidData(dataNums, stringReader.NullBitmapBytes())...)
-			for i := 0; i < dataNums; i++ {
-				if stringReader.IsNull(i) {
-					data = append(data, "")
-					continue
-				}
-				data = append(data, stringReader.ValueStr(i))
-			}
-		}
-	}
-	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
-	}
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
-	return data, validData, nil
-}
-
-func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
-	chunked, err := pcr.columnReader.NextBatch(count)
-	if err != nil {
-		return nil, err
-	}
-	data := make([]string, 0, count)
-	maxLength, err := parameterutil.GetMaxLength(pcr.field)
-	if err != nil {
-		return nil, err
 	}
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
-		stringReader, ok := chunk.(*array.String)
-		if stringReader.NullN() > 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("not nullable, but has null value")
+		if chunk.NullN() > 0 {
+			return nil, WrapNullRowErr(pcr.field)
 		}
+		stringReader, ok := chunk.(*array.String)
 		if !ok {
-			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		for i := 0; i < dataNums; i++ {
 			value := stringReader.Value(i)
-			if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
-				return nil, err
+			if isVarcharField {
+				if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
+					return nil, err
+				}
 			}
 			data = append(data, value)
 		}
@@ -601,17 +530,20 @@ func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
-func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error) {
+func ReadNullableStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, []bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, nil, err
 	}
 	data := make([]string, 0, count)
-	maxLength, err := parameterutil.GetMaxLength(pcr.field)
-	if err != nil {
-		return nil, nil, err
-	}
 	validData := make([]bool, 0, count)
+	var maxLength int64
+	if isVarcharField {
+		maxLength, err = parameterutil.GetMaxLength(pcr.field)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
 		stringReader, ok := chunk.(*array.String)
@@ -619,7 +551,7 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
-				return nil, nil, WrapTypeErr("string|null", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]string, dataNums)...)
@@ -630,9 +562,11 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 					data = append(data, "")
 					continue
 				}
-				value := stringReader.ValueStr(i)
-				if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
-					return nil, nil, err
+				value := stringReader.Value(i)
+				if isVarcharField {
+					if err = common.CheckValidString(value, maxLength, pcr.field); err != nil {
+						return nil, nil, err
+					}
 				}
 				data = append(data, value)
 			}
@@ -644,7 +578,7 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 	if len(data) == 0 {
 		return nil, nil, nil
 	}
-	if pcr.field.GetDefaultValue() != nil {
+	if isVarcharField && pcr.field.GetDefaultValue() != nil {
 		defaultValue := pcr.field.GetDefaultValue().GetStringData()
 		return fillWithDefaultValueImpl(data, defaultValue, validData, pcr.field)
 	}
@@ -653,7 +587,7 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 
 func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 	// JSON field read data from string array Parquet
-	data, err := ReadStringData(pcr, count)
+	data, err := ReadStringData(pcr, count, false)
 	if err != nil {
 		return nil, err
 	}
@@ -681,7 +615,7 @@ func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 
 func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 	// JSON field read data from string array Parquet
-	data, validData, err := ReadNullableStringData(pcr, count)
+	data, validData, err := ReadNullableStringData(pcr, count, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -733,11 +667,11 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
-				return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
+				return nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
 			}
 			data = append(data, uint8Reader.Uint8Values()...)
 		default:
-			return nil, WrapTypeErr("binary", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 	}
 	if len(data) == 0 {
@@ -887,7 +821,7 @@ func parseSparseFloatVectorStructs(structs []map[string]arrow.Array) ([][]byte, 
 func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	// read sparse vector from JSON-format string
 	if pcr.sparseIsString {
-		data, err := ReadStringData(pcr, count)
+		data, err := ReadStringData(pcr, count, false)
 		if err != nil {
 			return nil, err
 		}
@@ -994,20 +928,31 @@ func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {
 	}
 	data := make([][]bool, 0, count)
 	for _, chunk := range chunked.Chunks() {
+		if chunk.NullN() > 0 {
+			// Array field is not nullable, but some arrays are null
+			return nil, WrapNullRowErr(pcr.field)
+		}
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		boolReader, ok := listReader.ListValues().(*array.Boolean)
 		if !ok {
-			return nil, WrapTypeErr("boolArray", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		offsets := listReader.Offsets()
-		getArrayData(offsets, func(i int) (bool, error) {
+		err = getArrayData(offsets, func(i int) (bool, error) {
+			if boolReader.IsNull(i) {
+				// array contains null values is not allowed
+				return false, WrapNullElementErr(pcr.field)
+			}
 			return boolReader.Value(i), nil
 		}, func(arr []bool, valid bool) {
 			data = append(data, arr)
 		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -1028,7 +973,7 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
-				return nil, nil, WrapTypeErr("list|null", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
@@ -1036,15 +981,21 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 		} else {
 			boolReader, ok := listReader.ListValues().(*array.Boolean)
 			if !ok {
-				return nil, nil, WrapTypeErr("boolArray", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			offsets := listReader.Offsets()
-			getArrayData(offsets, func(i int) (bool, error) {
+			err = getArrayData(offsets, func(i int) (bool, error) {
+				if boolReader.IsNull(i) {
+					return false, WrapNullElementErr(pcr.field)
+				}
 				return boolReader.Value(i), nil
 			}, func(arr []bool, valid bool) {
 				data = append(data, arr)
 				validData = append(validData, valid)
 			})
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if len(data) != len(validData) {
@@ -1064,9 +1015,13 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 	data := make([][]T, 0, count)
 
 	for _, chunk := range chunked.Chunks() {
+		if chunk.NullN() > 0 {
+			// Array field is not nullable, but some arrays are null
+			return nil, WrapNullRowErr(pcr.field)
+		}
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
@@ -1079,48 +1034,90 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		switch valueReader.DataType().ID() {
 		case arrow.INT8:
 			int8Reader := valueReader.(*array.Int8)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int8Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int8Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT16:
 			int16Reader := valueReader.(*array.Int16)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int16Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int16Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT32:
 			int32Reader := valueReader.(*array.Int32)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int32Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int32Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.INT64:
 			int64Reader := valueReader.(*array.Int64)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if int64Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0, WrapNullElementErr(pcr.field)
+				}
 				return T(int64Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.FLOAT32:
 			float32Reader := valueReader.(*array.Float32)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if float32Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0.0, WrapNullElementErr(pcr.field)
+				}
 				return T(float32Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		case arrow.FLOAT64:
 			float64Reader := valueReader.(*array.Float64)
-			getArrayData(offsets, func(i int) (T, error) {
+			err = getArrayData(offsets, func(i int) (T, error) {
+				if float64Reader.IsNull(i) {
+					// array contains null values is not allowed
+					return 0.0, WrapNullElementErr(pcr.field)
+				}
 				return T(float64Reader.Value(i)), nil
 			}, func(arr []T, valid bool) {
 				data = append(data, arr)
 			})
+			if err != nil {
+				return nil, err
+			}
 		default:
-			return nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 	}
 	if len(data) == 0 {
@@ -1143,7 +1140,7 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
-				return nil, nil, WrapTypeErr("list|null", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
@@ -1160,54 +1157,96 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 			switch valueReader.DataType().ID() {
 			case arrow.INT8:
 				int8Reader := valueReader.(*array.Int8)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int8Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int8Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT16:
 				int16Reader := valueReader.(*array.Int16)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int16Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int16Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT32:
 				int32Reader := valueReader.(*array.Int32)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int32Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int32Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.INT64:
 				int64Reader := valueReader.(*array.Int64)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if int64Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0, WrapNullElementErr(pcr.field)
+					}
 					return T(int64Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.FLOAT32:
 				float32Reader := valueReader.(*array.Float32)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if float32Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0.0, WrapNullElementErr(pcr.field)
+					}
 					return T(float32Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			case arrow.FLOAT64:
 				float64Reader := valueReader.(*array.Float64)
-				getArrayData(offsets, func(i int) (T, error) {
+				err = getArrayData(offsets, func(i int) (T, error) {
+					if float64Reader.IsNull(i) {
+						// array contains null values is not allowed
+						return 0.0, WrapNullElementErr(pcr.field)
+					}
 					return T(float64Reader.Value(i)), nil
 				}, func(arr []T, valid bool) {
 					data = append(data, arr)
 					validData = append(validData, valid)
 				})
+				if err != nil {
+					return nil, nil, err
+				}
 			default:
-				return nil, nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 		}
 	}
@@ -1231,16 +1270,24 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 	}
 	data := make([][]string, 0, count)
 	for _, chunk := range chunked.Chunks() {
+		if chunk.NullN() > 0 {
+			// Array field is not nullable, but some arrays are null
+			return nil, WrapNullRowErr(pcr.field)
+		}
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		stringReader, ok := listReader.ListValues().(*array.String)
 		if !ok {
-			return nil, WrapTypeErr("stringArray", chunk.DataType().Name(), pcr.field)
+			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
 		offsets := listReader.Offsets()
 		err = getArrayData(offsets, func(i int) (string, error) {
+			if stringReader.IsNull(i) {
+				// array contains null values is not allowed
+				return "", WrapNullElementErr(pcr.field)
+			}
 			val := stringReader.Value(i)
 			if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
 				return val, err
@@ -1276,7 +1323,7 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 			// the chunk type may be *array.Null if the data in chunk is all null
 			_, ok := chunk.(*array.Null)
 			if !ok {
-				return nil, nil, WrapTypeErr("list|null", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
@@ -1284,10 +1331,14 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 		} else {
 			stringReader, ok := listReader.ListValues().(*array.String)
 			if !ok {
-				return nil, nil, WrapTypeErr("stringArray", chunk.DataType().Name(), pcr.field)
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			offsets := listReader.Offsets()
 			err = getArrayData(offsets, func(i int) (string, error) {
+				if stringReader.IsNull(i) {
+					// array contains null values is not allowed
+					return "", WrapNullElementErr(pcr.field)
+				}
 				val := stringReader.Value(i)
 				if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
 					return val, err
