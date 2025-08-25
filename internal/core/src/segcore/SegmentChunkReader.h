@@ -46,17 +46,21 @@ class SegmentChunkReader {
     }
 
     MultipleChunkDataAccessor
-    GetChunkDataAccessor(DataType data_type,
-                         FieldId field_id,
-                         bool index,
-                         int64_t& current_chunk_id,
-                         int64_t& current_chunk_pos) const;
+    GetMultipleChunkDataAccessor(
+        DataType data_type,
+        FieldId field_id,
+        int64_t& current_chunk_id,
+        int64_t& current_chunk_pos,
+        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
+        const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
                          FieldId field_id,
                          int chunk_id,
-                         int data_barrier) const;
+                         int data_barrier,
+                         const std::vector<PinWrapper<const index::IndexBase*>>&
+                             pinned_index) const;
 
     void
     MoveCursorForMultipleChunk(int64_t& current_chunk_id,
@@ -118,16 +122,20 @@ class SegmentChunkReader {
  private:
     template <typename T>
     MultipleChunkDataAccessor
-    GetChunkDataAccessor(FieldId field_id,
-                         bool index,
-                         int64_t& current_chunk_id,
-                         int64_t& current_chunk_pos) const;
+    GetMultipleChunkDataAccessor(
+        FieldId field_id,
+        int64_t& current_chunk_id,
+        int64_t& current_chunk_pos,
+        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
+        const;
 
     template <typename T>
     ChunkDataAccessor
     GetChunkDataAccessor(FieldId field_id,
                          int chunk_id,
-                         int data_barrier) const;
+                         int data_barrier,
+                         const std::vector<PinWrapper<const index::IndexBase*>>&
+                             pinned_index) const;
 
     const int64_t size_per_chunk_;
 };
