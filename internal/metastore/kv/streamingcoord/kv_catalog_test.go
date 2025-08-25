@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
@@ -138,4 +139,57 @@ func TestCatalog(t *testing.T) {
 	assert.Error(t, err)
 	err = catalog.SaveBroadcastTask(context.Background(), 1, &streamingpb.BroadcastTask{})
 	assert.Error(t, err)
+}
+
+func TestCatalog_ReplicationCatalog(t *testing.T) {
+	kv := mock_kv.NewMockMetaKv(t)
+	kvStorage := make(map[string]string)
+	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
+		return kvStorage[s], nil
+	})
+	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key, value string) error {
+		kvStorage[key] = value
+		return nil
+	})
+
+	catalog := NewCataLog(kv)
+
+	config := &milvuspb.ReplicateConfiguration{
+		Clusters: []*milvuspb.MilvusCluster{
+			{
+				ClusterId: "source-cluster",
+				Pchannels: []string{"source-channel-1", "source-channel-2"},
+			},
+			{
+				ClusterId: "target-cluster-a",
+				Pchannels: []string{"target-channel-a-1", "target-channel-a-2"},
+			},
+			{
+				ClusterId: "target-cluster-b",
+				Pchannels: []string{"target-channel-b-1", "target-channel-b-2"},
+			},
+		},
+		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+			{
+				SourceClusterId: "source-cluster",
+				TargetClusterId: "target-cluster-a",
+			},
+			{
+				SourceClusterId: "source-cluster",
+				TargetClusterId: "target-cluster-b",
+			},
+		},
+	}
+	err := catalog.SaveReplicateConfiguration(context.Background(), config)
+	assert.NoError(t, err)
+
+	cfg, err := catalog.GetReplicateConfiguration(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, cfg.GetClusters()[0].GetClusterId(), "source-cluster")
+	assert.Equal(t, cfg.GetClusters()[1].GetClusterId(), "target-cluster-a")
+	assert.Equal(t, cfg.GetClusters()[2].GetClusterId(), "target-cluster-b")
+	assert.Equal(t, cfg.GetCrossClusterTopology()[0].GetSourceClusterId(), "source-cluster")
+	assert.Equal(t, cfg.GetCrossClusterTopology()[0].GetTargetClusterId(), "target-cluster-a")
+	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetSourceClusterId(), "source-cluster")
+	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetTargetClusterId(), "target-cluster-b")
 }

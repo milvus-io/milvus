@@ -88,6 +88,24 @@ func NewReplicateMessage(clustrID string, im *milvuspb.ImmutableMessage) Mutable
 	return m
 }
 
+func MilvusMessageToImmutableMessage(im *milvuspb.ImmutableMessage) ImmutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
+	return msg
+}
+
+func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *milvuspb.ImmutableMessage {
+	msg := im.IntoImmutableMessageProto()
+	return &milvuspb.ImmutableMessage{
+		Id: &milvuspb.MessageID{
+			Id:      msg.GetId().GetId(),
+			WALName: GetWALName(walName),
+		},
+		Payload:    msg.GetPayload(),
+		Properties: msg.GetProperties(),
+	}
+}
+
 // newMutableMessageBuilder creates a new builder.
 // Should only used at client side.
 func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasgeBuilder[H, B] {

@@ -181,8 +181,8 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	const msgCount = 100
 	go func() {
 		for i := 0; i < msgCount; i++ {
-			mockMsg := mock_message.NewMockImmutableMessage(t)
 			tt := uint64(i + 1)
+			mockMsg := mock_message.NewMockImmutableMessage(t)
 			mockMsg.EXPECT().TimeTick().Return(tt)
 			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
 				Id: &messagespb.MessageID{

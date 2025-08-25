@@ -12,6 +12,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
@@ -31,6 +32,7 @@ func init() {
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
 	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(commonpb.WALName_WoodPecker.String(), UnmarshalMessageID)
 }
 
 // builderImpl is the builder for woodpecker opener.

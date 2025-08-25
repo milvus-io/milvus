@@ -3,6 +3,7 @@ package kafka
 import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
@@ -18,6 +19,7 @@ func init() {
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
 	message.RegisterMessageIDUnmsarshaler(walName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(commonpb.WALName_Kafka.String(), UnmarshalMessageID)
 }
 
 // builderImpl is the builder for pulsar wal.

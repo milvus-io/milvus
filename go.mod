@@ -58,6 +58,7 @@ require (
 require (
 	cloud.google.com/go/storage v1.43.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
+	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/aws/aws-sdk-go-v2 v1.32.6
 	github.com/aws/aws-sdk-go-v2/config v1.28.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.47
@@ -112,7 +113,6 @@ require (
 	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
 	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
-	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7 // indirect
 	github.com/apache/thrift v0.20.0 // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.7 // indirect
