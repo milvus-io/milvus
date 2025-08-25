@@ -5262,6 +5262,8 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 
 func TestNamespaceProperty(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 	ctx := context.Background()
 	prefix := "TestNamespaceProperty"
 	collectionName := prefix + funcutil.GenRandomStr()
