@@ -263,6 +263,78 @@ class Json {
         return doc().at_pointer(pointer).get<T>();
     }
 
+    value_result<std::string>
+    at_string_any(std::string_view pointer) const {
+        AssertInfo(!pointer.empty(),
+                   "pointer must not be empty for at_string_any");
+        if (data_.size() == 0) {
+            return std::string{};
+        }
+
+        auto d = doc();
+        if (d.error() != simdjson::SUCCESS)
+            return d.error();
+
+        auto el = d.at_pointer(pointer);
+        if (el.error() != simdjson::SUCCESS)
+            return el.error();
+
+        auto t = el.type();
+        if (t.error() != simdjson::SUCCESS)
+            return t.error();
+
+        switch (t.value()) {
+            case simdjson::ondemand::json_type::string: {
+                auto s = el.get_string(false);
+                if (s.error() != simdjson::SUCCESS)
+                    return s.error();
+                return std::string{s.value()};
+            }
+            case simdjson::ondemand::json_type::number: {
+                auto nt = el.get_number_type();
+                if (nt.error() != simdjson::SUCCESS)
+                    return nt.error();
+                if (nt.value() ==
+                    simdjson::ondemand::number_type::floating_point_number) {
+                    auto dv = el.get_double();
+                    if (dv.error() != simdjson::SUCCESS)
+                        return dv.error();
+                    return fmt::format("{}", dv.value());
+                } else if (nt.value() ==
+                           simdjson::ondemand::number_type::signed_integer) {
+                    auto iv = el.get_int64();
+                    if (iv.error() != simdjson::SUCCESS)
+                        return iv.error();
+                    return fmt::format("{}", iv.value());
+                } else {  // unsigned_integer
+                    auto uv = el.get_uint64();
+                    if (uv.error() != simdjson::SUCCESS)
+                        return uv.error();
+                    return fmt::format("{}", uv.value());
+                }
+            }
+            case simdjson::ondemand::json_type::boolean: {
+                auto bv = el.get_bool();
+                if (bv.error() != simdjson::SUCCESS)
+                    return bv.error();
+                return bv.value() ? std::string("true") : std::string("false");
+            }
+            case simdjson::ondemand::json_type::null:
+                return std::string("null");
+
+            case simdjson::ondemand::json_type::object:
+            case simdjson::ondemand::json_type::array: {
+                auto dom_el = dom_doc().at_pointer(pointer);
+                if (dom_el.error() != simdjson::SUCCESS)
+                    return dom_el.error();
+                return simdjson::minify(dom_el.value());
+            }
+
+            default:
+                return simdjson::error_code::TAPE_ERROR;
+        }
+    }
+
     template <typename T>
     value_result<T>
     at(uint16_t offset, uint16_t length) const {
