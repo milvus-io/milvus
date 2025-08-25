@@ -19,6 +19,7 @@
 #include <cmath>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <ogr_geometry.h>
 #include <cstdlib>
 
 #include "Constants.h"
@@ -207,6 +208,14 @@ struct GeneratedData {
                         std::copy(src_data.begin(), src_data.end(), ret_data);
                         break;
                     }
+                    case DataType::GEOMETRY: {
+                        auto ret_data =
+                            reinterpret_cast<std::string*>(ret.data());
+                        auto src_data =
+                            target_field_data.scalars().geometry_data().data();
+                        std::copy(src_data.begin(), src_data.end(), ret_data);
+                        break;
+                    }
                     default: {
                         PanicInfo(Unsupported, "unsupported");
                     }
@@ -333,6 +342,109 @@ GenerateRandomSparseFloatVector(size_t rows,
     }
 
     return tensor;
+}
+
+inline OGRGeometry* makeGeometryValid(OGRGeometry* geometry) {
+    if (!geometry || geometry->IsValid())
+        return geometry;
+
+    OGRGeometry* fixed = geometry->MakeValid();
+    if (fixed) {
+        OGRGeometryFactory::destroyGeometry(geometry);
+        geometry = fixed;
+    }
+    return geometry;
+}
+
+inline void
+generateRandomPoint(OGRPoint& point) {
+    point.setX(static_cast<double>(rand()) / RAND_MAX * 360.0 - 180.0);
+    point.setY(static_cast<double>(rand()) / RAND_MAX * 180.0 - 90.0);
+}
+
+inline void
+generateRandomValidLineString(OGRLineString& lineString, int numPoints) {
+    // Generate a simple line string that doesn't self-intersect
+    double startX = static_cast<double>(rand()) / RAND_MAX * 300.0 - 150.0;
+    double startY = static_cast<double>(rand()) / RAND_MAX * 160.0 - 80.0;
+
+    OGRPoint point;
+    point.setX(startX);
+    point.setY(startY);
+    lineString.addPoint(&point);
+
+    for (int i = 1; i < numPoints; ++i) {
+        // Generate next point with some distance from previous point
+        double deltaX = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 20.0;
+        double deltaY = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 20.0;
+
+        point.setX(startX + deltaX);
+        point.setY(startY + deltaY);
+        lineString.addPoint(&point);
+
+        startX = point.getX();
+        startY = point.getY();
+    }
+}
+
+inline void
+generateRandomValidPolygon(OGRPolygon& polygon, int numPoints) {
+    // Generate a simple convex polygon to avoid self-intersection
+    if (numPoints < 3)
+        numPoints = 3;
+
+    OGRLinearRing ring;
+
+    // Generate center point
+    double centerX = static_cast<double>(rand()) / RAND_MAX * 300.0 - 150.0;
+    double centerY = static_cast<double>(rand()) / RAND_MAX * 160.0 - 80.0;
+
+    // Generate radius
+    double radius = 5.0 + static_cast<double>(rand()) / RAND_MAX * 15.0;
+
+    // Generate points in a circle to form a convex polygon
+    for (int i = 0; i < numPoints; ++i) {
+        double angle = 2.0 * M_PI * i / numPoints;
+        double x = centerX + radius * cos(angle);
+        double y = centerY + radius * sin(angle);
+
+        OGRPoint point;
+        point.setX(x);
+        point.setY(y);
+        ring.addPoint(&point);
+    }
+
+    // Close the ring
+    ring.closeRings();
+    polygon.addRing(&ring);
+}
+
+inline OGRGeometry*
+GenRandomGeometry() {
+    OGRGeometry* geometry = nullptr;
+    int geomType = rand() % 3;  // Randomly select a geometry type (0 to 2)
+    switch (geomType) {
+        case 0: {
+            OGRPoint point;
+            generateRandomPoint(point);
+            geometry = point.clone();
+            break;
+        }
+        case 1: {
+            OGRLineString lineString;
+            generateRandomValidLineString(lineString, 5);
+            geometry = lineString.clone();
+            break;
+        }
+        case 2: {
+            OGRPolygon polygon;
+            generateRandomValidPolygon(polygon, 5);
+            geometry = polygon.clone();
+            break;
+        }
+    }
+    geometry = makeGeometryValid(geometry);
+    return geometry;
 }
 
 inline GeneratedData
@@ -541,6 +653,21 @@ DataGen(SchemaPtr schema,
                                R"(","bool": true)" + R"(, "array": [1,2,3])" +
                                "}";
                     data[i] = str;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::GEOMETRY: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    OGRGeometry* geo = GenRandomGeometry();
+                    size_t size = geo->WkbSize();
+                    auto wkb_data = new unsigned char[size];
+                    geo->exportToWkb(wkbNDR, wkb_data);
+                    data[i] = std::string(
+                        reinterpret_cast<const char*>(wkb_data), size);
+                    OGRGeometryFactory::destroyGeometry(geo);
+                    delete[] wkb_data;
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
@@ -1184,6 +1311,16 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 } else {
                     createFieldData(data_raw.data(), DataType::JSON, dim);
                 }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                auto src_data = data->scalars().geometry_data().data();
+                std::vector<std::string> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = std::move(std::string(str));
+                }
+                createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
                 break;
             }
             case DataType::ARRAY: {

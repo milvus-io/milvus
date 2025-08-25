@@ -98,6 +98,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_JSON:
 		val, validData, err := r.GetJSONFromPayload()
 		return val, validData, 0, err
+	case schemapb.DataType_Geometry:
+		val, validData, err := r.GetGeometryFromPayload()
+		return val, validData, 0, err
 	default:
 		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("unknown type")
 	}
@@ -416,6 +419,25 @@ func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, 
 func (r *PayloadReader) GetJSONFromPayload() ([][]byte, []bool, error) {
 	if r.colType != schemapb.DataType_JSON {
 		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get json from datatype %v", r.colType.String()))
+	}
+
+	if r.nullable {
+		return readNullableByteAndConvert(r, func(bytes []byte) []byte {
+			return bytes
+		})
+	}
+	value, err := readByteAndConvert(r, func(bytes parquet.ByteArray) []byte {
+		return bytes
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, nil, nil
+}
+
+func (r *PayloadReader) GetGeometryFromPayload() ([][]byte, []bool, error) {
+	if r.colType != schemapb.DataType_Geometry {
+		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get Geometry from datatype %v", r.colType.String()))
 	}
 
 	if r.nullable {

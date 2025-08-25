@@ -78,6 +78,8 @@ func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string
 			return common.DefaultDynamicFieldName
 		}
 		return common.DefaultJSONFieldName
+	// case entity.FieldTypeGeometry:
+	// 	return common.DefaultGeometryName
 	case entity.FieldTypeArray:
 		return GetFieldNameByElementType(opt.elementType)
 	case entity.FieldTypeBinaryVector:

@@ -673,6 +673,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
 				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
 			}
+		case schemapb.DataType_Geometry:
+			srcData := srcField.GetScalars().GetGeometryData().GetData()
+			validData := srcField.GetValidData()
+			fieldData = &GeometryFieldData{
+				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
+				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+			}
 
 		default:
 			return nil, merr.WrapErrServiceInternal("data type not handled", field.GetDataType().String())
@@ -1186,6 +1193,21 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+				ValidData: rawData.ValidData,
+			}
+		case *GeometryFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Geometry,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
 								Data: rawData.Data,
 							},
 						},

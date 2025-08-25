@@ -491,6 +491,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
     auto int8_nullable_id =
@@ -668,6 +669,7 @@ TEST(Sealed, ClearData) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -799,6 +801,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -2263,6 +2266,7 @@ TEST(Sealed, QueryAllFields) {
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -2310,6 +2314,7 @@ TEST(Sealed, QueryAllFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
+    auto geometry_values = dataset.get_col<std::string>(geometry_field);
     auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
     auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
     auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
@@ -2339,6 +2344,8 @@ TEST(Sealed, QueryAllFields) {
         segment->bulk_subscript(varchar_field, ids_ds->GetIds(), dataset_size);
     auto json_result =
         segment->bulk_subscript(json_field, ids_ds->GetIds(), dataset_size);
+    auto geometry_result =
+        segment->bulk_subscript(geometry_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2368,6 +2375,8 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
               dataset_size);
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+              dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(float16_vec_result->vectors().float16_vector().size(),
@@ -2417,6 +2426,8 @@ TEST(Sealed, QueryAllNullableFields) {
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
+    auto geometry_field =
+        schema->AddDebugField("geometry", DataType::GEOMETRY, true);
     auto int_array_field = schema->AddDebugField(
         "int_array", DataType::ARRAY, DataType::INT8, true);
     auto long_array_field = schema->AddDebugField(
@@ -2460,6 +2471,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
+    auto geometry_values = dataset.get_col<std::string>(geometry_field);
     auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
     auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
     auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
@@ -2476,6 +2488,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_valid_values = dataset.get_col_valid(double_field);
     auto varchar_valid_values = dataset.get_col_valid(varchar_field);
     auto json_valid_values = dataset.get_col_valid(json_field);
+    auto geometry_valid_values = dataset.get_col_valid(geometry_field);
     auto int_array_valid_values = dataset.get_col_valid(int_array_field);
     auto long_array_valid_values = dataset.get_col_valid(long_array_field);
     auto bool_array_valid_values = dataset.get_col_valid(bool_array_field);
@@ -2502,6 +2515,8 @@ TEST(Sealed, QueryAllNullableFields) {
         segment->bulk_subscript(varchar_field, ids_ds->GetIds(), dataset_size);
     auto json_result =
         segment->bulk_subscript(json_field, ids_ds->GetIds(), dataset_size);
+    auto geometry_result =
+        segment->bulk_subscript(geometry_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2527,6 +2542,8 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
               dataset_size);
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+              dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
@@ -2550,6 +2567,7 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(double_result->valid_data_size(), dataset_size);
     EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
     EXPECT_EQ(json_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->valid_data_size(), dataset_size);
     EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
@@ -2578,4 +2596,47 @@ TEST(Sealed, SearchSortedPk) {
     auto offsets2 = segment->search_pk(PkType(pk_values[100]), int64_t(105));
     EXPECT_EQ(5, offsets2.size());
     EXPECT_EQ(100, offsets2[0].get());
+}
+
+TEST(Sealed, QueryAllFieldsWithGeo) {
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"},
+        {"metric_type", metric_type},
+        {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_sealed = CreateSealedSegment(schema, metaPtr);
+    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+
+    int64_t dataset_size = 1000;
+    auto dataset = DataGen(schema, dataset_size);
+    SealedLoadFieldData(dataset, *segment);
+
+    auto geometry_values = dataset.get_col<std::string>(geometry_field);
+
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto geometry_result =
+        segment->bulk_subscript(geometry_field, ids_ds->GetIds(), dataset_size);
+
+    EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+              dataset_size);
+
+    for (size_t i = 0; i < dataset_size; ++i) {
+        auto id = ids_ds->GetIds()[i];
+        // verify
+        ASSERT_EQ(geometry_values[id],
+                  geometry_result->scalars().geometry_data().data(i));
+    }
 }

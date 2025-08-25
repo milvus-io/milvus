@@ -251,7 +251,8 @@ class CachedSearchIteratorTest
 
         size_t offset = 0;
         for (size_t i = 0; i < num_chunks_; ++i) {
-            const size_t rows = std::min(nb_ - offset, kSizePerChunk);
+            const size_t rows =
+                std::min(static_cast<size_t>(nb_ - offset), kSizePerChunk);
             const size_t chunk_bitset_size = (rows + 7) / 8;
             const size_t buf_size =
                 chunk_bitset_size + rows * dim_ * sizeof(float);
