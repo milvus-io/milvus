@@ -12,28 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
-const (
-	clusterIDKey      = "cluster-id"
-	createProducerKey = "create-producer"
-)
-
-// WithClusterID attaches cluster id to context.
-func WithClusterID(ctx context.Context, clusterID string) context.Context {
-	return metadata.AppendToOutgoingContext(ctx, clusterIDKey, clusterID)
-}
-
-// GetClusterID gets cluster id from context.
-func GetClusterID(ctx context.Context) (string, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", errors.New("cluster id not found from context")
-	}
-	msg := md.Get(clusterIDKey)
-	if len(msg) == 0 {
-		return "", errors.New("cluster id not found in context")
-	}
-	return msg[0], nil
-}
+const createProducerKey = "create-producer"
 
 // WithCreateProducer attaches create producer request to context.
 func WithCreateProducer(ctx context.Context, req *streamingpb.CreateProducerRequest) context.Context {
