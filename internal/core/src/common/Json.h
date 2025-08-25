@@ -40,6 +40,10 @@
 #include "rapidjson/stringbuffer.h"
 
 namespace milvus {
+
+bool isObjectEmpty(simdjson::ondemand::value value);
+bool isObjectEmpty(simdjson::ondemand::document document);
+
 // function to extract specific keys and convert them to json
 // rapidjson is suitable for extract and reconstruct serialization
 // instead of simdjson which not suitable for serialization
@@ -210,10 +214,10 @@ class Json {
     exist(std::string_view pointer) const {
         auto doc = this->doc();
         if (pointer.empty()) {
-            return doc.error() == simdjson::SUCCESS && !doc.is_null();
+            return doc.error() == simdjson::SUCCESS && !isObjectEmpty(doc);
         } else {
             auto res = doc.at_pointer(pointer);
-            return res.error() == simdjson::SUCCESS && !res.is_null();
+            return res.error() == simdjson::SUCCESS && !isObjectEmpty(res.value());
         }
     }
 
@@ -308,4 +312,61 @@ class Json {
         own_data_{};  // this could be empty, then the Json will be just s view on bytes
     simdjson::padded_string_view data_{};
 };
+
+inline bool
+isObjectEmpty(simdjson::ondemand::value value) {
+    if (value.is_null()) {
+        return true;
+    }
+
+    if (value.type().value() == simdjson::ondemand::json_type::object) {
+        auto object = value.get_object();
+        for (auto field : object) {
+            if (!isObjectEmpty(field.value())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (value.type().value() == simdjson::ondemand::json_type::array) {
+        auto array = value.get_array();
+        for (auto element : array) {
+            if (!isObjectEmpty(std::move(element))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+inline bool
+isObjectEmpty(simdjson::ondemand::document document) {
+    if (document.is_null()) {
+        return true;
+    }
+
+    if (document.type().value() == simdjson::ondemand::json_type::object) {
+        auto object = document.get_object();
+        for (auto field : object) {
+            if (!isObjectEmpty(field.value())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (document.type().value() == simdjson::ondemand::json_type::array) {
+        auto array = document.get_array();
+        for (auto element : array) {
+            if (!isObjectEmpty(std::move(element))) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
 }  // namespace milvus
