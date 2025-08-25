@@ -243,6 +243,23 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
     }
 }
 
+bool
+TryReserveLoadingResourceWithTimeout(CResourceUsage size,
+                                     int64_t millisecond_timeout) {
+    return milvus::cachinglayer::Manager::GetInstance()
+        .ReserveLoadingResourceWithTimeout(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes),
+            std::chrono::milliseconds(millisecond_timeout));
+}
+
+void
+ReleaseLoadingResource(CResourceUsage size) {
+    milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
+        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                            size.disk_bytes));
+}
+
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();

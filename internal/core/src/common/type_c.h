@@ -143,6 +143,12 @@ typedef struct CNewSegmentResult {
     CStatus status;
     CSegmentInterface segmentPtr;
 } CNewSegmentResult;
+
+typedef struct CResourceUsage {
+    int64_t memory_bytes;
+    int64_t disk_bytes;
+} CResourceUsage;
+
 #ifdef __cplusplus
 }
 

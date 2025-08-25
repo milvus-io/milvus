@@ -32,6 +32,7 @@
 #include "simdjson/common_defs.h"
 #include "sys/mman.h"
 #include "common/Types.h"
+#include "cachinglayer/Utils.h"
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
@@ -65,9 +66,12 @@ class Chunk {
         return size_;
     }
 
-    size_t
+    cachinglayer::ResourceUsage
     CellByteSize() const {
-        return size_;
+        if (mmap_file_raii_) {
+            return cachinglayer::ResourceUsage(0, static_cast<int64_t>(size_));
+        }
+        return cachinglayer::ResourceUsage(static_cast<int64_t>(size_), 0);
     }
 
     int64_t

@@ -12,6 +12,7 @@
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 
 #include "common/ChunkWriter.h"
+#include "common/Types.h"
 #include "segcore/Utils.h"
 #include "storage/Util.h"
 
@@ -56,11 +57,48 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    // TODO(tiered storage 1): provide a better estimation.
-    return milvus::cachinglayer::ResourceUsage{0, 0};
+    int64_t value_size = 0;
+    switch (field_meta_.get_data_type()) {
+        case milvus::DataType::BOOL:
+            value_size = sizeof(bool);
+            break;
+        case milvus::DataType::INT8:
+            value_size = sizeof(int8_t);
+            break;
+        case milvus::DataType::INT16:
+            value_size = sizeof(int16_t);
+            break;
+        case milvus::DataType::INT32:
+            value_size = sizeof(int32_t);
+            break;
+        case milvus::DataType::INT64:
+            value_size = sizeof(int64_t);
+            break;
+        case milvus::DataType::FLOAT:
+            value_size = sizeof(float);
+            break;
+        case milvus::DataType::DOUBLE:
+            value_size = sizeof(double);
+            break;
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::STRING:
+        case milvus::DataType::TEXT:
+            if (field_meta_.default_value().has_value()) {
+                auto default_value = field_meta_.default_value().value();
+                value_size = default_value.string_data().size() + 1;  // +1 for null terminator
+            } else {
+                value_size = 1;  // 1 for null
+            }
+            break;
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported default value data type {}",
+                      field_meta_.get_data_type());
+    }
+    return {{value_size * meta_.num_rows_until_chunk_[1], 0}, {2 * value_size * meta_.num_rows_until_chunk_[1], 0}};
 }
 
 const std::string&
