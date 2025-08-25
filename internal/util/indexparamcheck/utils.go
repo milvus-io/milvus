@@ -93,6 +93,7 @@ func CheckAutoIndexConfig() {
 	autoIndexCfg := &paramtable.Get().AutoIndexConfig
 	CheckAutoIndexHelper(autoIndexCfg.IndexParams.Key, autoIndexCfg.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
+	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.SparseIndexParams.Key, autoIndexCfg.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
 }
 
