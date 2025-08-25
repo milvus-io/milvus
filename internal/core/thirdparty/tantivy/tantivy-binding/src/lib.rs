@@ -1,10 +1,10 @@
 use error::TantivyBindingError;
 
 mod array;
-mod direct_bitset_collector;
 mod bitset_wrapper;
 mod data_type;
 mod demo_c;
+mod direct_bitset_collector;
 mod docid_collector;
 mod error;
 mod hashmap_c;
