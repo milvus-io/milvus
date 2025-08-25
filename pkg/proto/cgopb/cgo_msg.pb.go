@@ -31,7 +31,7 @@ type LoadIndexInfo struct {
 	SegmentID          int64                 `protobuf:"varint,3,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
 	Field              *schemapb.FieldSchema `protobuf:"bytes,5,opt,name=field,proto3" json:"field,omitempty"`
 	EnableMmap         bool                  `protobuf:"varint,6,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
-	MmapDirPath        string                `protobuf:"bytes,7,opt,name=mmap_dir_path,json=mmapDirPath,proto3" json:"mmap_dir_path,omitempty"`
+	MmapDirPath        string                `protobuf:"bytes,7,opt,name=mmap_dir_path,json=mmapDirPath,proto3" json:"mmap_dir_path,omitempty"` //Deprecated
 	IndexID            int64                 `protobuf:"varint,8,opt,name=indexID,proto3" json:"indexID,omitempty"`
 	IndexBuildID       int64                 `protobuf:"varint,9,opt,name=index_buildID,json=indexBuildID,proto3" json:"index_buildID,omitempty"`
 	IndexVersion       int64                 `protobuf:"varint,10,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`

@@ -32,7 +32,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"path"
 	"strconv"
 	"sync"
 	"time"
@@ -41,6 +40,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -248,18 +248,18 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
-func InitMmapManager(params *paramtable.ComponentParam) error {
-	mmapDirPath := params.QueryNodeCfg.MmapDirPath.GetValue()
-	cMmapChunkManagerDir := C.CString(path.Join(mmapDirPath, "/mmap_chunk_manager/"))
+func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
+	growingMMapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
+	cGrowingMMapDir := C.CString(growingMMapDir)
 	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
-	defer C.free(unsafe.Pointer(cMmapChunkManagerDir))
+	defer C.free(unsafe.Pointer(cGrowingMMapDir))
 	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
 	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
 	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
 	mmapConfig := C.CMmapConfig{
 		cache_read_ahead_policy:  cCacheReadAheadPolicy,
-		mmap_path:                cMmapChunkManagerDir,
+		mmap_path:                cGrowingMMapDir,
 		disk_limit:               C.uint64_t(diskLimit),
 		fix_file_size:            C.uint64_t(mmapFileSize),
 		growing_enable_mmap:      C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),

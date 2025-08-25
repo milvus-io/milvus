@@ -96,16 +96,6 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
 }
 
 void
-AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
-                  const char* c_dir_path) {
-    SCOPE_CGO_CALL_METRIC();
-
-    auto load_field_data_info =
-        static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
-    load_field_data_info->mmap_dir_path = std::string(c_dir_path);
-}
-
-void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version) {
     SCOPE_CGO_CALL_METRIC();

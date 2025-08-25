@@ -204,7 +204,7 @@ func (node *DataNode) Init() error {
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 
-		index.InitSegcore()
+		index.InitSegcore(serverID)
 
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})

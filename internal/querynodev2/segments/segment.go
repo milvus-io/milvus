@@ -744,7 +744,6 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	)
 
 	req := &segcore.LoadFieldDataRequest{
-		MMapDir:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		RowCount:       rowCount,
 		StorageVersion: loadInfo.StorageVersion,
 	}
@@ -802,7 +801,6 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
 	req := &segcore.LoadFieldDataRequest{
-		MMapDir: paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		Fields: []segcore.LoadFieldDataInfo{{
 			Field:      field,
 			EnableMMap: mmapEnabled,
@@ -971,14 +969,12 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
-
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:       loadInfo.GetCollectionID(),
 		PartitionID:        loadInfo.GetPartitionID(),
 		SegmentID:          loadInfo.GetSegmentID(),
 		Field:              fieldSchema,
 		EnableMmap:         enableMmap,
-		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		IndexID:            indexInfo.GetIndexID(),
 		IndexBuildID:       indexInfo.GetBuildID(),
 		IndexVersion:       indexInfo.GetIndexVersion(),
