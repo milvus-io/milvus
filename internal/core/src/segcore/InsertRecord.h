@@ -660,6 +660,17 @@ class InsertRecordGrowing {
     }
 
     void
+    search_pk_range(const PkType& pk,
+                    Timestamp timestamp,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        auto condition = [this, timestamp](int64_t offset) {
+            return timestamps_[offset] <= timestamp;
+        };
+        pk2offset_->find_range(pk, op, bitset, condition);
+    }
+
+    void
     insert_pks(const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;

@@ -82,6 +82,7 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().IndexLoadResource(
             index_load_info_.field_type,
+            index_load_info_.element_type,
             index_load_info_.index_engine_version,
             index_load_info_.index_size,
             index_load_info_.index_params,
