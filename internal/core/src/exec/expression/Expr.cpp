@@ -32,6 +32,7 @@
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
+#include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "expr/ITypeExpr.h"
 #include "monitor/Monitor.h"
 
@@ -239,6 +240,16 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyBinaryArithOpEvalRangeExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
+    } else if (auto casted_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
+        result = std::make_shared<PhyTimestamptzArithCompareExpr>(
+            compiled_inputs,
+            casted_expr,
+            "PhyTimestamptzArithCompareExpr",
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),

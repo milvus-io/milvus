@@ -2728,7 +2728,8 @@ func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
 }
 func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
 	for _, p := range props {
-		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone{
+		// used in collection or database
+		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone {
 			return true, p.Value
 		}
 	}
@@ -2736,43 +2737,32 @@ func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
 }
 
 func checkTimezone(props ...*commonpb.KeyValuePair) error {
-	has_timezone, timezone_str := getDefaultTimezoneVal(props...)
-	if has_timezone {
-		_, err := time.LoadLocation(timezone_str)
+	hasTImezone, timezoneStr := getDefaultTimezoneVal(props...)
+	if hasTImezone {
+		_, err := time.LoadLocation(timezoneStr)
 		if err != nil {
-				return merr.WrapErrParameterInvalidMsg("invalid timezone, should be a IANA timezone name: %s", err.Error())
-			}
-		}
-		return nil
-}
-
-func getColTimezone(colInfo *collectionInfo) string {
-	for _, pair := range colInfo.properties {
-		if pair.GetKey() == common.CollectionDefaultTimezone {
-			return pair.GetValue()
+			return merr.WrapErrParameterInvalidMsg("invalid timezone, should be a IANA timezone name: %s", err.Error())
 		}
 	}
-	return ""
+	return nil
 }
 
-func getDbTimezone(dbInfo *databaseInfo) string {
-	for _, pair := range dbInfo.properties {
-		if pair.GetKey() == common.DatabaseDefaultTimezone {
-			return pair.GetValue()
-		}
-	}
-	return ""
+func getColTimezone(colInfo *collectionInfo) (bool, string) {
+	return getDefaultTimezoneVal(colInfo.properties...)
+}
+
+func getDbTimezone(dbInfo *databaseInfo) (bool, string) {
+	return getDefaultTimezoneVal(dbInfo.properties...)
 }
 
 func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, dbTimezone string) error {
 	naiveLayouts := []string{
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05.999999999", 
+		"2006-01-02 15:04:05.999999999",
 		"2006-01-02 15:04:05",
 	}
 	for _, fieldData := range columns {
-		
 		if fieldData.GetType() != schemapb.DataType_Timestamptz {
 			continue
 		}
@@ -2792,7 +2782,7 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 			// parse directly
 			t, err = time.Parse(time.RFC3339Nano, isoStr)
 			if err == nil {
-				utcTimestamps[i] = t.UnixNano()
+				utcTimestamps[i] = t.UnixMicro()
 				continue
 			}
 			// no timezone, try to find timezone in collecion -> database level
@@ -2802,7 +2792,7 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 			} else if dbTimezone != "" {
 				defaultTZ = dbTimezone
 			}
-			
+
 			location, err := time.LoadLocation(defaultTZ)
 			if err != nil {
 				log.Error("invalid timezone", zap.String("timezone", defaultTZ), zap.Error(err))
@@ -2820,7 +2810,7 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 				log.Warn("Can not parse timestamptz string", zap.String("timestamp_string", isoStr))
 				return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string: %s", isoStr)
 			}
-			utcTimestamps[i] = t.UnixNano()
+			utcTimestamps[i] = t.UnixMicro()
 		}
 		// Replace data in place
 		fieldData.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
@@ -2830,10 +2820,9 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 		}
 	}
 	return nil
-
 }
 
-func timestamptzUtc2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string, dbTimezone string) error {
+func timestamptzUTC2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string, dbTimezone string) error {
 	// Determine the target timezone based on priority: collection -> database -> UTC.
 	defaultTZ := "UTC"
 	if userDefineTimezone != "" {
@@ -2856,15 +2845,17 @@ func timestamptzUtc2IsoStr(results []*schemapb.FieldData, userDefineTimezone str
 		}
 		scalarField := fieldData.GetScalars()
 		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
-			log.Warn("field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
-			return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
+			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
+				log.Warn("field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
+			}
 		}
 
 		utcTimestamps := scalarField.GetTimestamptzData().GetData()
 		isoStrings := make([]string, len(utcTimestamps))
 
 		for i, ts := range utcTimestamps {
-			t := time.Unix(0, ts).UTC()
+			t := time.UnixMicro(ts).UTC()
 			localTime := t.In(location)
 			isoStrings[i] = localTime.Format(time.RFC3339Nano)
 		}

@@ -837,9 +837,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		log.Warn("fail to get database info", zap.Error(err))
 		return err
 	}
-	colTimezone := getColTimezone(colInfo)
-	dbTimezone := getDbTimezone(dbInfo)
-	err = timestamptzUtc2IsoStr(t.result.GetResults().GetFieldsData(), parseTimezone(t.request.SearchParams), colTimezone, dbTimezone)
+	_, colTimezone := getColTimezone(colInfo)
+	_, dbTimezone := getDbTimezone(dbInfo)
+	err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), parseTimezone(t.request.SearchParams), colTimezone, dbTimezone)
 	if err != nil {
 		log.Warn("fail to convert timestamp", zap.Error(err))
 		return err

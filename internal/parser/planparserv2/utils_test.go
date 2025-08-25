@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -589,4 +590,126 @@ func Test_handleCompare(t *testing.T) {
 		assert.Equal(t, planpb.OpType_GreaterThan, result.GetUnaryRangeExpr().GetOp())
 		assert.Equal(t, "var1", result.GetUnaryRangeExpr().GetTemplateVariableName())
 	})
+}
+
+func TestParseISO8601Duration(t *testing.T) {
+	testCases := []struct {
+		name      string
+		input     string
+		expected  *planpb.Interval
+		expectErr bool
+	}{
+		{
+			name:  "Full duration",
+			input: "P1Y2M3DT4H5M6S",
+			expected: &planpb.Interval{
+				Years:   1,
+				Months:  2,
+				Days:    3,
+				Hours:   4,
+				Minutes: 5,
+				Seconds: 6,
+			},
+			expectErr: false,
+		},
+		{
+			name:  "Date part only",
+			input: "P3Y6M4D",
+			expected: &planpb.Interval{
+				Years:  3,
+				Months: 6,
+				Days:   4,
+			},
+			expectErr: false,
+		},
+		{
+			name:  "Time part only",
+			input: "PT10H30M15S",
+			expected: &planpb.Interval{
+				Hours:   10,
+				Minutes: 30,
+				Seconds: 15,
+			},
+			expectErr: false,
+		},
+		{
+			name:  "handle 0",
+			input: "P0D",
+			expected: &planpb.Interval{
+				Days: 0,
+			},
+		},
+		{
+			name:      "Ambiguous M for Month",
+			input:     "P2M",
+			expected:  &planpb.Interval{Months: 2},
+			expectErr: false,
+		},
+		{
+			name:      "Ambiguous M for Minute",
+			input:     "PT2M",
+			expected:  &planpb.Interval{Minutes: 2},
+			expectErr: false,
+		},
+		{
+			name:      "Mixed date and time with missing parts",
+			input:     "P1DT12H",
+			expected:  &planpb.Interval{Days: 1, Hours: 12},
+			expectErr: false,
+		},
+		{
+			name:      "Only P (valid empty duration)",
+			input:     "P",
+			expected:  &planpb.Interval{},
+			expectErr: false,
+		},
+		{
+			name:      "Only PT (valid empty time part)",
+			input:     "PT",
+			expected:  &planpb.Interval{},
+			expectErr: false,
+		},
+		{
+			name:      "Invalid format - no P prefix",
+			input:     "1Y2M",
+			expected:  nil,
+			expectErr: true,
+		},
+		{
+			name:      "Invalid format - unknown character",
+			input:     "P1Y2X",
+			expected:  nil,
+			expectErr: true,
+		},
+		{
+			name:      "Invalid format - time part without T",
+			input:     "P1H",
+			expected:  nil,
+			expectErr: true,
+		},
+		{
+			name:      "Invalid format - empty string",
+			input:     "",
+			expected:  nil,
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := parseISODuration(tc.input)
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("expected an error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("did not expect an error but got: %v", err)
+			}
+			if !reflect.DeepEqual(actual, tc.expected) {
+				t.Errorf("result mismatch:\nexpected: %+v\nactual:   %+v", tc.expected, actual)
+			}
+		})
+	}
 }

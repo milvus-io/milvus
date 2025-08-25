@@ -291,8 +291,17 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
+	if err != nil {
+		return ErrWithLog(log, "Failed to get collection info", err)
+	}
+	_, dbTimezone := getDbTimezone(db)
+	_, colTimezone := getColTimezone(colInfo)
+	timezonePreference := []string{colTimezone, dbTimezone}
+	visitorArgs := &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}
+
 	start := time.Now()
-	dr.plan, err = planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues())
+	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
