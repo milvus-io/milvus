@@ -71,7 +71,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		return nil, err
 	}
 
-	client, err := vllm.NewVLLMClient(apiKey, endpoint, conf["enable"])
+	client, err := vllm.NewVLLMClient(apiKey, endpoint)
 	if err != nil {
 		return nil, err
 	}

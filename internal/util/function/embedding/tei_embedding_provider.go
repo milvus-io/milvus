@@ -84,7 +84,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 	if err != nil {
 		return nil, err
 	}
-	c, err := tei.NewTEIClient(apiKey, endpoint, params["enable"])
+	c, err := tei.NewTEIClient(apiKey, endpoint)
 	if err != nil {
 		return nil, err
 	}

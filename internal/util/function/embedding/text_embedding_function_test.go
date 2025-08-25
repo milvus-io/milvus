@@ -999,3 +999,27 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
 		s.NoError(err)
 	}
 }
+
+func (s *TextEmbeddingFunctionSuite) TestDisable() {
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := openAIProvider + "." + models.EnableConf
+		return map[string]string{
+			key: "false",
+		}
+	}
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: openAIProvider},
+			{Key: models.ModelNameParamKey, Value: "text-embedding-ada-002"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	})
+	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
+}

@@ -20,37 +20,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 func TestNewClient(t *testing.T) {
-	{
-		_, err := NewTEIClient("mock_key", "http://localhost", "true")
-		assert.True(t, err == nil)
-	}
-	{
-		_, err := NewTEIClient("mock_key", "http://localhost", "false")
-		assert.True(t, err != nil)
-	}
-	{
-		_, err := NewTEIClient("mock_key", "http://localhost", "")
-		assert.True(t, err == nil)
-	}
-	{
-		os.Setenv(models.EnableTeiEnvStr, "true")
-		_, err := NewTEIClient("mock_key", "http://localhost", "")
-		assert.True(t, err == nil)
-	}
-	{
-		os.Setenv(models.EnableTeiEnvStr, "false")
-		_, err := NewTEIClient("mock_key", "http://localhost", "")
-		assert.True(t, err != nil)
-	}
+	_, err := NewTEIClient("mock_key", "http://localhost")
+	assert.True(t, err == nil)
 }
 
 func TestEmbeddingOK(t *testing.T) {
@@ -68,14 +45,14 @@ func TestEmbeddingOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIClient("mock_key", url, "true")
+		c, _ := NewTEIClient("mock_key", url)
 		ret, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
 
 	{
-		c, _ := NewTEIClient("mock_key", url, "true")
+		c, _ := NewTEIClient("mock_key", url)
 		ret, err := c.Embedding([]string{"sentence"}, false, "", "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
@@ -91,7 +68,7 @@ func TestEmbeddingFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIClient("mock_key", url, "true")
+		c, _ := NewTEIClient("mock_key", url)
 		_, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
 		assert.True(t, err != nil)
 	}
@@ -112,7 +89,7 @@ func TestRerankOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIClient("", url, "true")
+		c, _ := NewTEIClient("", url)
 		ret, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &RerankResponse{RerankResponseItem{Index: 0, Score: 0.0}, RerankResponseItem{Index: 1, Score: 0.1}, RerankResponseItem{Index: 2, Score: 0.2}})
@@ -128,7 +105,7 @@ func TestRerankFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIClient("mock_key", url, "true")
+		c, _ := NewTEIClient("mock_key", url)
 		_, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
 	}
