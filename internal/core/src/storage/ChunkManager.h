@@ -16,11 +16,13 @@
 
 #pragma once
 
+#include <folly/futures/Future.h>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
 #include <map>
+#include "common/Types.h"
 
 namespace milvus::storage {
 
@@ -78,6 +80,22 @@ class ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) = 0;
+
+    virtual folly::SemiFuture<uint64_t>
+    ReadAsync(const std::string& filepath,
+              uint64_t offset,
+              void* buf,
+              uint64_t len) {
+        ThrowInfo(NotImplemented, GetName() + "ReadAsync with offset not implement");
+    }
+              
+    virtual folly::SemiFuture<uint64_t>
+    ReadAsync(const std::string& remote_filepath,
+              const std::string& local_filepath,
+              uint64_t offset,
+              uint64_t len) {
+        ThrowInfo(NotImplemented, GetName() + "ReadAsync with offset not implement");
+    }
 
     /**
      * @brief Write buffer to file with offset

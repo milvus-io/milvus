@@ -26,6 +26,7 @@
 #include <aws/core/platform/Environment.h>
 #include <aws/core/client/AWSError.h>
 #include "TencentCloudSTSClient.h"
+#include <aws/core/client/ClientConfiguration.h>
 
 namespace Aws {
 namespace Http {
