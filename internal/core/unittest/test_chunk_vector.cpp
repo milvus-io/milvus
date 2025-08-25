@@ -71,7 +71,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
     auto bf16_vec = schema->AddDebugField(
         "bf16_vec", DataType::VECTOR_BFLOAT16, 128, metric_type);
     auto sparse_vec = schema->AddDebugField(
-        "sparse_vec", DataType::VECTOR_SPARSE_FLOAT, 128, metric_type);
+        "sparse_vec", DataType::VECTOR_SPARSE_U32_F32, 128, metric_type);
     auto int8_vec = schema->AddDebugField(
         "int8_vec", DataType::VECTOR_INT8, 128, metric_type);
     schema->set_primary_field_id(int64_field);
@@ -200,7 +200,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         auto fp16_vec_gt = dataset.get_col<float16>(fp16_vec);
         auto bf16_vec_gt = dataset.get_col<bfloat16>(bf16_vec);
         auto sparse_vec_gt =
-            dataset.get_col<knowhere::sparse::SparseRow<float>>(sparse_vec);
+            dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(sparse_vec);
         auto int8_vec_gt = dataset.get_col<int8>(int8_vec);
 
         for (size_t i = 0; i < num_inserted; ++i) {
@@ -234,7 +234,7 @@ INSTANTIATE_TEST_SUITE_P(IsSparse, ChunkVectorTest, ::testing::Bool());
 TEST_P(ChunkVectorTest, SearchWithMmap) {
     auto is_sparse = GetParam();
     auto data_type =
-        is_sparse ? DataType::VECTOR_SPARSE_FLOAT : DataType::VECTOR_FLOAT;
+        is_sparse ? DataType::VECTOR_SPARSE_U32_F32 : DataType::VECTOR_FLOAT;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);

@@ -184,12 +184,12 @@ IndexFactory::VecIndexLoadResource(
                 knowhere::IndexStaticFaced<knowhere::bf16>::HasRawData(
                     index_type, index_version, config);
             break;
-        case milvus::DataType::VECTOR_SPARSE_FLOAT:
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
             resource = knowhere::IndexStaticFaced<
-                knowhere::fp32>::EstimateLoadResource(index_type,
-                                                      index_version,
-                                                      index_size_gb,
-                                                      config);
+                knowhere::sparse_u32_f32>::EstimateLoadResource(index_type,
+                                                                index_version,
+                                                                index_size_gb,
+                                                                config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
                     index_type, index_version, config);
@@ -516,8 +516,8 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
-                return std::make_unique<VectorDiskAnnIndex<float>>(
+            case DataType::VECTOR_SPARSE_U32_F32: {
+                return std::make_unique<VectorDiskAnnIndex<sparse_u32_f32>>(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_ARRAY: {
@@ -537,9 +537,17 @@ IndexFactory::CreateVectorIndex(
         }
     } else {  // create mem index
         switch (data_type) {
-            case DataType::VECTOR_FLOAT:
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_FLOAT: {
                 return std::make_unique<VectorMemIndex<float>>(
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
+            }
+            case DataType::VECTOR_SPARSE_U32_F32: {
+                return std::make_unique<VectorMemIndex<sparse_u32_f32>>(
                     DataType::NONE,
                     index_type,
                     metric_type,
@@ -596,11 +604,19 @@ IndexFactory::CreateVectorIndex(
                             version,
                             use_knowhere_build_pool,
                             file_manager_context);
+                    case DataType::VECTOR_SPARSE_U32_F32:
+                        return std::make_unique<VectorMemIndex<sparse_u32_f32>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
                     default:
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented data type to "
                                               "build mem index: {}",
-                                              data_type));
+                                              element_type));
                 }
             }
             default:

@@ -23,6 +23,7 @@
 #include "common/Json.h"
 #include "common/Consts.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 
 namespace milvus::query {
 
@@ -80,7 +81,7 @@ struct Placeholder {
     // only one of blob_ and sparse_matrix_ should be set. blob_ is used for
     // dense vector search and sparse_matrix_ is for sparse vector search.
     aligned_vector<char> blob_;
-    std::unique_ptr<knowhere::sparse::SparseRow<float>[]> sparse_matrix_;
+    std::unique_ptr<knowhere::sparse::SparseRow<sparseValueType>[]> sparse_matrix_;
     // offsets for embedding list
     aligned_vector<size_t> lims_;
 

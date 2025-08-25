@@ -206,7 +206,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             add_vector_payload(builder, const_cast<uint8_t*>(raw_data), length);
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             ThrowInfo(DataTypeInvalid,
                       "Sparse Float Vector payload should be added by calling "
                       "add_one_binary_payload",
@@ -287,7 +287,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         // sparse float vector doesn't require a dim
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
@@ -416,7 +416,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::binary(), nullable)});
         }
         // sparse float vector doesn't require a dim
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
@@ -456,7 +456,7 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
                               arrow::fixed_size_binary(dim * sizeof(bfloat16)),
                               nullable)});
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
@@ -490,7 +490,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
         case DataType::VECTOR_BFLOAT16: {
             return schema->type_length() / sizeof(bfloat16);
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("GetDimensionFromFileMetaData should not be "
                                   "called for sparse vector"));
@@ -971,7 +971,7 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_BFLOAT16:
             return std::make_shared<FieldData<BFloat16Vector>>(
                 dim, type, total_num_rows);
-        case DataType::VECTOR_SPARSE_FLOAT:
+        case DataType::VECTOR_SPARSE_U32_F32:
             return std::make_shared<FieldData<SparseFloatVector>>(
                 type, total_num_rows);
         case DataType::VECTOR_INT8:

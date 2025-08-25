@@ -782,7 +782,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
-                   DataType::VECTOR_SPARSE_FLOAT) {
+                   DataType::VECTOR_SPARSE_U32_F32) {
             bulk_subscript_sparse_float_vector_impl(
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,

@@ -37,7 +37,7 @@ constexpr bool IsScalar =
 
 template <typename T>
 constexpr bool IsSparse = std::is_same_v<T, SparseFloatVector> ||
-                          std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
+                          std::is_same_v<T, knowhere::sparse::SparseRow<sparseValueType>>;
 
 template <typename T>
 constexpr bool IsVariableType =
@@ -52,7 +52,7 @@ template <typename T>
 constexpr bool IsVariableTypeSupportInChunk =
     std::is_same_v<T, std::string> || std::is_same_v<T, Array> ||
     std::is_same_v<T, Json> ||
-    std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
+    std::is_same_v<T, knowhere::sparse::SparseRow<sparseValueType>>;
 
 template <typename T>
 using ChunkViewType = std::conditional_t<

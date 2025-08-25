@@ -699,7 +699,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                                                   dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_SPARSE_FLOAT) {
+                       DataType::VECTOR_SPARSE_U32_F32) {
                 this->append_data<SparseFloatVector>(
                     field_id, size_per_chunk, vec_mmap_descriptor);
                 return;

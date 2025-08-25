@@ -415,5 +415,6 @@ template class VectorDiskAnnIndex<float>;
 template class VectorDiskAnnIndex<float16>;
 template class VectorDiskAnnIndex<bfloat16>;
 template class VectorDiskAnnIndex<bin1>;
+template class VectorDiskAnnIndex<sparse_u32_f32>;
 
 }  // namespace milvus::index

@@ -568,7 +568,7 @@ TEST(chunk, test_sparse_float) {
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
     auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_FLOAT, false, kTestSparseDim, n_rows);
+        storage::DataType::VECTOR_SPARSE_U32_F32, false, kTestSparseDim, n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;
@@ -593,7 +593,7 @@ TEST(chunk, test_sparse_float) {
 
     FieldMeta field_meta(FieldName("a"),
                          milvus::FieldId(1),
-                         DataType::VECTOR_SPARSE_FLOAT,
+                         DataType::VECTOR_SPARSE_U32_F32,
                          kTestSparseDim,
                          "IP",
                          false,
