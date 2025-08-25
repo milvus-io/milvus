@@ -104,7 +104,7 @@ func (ddt *dropDatabaseTask) SetID(uid UniqueID) {
 }
 
 func (ddt *dropDatabaseTask) Name() string {
-	return DropCollectionTaskName
+	return DropDatabaseTaskName
 }
 
 func (ddt *dropDatabaseTask) Type() commonpb.MsgType {
@@ -342,7 +342,7 @@ func (t *describeDatabaseTask) SetID(uid UniqueID) {
 }
 
 func (t *describeDatabaseTask) Name() string {
-	return AlterDatabaseTaskName
+	return DescribeDatabaseTaskName
 }
 
 func (t *describeDatabaseTask) Type() commonpb.MsgType {
