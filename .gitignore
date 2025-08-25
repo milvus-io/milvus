@@ -111,3 +111,6 @@ internal/core/src/pb/*.pb.h
 internal/core/src/pb/*.pb.cc
 **/legacypb/*.pb.go
 pkg/streaming/proto/**/*.pb.go
+
+#AI rules
+WARP.md
