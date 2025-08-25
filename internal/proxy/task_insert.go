@@ -260,13 +260,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// trans timestamptz data
-	colTimezone := getColTimezone(colInfo)
-	dbTimezone := getDbTimezone(dbInfo)
+	_, colTimezone := getColTimezone(colInfo)
+	_, dbTimezone := getDbTimezone(dbInfo)
 	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone, dbTimezone)
 	if err != nil {
 		return err
 	}
-
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {

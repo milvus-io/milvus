@@ -5,12 +5,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -786,4 +788,81 @@ func decodeUnicode(input string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
+}
+
+func parseISODuration(durationStr string) (*planpb.Interval, error) {
+	iso8601DurationRegex := regexp.MustCompile(
+		`^P` + // P at the start
+			`(?:(\d+)Y)?` + // Years (optional)
+			`(?:(\d+)M)?` + // Months (optional)
+			`(?:(\d+)D)?` + // Days (optional)
+			`(?:T` + // T separator (optional, but required for time parts)
+			`(?:(\d+)H)?` + // Hours (optional)
+			`(?:(\d+)M)?` + // Minutes (optional)
+			`(?:(\d+)S)?` + // Seconds (optional)
+			`)?$`,
+	)
+	matches := iso8601DurationRegex.FindStringSubmatch(durationStr)
+	if matches == nil {
+		return nil, fmt.Errorf("invalid ISO 8601 duration: %s", durationStr)
+	}
+
+	interval := &planpb.Interval{}
+	if matches[1] != "" {
+		years, _ := strconv.ParseInt(matches[1], 10, 64)
+		interval.Years = years
+	}
+	if matches[2] != "" {
+		months, _ := strconv.ParseInt(matches[2], 10, 64)
+		interval.Months = months
+	}
+	if matches[3] != "" {
+		days, _ := strconv.ParseInt(matches[3], 10, 64)
+		interval.Days = days
+	}
+	if matches[4] != "" {
+		hours, _ := strconv.ParseInt(matches[4], 10, 64)
+		interval.Hours = hours
+	}
+	if matches[5] != "" {
+		minutes, _ := strconv.ParseInt(matches[5], 10, 64)
+		interval.Minutes = minutes
+	}
+	if matches[6] != "" {
+		seconds, _ := strconv.ParseInt(matches[6], 10, 64)
+		interval.Seconds = seconds
+	}
+
+	return interval, nil
+}
+
+func parseISOWithTimezone(isoString string, preferredZones []string) (int64, error) {
+	timeZoneOffsetRegex := regexp.MustCompile(`([+-]\d{2}:\d{2}|Z)$`)
+	// layout for timestamp string without timezone
+	const layoutForNaiveTime = "2025-01-02T15:04:05.999999999"
+	if timeZoneOffsetRegex.MatchString(isoString) { // has timezone
+		t, err := time.Parse(time.RFC3339Nano, isoString)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse timezone-aware string '%s': %w", isoString, err)
+		}
+		log.Debug("use timezone in string")
+		return t.UnixMicro(), nil
+	}
+	for _, zoneName := range preferredZones {
+		loc, err := time.LoadLocation(zoneName)
+		if err != nil {
+			continue
+		}
+		t, err := time.ParseInLocation(layoutForNaiveTime, isoString, loc)
+		if err == nil {
+			log.Debug("use preferred timezone")
+			return t.UnixMicro(), nil
+		}
+	}
+	t, err := time.ParseInLocation(layoutForNaiveTime, isoString, time.UTC)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse naive time string '%s' even with UTC fallback: %w", isoString, err)
+	}
+	log.Debug("use UTC timezone")
+	return t.UnixMicro(), nil
 }

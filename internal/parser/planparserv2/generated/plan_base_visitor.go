@@ -123,6 +123,10 @@ func (v *BasePlanVisitor) VisitUnary(ctx *UnaryContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTimestamptzCompare(ctx *TimestamptzCompareContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitInteger(ctx *IntegerContext) interface{} {
 	return v.VisitChildren(ctx)
 }

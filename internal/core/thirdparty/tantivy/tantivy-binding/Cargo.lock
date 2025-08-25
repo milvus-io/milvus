@@ -4087,8 +4087,8 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
- "url",
  "unicode-general-category",
+ "url",
  "whatlang",
  "zstd-sys",
 ]
