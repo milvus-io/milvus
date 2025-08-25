@@ -38,6 +38,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "mmap/Types.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "exec/expression/ExprCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -644,6 +645,18 @@ FinishLoad(CSegmentInterface c_segment) {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         segment_interface->FinishLoad();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+CStatus
+ExprResCacheEraseSegment(int64_t segment_id) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        milvus::exec::ExprResCacheManager::Instance().EraseSegment(segment_id);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

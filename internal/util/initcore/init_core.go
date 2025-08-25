@@ -392,6 +392,24 @@ func SetupCoreConfigChangelCallback() {
 			UpdateDefaultJSONKeyStatsCommitInterval(interval)
 			return nil
 		})
+
+		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateExprResCacheEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			capacity, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateExprResCacheCapacityBytes(capacity)
+			return nil
+		})
 	})
 }
 

@@ -64,6 +64,14 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
+func UpdateExprResCacheEnable(enable bool) {
+	C.SetExprResCacheEnable(C.bool(enable))
+}
+
+func UpdateExprResCacheCapacityBytes(capacity int) {
+	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+}
+
 func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
 	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
 }

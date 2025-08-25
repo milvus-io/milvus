@@ -94,7 +94,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->IsNull();
     }
 
-    const TargetBitmap
+    TargetBitmap
     IsNotNull() override {
         return internal_index_->IsNotNull();
     }
