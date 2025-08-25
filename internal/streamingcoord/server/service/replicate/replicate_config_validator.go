@@ -27,11 +27,6 @@ func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration, curren
 		clusterMap:       make(map[string]*milvuspb.MilvusCluster),
 		config:           config,
 	}
-	// Build cluster maps during initialization
-	for _, cluster := range config.GetClusters() {
-		clusterID := cluster.GetClusterId()
-		validator.clusterMap[clusterID] = cluster
-	}
 	return validator
 }
 
@@ -121,6 +116,11 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 			return fmt.Errorf("cluster '%s' has %d pchannels, but expected %d (same as cluster '%s')",
 				clusterID, len(pchannels), expectedPchannelCount, firstClusterID)
 		}
+		// Build cluster maps
+		if _, exists := v.clusterMap[clusterID]; exists {
+			return fmt.Errorf("duplicate clusterID found: '%s'", clusterID)
+		}
+		v.clusterMap[clusterID] = cluster
 	}
 	return nil
 }
