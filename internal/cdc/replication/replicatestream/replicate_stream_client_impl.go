@@ -66,7 +66,7 @@ func NewReplicateStreamClient(ctx context.Context, targetCluster *milvuspb.Milvu
 		cancel:          cancel,
 	}
 
-	rs.startInternal()
+	go rs.startInternal()
 	return rs
 }
 
@@ -97,10 +97,6 @@ func (r *replicateStreamClient) startInternal() {
 				time.Sleep(backoff.NextBackOff())
 				continue
 			}
-			// close the old client
-			if r.client != nil {
-				r.client.CloseSend()
-			}
 
 			// reset client and pending messages
 			r.client = client
@@ -112,15 +108,19 @@ func (r *replicateStreamClient) startInternal() {
 
 			select {
 			case <-r.ctx.Done():
+				r.client.CloseSend()
+				r.wg.Wait()
 				logger.Info("replicate stream client closed by ctx done")
 				return
 			case err := <-sendErrCh:
 				close(stopCh)
+				r.client.CloseSend()
 				r.wg.Wait()
 				time.Sleep(backoff.NextBackOff())
 				log.Warn("restart stream client due to send error", zap.Error(err))
 			case err := <-recvErrCh:
 				close(stopCh)
+				r.client.CloseSend()
 				r.wg.Wait()
 				time.Sleep(backoff.NextBackOff())
 				log.Warn("restart stream client due to recv error", zap.Error(err))
