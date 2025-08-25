@@ -34,6 +34,7 @@ const (
 	PartitionStatsCurrentVersionPrefix = MetaPrefix + "/current-partition-stats-version"
 	StatsTaskPrefix                    = MetaPrefix + "/stats-task"
 	FileResourceMetaPrefix             = MetaPrefix + "/file_resource"
+	GlobalStatsTaskPrefix              = MetaPrefix + "/global-stats-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

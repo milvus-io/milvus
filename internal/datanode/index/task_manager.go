@@ -80,19 +80,29 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 }
 
 type TaskManager struct {
-	ctx          context.Context
-	stateLock    sync.Mutex
-	indexTasks   map[Key]*IndexTaskInfo
-	analyzeTasks map[Key]*AnalyzeTaskInfo
-	statsTasks   map[Key]*StatsTaskInfo
+	ctx              context.Context
+	stateLock        sync.Mutex
+	indexTasks       map[Key]*IndexTaskInfo
+	analyzeTasks     map[Key]*AnalyzeTaskInfo
+	statsTasks       map[Key]*StatsTaskInfo
+	globalStatsTasks map[Key]*GlobalStatsTaskInfo
+}
+
+type GlobalStatsTaskInfo struct {
+	Cancel     context.CancelFunc
+	State      indexpb.JobState
+	FailReason string
+	SegID      typeutil.UniqueID
+	Files      []string
 }
 
 func NewTaskManager(ctx context.Context) *TaskManager {
 	return &TaskManager{
-		ctx:          ctx,
-		indexTasks:   make(map[Key]*IndexTaskInfo),
-		analyzeTasks: make(map[Key]*AnalyzeTaskInfo),
-		statsTasks:   make(map[Key]*StatsTaskInfo),
+		ctx:              ctx,
+		indexTasks:       make(map[Key]*IndexTaskInfo),
+		analyzeTasks:     make(map[Key]*AnalyzeTaskInfo),
+		statsTasks:       make(map[Key]*StatsTaskInfo),
+		globalStatsTasks: make(map[Key]*GlobalStatsTaskInfo),
 	}
 }
 
@@ -259,6 +269,63 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 		}
 	}
 	return nil
+}
+
+func (m *TaskManager) StoreGlobalStatsFiles(
+	ClusterID string,
+	taskID typeutil.UniqueID,
+	files []string,
+) {
+	key := Key{ClusterID: ClusterID, TaskID: taskID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if info, ok := m.globalStatsTasks[key]; ok {
+		info.Files = files
+		return
+	}
+}
+
+func (m *TaskManager) LoadOrStoreGlobalStatsTask(clusterID string, taskID typeutil.UniqueID, info *GlobalStatsTaskInfo) *GlobalStatsTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	key := Key{ClusterID: clusterID, TaskID: taskID}
+	oldInfo, ok := m.globalStatsTasks[key]
+	if ok {
+		return oldInfo
+	}
+	m.globalStatsTasks[key] = info
+	return nil
+}
+
+func (m *TaskManager) GetGlobalStatsTaskInfo(clusterID string, taskID typeutil.UniqueID) *GlobalStatsTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	if info, ok := m.globalStatsTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
+		return &GlobalStatsTaskInfo{
+			Cancel:     info.Cancel,
+			State:      info.State,
+			FailReason: info.FailReason,
+			Files:      info.Files,
+		}
+	}
+	return nil
+}
+
+func (m *TaskManager) DeleteGlobalStatsTaskInfos(ctx context.Context, keys []Key) []*GlobalStatsTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	deleted := make([]*GlobalStatsTaskInfo, 0, len(keys))
+	for _, key := range keys {
+		info, ok := m.globalStatsTasks[key]
+		if ok {
+			deleted = append(deleted, info)
+			delete(m.globalStatsTasks, key)
+			log.Ctx(ctx).Info("delete global stats task infos",
+				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
+		}
+	}
+	return deleted
 }
 
 func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []*AnalyzeTaskInfo {
@@ -462,6 +529,29 @@ func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.Uniq
 	defer m.stateLock.Unlock()
 	if task, ok := m.statsTasks[key]; ok {
 		log.Info("store stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
+			zap.String("state", state.String()), zap.String("fail reason", failReason))
+		task.State = state
+		task.FailReason = failReason
+	}
+}
+
+func (m *TaskManager) GetGlobalStatsTaskState(clusterID string, taskID typeutil.UniqueID) indexpb.JobState {
+	key := Key{ClusterID: clusterID, TaskID: taskID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	task, ok := m.globalStatsTasks[key]
+	if !ok {
+		return indexpb.JobState_JobStateNone
+	}
+	return task.State
+}
+
+func (m *TaskManager) StoreGlobalStatsTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+	key := Key{ClusterID: clusterID, TaskID: taskID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.globalStatsTasks[key]; ok {
+		log.Info("store global stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
