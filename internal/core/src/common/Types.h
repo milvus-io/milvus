@@ -188,6 +188,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::binary();
         case DataType::VECTOR_INT8:
             return arrow::fixed_size_binary(dim);
+        case DataType::VECTOR_ARRAY:
+            return arrow::binary();
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("failed to get data type, invalid type {}",

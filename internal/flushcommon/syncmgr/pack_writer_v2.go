@@ -117,7 +117,8 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	columnGroups := storagecommon.SplitBySchema(bw.schema.GetFields())
+	allFields := typeutil.GetAllFieldSchemas(bw.schema)
+	columnGroups := storagecommon.SplitBySchema(allFields)
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
@@ -193,9 +194,9 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	}
 
 	rec := builder.NewRecord()
-	field2Col := make(map[storage.FieldID]int, len(bw.schema.GetFields()))
-
-	for c, field := range bw.schema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(bw.schema)
+	field2Col := make(map[storage.FieldID]int, len(allFields))
+	for c, field := range allFields {
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil

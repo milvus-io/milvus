@@ -450,14 +450,42 @@ class VectorArrayChunk : public Chunk {
             data_ptr, dim_, len, next_offset - offset, element_type_);
     }
 
-    std::vector<VectorArrayView>
-    Views() const {
+    std::pair<std::vector<VectorArrayView>, FixedVector<bool>>
+    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
+              std::nullopt) const {
+        auto start_offset = 0;
+        auto len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && start_offset < row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                len > 0 && len <= row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                start_offset + len <= row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+        }
+
         std::vector<VectorArrayView> views;
-        views.reserve(row_nums_);
-        for (int64_t i = 0; i < row_nums_; i++) {
+        views.reserve(len);
+        auto end_offset = start_offset + len;
+        for (int64_t i = start_offset; i < end_offset; i++) {
             views.emplace_back(View(i));
         }
-        return views;
+        // vector array does not support null, so just return {}.
+        return {std::move(views), {}};
     }
 
     const char*

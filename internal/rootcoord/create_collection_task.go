@@ -210,6 +210,8 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for _, field := range structArrayField.GetFields() {
 			field.FieldID = int64(idx + StartOfUserFieldID)
 			idx++
+			// Also register sub-field names in name2id map
+			name2id[field.GetName()] = field.GetFieldID()
 		}
 	}
 

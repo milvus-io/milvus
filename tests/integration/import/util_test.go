@@ -86,7 +86,7 @@ func GenerateParquetFileAndReturnInsertData(c *cluster.MiniClusterV3, schema *sc
 func searilizeParquetFile(schema *schemapb.CollectionSchema, insertData *storage.InsertData, numRows int) (*bytes.Buffer, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, 10240))
 
-	pqSchema, err := pq.ConvertToArrowSchema(schema, false)
+	pqSchema, err := pq.ConvertToArrowSchemaForUT(schema, false)
 	if err != nil {
 		return nil, err
 	}

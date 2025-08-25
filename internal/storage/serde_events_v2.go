@@ -114,7 +114,8 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
 	field2Col := make(map[FieldID]int)
-	for i, field := range schema.Fields {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
 	return &packedRecordReader{
@@ -158,8 +159,10 @@ func (pw *packedRecordWriter) Write(r Record) error {
 	var rec arrow.Record
 	sar, ok := r.(*simpleArrowRecord)
 	if !ok {
-		arrays := make([]arrow.Array, len(pw.schema.Fields))
-		for i, field := range pw.schema.Fields {
+		// Get all fields including struct sub-fields
+		allFields := typeutil.GetAllFieldSchemas(pw.schema)
+		arrays := make([]arrow.Array, len(allFields))
+		for i, field := range allFields {
 			arrays[i] = r.Column(field.FieldID)
 		}
 		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
@@ -354,7 +357,8 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
-			pw.columnGroups = storagecommon.SplitBySchema(pw.schema.Fields)
+			allFields := typeutil.GetAllFieldSchemas(pw.schema)
+			pw.columnGroups = storagecommon.SplitBySchema(allFields)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {

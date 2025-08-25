@@ -955,6 +955,12 @@ func TestProxy(t *testing.T) {
 	// params.Save(params.CommonCfg.SessionRetryTimes.Key, "500")
 	// params.Save(params.CommonCfg.GracefulStopTimeout.Key, "3600")
 
+	params.Save(params.EtcdCfg.RequestTimeout.Key, "300000")
+	params.Save(params.CommonCfg.SessionTTL.Key, "300")
+	params.Save(params.CommonCfg.SessionRetryTimes.Key, "500")
+	params.Save(params.CommonCfg.GracefulStopTimeout.Key, "3600")
+
+	params.Save(params.CommonCfg.EnableStorageV2.Key, "true")
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
 	params.DataCoordGrpcServerCfg.IP = "localhost"
