@@ -426,10 +426,10 @@ VectorMemIndex<T>::Build(const Config& config) {
                     field_data)
                     ->Dim());
         }
-        std::vector<knowhere::sparse::SparseRow<float>> vec(total_rows);
+        std::vector<knowhere::sparse::SparseRow<sparseValueType>> vec(total_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
-            auto ptr = static_cast<const knowhere::sparse::SparseRow<float>*>(
+            auto ptr = static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
             for (size_t i = 0; i < field_data->Length(); ++i) {
@@ -570,7 +570,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
@@ -579,8 +579,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     }
     // release and transfer ownership to the result unique ptr.
     res.value()->SetIsOwner(false);
-    return std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>(
-        static_cast<const knowhere::sparse::SparseRow<float>*>(
+    return std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>(
+        static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
             res.value()->GetTensor()));
 }
 
@@ -751,5 +751,6 @@ template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
 template class VectorMemIndex<int8>;
+template class VectorMemIndex<sparse_u32_f32>;
 
 }  // namespace milvus::index

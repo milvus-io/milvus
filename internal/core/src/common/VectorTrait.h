@@ -122,7 +122,7 @@ class SparseFloatVector : public VectorTrait {
  public:
     using embedded_type = float;
     static constexpr int32_t dim_factor = 1;
-    static constexpr auto data_type = DataType::VECTOR_SPARSE_FLOAT;
+    static constexpr auto data_type = DataType::VECTOR_SPARSE_U32_F32;
     static constexpr auto c_data_type = CDataType::SparseFloatVector;
     static constexpr auto schema_data_type =
         proto::schema::DataType::SparseFloatVector;

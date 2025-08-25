@@ -75,9 +75,9 @@ ValidateIndexParams(const char* index_type,
                         knowhere::Version::GetCurrentVersion().VersionNumber(),
                         json,
                         error_msg);
-            } else if (dataType == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+            } else if (dataType == milvus::DataType::VECTOR_SPARSE_U32_F32) {
                 status =
-                    knowhere::IndexStaticFaced<knowhere::fp32>::ConfigCheck(
+                    knowhere::IndexStaticFaced<knowhere::sparse_u32_f32>::ConfigCheck(
                         index_type,
                         knowhere::Version::GetCurrentVersion().VersionNumber(),
                         json,

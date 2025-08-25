@@ -134,8 +134,8 @@ VariableLengthChunk<std::string>::set(
 // Template specialization for sparse vector
 template <>
 inline void
-VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
-    const knowhere::sparse::SparseRow<float>* src,
+VariableLengthChunk<knowhere::sparse::SparseRow<sparseValueType>>::set(
+    const knowhere::sparse::SparseRow<sparseValueType>* src,
     uint32_t begin,
     uint32_t length,
     const std::optional<CheckDataValid>& check_data_valid) {
@@ -158,7 +158,7 @@ VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
         uint8_t* data_ptr = buf + offset;
         std::memcpy(data_ptr, (uint8_t*)src[i].data(), data_size);
         data_[i + begin] =
-            knowhere::sparse::SparseRow<float>(src[i].size(), data_ptr, false);
+            knowhere::sparse::SparseRow<sparseValueType>(src[i].size(), data_ptr, false);
         offset += data_size;
     }
 }

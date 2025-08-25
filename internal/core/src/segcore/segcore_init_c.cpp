@@ -124,6 +124,11 @@ SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
 }
 
 extern "C" void
+SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads) {
+    milvus::config::KnowhereInitFetchThreadPool(num_threads);
+}
+
+extern "C" void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size) {
     milvus::config::KnowhereInitGPUMemoryPool(init_size, max_size);

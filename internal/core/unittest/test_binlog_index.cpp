@@ -91,7 +91,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             } else {
                 intermin_index_has_raw_data = true;
             }
-        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             auto sparse_vecs = GenerateRandomSparseFloatVector(data_n);
             vec_field_data->FillFieldData(sparse_vecs.get(), data_n);
             data_d = std::dynamic_pointer_cast<
@@ -190,12 +190,12 @@ INSTANTIATE_TEST_SUITE_P(
             knowhere::IndexEnum::
                 INDEX_FAISS_SCANN_DVR),  // intermin index not has data
         std::make_tuple(
-            DataType::VECTOR_SPARSE_FLOAT,
+            DataType::VECTOR_SPARSE_U32_F32,
             knowhere::metric::IP,
             knowhere::IndexEnum::
                 INDEX_SPARSE_INVERTED_INDEX,  //intermin index not has data
             std::nullopt),
-        std::make_tuple(DataType::VECTOR_SPARSE_FLOAT,
+        std::make_tuple(DataType::VECTOR_SPARSE_U32_F32,
                         knowhere::metric::IP,
                         knowhere::IndexEnum::
                             INDEX_SPARSE_WAND,  // intermin index not has data

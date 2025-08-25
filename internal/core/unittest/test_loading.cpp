@@ -47,8 +47,8 @@ class IndexLoadTest : public ::testing::TestWithParam<Param> {
             data_type = milvus::DataType::VECTOR_FLOAT16;
         } else if (field_type == "vector_binary") {
             data_type = milvus::DataType::VECTOR_BINARY;
-        } else if (field_type == "vector_sparse_float") {
-            data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
+        } else if (field_type == "VECTOR_SPARSE_U32_F32") {
+            data_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
         } else if (field_type == "vector_int8") {
             data_type = milvus::DataType::VECTOR_INT8;
         } else if (field_type == "array") {

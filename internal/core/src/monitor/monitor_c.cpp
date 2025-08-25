@@ -16,9 +16,9 @@
 
 char*
 GetCoreMetrics() {
-    auto str = milvus::monitor::prometheusClient->GetMetrics();
+    auto str = milvus::monitor::getPrometheusClient().GetMetrics();
     auto len = str.length();
-    char* res = (char*)malloc(len + 1);
+    char* res = static_cast<char*>(malloc(len + 1));
     memcpy(res, str.data(), len);
     res[len] = '\0';
     return res;
