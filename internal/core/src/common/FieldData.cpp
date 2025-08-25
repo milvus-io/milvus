@@ -214,14 +214,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::GEOMETRY: {
-            auto array_info =
-                GetDataInfoFromArray<arrow::BinaryViewArray,
-                                     arrow::Type::type::BINARY>(array);
             auto geometry_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            std::vector<std::string> values(element_count);
+            std::vector<uint8_t> values(element_count);
             for (size_t index = 0; index < element_count; ++index) {
-                values[index] = geometry_array->GetString(index);
+                values[index] = *geometry_array->GetValue(index, 0);
             }
             if (nullable_) {
                 return FillFieldData(

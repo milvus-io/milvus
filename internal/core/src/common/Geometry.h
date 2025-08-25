@@ -29,7 +29,7 @@ class Geometry {
         AssertInfo(geometry != nullptr,
                    "failed to construct geometry from wkb data");
         geometry_.reset(geometry);
-        to_wkb_internal();
+        //to_wkb_internal();
     }
 
     explicit Geometry(const char* wkt) {
@@ -38,19 +38,19 @@ class Geometry {
         AssertInfo(geometry != nullptr,
                    "failed to construct geometry from wkt data");
         geometry_.reset(geometry);
-        to_wkb_internal();
+        //to_wkb_internal();
     }
 
     Geometry(const Geometry& other) {
         if (other.IsValid()) {
             this->geometry_.reset(other.geometry_->clone());
-            this->to_wkb_internal();
+            //this->to_wkb_internal();
         }
     }
 
     Geometry(Geometry&& other) noexcept
-        : wkb_data_(std::move(other.wkb_data_)),
-          size_(other.size_),
+        :  //wkb_data_(std::move(other.wkb_data_)),
+          //size_(other.size_),
           geometry_(std::move(other.geometry_)) {
     }
 
@@ -58,7 +58,7 @@ class Geometry {
     operator=(const Geometry& other) {
         if (this != &other && other.IsValid()) {
             this->geometry_.reset(other.geometry_->clone());
-            this->to_wkb_internal();
+            //this->to_wkb_internal();
         }
         return *this;
     }
@@ -66,23 +66,23 @@ class Geometry {
     Geometry&
     operator=(Geometry&& other) noexcept {
         if (this != &other) {
-            wkb_data_ = std::move(other.wkb_data_);
-            size_ = std::move(other.size_);
+            //wkb_data_ = std::move(other.wkb_data_);
+            //size_ = std::move(other.size_);
             geometry_ = std::move(other.geometry_);
         }
         return *this;
     }
 
-    operator std::string() const {
-        //tmp string created by copy ctr
-        return std::string(reinterpret_cast<const char*>(wkb_data_.get()),
-                           size_);
-    }
+    // operator std::string() const {
+    //     //tmp string created by copy ctr
+    //     return std::string(reinterpret_cast<const char*>(wkb_data_.get()),
+    //                        size_);
+    // }
 
-    operator std::string_view() const {
-        return std::string_view(reinterpret_cast<const char*>(wkb_data_.get()),
-                                size_);
-    }
+    // operator std::string_view() const {
+    //     return std::string_view(reinterpret_cast<const char*>(wkb_data_.get()),
+    //                             size_);
+    // }
 
     ~Geometry() {
         if (geometry_) {
@@ -100,15 +100,15 @@ class Geometry {
         return geometry_.get();
     }
 
-    const unsigned char*
-    data() const {
-        return wkb_data_.get();
-    }
+    // const unsigned char*
+    // data() const {
+    //     return wkb_data_.get();
+    // }
 
-    size_t
-    size() const {
-        return size_;
-    }
+    // size_t
+    // size() const {
+    //     return size_;
+    // }
 
     //spatial relation
     bool
@@ -151,25 +151,25 @@ class Geometry {
         return geometry_->exportToWkt();
     }
 
-    std::string
-    to_wkb_string() const {
-        return std::string(reinterpret_cast<const char*>(wkb_data_.get()),
-                           size_);
-    }
+    // std::string
+    // to_wkb_string() const {
+    //     return std::string(reinterpret_cast<const char*>(wkb_data_.get()),
+    //                        size_);
+    // }
 
  private:
-    inline void
-    to_wkb_internal() {
-        if (geometry_) {
-            size_ = geometry_->WkbSize();
-            wkb_data_ = std::make_unique<unsigned char[]>(size_);
-            // little-endian order to save wkb
-            geometry_->exportToWkb(wkbNDR, wkb_data_.get());
-        }
-    }
+    //inline void
+    // to_wkb_internal() {
+    //     if (geometry_) {
+    //         size_ = geometry_->WkbSize();
+    //         wkb_data_ = std::make_unique<unsigned char[]>(size_);
+    //         // little-endian order to save wkb
+    //         geometry_->exportToWkb(wkbNDR, wkb_data_.get());
+    //     }
+    // }
 
-    std::unique_ptr<unsigned char[]> wkb_data_;
-    size_t size_{0};
+    //std::unique_ptr<unsigned char[]> wkb_data_;
+    //size_t size_{0};
     std::unique_ptr<OGRGeometry> geometry_;
 };
 
