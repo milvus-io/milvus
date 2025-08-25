@@ -246,6 +246,13 @@ type commonConfig struct {
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
 	DiskWriteNumThreads   ParamItem `refreshable:"true"`
 
+	DiskWriteRateLimiterRefillPeriodUs      ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterAvgKBps             ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMaxBurstKBps        ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterHighPriorityRatio   ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -685,6 +692,62 @@ In this case, the maximum concurrency of disk write operations is determined by 
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
+
+	p.DiskWriteRateLimiterRefillPeriodUs = ParamItem{
+		Key:          "common.diskWriteRateLimiter.refillPeriodUs",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterRefillPeriodUs.Init(base.mgr)
+
+	p.DiskWriteRateLimiterAvgKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.avgKBps",
+		Version:      "2.6.0",
+		DefaultValue: "262144",
+		Doc:          "average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterAvgKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMaxBurstKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.maxBurstKBps",
+		Version:      "2.6.0",
+		DefaultValue: "524288",
+		Doc:          "max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMaxBurstKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterHighPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.highPriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc: `amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+The ratio is the multiplication factor of the configured bandwidth.
+For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.`,
+		Export: true,
+	}
+	p.DiskWriteRateLimiterHighPriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMiddlePriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.middlePriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMiddlePriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterLowPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.lowPriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterLowPriorityRatio.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
