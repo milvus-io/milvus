@@ -153,9 +153,11 @@ class DeletedRecord {
         mem_size_.fetch_add(mem_add);
 
         if constexpr (is_sealed) {
-            // update estimated memory size to caching layer only when the delta is large enough (1024 bytes)
+            // update estimated memory size to caching layer only when the delta is large enough (64KB)
+            constexpr int64_t MIN_DELTA_SIZE = 64 * 1024;
             auto new_estimated_size = size();
-            if (std::abs(new_estimated_size - estimated_memory_size_) > 1024) {
+            if (std::abs(new_estimated_size - estimated_memory_size_) >
+                MIN_DELTA_SIZE) {
                 auto delta_size = new_estimated_size - estimated_memory_size_;
                 if (delta_size >= 0) {
                     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
