@@ -55,7 +55,7 @@ func TestBalancer(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, assignment)
 
-	assignmentService.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Return(nil)
+	assignmentService.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Return(&types.UpdateWALBalancePolicyResponse{}, nil)
 	err = balancer.SuspendRebalance(context.Background())
 	assert.NoError(t, err)
 	err = balancer.ResumeRebalance(context.Background())
@@ -66,7 +66,7 @@ func TestBalancer(t *testing.T) {
 	assert.NoError(t, err)
 
 	assignmentService.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Unset()
-	assignmentService.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Return(errors.New("test"))
+	assignmentService.EXPECT().UpdateWALBalancePolicy(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 	err = balancer.SuspendRebalance(context.Background())
 	assert.Error(t, err)
 	err = balancer.ResumeRebalance(context.Background())

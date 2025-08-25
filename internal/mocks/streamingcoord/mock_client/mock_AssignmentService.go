@@ -8,8 +8,6 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mock "github.com/stretchr/testify/mock"
 
-	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -285,21 +283,33 @@ func (_c *MockAssignmentService_UpdateReplicateConfiguration_Call) RunAndReturn(
 }
 
 // UpdateWALBalancePolicy provides a mock function with given fields: ctx, req
-func (_m *MockAssignmentService) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error {
+func (_m *MockAssignmentService) UpdateWALBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateWALBalancePolicy")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) error); ok {
+	var r0 *types.UpdateWALBalancePolicyResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.UpdateWALBalancePolicyRequest) *types.UpdateWALBalancePolicyResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.UpdateWALBalancePolicyResponse)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *types.UpdateWALBalancePolicyRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockAssignmentService_UpdateWALBalancePolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateWALBalancePolicy'
@@ -309,24 +319,24 @@ type MockAssignmentService_UpdateWALBalancePolicy_Call struct {
 
 // UpdateWALBalancePolicy is a helper method to define mock.On call
 //   - ctx context.Context
-//   - req *streamingpb.UpdateWALBalancePolicyRequest
+//   - req *types.UpdateWALBalancePolicyRequest
 func (_e *MockAssignmentService_Expecter) UpdateWALBalancePolicy(ctx interface{}, req interface{}) *MockAssignmentService_UpdateWALBalancePolicy_Call {
 	return &MockAssignmentService_UpdateWALBalancePolicy_Call{Call: _e.mock.On("UpdateWALBalancePolicy", ctx, req)}
 }
 
-func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) Run(run func(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest)) *MockAssignmentService_UpdateWALBalancePolicy_Call {
+func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) Run(run func(ctx context.Context, req *types.UpdateWALBalancePolicyRequest)) *MockAssignmentService_UpdateWALBalancePolicy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*streamingpb.UpdateWALBalancePolicyRequest))
+		run(args[0].(context.Context), args[1].(*types.UpdateWALBalancePolicyRequest))
 	})
 	return _c
 }
 
-func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) Return(_a0 error) *MockAssignmentService_UpdateWALBalancePolicy_Call {
-	_c.Call.Return(_a0)
+func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) Return(_a0 *types.UpdateWALBalancePolicyResponse, _a1 error) *MockAssignmentService_UpdateWALBalancePolicy_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) RunAndReturn(run func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) error) *MockAssignmentService_UpdateWALBalancePolicy_Call {
+func (_c *MockAssignmentService_UpdateWALBalancePolicy_Call) RunAndReturn(run func(context.Context, *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error)) *MockAssignmentService_UpdateWALBalancePolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

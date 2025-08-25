@@ -42,8 +42,21 @@ func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*ty
 	return nil, merr.WrapErrNodeNotFound(nodeID, "streaming node not found")
 }
 
+// IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
+func (b balancerImpl) IsRebalanceSuspended(ctx context.Context) (bool, error) {
+	// Update nothing, just fetch the current policy back.
+	policy, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+		Config:     &streamingpb.WALBalancePolicyConfig{},
+		UpdateMask: &fieldmaskpb.FieldMask{},
+	})
+	if err != nil {
+		return false, err
+	}
+	return !policy.GetConfig().GetAllowRebalance(), nil
+}
+
 func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
-	return b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+	_, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: false,
 		},
@@ -51,10 +64,11 @@ func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
 			Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance},
 		},
 	})
+	return err
 }
 
 func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
-	return b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+	_, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: true,
 		},
@@ -62,22 +76,25 @@ func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
 			Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance},
 		},
 	})
+	return err
 }
 
 func (b balancerImpl) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
-	return b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+	_, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{}},
 		Nodes: &streamingpb.WALBalancePolicyNodes{
 			FreezeNodeIds: nodeIDs,
 		},
 	})
+	return err
 }
 
 func (b balancerImpl) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
-	return b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+	_, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{}},
 		Nodes: &streamingpb.WALBalancePolicyNodes{
 			DefreezeNodeIds: nodeIDs,
 		},
 	})
+	return err
 }
