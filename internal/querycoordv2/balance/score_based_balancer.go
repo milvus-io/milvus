@@ -79,9 +79,9 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		return nil
 	}
 
-	queue := newPriorityQueue()
+	queue := NewPriorityQueue()
 	for _, item := range nodeItemsMap {
-		queue.push(item)
+		queue.Push(item)
 	}
 
 	// sort segments by segment row count, if segment has same row count, sort by node's score
@@ -100,9 +100,9 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	for _, s := range segments {
 		func(s *meta.Segment) {
 			// for each segment, pick the node with the least score
-			targetNode := queue.pop().(*nodeItem)
+			targetNode := queue.Pop().(*nodeItem)
 			// make sure candidate is always push back
-			defer queue.push(targetNode)
+			defer queue.Push(targetNode)
 			scoreChanges := b.calculateSegmentScore(s)
 
 			sourceNode := nodeItemsMap[s.Node]
@@ -173,9 +173,9 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 		return nil
 	}
 
-	queue := newPriorityQueue()
+	queue := NewPriorityQueue()
 	for _, item := range nodeItemsMap {
-		queue.push(item)
+		queue.Push(item)
 	}
 	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, ch := range channels {
@@ -193,10 +193,10 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			}
 			// for each channel, pick the node with the least score
 			if targetNode == nil {
-				targetNode = queue.pop().(*nodeItem)
+				targetNode = queue.Pop().(*nodeItem)
 			}
 			// make sure candidate is always push back
-			defer queue.push(targetNode)
+			defer queue.Push(targetNode)
 			scoreChanges := b.calculateChannelScore(ch, collectionID)
 
 			sourceNode := nodeItemsMap[ch.Node]
