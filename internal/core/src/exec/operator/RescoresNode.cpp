@@ -72,6 +72,12 @@ PhyRescoresNode::GetOutput() {
         }
     }
 
+    // skip rescore if result was empty
+    if (offsets.empty()){
+        query_context_->set_search_result(std::move(search_result));
+        return input_;
+    }
+
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
         std::vector<expr::TypedExprPtr> filters;
