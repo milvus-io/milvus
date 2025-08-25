@@ -40,6 +40,30 @@ BuildTextIndex(ProtoLayoutInterface c_binary_set,
                const uint64_t len);
 
 CStatus
+BuildPrimaryIndex(ProtoLayoutInterface c_binary_set,
+                  const uint8_t* serialized_build_index_info,
+                  const uint64_t len);
+
+CStatus
+LoadPrimaryIndex(CPrimaryIndex* res_index,
+                 const uint8_t* serialized_load_index_info,
+                 const uint64_t len);
+
+CStatus
+QueryPrimaryIndex(CPrimaryIndex index_handle, const char* key, int64_t* result);
+
+CStatus
+ResetSegmentId(CPrimaryIndex index_handle,
+               int64_t to_segment_id,
+               int64_t from_segment_id);
+
+CStatus
+GetSegmentList(CPrimaryIndex index_handle, int64_t** result, int64_t* size);
+
+CStatus
+DeletePrimaryIndex(CPrimaryIndex index_handle);
+
+CStatus
 CleanLocalData(CIndex index);
 
 CStatus
