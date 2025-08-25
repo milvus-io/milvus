@@ -645,7 +645,6 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName)
 
 	t.result, err = reducer.Reduce(toReduceResults)
-	log.Debug("reduced result: ", zap.Any("FieldsData", t.result.FieldsData))
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err

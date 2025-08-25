@@ -378,7 +378,7 @@ inline SchemaPtr CreateTestSchema() {
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
     auto timestamptz_field =
-        schema->AddDebugArrayField("timestamptz", DataType::TIMESTAMPTZ, true);
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
