@@ -219,7 +219,7 @@ const (
 	IndexNonEncoding           = "index.nonEncoding"
 
 	// timezone releated
-	DatabaseDefaultTimezone = "database.timezone"
+	DatabaseDefaultTimezone   = "database.timezone"
 	CollectionDefaultTimezone = "collection.timezone"
 )
 

@@ -15,13 +15,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+type ParserVisitorArgs struct {
+	TimezonePreference []string
+}
+
 type ParserVisitor struct {
 	parser.BasePlanVisitor
 	schema *typeutil.SchemaHelper
+	args   *ParserVisitorArgs
 }
 
-func NewParserVisitor(schema *typeutil.SchemaHelper) *ParserVisitor {
-	return &ParserVisitor{schema: schema}
+func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
+	return &ParserVisitor{schema: schema, args: args}
 }
 
 // VisitParens unpack the parentheses.
@@ -1611,5 +1616,62 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 			},
 			IsTemplate: true,
 		},
+	}
+}
+
+func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareContext) interface{} {
+	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	identifier := ctx.Identifier().Accept(v)
+	if err != nil {
+		return fmt.Errorf("can not translate identifier: %s", identifier)
+	}
+	if colExpr.dataType != schemapb.DataType_Timestamptz {
+		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
+	}
+
+	arithOp := planpb.ArithOpType_Add
+	interval := &planpb.Interval{}
+	if ctx.GetOp1() != nil {
+		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
+		rawIntervalStr := ctx.GetInterval_string().GetText()
+		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+		if err != nil {
+			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+		}
+		interval, err = parseISODuration(unquotedIntervalStr)
+		if err != nil {
+			return err
+		}
+	}
+	rawCompareStr := ctx.GetCompare_string().GetText()
+	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
+	if err != nil {
+		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
+	}
+
+	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
+
+	timestamptzInt64, err := parseISOWithTimezone(unquotedCompareStr, v.args.TimezonePreference)
+	if err != nil {
+		return err
+	}
+
+	newExpr := &planpb.Expr{
+		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+				TimestamptzColumn: toColumnInfo(colExpr),
+				ArithOp:           arithOp,
+				Interval:          interval,
+				CompareOp:         compareOp,
+				CompareValue: &planpb.GenericValue{
+					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+				},
+			},
+		},
+	}
+
+	return &ExprWithType{
+		expr:     newExpr,
+		dataType: schemapb.DataType_Bool,
 	}
 }
