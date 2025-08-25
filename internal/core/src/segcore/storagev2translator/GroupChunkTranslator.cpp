@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "common/type_c.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "common/GroupChunk.h"
 #include "mmap/Types.h"
@@ -23,8 +24,10 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -77,7 +80,9 @@ GroupChunkTranslator::GroupChunkTranslator(
     // Get row group metadata from files
     for (const auto& file : insert_files_) {
         auto reader =
-            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties());
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();

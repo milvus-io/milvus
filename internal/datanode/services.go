@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -535,43 +536,52 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	switch taskType {
 	case taskcommon.PreImport:
 		req := &datapb.PreImportRequest{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.CompactionV2(ctx, req)
 	case taskcommon.Index:
 		req := &workerpb.CreateJobRequest{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createIndexTask(ctx, req)
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createStatsTask(ctx, req)
 	case taskcommon.Analyze:
 		req := &workerpb.AnalyzeRequest{}
-		err := proto.Unmarshal(request.GetPayload(), req)
-		if err != nil {
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)

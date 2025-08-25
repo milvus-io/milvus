@@ -28,39 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func Test_EqualKeyPairArray(t *testing.T) {
-	p1 := []*commonpb.KeyValuePair{
-		{
-			Key:   "k1",
-			Value: "v1",
-		},
-	}
-
-	p2 := []*commonpb.KeyValuePair{}
-	assert.False(t, EqualKeyPairArray(p1, p2))
-
-	p2 = append(p2, &commonpb.KeyValuePair{
-		Key:   "k2",
-		Value: "v2",
-	})
-	assert.False(t, EqualKeyPairArray(p1, p2))
-	p2 = []*commonpb.KeyValuePair{
-		{
-			Key:   "k1",
-			Value: "v2",
-		},
-	}
-	assert.False(t, EqualKeyPairArray(p1, p2))
-
-	p2 = []*commonpb.KeyValuePair{
-		{
-			Key:   "k1",
-			Value: "v1",
-		},
-	}
-	assert.True(t, EqualKeyPairArray(p1, p2))
-}
-
 func Test_EncodeMsgPositions(t *testing.T) {
 	mp := &msgstream.MsgPosition{
 		ChannelName: "test",
@@ -315,4 +282,174 @@ func TestGetRateLimitConfigErr(t *testing.T) {
 		}, "b", 100)
 		assert.EqualValues(t, 100, v)
 	})
+}
+
+func TestIsSubsetOfProperties(t *testing.T) {
+	type args struct {
+		src    []*commonpb.KeyValuePair
+		target []*commonpb.KeyValuePair
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "empty src and empty target",
+			args: args{
+				src:    []*commonpb.KeyValuePair{},
+				target: []*commonpb.KeyValuePair{},
+			},
+			want: true,
+		},
+		{
+			name: "empty src with non-empty target",
+			args: args{
+				src: []*commonpb.KeyValuePair{},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "non-empty src with empty target",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+				},
+				target: []*commonpb.KeyValuePair{},
+			},
+			want: false,
+		},
+		{
+			name: "src is subset of target - single pair",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "src is subset of target - multiple pairs",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key3", Value: "value3"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+					{Key: "key3", Value: "value3"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "src equals target",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "src key not in target",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key_missing", Value: "value_missing"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "src key exists but value differs",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "different_value"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "duplicate keys in src - all match target",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key1", Value: "value1"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "duplicate keys in target - src subset",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+					{Key: "key1", Value: "value1"},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "empty string values",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: ""},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: ""},
+					{Key: "key2", Value: "value2"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "empty string value mismatch",
+			args: args{
+				src: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: ""},
+				},
+				target: []*commonpb.KeyValuePair{
+					{Key: "key1", Value: "value1"},
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSubsetOfProperties(tt.args.src, tt.args.target)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

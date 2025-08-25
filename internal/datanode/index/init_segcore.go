@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func InitSegcore() {
+func InitSegcore() error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -84,8 +84,11 @@ func InitSegcore() {
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()
+
+	return initcore.InitPluginLoader()
 }
 
 func CloseSegcore() {
 	initcore.CleanGlogManager()
+	initcore.CleanPluginLoader()
 }

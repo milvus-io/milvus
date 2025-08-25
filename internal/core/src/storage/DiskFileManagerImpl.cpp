@@ -57,6 +57,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    plugin_context_ = fileManagerContext.plugin_context;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -265,7 +266,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                        remote_file_sizes,
                        remote_files,
                        field_meta_,
-                       index_meta_);
+                       index_meta_,
+                       plugin_context_);
     for (auto& re : res) {
         remote_paths_to_size_[re.first] = re.second;
     }

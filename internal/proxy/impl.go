@@ -2707,7 +2707,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	} else if err != nil {
 		rsp.Status = merr.Status(err)
 	}
-	return rsp, err
+	if err != nil {
+		rsp.Status = merr.Status(err)
+	}
+	return rsp, nil
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
