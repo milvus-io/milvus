@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -24,10 +25,12 @@ import (
 
 // PayloadReader reads data from payload
 type PayloadReader struct {
-	reader   *file.Reader
-	colType  schemapb.DataType
-	numRows  int64
-	nullable bool
+	reader      *file.Reader
+	colType     schemapb.DataType
+	numRows     int64
+	nullable    bool
+	elementType *schemapb.DataType // For VectorArray type
+	dim         *int64             // For VectorArray type
 }
 
 var _ PayloadReaderInterface = (*PayloadReader)(nil)
@@ -40,7 +43,73 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 	if err != nil {
 		return nil, err
 	}
-	return &PayloadReader{reader: parquetReader, colType: colType, numRows: parquetReader.NumRows(), nullable: nullable}, nil
+
+	reader := &PayloadReader{
+		reader:   parquetReader,
+		colType:  colType,
+		numRows:  parquetReader.NumRows(),
+		nullable: nullable,
+	}
+
+	if colType == schemapb.DataType_ArrayOfVector {
+		arrowReader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create arrow reader for VectorArray: %w", err)
+		}
+
+		arrowSchema, err := arrowReader.Schema()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get arrow schema for VectorArray: %w", err)
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, fmt.Errorf("VectorArray should have exactly 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		if !field.HasMetadata() {
+			return nil, errors.New("VectorArray field is missing metadata")
+		}
+
+		metadata := field.Metadata
+
+		elementTypeStr, ok := metadata.GetValue("elementType")
+		if !ok {
+			return nil, errors.New("VectorArray metadata missing required 'elementType' field")
+		}
+		elementTypeInt, err := strconv.ParseInt(elementTypeStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid elementType in VectorArray metadata: %s", elementTypeStr)
+		}
+
+		elementType := schemapb.DataType(elementTypeInt)
+		switch elementType {
+		case schemapb.DataType_FloatVector,
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_Int8Vector,
+			schemapb.DataType_SparseFloatVector:
+			reader.elementType = &elementType
+		default:
+			return nil, fmt.Errorf("invalid vector type for VectorArray: %s", elementType.String())
+		}
+
+		dimStr, ok := metadata.GetValue("dim")
+		if !ok {
+			return nil, errors.New("VectorArray metadata missing required 'dim' field")
+		}
+		dimVal, err := strconv.ParseInt(dimStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid dim in VectorArray metadata: %s", dimStr)
+		}
+		if dimVal <= 0 {
+			return nil, fmt.Errorf("VectorArray dim must be positive, got %d", dimVal)
+		}
+		reader.dim = &dimVal
+	}
+
+	return reader, nil
 }
 
 // GetDataFromPayload returns data,length from payload, returns err if failed
@@ -424,15 +493,7 @@ func (r *PayloadReader) GetVectorArrayFromPayload() ([]*schemapb.VectorField, er
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get vector from datatype %v", r.colType.String()))
 	}
 
-	value, err := readByteAndConvert(r, func(bytes parquet.ByteArray) *schemapb.VectorField {
-		v := &schemapb.VectorField{}
-		proto.Unmarshal(bytes, v)
-		return v
-	})
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
+	return readVectorArrayFromListArray(r)
 }
 
 func (r *PayloadReader) GetJSONFromPayload() ([][]byte, []bool, error) {
@@ -473,6 +534,88 @@ func (r *PayloadReader) GetArrowRecordReader() (pqarrow.RecordReader, error) {
 		return nil, err
 	}
 	return rr, nil
+}
+
+// readVectorArrayFromListArray reads VectorArray data stored as Arrow ListArray
+func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, error) {
+	arrowReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
+	if err != nil {
+		return nil, err
+	}
+	defer arrowReader.ParquetReader().Close()
+
+	// Read all row groups
+	table, err := arrowReader.ReadTable(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer table.Release()
+
+	if table.NumCols() != 1 {
+		return nil, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+	}
+
+	column := table.Column(0)
+	if column.Len() == 0 {
+		return []*schemapb.VectorField{}, nil
+	}
+
+	result := make([]*schemapb.VectorField, 0, int(r.numRows))
+
+	elementType := *r.elementType
+	dim := *r.dim
+	for _, chunk := range column.Data().Chunks() {
+		listArray, ok := chunk.(*array.List)
+		if !ok {
+			return nil, fmt.Errorf("expected ListArray, got %T", chunk)
+		}
+
+		valuesArray := listArray.ListValues()
+		switch elementType {
+		case schemapb.DataType_FloatVector:
+			floatArray, ok := valuesArray.(*array.Float32)
+			if !ok {
+				return nil, fmt.Errorf("expected Float32 array for FloatVector, got %T", valuesArray)
+			}
+
+			// Process each row which contains multiple vectors
+			for i := 0; i < listArray.Len(); i++ {
+				if listArray.IsNull(i) {
+					return nil, fmt.Errorf("null value in VectorArray")
+				}
+
+				start, end := listArray.ValueOffsets(i)
+				vectorData := make([]float32, end-start)
+
+				for j := start; j < end; j++ {
+					vectorData[j-start] = floatArray.Value(int(j))
+				}
+
+				vectorField := &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: vectorData,
+						},
+					},
+				}
+				result = append(result, vectorField)
+			}
+
+		case schemapb.DataType_BinaryVector:
+			return nil, fmt.Errorf("BinaryVector in VectorArray not implemented yet")
+		case schemapb.DataType_Float16Vector:
+			return nil, fmt.Errorf("Float16Vector in VectorArray not implemented yet")
+		case schemapb.DataType_BFloat16Vector:
+			return nil, fmt.Errorf("BFloat16Vector in VectorArray not implemented yet")
+		case schemapb.DataType_Int8Vector:
+			return nil, fmt.Errorf("Int8Vector in VectorArray not implemented yet")
+		default:
+			return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
+		}
+	}
+
+	return result, nil
 }
 
 func readNullableByteAndConvert[T any](r *PayloadReader, convert func([]byte) T) ([]T, []bool, error) {
