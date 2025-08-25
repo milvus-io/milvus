@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 )
 
 func TestDecayFunction(t *testing.T) {
@@ -271,7 +271,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 	{
 		nq := int64(1)
 		f, err := newDecayFunction(schema, functionSchema)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
 		s.NoError(err)
 
 		_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
@@ -289,7 +289,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		nq := int64(1)
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 		s.NoError(err)
@@ -302,7 +302,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		nq := int64(3)
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 		s.NoError(err)
@@ -329,9 +329,9 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		f, err := newDecayFunction(schema, functionSchema2)
 		s.NoError(err)
 		// ts/id data: 0 - 9
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		// empty
-		data2 := function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
+		data2 := embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -345,9 +345,9 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		f, err := newDecayFunction(schema, functionSchema2)
 		s.NoError(err)
 		// ts/id data: 0 - 9
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		// ts/id data: 0 - 3
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
@@ -364,11 +364,11 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		// nq1 ts/id data: 0 - 9
 		// nq2 ts/id data: 10 - 19
 		// nq3 ts/id data: 20 - 29
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		// nq1 ts/id data: 0 - 3
 		// nq2 ts/id data: 4 - 7
 		// nq3 ts/id data: 8 - 11
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, 1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)

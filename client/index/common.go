@@ -45,11 +45,13 @@ const (
 	BinIvfFlat IndexType = "BIN_IVF_FLAT"
 	IvfPQ      IndexType = "IVF_PQ" // faiss
 	IvfSQ8     IndexType = "IVF_SQ8"
+	IvfRabitQ  IndexType = "IVF_RABITQ"
 	HNSW       IndexType = "HNSW"
 	IvfHNSW    IndexType = "IVF_HNSW"
 	AUTOINDEX  IndexType = "AUTOINDEX"
 	DISKANN    IndexType = "DISKANN"
 	SCANN      IndexType = "SCANN"
+	MinHashLSH IndexType = "MINHASH_LSH"
 
 	// Sparse
 	SparseInverted IndexType = "SPARSE_INVERTED_INDEX"

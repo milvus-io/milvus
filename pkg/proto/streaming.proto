@@ -171,7 +171,10 @@ message WALBalancePolicyNodes {
     repeated int64 defreeze_node_ids = 2; // nodes that will be defrozen.
 }
 
-message UpdateWALBalancePolicyResponse {}
+message UpdateWALBalancePolicyResponse {
+    WALBalancePolicyConfig config = 1;    // return current configuration of WAL balance policy.
+    repeated int64 freeze_node_ids = 2;   // nodes that are frozen.
+}
 
 // AssignmentDiscoverRequest is the request of Discovery
 message AssignmentDiscoverRequest {

@@ -2346,6 +2346,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
         # Step 2: Test point 1 - loaded partitions can be searched/queried
+        self.release_collection(client, collection_name)
         self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
@@ -2458,8 +2459,10 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2],
                    check_task=CheckTasks.err_res, check_items=error)
-        
+    
         self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2])
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2485,6 +2488,10 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
         self.release_partitions(client, collection_name, [partition_name_2])
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
         self.load_partitions(client, collection_name, [partition_name_2])
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2])
@@ -2580,6 +2587,196 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_milvus_client_load_replica_change(self):
+        """
+        target: test load replica change
+                2.load with a new replica number
+                3.release collection
+                4.load with a new replica
+                5.verify replica changes and query functionality
+        expected: The second time successfully loaded with a new replica number
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # Create index and load with replica_number=1
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name, replica_number=1)
+        # Verify initial load state
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Query to verify functionality
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
+                  check_task=CheckTasks.check_query_results,
+                  check_items={"exp_res": [rows[0]], "with_vec": True})
+        # Load with replica_number=2 (should work)
+        self.load_collection(client, collection_name, replica_number=2)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Release and reload with replica_number=2
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name, replica_number=2)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Verify query still works after replica change
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
+                  check_task=CheckTasks.check_query_results,
+                  check_items={"exp_res": [rows[0]], "with_vec": True})
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_milvus_client_load_replica_multi(self):
+        """
+        target: test load with multiple replicas
+        method: 1.create collection with one shard
+                2.insert multiple segments
+                3.load with multiple replicas
+                4.query and search
+        expected: Query and search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection with one shard
+        self.create_collection(client, collection_name, default_dim, shards_num=1)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        schema_info = self.describe_collection(client, collection_name)[0]
+        # Insert multiple segments
+        replica_number = 2
+        total_entities = 0
+        all_rows = []
+        for i in range(replica_number):
+            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info, start=i * default_nb)
+            self.insert(client, collection_name, rows)
+            total_entities += default_nb
+            all_rows.extend(rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == total_entities
+        # Create index and load with multiple replicas
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name, replica_number=replica_number)
+        # Verify load state
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Query test
+        query_res, _ = self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0, {default_nb}]",
+                  check_task=CheckTasks.check_query_results,
+                  check_items={"exp_res": [all_rows[0], all_rows[default_nb]], "with_vec": True})
+        assert len(query_res) == 2
+        # Search test
+        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+        self.search(client, collection_name, vectors_to_search,
+                   check_task=CheckTasks.check_search_results,
+                   check_items={"enable_milvus_client_api": True,
+                               "nq": len(vectors_to_search),
+                               "limit": default_limit,
+                               "pk_name": default_primary_key_field_name})
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_milvus_client_load_replica_partitions(self):
+        """
+        target: test load replica with partitions
+        method: 1.Create collection and one partition
+                2.Insert data into collection and partition
+                3.Load multi replicas with partition
+                4.Query
+        expected: Verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # Create collection
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Insert data into collection and partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_1 = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        rows_2 = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info, start=default_nb)
+        self.insert(client, collection_name, rows_1)
+        self.create_partition(client, collection_name, partition_name)
+        self.insert(client, collection_name, rows_2, partition_name=partition_name)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb * 2
+        # Create index and load partition with multiple replicas
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name], replica_number=2)
+        # Verify load state
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Query on loaded partition (should succeed)
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [{default_nb}]",
+                  partition_names=[partition_name],
+                  check_task=CheckTasks.check_query_results,
+                  check_items={"exp_res": [rows_2[0]], "with_vec": True})
+        # Query on non-loaded partition (should fail)
+        error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
+                  partition_names=[ct.default_partition_name, partition_name],
+                  check_task=CheckTasks.err_res, check_items=error)
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_milvus_client_count_multi_replicas(self):
+        """
+        target: test count multi replicas
+        method: 1. load data with multi replicas
+                2. count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # Create index and load with multiple replicas
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name, replica_number=2)
+        # Verify load state
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+        # Count with multi replicas
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
+                  output_fields=["count(*)"],
+                  check_task=CheckTasks.check_query_results,
+                  check_items={"exp_res": [{"count(*)": default_nb}]})
+        
+        # Cleanup
+        self.drop_collection(client, collection_name)
 
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2677,9 +2874,100 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_2],
                    check_task=CheckTasks.err_res, check_items=error)
-        # 7. load the whole collection (should succeed)
+        # 7. load partition2 twice
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_2])
+        # 8. load the whole collection (should succeed)
         self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_load_collection_after_load_partition_drop_another(self):
+        """
+        target: test release/load collection after loading one partition and dropping another
+        method: 1) load partitions 2) drop one partition 3) release another partition 4) load collection 5) query
+        expected: no exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # Create collection and partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        # Load one partition, drop the other, then release the loaded partition
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.drop_partition(client, collection_name, partition_name_2)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Load the whole collection and run a query
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_partition_operations(self):
+        """
+        target: comprehensive test for load collection after various partition operations
+        method: combines three V1 test scenarios:
+                1. load partition -> release partition -> load collection -> search
+                2. load partition -> release partitions -> query (should fail) -> load collection -> query
+                3. load partition -> drop partition -> query (should fail) -> drop another -> load collection -> query
+        expected: all operations should work correctly with proper error handling
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        
+        # Create collection and partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.release_collection(client, collection_name)
+        
+        # Scenario 1: load partition -> release partition -> load collection -> search
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.load_collection(client, collection_name)
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                   partition_names=[partition_name_1, partition_name_2])
+        
+        # Scenario 2: load partition -> release partitions -> query (should fail) -> load collection -> query
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        error = {ct.err_code: 65535, ct.err_msg: 'collection not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2],
+                  check_task=CheckTasks.err_res, check_items=error)
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2])
+        
+        # Scenario 3: load partition -> drop partition -> query (should fail) -> drop another -> load collection -> query
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_name_1} not found'}
+        self.query(client, collection_name, filter=default_search_exp,
+                  partition_names=[partition_name_1, partition_name_2],
+                  check_task=CheckTasks.err_res, check_items=error)
+        self.drop_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp)
+        
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
 
 
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):

@@ -57,18 +57,17 @@ func (c *AssignmentServiceImpl) GetLatestAssignments(ctx context.Context) (*type
 	return c.watcher.GetLatestDiscover(ctx)
 }
 
-func (c *AssignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error {
+func (c *AssignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return status.NewOnShutdownError("assignment service client is closing")
+		return nil, status.NewOnShutdownError("assignment service client is closing")
 	}
 	defer c.lifetime.Done()
 
 	service, err := c.service.GetService(c.ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = service.UpdateWALBalancePolicy(ctx, req)
-	return err
+	return service.UpdateWALBalancePolicy(ctx, req)
 }
 
 // AssignmentDiscover watches the assignment discovery.

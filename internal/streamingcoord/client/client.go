@@ -37,7 +37,8 @@ type AssignmentService interface {
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
 
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
-	UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error
+	// Return the WAL balance policy after the update.
+	UpdateWALBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error)
 }
 
 // BroadcastService is the interface of broadcast service.

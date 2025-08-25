@@ -26,6 +26,7 @@ test_stlsort_for_range(
     {
         Config config;
         config[milvus::index::ENABLE_MMAP] = enable_mmap;
+        config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
 
         auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
         index->Load(binary_set, config);
