@@ -22,6 +22,7 @@
 #include "expr/ITypeExpr.h"
 #include "segcore/segment_c.h"
 #include "test_utils/storage_test_utils.h"
+#include "exec/expression/ExprCache.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -1067,4 +1068,55 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
 
     writer.join();
     reader.join();
+}
+
+TEST(TextMatch, ExprResCacheSealed) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = GenTestSchema();
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football"};
+
+    int64_t N = 2;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+
+    SealedLoadFieldData(raw_data, *seg);
+    seg->CreateTextIndex(FieldId(101));
+
+    ASSERT_EQ(mgr.GetEntryCount(), 0);
+
+    BitsetType final;
+    auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
+    final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    ASSERT_TRUE(final[0]);
+    ASSERT_TRUE(final[1]);
+
+    // Expect one cache entry inserted
+    ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+    // Run again; should hit cache and not increase entries
+    final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    ASSERT_TRUE(final[0]);
+    ASSERT_TRUE(final[1]);
+    ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+    // Cleanup
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
 }

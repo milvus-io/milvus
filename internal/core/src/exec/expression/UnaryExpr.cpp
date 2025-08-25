@@ -19,6 +19,7 @@
 #include "common/Json.h"
 #include <boost/regex.hpp>
 #include "common/Types.h"
+#include "exec/expression/ExprCache.h"
 #include "common/type_c.h"
 #include "log/Log.h"
 
@@ -1463,17 +1464,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+            std::move(index->FilterByPath(pointer,
+                                          active_count_,
+                                          is_growing,
+                                          is_strong_consistency,
+                                          filter_func)));
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1915,6 +1915,25 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         }
     }
     auto op_type = expr_->op_type_;
+
+    // Process-level LRU cache lookup by (segment_id, expr signature)
+    if (cached_match_res_ == nullptr &&
+        exec::ExprResCacheManager::IsEnabled() &&
+        segment_->type() == SegmentType::Sealed) {
+        exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                           this->GetExprSignature()};
+        exec::ExprResCacheManager::Value v;
+        if (exec::ExprResCacheManager::Instance().Get(key, v)) {
+            cached_match_res_ = v.result;
+            cached_index_chunk_valid_res_ = v.valid_result;
+            AssertInfo(cached_match_res_->size() == active_count_,
+                       "internal error: expr res cache size {} not equal "
+                       "expect active count {}",
+                       cached_match_res_->size(),
+                       active_count_);
+        }
+    }
+
     auto func = [op_type, slop](Index* index,
                                 const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
@@ -1938,13 +1957,26 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         auto res = std::move(func(index, query));
         auto valid_res = index->IsNotNull();
         cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-        cached_index_chunk_valid_res_ = std::move(valid_res);
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(valid_res));
         if (cached_match_res_->size() < active_count_) {
             // some entities are not visible in inverted index.
             // only happend on growing segment.
             TargetBitmap tail(active_count_ - cached_match_res_->size());
             cached_match_res_->append(tail);
-            cached_index_chunk_valid_res_.append(tail);
+            cached_index_chunk_valid_res_->append(tail);
+        }
+
+        // Insert into process-level cache
+        if (exec::ExprResCacheManager::IsEnabled() &&
+            segment_->type() == SegmentType::Sealed) {
+            exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                               this->ToString()};
+            exec::ExprResCacheManager::Value v;
+            v.result = cached_match_res_;
+            v.valid_result = cached_index_chunk_valid_res_;
+            v.active_count = active_count_;
+            exec::ExprResCacheManager::Instance().Put(key, v);
         }
     }
 
@@ -1952,7 +1984,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     TargetBitmap valid_result;
     result.append(
         *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(cached_index_chunk_valid_res_,
+    valid_result.append(*cached_index_chunk_valid_res_,
                         current_data_global_pos_,
                         real_batch_size);
     MoveCursor();
