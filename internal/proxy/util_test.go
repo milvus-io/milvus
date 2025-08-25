@@ -708,6 +708,23 @@ func TestValidateName(t *testing.T) {
 	assert.Nil(t, ValidateObjectName("*"))
 }
 
+func TestValidateRoleName_HyphenToggle(t *testing.T) {
+	pt := paramtable.Get()
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$-")
+	assert.Nil(t, ValidateRoleName("Admin-1"))
+	assert.Nil(t, ValidateRoleName("_a-bc$1"))
+	assert.NotNil(t, ValidateRoleName("-bad"))
+	assert.NotNil(t, ValidateRoleName("1leading"))
+	assert.NotNil(t, ValidateRoleName(""))
+	assert.NotNil(t, ValidateRoleName("*"))
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$")
+	assert.Nil(t, ValidateRoleName("Admin_1"))
+	assert.Nil(t, ValidateRoleName("Admin$1"))
+	assert.NotNil(t, ValidateRoleName("Admin-1"))
+}
+
 func TestIsDefaultRole(t *testing.T) {
 	assert.Equal(t, true, IsDefaultRole(util.RoleAdmin))
 	assert.Equal(t, true, IsDefaultRole(util.RolePublic))
