@@ -70,21 +70,23 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 
 	// Test Replicate method
 	const msgCount = pendingMessageQueueLength * 10
-	for i := 0; i < msgCount; i++ {
-		mockMsg := mock_message.NewMockImmutableMessage(t)
-		tt := uint64(i + 1)
-		mockMsg.EXPECT().TimeTick().Return(tt)
-		mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
-			Id: &messagespb.MessageID{
-				Id: strconv.Itoa(int(tt)), // use id as time tick in mock
-			},
-			Payload:    []byte("test-payload"),
-			Properties: map[string]string{"key": "value"},
-		})
+	go func() {
+		for i := 0; i < msgCount; i++ {
+			mockMsg := mock_message.NewMockImmutableMessage(t)
+			tt := uint64(i + 1)
+			mockMsg.EXPECT().TimeTick().Return(tt)
+			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
+				Id: &messagespb.MessageID{
+					Id: strconv.Itoa(int(tt)), // use id as time tick in mock
+				},
+				Payload:    []byte("test-payload"),
+				Properties: map[string]string{"key": "value"},
+			})
 
-		err := replicateClient.Replicate(mockMsg)
-		assert.NoError(t, err)
-	}
+			err := replicateClient.Replicate(mockMsg)
+			assert.NoError(t, err)
+		}
+	}()
 
 	// recv the confirm message
 	for i := 0; i < msgCount; i++ {
@@ -177,21 +179,23 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 
 	// Replicate after reconnected
 	const msgCount = 100
-	for i := 0; i < msgCount; i++ {
-		mockMsg := mock_message.NewMockImmutableMessage(t)
-		tt := uint64(i + 1)
-		mockMsg.EXPECT().TimeTick().Return(tt)
-		mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
-			Id: &messagespb.MessageID{
-				Id: strconv.Itoa(int(tt)), // use id as time tick in mock
-			},
-			Payload:    []byte("test-payload"),
-			Properties: map[string]string{"key": "value"},
-		})
+	go func() {
+		for i := 0; i < msgCount; i++ {
+			mockMsg := mock_message.NewMockImmutableMessage(t)
+			tt := uint64(i + 1)
+			mockMsg.EXPECT().TimeTick().Return(tt)
+			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
+				Id: &messagespb.MessageID{
+					Id: strconv.Itoa(int(tt)), // use id as time tick in mock
+				},
+				Payload:    []byte("test-payload"),
+				Properties: map[string]string{"key": "value"},
+			})
 
-		err := replicateClient.Replicate(mockMsg)
-		assert.NoError(t, err)
-	}
+			err := replicateClient.Replicate(mockMsg)
+			assert.NoError(t, err)
+		}
+	}()
 
 	for i := 0; i < msgCount; i++ {
 		mockStreamClient.ExpectRecv()
