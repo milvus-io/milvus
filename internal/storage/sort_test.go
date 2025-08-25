@@ -59,7 +59,7 @@ func TestSort(t *testing.T) {
 	t.Run("sort", func(t *testing.T) {
 		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
-		})
+		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 6, gotNumRows)
 		err = rw.Close()
@@ -70,7 +70,7 @@ func TestSort(t *testing.T) {
 		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
-		})
+		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 3, gotNumRows)
 		err = rw.Close()
@@ -163,7 +163,45 @@ func BenchmarkSort(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
 				return true
-			})
+			}, []int64{common.RowIDField})
 		}
 	})
+}
+
+func TestSortByMoreThanOneField(t *testing.T) {
+	const batchSize = 10000
+	sortByFieldIDs := []int64{common.RowIDField, common.TimeStampField}
+
+	blobs, err := generateTestDataWithSeed(10, batchSize)
+	assert.NoError(t, err)
+	reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
+	assert.NoError(t, err)
+	blobs, err = generateTestDataWithSeed(20, batchSize)
+	assert.NoError(t, err)
+	reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
+	assert.NoError(t, err)
+	rr := []RecordReader{reader20, reader10}
+
+	lastPK := int64(-1)
+	lastTS := int64(-1)
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			pk := r.Column(common.RowIDField).(*array.Int64).Value(0)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(0)
+			assert.True(t, pk > lastPK || (pk == lastPK && ts > lastTS))
+			lastPK = pk
+			return nil
+		},
+
+		closefn: func() error {
+			lastPK = int64(-1)
+			return nil
+		},
+	}
+	gotNumRows, err := Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
+		return true
+	}, sortByFieldIDs)
+	assert.NoError(t, err)
+	assert.Equal(t, batchSize*2, gotNumRows)
+	assert.NoError(t, rw.Close())
 }
