@@ -74,6 +74,8 @@ func TestManager(t *testing.T) {
 	states := []map[uint64]bool{
 		{1: false, 2: false, 3: true},
 		{1: true, 2: false},
+		{1: true, 2: false},
+		{1: true, 2: false},
 	}
 	r.EXPECT().GetLatestState(mock.Anything).Unset()
 	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
@@ -87,6 +89,10 @@ func TestManager(t *testing.T) {
 	assert.Len(t, nodes, 3)
 	assert.ErrorIs(t, nodes[3].Err, types.ErrNotAlive)
 	assert.ErrorIs(t, nodes[1].Err, types.ErrStopping)
+
+	nodeInfos, err := m.GetAllStreamingNodes(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, nodeInfos, 2)
 
 	// Test Assign
 	serverID := int64(2)
@@ -123,6 +129,9 @@ func TestManager(t *testing.T) {
 	rb.EXPECT().Close().Return()
 	m.Close()
 
+	nodeInfos, err = m.GetAllStreamingNodes(context.Background())
+	assert.Nil(t, nodeInfos)
+	assert.Error(t, err)
 	nodes, err = m.CollectAllStatus(context.Background())
 	assert.Nil(t, nodes)
 	assert.Error(t, err)

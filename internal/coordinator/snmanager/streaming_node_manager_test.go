@@ -22,6 +22,7 @@ func TestStreamingNodeManager(t *testing.T) {
 	b := mock_balancer.NewMockBalancer(t)
 
 	ch := make(chan pChannelInfoAssigned, 1)
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Run(
 		func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) {
 			for {
@@ -58,6 +59,11 @@ func TestStreamingNodeManager(t *testing.T) {
 
 	node := m.GetWALLocated("a_test")
 	assert.Equal(t, node, int64(1))
+
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {ServerID: 1, Address: "localhost:1"},
+	}, nil)
 	streamingNodes = m.GetStreamingQueryNodeIDs()
 	assert.Equal(t, len(streamingNodes), 1)
 

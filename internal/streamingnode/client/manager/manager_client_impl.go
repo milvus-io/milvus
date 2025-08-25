@@ -53,6 +53,29 @@ func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct
 	return resultCh, nil
 }
 
+// GetAllStreamingNodes fetches all streaming node info.
+func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("manager client is closing")
+	}
+	defer c.lifetime.Done()
+
+	// Get all discovered streamingnode.
+	state, err := c.rb.Resolver().GetLatestState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]*types.StreamingNodeInfo, len(state.State.Addresses))
+	for serverID, session := range state.Sessions() {
+		result[serverID] = &types.StreamingNodeInfo{
+			ServerID: serverID,
+			Address:  session.Address,
+		}
+	}
+	return result, nil
+}
+
 // CollectAllStatus collects status in all underlying streamingnode.
 func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {

@@ -80,6 +80,11 @@ func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.Async
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
 }
 
+// GetAllStreamingNodes fetches all streaming node info.
+func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
 	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
