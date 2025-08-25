@@ -53,6 +53,8 @@ func GetDefaultValue(field *schemapb.FieldSchema) (any, error) {
 			return field.GetDefaultValue().GetFloatData(), nil
 		case schemapb.DataType_Double:
 			return field.GetDefaultValue().GetDoubleData(), nil
+		case schemapb.DataType_Timestamptz:
+			return field.GetDefaultValue().GetTimestamptzData(), nil
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			return field.GetDefaultValue().GetStringData(), nil
 		default:

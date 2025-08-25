@@ -84,7 +84,8 @@ TEST(CPackedTest, PackedWriterAndReader) {
     struct ArrowArray arrays[] = {carray};
     struct ArrowSchema array_schemas[] = {cschema};
 
-    c_status = WriteRecordBatch(c_packed_writer, arrays, array_schemas, &c_origin_schema);
+    c_status = WriteRecordBatch(
+        c_packed_writer, arrays, array_schemas, &c_origin_schema);
     EXPECT_EQ(c_status.error_code, 0);
 
     c_status = CloseWriter(c_packed_writer);

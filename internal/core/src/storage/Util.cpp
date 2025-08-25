@@ -198,6 +198,17 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 builder, double_data, payload.valid_data, nullable, length);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            auto timestamptz_data = reinterpret_cast<int64_t*>(raw_data);
+            add_numeric_payload<int64_t, arrow::Int64Builder>(
+                builder,
+                timestamptz_data,
+                payload.valid_data,
+                nullable,
+                length);
+            break;
+        }
+
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_BINARY:
@@ -275,6 +286,9 @@ CreateArrowBuilder(DataType data_type) {
         }
         case DataType::DOUBLE: {
             return std::make_shared<arrow::DoubleBuilder>();
+        }
+        case DataType::TIMESTAMPTZ: {
+            return std::make_shared<arrow::Int64Builder>();
         }
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -360,6 +374,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::DOUBLE:
             return std::make_shared<arrow::DoubleScalar>(
                 default_value.double_data());
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<arrow::Int64Scalar>(
+                default_value.timestamptz_data());
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
@@ -402,6 +419,10 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         case DataType::DOUBLE: {
             return arrow::schema(
                 {arrow::field("val", arrow::float64(), nullable)});
+        }
+        case DataType::TIMESTAMPTZ: {
+            return arrow::schema(
+                {arrow::field("val", arrow::int64(), nullable)});
         }
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -947,6 +968,9 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::DOUBLE:
             return std::make_shared<FieldData<double>>(
+                type, nullable, total_num_rows);
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
                 type, nullable, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:

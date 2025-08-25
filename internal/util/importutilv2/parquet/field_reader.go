@@ -103,7 +103,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadIntegerOrFloatData[int32](c, count)
 		return data, nil, err
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableIntegerOrFloatData[int64](c, count)
 		}
@@ -1468,6 +1468,26 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 				},
 			})
 		}
+	case schemapb.DataType_Timestamptz:
+		int64Array, err := ReadIntegerOrFloatArrayData[int64](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if int64Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range int64Array.([][]int64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
+				return nil, err
+			}
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		stringArray, err := ReadStringArrayData(pcr, count)
 		if err != nil {
@@ -1644,6 +1664,27 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+		return data, validData, nil
+	case schemapb.DataType_Timestamptz:
+		int64Array, validData, err := ReadNullableIntegerOrFloatArrayData[int64](pcr, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if int64Array == nil {
+			return nil, nil, nil
+		}
+		for _, elementArray := range int64Array.([][]int64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
+				return nil, nil, err
+			}
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{
 						Data: elementArray,
 					},
 				},
