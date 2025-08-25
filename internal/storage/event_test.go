@@ -199,13 +199,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Bool, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]bool{true, false, true}, nil)
+				return w.AddDataToPayloadForUT([]bool{true, false, true}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]bool{false, true, false}, nil)
+				return w.AddDataToPayloadForUT([]bool{false, true, false}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]bool{true, false, true, false, true, false})
 	})
@@ -215,13 +215,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int8, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int8{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]int8{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int8{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int8{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int8{1, 2, 3, 4, 5, 6})
 	})
@@ -231,13 +231,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int16, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int16{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]int16{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int16{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int16{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int16{1, 2, 3, 4, 5, 6})
 	})
@@ -247,13 +247,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int32, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int32{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]int32{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int32{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int32{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int32{1, 2, 3, 4, 5, 6})
 	})
@@ -263,13 +263,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int64, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int64{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int64{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int64{1, 2, 3, 4, 5, 6})
 	})
@@ -279,13 +279,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Float, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]float32{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]float32{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]float32{1, 2, 3, 4, 5, 6})
 	})
@@ -295,13 +295,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Double, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float64{1, 2, 3}, nil)
+				return w.AddDataToPayloadForUT([]float64{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float64{4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]float64{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]float64{1, 2, 3, 4, 5, 6})
 	})
@@ -311,13 +311,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{1, 2, 3, 4}, nil)
+				return w.AddDataToPayloadForUT([]byte{1, 2, 3, 4}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{5, 6, 7, 8}, nil)
+				return w.AddDataToPayloadForUT([]byte{5, 6, 7, 8}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5, 6}, nil)
 			},
 			[]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	})
@@ -327,13 +327,13 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3, 4}, nil)
+				return w.AddDataToPayloadForUT([]float32{1, 2, 3, 4}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{5, 6, 7, 8}, nil)
+				return w.AddDataToPayloadForUT([]float32{5, 6, 7, 8}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, nil)
+				return w.AddDataToPayloadForUT([]int{1, 2, 3, 4, 5, 6}, nil)
 			},
 			[]float32{1, 2, 3, 4, 5, 6, 7, 8})
 	})
@@ -342,13 +342,13 @@ func TestInsertEvent(t *testing.T) {
 		w, err := newInsertEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -396,13 +396,13 @@ func TestDeleteEvent(t *testing.T) {
 		w, err := newDeleteEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -456,11 +456,11 @@ func TestCreateCollectionEvent(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -498,13 +498,13 @@ func TestCreateCollectionEvent(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -558,11 +558,11 @@ func TestDropCollectionEvent(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -600,13 +600,13 @@ func TestDropCollectionEvent(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -660,11 +660,11 @@ func TestCreatePartitionEvent(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -702,13 +702,13 @@ func TestCreatePartitionEvent(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -762,11 +762,11 @@ func TestDropPartitionEvent(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
+		err = w.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -804,13 +804,13 @@ func TestDropPartitionEvent(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234", nil)
+		err = w.AddDataToPayloadForUT("1234", nil)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("567890", true)
 		assert.NoError(t, err)
 		err = w.AddOneStringToPayload("abcdefg", true)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -1104,7 +1104,7 @@ func TestEventClose(t *testing.T) {
 	w, err := newInsertEventWriter(schemapb.DataType_String)
 	assert.NoError(t, err)
 	w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-	err = w.AddDataToPayload("1234", nil)
+	err = w.AddDataToPayloadForUT("1234", nil)
 	assert.NoError(t, err)
 	err = w.Finish()
 	assert.NoError(t, err)

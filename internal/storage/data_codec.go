@@ -292,6 +292,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			opts = append(opts, WithDim(int(dim)))
 		}
+
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			opts = append(opts, WithElementType(field.GetElementType()))
+		}
 		eventWriter, err := writer.NextInsertEventWriter(opts...)
 		if err != nil {
 			writer.Close()
@@ -443,11 +447,9 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			return err
 		}
 	case schemapb.DataType_ArrayOfVector:
-		// todo(SpadeA): optimize the serialization method
-		for _, singleArray := range singleData.(*VectorArrayFieldData).Data {
-			if err = eventWriter.AddOneVectorArrayToPayload(singleArray); err != nil {
-				return err
-			}
+		vectorArrayData := singleData.(*VectorArrayFieldData)
+		if err = eventWriter.AddVectorArrayFieldDataToPayload(vectorArrayData); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("undefined data type %d", dataType)

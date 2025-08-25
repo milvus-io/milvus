@@ -297,29 +297,193 @@ func TestPayloadWriter_Failed(t *testing.T) {
 		err = w.AddFloatToPayload(data, nil)
 		require.Error(t, err)
 	})
+}
 
-	t.Run("Test ArrayOfFloatVector", func(t *testing.T) {
-		// The dim is not used for ArrayOfVector type for payload writer as each row contains this info
-		w, err := NewPayloadWriter(schemapb.DataType_ArrayOfVector, WithDim(1))
-		require.Nil(t, err)
+func TestPayloadWriter_ArrayOfVector(t *testing.T) {
+	t.Run("Test ArrayOfFloatVector - Basic", func(t *testing.T) {
+		dim := 128
+		numRows := 100
+		vectorsPerRow := 5
+
+		// Create test data
+		vectorArrayData := &VectorArrayFieldData{
+			Data:        make([]*schemapb.VectorField, numRows),
+			ElementType: schemapb.DataType_FloatVector,
+		}
+
+		for i := 0; i < numRows; i++ {
+			floatData := make([]float32, vectorsPerRow*dim)
+			for j := 0; j < len(floatData); j++ {
+				floatData[j] = float32(i*1000 + j) // Predictable values for verification
+			}
+
+			vectorArrayData.Data[i] = &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: floatData,
+					},
+				},
+			}
+		}
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_FloatVector),
+		)
+		require.NoError(t, err)
 		require.NotNil(t, w)
+
+		err = w.AddVectorArrayFieldDataToPayload(vectorArrayData)
+		require.NoError(t, err)
 
 		err = w.FinishPayloadWriter()
 		require.NoError(t, err)
 
-		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
-			Dim: 8,
-		})
-		require.Error(t, err)
+		// Verify results
+		buffer, err := w.GetPayloadBufferFromWriter()
+		require.NoError(t, err)
+		require.NotEmpty(t, buffer)
 
-		w, err = NewPayloadWriter(schemapb.DataType_Int64)
-		require.Nil(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, numRows, length)
+	})
+
+	t.Run("Test ArrayOfFloatVector - Error Cases", func(t *testing.T) {
+		// Test missing ElementType
+		_, err := NewPayloadWriter(schemapb.DataType_ArrayOfVector, WithDim(128))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "requires elementType")
+
+		// Test with correct setup
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(128),
+			WithElementType(schemapb.DataType_FloatVector),
+		)
+		require.NoError(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
-			Dim: 8,
-		})
+		// Test adding empty data
+		emptyData := &VectorArrayFieldData{
+			Data:        []*schemapb.VectorField{},
+			ElementType: schemapb.DataType_FloatVector,
+		}
+		err = w.AddVectorArrayFieldDataToPayload(emptyData)
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "empty vector array")
+
+		// Test incorrect data type with AddDataToPayloadForUT
+		w, err = NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(128),
+			WithElementType(schemapb.DataType_FloatVector),
+		)
+		require.NoError(t, err)
+
+		wrongData := "not a VectorArrayFieldData"
+		err = w.AddDataToPayloadForUT(wrongData, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "incorrect data type")
+	})
+
+	t.Run("Test ArrayOfFloatVector - Multiple Batches", func(t *testing.T) {
+		// Test adding multiple batches of vector arrays
+		dim := 64
+		batchSize := 50
+		numBatches := 3
+		vectorsPerRow := 3
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_FloatVector),
+		)
+		require.NoError(t, err)
+
+		totalRows := 0
+		for batch := 0; batch < numBatches; batch++ {
+			batchData := &VectorArrayFieldData{
+				Data:        make([]*schemapb.VectorField, batchSize),
+				ElementType: schemapb.DataType_FloatVector,
+			}
+
+			for i := 0; i < batchSize; i++ {
+				floatData := make([]float32, vectorsPerRow*dim)
+				for j := 0; j < len(floatData); j++ {
+					floatData[j] = float32(batch*10000 + i*100 + j)
+				}
+
+				batchData.Data[i] = &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: floatData,
+						},
+					},
+				}
+			}
+
+			err = w.AddVectorArrayFieldDataToPayload(batchData)
+			require.NoError(t, err)
+			totalRows += batchSize
+		}
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, totalRows, length)
+	})
+
+	t.Run("Test ArrayOfFloatVector - Variable Vectors Per Row", func(t *testing.T) {
+		// Test with different number of vectors per row
+		dim := 32
+		numRows := 20
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_FloatVector),
+		)
+		require.NoError(t, err)
+
+		vectorArrayData := &VectorArrayFieldData{
+			Data:        make([]*schemapb.VectorField, numRows),
+			ElementType: schemapb.DataType_FloatVector,
+		}
+
+		for i := 0; i < numRows; i++ {
+			// Variable number of vectors per row (1 to 10)
+			vectorsPerRow := (i % 10) + 1
+			floatData := make([]float32, vectorsPerRow*dim)
+
+			for j := 0; j < len(floatData); j++ {
+				floatData[j] = float32(i*100 + j)
+			}
+
+			vectorArrayData.Data[i] = &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: floatData,
+					},
+				},
+			}
+		}
+
+		err = w.AddVectorArrayFieldDataToPayload(vectorArrayData)
+		require.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, numRows, length)
 	})
 }
 
@@ -330,7 +494,7 @@ func TestParquetEncoding(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Int64, WithWriterProps(getFieldWriterProps(field)))
 
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
+		err = w.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
 
 		err = w.FinishPayloadWriter()

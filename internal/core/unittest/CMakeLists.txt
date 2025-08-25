@@ -110,6 +110,7 @@ set(MILVUS_TEST_FILES
         test_vector_array.cpp
         test_ngram_query.cpp
         test_stlsort_index.cpp
+        test_vector_array_chunk.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

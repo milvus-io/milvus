@@ -26,7 +26,7 @@ import (
 
 // PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
-	AddDataToPayload(any, []bool) error
+	AddDataToPayloadForUT(any, []bool) error
 	AddBoolToPayload([]bool, []bool) error
 	AddByteToPayload([]byte, []bool) error
 	AddInt8ToPayload([]int8, []bool) error
@@ -44,7 +44,7 @@ type PayloadWriterInterface interface {
 	AddBFloat16VectorToPayload([]byte, int) error
 	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
 	AddInt8VectorToPayload([]int8, int) error
-	AddOneVectorArrayToPayload(*schemapb.VectorField) error
+	AddVectorArrayFieldDataToPayload(*VectorArrayFieldData) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)

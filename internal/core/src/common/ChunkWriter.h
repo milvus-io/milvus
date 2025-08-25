@@ -98,7 +98,7 @@ class ChunkWriter final : public ChunkWriterBase {
     }
 
     ChunkWriter(int dim, std::string file_path, bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
+        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim) {};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -245,12 +245,9 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
 class VectorArrayChunkWriter : public ChunkWriterBase {
  public:
-    VectorArrayChunkWriter(int64_t dim, const milvus::DataType element_type)
-        : ChunkWriterBase(false), element_type_(element_type), dim_(dim) {
-    }
     VectorArrayChunkWriter(int64_t dim,
                            const milvus::DataType element_type,
-                           std::string file_path)
+                           std::string file_path = "")
         : ChunkWriterBase(std::move(file_path), false),
           element_type_(element_type),
           dim_(dim) {
@@ -263,6 +260,12 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
     finish() override;
 
  private:
+    void
+    writeFloatVectorArray(const arrow::ArrayVector& array_vec);
+
+    size_t
+    calculateTotalSize(const arrow::ArrayVector& array_vec);
+
     const milvus::DataType element_type_;
     int64_t dim_;
 };
