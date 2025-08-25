@@ -1428,6 +1428,11 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 		return client.GcControl(ctx, req)
 	})
 }
+func (c *Client) GetGcStatus(ctx context.Context, req *datapb.GetGcStatusRequest, opts ...grpc.CallOption) (*datapb.GetGcStatusResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetGcStatusResponse, error) {
+		return client.GetGcStatus(ctx, req)
+	})
+}
 
 func (c *Client) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ImportResponse, error) {
