@@ -2,7 +2,6 @@ use core::slice;
 use std::sync::Arc;
 
 use either::Either;
-use futures::executor::block_on;
 use libc::c_char;
 use log::info;
 use tantivy_5::schema::{
@@ -272,8 +271,15 @@ impl IndexWriterWrapperImpl {
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
-                // self.manual_merge();
-                block_on(index_writer.garbage_collect_files())?;
+
+                // merge all segments
+                let segment_ids = index_writer.index().searchable_segment_ids()?;
+                if segment_ids.len() > 1 {
+                    let _ = index_writer.merge(&segment_ids).wait();
+                }
+
+                index_writer.garbage_collect_files().wait()?;
+
                 index_writer.wait_merging_threads()?;
             }
             Either::Right(single_segment_index_writer) => {
