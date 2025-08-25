@@ -192,7 +192,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         """
         target: test drop index when collection are not released
         method: drop index when collection are not released
-        expected: drop index successfully
+        expected: raise exception
         """
         client = self._client()
         self.init_async_milvus_client()

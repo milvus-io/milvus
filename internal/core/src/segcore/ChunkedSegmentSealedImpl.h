@@ -78,21 +78,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetFieldDataIfExist(FieldId field_id) const;
 
     std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(FieldId field_id) const override {
-        auto res = scalar_indexings_.withRLock(
-            [&](auto& map) -> PinWrapper<const index::IndexBase*> {
-                auto iter = map.find(field_id);
-                if (iter == map.end()) {
-                    return nullptr;
-                }
-                auto ca = SemiInlineGet(iter->second->PinCells({0}));
-                auto index = ca->get_cell_of(0);
-                return PinWrapper<const index::IndexBase*>(ca, index);
-            });
-        if (res.get() == nullptr) {
+    PinIndex(FieldId field_id, bool include_ngram = false) const override {
+        auto [scalar_indexings, ngram_fields] =
+            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+        if (!include_ngram) {
+            if (ngram_fields->find(field_id) != ngram_fields->end()) {
+                return {};
+            }
+        }
+
+        auto iter = scalar_indexings->find(field_id);
+        if (iter == scalar_indexings->end()) {
             return {};
         }
-        return {res};
+        auto ca = SemiInlineGet(iter->second->PinCells({0}));
+        auto index = ca->get_cell_of(0);
+        return {PinWrapper<const index::IndexBase*>(ca, index)};
     }
 
     bool

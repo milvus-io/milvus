@@ -152,7 +152,7 @@ class SegmentInterface {
     }
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(FieldId field_id) const {
+    PinIndex(FieldId field_id, bool include_ngram = false) const {
         return {};
     };
 
