@@ -33,6 +33,7 @@
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
+constexpr uint64_t MMAP_GEOMETRY_PADDING = 1;
 constexpr uint64_t MMAP_ARRAY_PADDING = 1;
 class Chunk {
  public:
@@ -211,6 +212,7 @@ class StringChunk : public Chunk {
 };
 
 using JSONChunk = StringChunk;
+using GeometryChunk = StringChunk;
 
 class ArrayChunk : public Chunk {
  public:

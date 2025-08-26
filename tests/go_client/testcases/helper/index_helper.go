@@ -89,7 +89,7 @@ func SupportScalarIndexFieldType(field entity.FieldType) bool {
 	vectorFieldTypes := []entity.FieldType{
 		entity.FieldTypeBinaryVector, entity.FieldTypeFloatVector,
 		entity.FieldTypeFloat16Vector, entity.FieldTypeBFloat16Vector,
-		entity.FieldTypeSparseVector, entity.FieldTypeJSON,
+		entity.FieldTypeSparseVector, entity.FieldTypeJSON, // entity.FieldTypeGeometry // geometry now not support scalar index
 	}
 	for _, vectorFieldType := range vectorFieldTypes {
 		if field == vectorFieldType {

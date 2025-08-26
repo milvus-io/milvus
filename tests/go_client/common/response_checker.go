@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	// "github.com/twpayne/go-geom/encoding/wkb"
+	// "github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
@@ -76,6 +78,18 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 		default:
 			log.Warn("columnA type", zap.String("name", columnB.Name()), zap.Any("type", _v))
 		}
+	// case entity.FieldTypeGeometry:
+	// 	// currently proxy transform wkb to wkt,the query output wkt has different precision with client input(omit trailing zeros),and omit omissible bracket
+	// 	columnAcompData := make([][]byte, 0)
+	// 	// simulate proxy replace wkb progress
+	// 	for _, bytes := range columnA.(*column.ColumnGeometryBytes).Data() {
+	// 		geomT, _ := wkt.Unmarshal(string(bytes))
+	// 		wkbBytes, _ := wkb.Marshal(geomT, wkb.NDR)
+	// 		geomT, _ = wkb.Unmarshal(wkbBytes)
+	// 		realwktstr, _ := wkt.Marshal(geomT)
+	// 		columnAcompData = append(columnAcompData, []byte(realwktstr))
+	// 	}
+	// 	require.ElementsMatch(t, columnAcompData, columnB.(*column.ColumnGeometryBytes).Data())
 	case entity.FieldTypeFloatVector:
 		require.ElementsMatch(t, columnA.(*column.ColumnFloatVector).Data(), columnB.(*column.ColumnFloatVector).Data())
 	case entity.FieldTypeBinaryVector:
