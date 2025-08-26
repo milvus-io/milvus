@@ -97,8 +97,8 @@ TEST(GetArrowDataTypeTest, VECTOR_BFLOAT16) {
     ASSERT_TRUE(result->Equals(arrow::fixed_size_binary(dim * 2)));
 }
 
-TEST(GetArrowDataTypeTest, VECTOR_SPARSE_FLOAT) {
-    auto result = GetArrowDataType(DataType::VECTOR_SPARSE_FLOAT);
+TEST(GetArrowDataTypeTest, VECTOR_SPARSE_U32_F32) {
+    auto result = GetArrowDataType(DataType::VECTOR_SPARSE_U32_F32);
     ASSERT_TRUE(result->Equals(arrow::binary()));
 }
 

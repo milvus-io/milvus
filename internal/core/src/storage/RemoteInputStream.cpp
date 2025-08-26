@@ -21,6 +21,13 @@ RemoteInputStream::Read(void* data, size_t size) {
 }
 
 size_t
+RemoteInputStream::ReadAt(void* data, size_t offset, size_t size) {
+    auto status = remote_file_->ReadAt(offset, size, data);
+    AssertInfo(status.ok(), "Failed to read from input stream");
+    return static_cast<size_t>(status.ValueOrDie());
+}
+
+size_t
 RemoteInputStream::Read(int fd, size_t size) {
     size_t read_batch_size =
         std::min(size, static_cast<size_t>(DEFAULT_INDEX_FILE_SLICE_SIZE));

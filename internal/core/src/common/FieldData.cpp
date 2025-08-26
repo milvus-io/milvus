@@ -284,11 +284,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     array);
             return FillFieldData(array_info.first, array_info.second);
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            std::vector<knowhere::sparse::SparseRow<float>> values;
+            std::vector<knowhere::sparse::SparseRow<sparseValueType>> values;
             for (size_t index = 0; index < element_count; ++index) {
                 auto view = arr->GetString(index);
                 values.push_back(
@@ -460,7 +460,7 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
-template class FieldDataImpl<knowhere::sparse::SparseRow<float>, true>;
+template class FieldDataImpl<knowhere::sparse::SparseRow<sparseValueType>, true>;
 template class FieldDataImpl<VectorArray, true>;
 
 FieldDataPtr
