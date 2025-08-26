@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
@@ -183,6 +184,115 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 	}
 
 	return res, nil
+}
+
+func BuildPrimaryKeyIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildPrimaryIndexInfo) (map[string]int64, error) {
+	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal buildPrimaryKeyIndex failed",
+			zap.String("clusterID", buildIndexInfo.GetClusterID()),
+			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
+	result := C.CreateProtoLayout()
+	defer C.ReleaseProtoLayout(result)
+	status := C.BuildPrimaryIndex(result, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	if err := HandleCStatus(&status, "failed to build primary key index"); err != nil {
+		return nil, err
+	}
+
+	var indexStats cgopb.IndexStats
+	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]int64)
+	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
+		res[indexInfo.FileName] = indexInfo.FileSize
+	}
+
+	return res, nil
+}
+
+type PrimaryIndexHandle struct {
+	indexPtr C.CPrimaryIndex
+	close    bool
+}
+
+func LoadPrimaryIndex(ctx context.Context, loadIndexInfo *indexcgopb.LoadPrimaryIndexInfo) (*PrimaryIndexHandle, error) {
+	loadIndexInfoBlob, err := proto.Marshal(loadIndexInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal loadPrimaryIndex failed",
+			zap.Int64("buildID", loadIndexInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	var indexPtr C.CPrimaryIndex
+	status := C.LoadPrimaryIndex(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&loadIndexInfoBlob[0])), (C.uint64_t)(len(loadIndexInfoBlob)))
+	if err := HandleCStatus(&status, "failed to load primary index"); err != nil {
+		return nil, err
+	}
+
+	handle := &PrimaryIndexHandle{
+		indexPtr: indexPtr,
+		close:    false,
+	}
+
+	return handle, nil
+}
+
+func (h *PrimaryIndexHandle) Query(key string) (int64, error) {
+	if h.close {
+		return 0, errors.New("primary index handle is closed")
+	}
+
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+
+	var result C.int64_t
+	status := C.QueryPrimaryIndex(h.indexPtr, cKey, &result)
+	if err := HandleCStatus(&status, "failed to query primary index"); err != nil {
+		return 0, err
+	}
+
+	return int64(result), nil
+}
+
+func (h *PrimaryIndexHandle) ResetSegmentId(toSegmentID, fromSegmentID int64) error {
+	status := C.ResetSegmentId(h.indexPtr, (C.int64_t)(toSegmentID), (C.int64_t)(fromSegmentID))
+	return HandleCStatus(&status, "failed to reset segment id")
+}
+
+func (h *PrimaryIndexHandle) GetSegmentList() ([]int64, error) {
+	var result *C.int64_t
+	var size C.int64_t
+	status := C.GetSegmentList(h.indexPtr, &result, &size)
+	if err := HandleCStatus(&status, "failed to get segment list"); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(result))
+
+	segmentList := make([]int64, int(size))
+	for i := int64(0); i < int64(size); i++ {
+		segmentList[i] = int64(*(*C.int64_t)(unsafe.Pointer(uintptr(unsafe.Pointer(result)) + uintptr(i)*unsafe.Sizeof(*result))))
+	}
+	return segmentList, nil
+}
+
+func (h *PrimaryIndexHandle) Close() error {
+	if h.close {
+		return nil
+	}
+
+	status := C.DeletePrimaryIndex(h.indexPtr)
+	if err := HandleCStatus(&status, "failed to delete primary index"); err != nil {
+		return err
+	}
+
+	h.close = true
+	return nil
 }
 
 // TODO: this seems to be used only for test. We should mark the method
