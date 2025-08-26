@@ -1398,39 +1398,49 @@ function:
     providers:
       azure_openai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable azure openai model service
         resource_name:  # Your azure openai resource name
         url:  # Your azure openai embedding url, Default is the official embedding url
       bedrock:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable bedrock model service
       cohere:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable cohere model service
         url:  # Your cohere embedding url, Default is the official embedding url
       dashscope:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable dashscope model service
         url:  # Your dashscope embedding url, Default is the official embedding url
       openai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable openai model service
         url:  # Your openai embedding url, Default is the official embedding url
       siliconflow:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable siliconflow model service
         url:  # Your siliconflow embedding url, Default is the official embedding url
       tei:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable TEI model service
       vertexai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable vertexai model service
         url:  # Your VertexAI embedding url
       voyageai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable voyageai model service
         url:  # Your voyageai embedding url, Default is the official embedding url
   rerank:
     model:
       providers:
         cohere:
           credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable cohere model service
           url:  # Your cohere rerank url, Default is the official rerank url
         siliconflow:
           credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable siliconflow model service
           url:  # Your siliconflow rerank url, Default is the official rerank url
         tei:
           credential:  # The name in the crendential configuration item
@@ -1438,5 +1448,9 @@ function:
         vllm:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable vllm rerank service
+        voyageai:
+          credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable voyageai model service
+          url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
