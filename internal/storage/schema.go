@@ -33,7 +33,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 			dim = 0
 		}
 
-		var elementType = schemapb.DataType_None
+		elementType := schemapb.DataType_None
 		if field.DataType == schemapb.DataType_ArrayOfVector {
 			elementType = field.GetElementType()
 		}
