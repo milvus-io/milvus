@@ -388,6 +388,41 @@ func GenColumnDataWithOption(fieldType entity.FieldType, option GenDataOption) c
 	return GenColumnData(option.nb, fieldType, option)
 }
 
+//	func GenDefaultGeometryData(nb int, option GenDataOption) [][]byte {
+//		const (
+//			point           = "POINT (30.123 -10.456)"
+//			linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+//			polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+//			multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+//			multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+//			multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+//		)
+//		wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+//		geometryValues := make([][]byte, 0, nb)
+//		start := option.start
+//		for i := start; i < start+nb; i++ {
+//			geometryValues = append(geometryValues, []byte(wktArray[i%6]))
+//		}
+//		return geometryValues
+//	}
+func GenDefaultGeometryData(nb int, option GenDataOption) []string {
+	const (
+		point           = "POINT (30.123 -10.456)"
+		linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+		polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+		multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+		multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+		multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+	)
+	wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+	geometryValues := make([]string, 0, nb)
+	start := option.start
+	for i := start; i < start+nb; i++ {
+		geometryValues = append(geometryValues, wktArray[i%6])
+	}
+	return geometryValues
+}
+
 // GenColumnData GenColumnDataOption except dynamic column
 func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
 	dim := option.dim
@@ -568,6 +603,10 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			return nullableColumn
 		}
 		return column.NewColumnJSONBytes(fieldName, jsonValues)
+
+	case entity.FieldTypeGeometry:
+		geometryValues := GenDefaultGeometryData(nb, option)
+		return column.NewColumnGeometryWKT(fieldName, geometryValues)
 
 	case entity.FieldTypeFloatVector:
 		if validDataLen < nb {

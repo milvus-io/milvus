@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
 #include "common/Schema.h"
@@ -801,6 +802,43 @@ class CompareExpr : public ITypeFilterExpr {
     const DataType left_data_type_;
     const DataType right_data_type_;
     const proto::plan::OpType op_type_;
+};
+
+class GISFunctionFilterExpr : public ITypeFilterExpr {
+ public:
+    GISFunctionFilterExpr(ColumnInfo cloumn,
+                          GISFunctionType op,
+                          const std::string& geometry_wkt,
+                          double distance = 0.0)
+        : column_(cloumn),
+          op_(op),
+          geometry_wkt_(geometry_wkt),
+          distance_(distance){};
+    std::string
+    ToString() const override {
+        if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}, Distance: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_wkt_,
+                distance_);
+        } else {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_wkt_);
+        }
+    }
+
+ public:
+    const ColumnInfo column_;
+    const GISFunctionType op_;
+    const std::string geometry_wkt_;
+    const double distance_;
 };
 
 class JsonContainsExpr : public ITypeFilterExpr {

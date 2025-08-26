@@ -88,6 +88,8 @@ func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string
 			return common.DefaultDynamicFieldName
 		}
 		return common.DefaultJSONFieldName
+	case entity.FieldTypeGeometry:
+		return common.DefaultGeometryFieldName
 	case entity.FieldTypeArray:
 		return GetFieldNameByElementType(opt.elementType)
 	case entity.FieldTypeBinaryVector:
@@ -119,6 +121,7 @@ const (
 	Int64VecAllScalar     CollectionFieldsType = 8  // int64 + floatVec + all scalar fields
 	FullTextSearch        CollectionFieldsType = 9  // int64 + varchar + sparse vector + analyzer + function
 	TextEmbedding         CollectionFieldsType = 10 // int64 + varchar + float_vector + text_embedding_function
+	Int64VecGeometry      CollectionFieldsType = 11 // int64 + floatVec + geometry
 )
 
 type GenFieldsOption struct {

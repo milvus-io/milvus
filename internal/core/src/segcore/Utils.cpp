@@ -21,7 +21,9 @@
 #include "common/type_c.h"
 #include "common/Common.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
 #include "storage/DataCodec.h"
@@ -145,6 +147,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 auto& json_data = FIELD_DATA(data, json);
                 for (auto& json_bytes : json_data) {
                     result += json_bytes.size();
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                auto& geometry_data = FIELD_DATA(data, geometry);
+                for (auto& geometry_bytes : geometry_data) {
+                    result += geometry_bytes.size();
                 }
                 break;
             }
@@ -326,6 +335,14 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             }
             break;
         }
+        case DataType::GEOMETRY: {
+            auto obj = scalar_array->mutable_geometry_data();
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
         case DataType::ARRAY: {
             auto obj = scalar_array->mutable_array_data();
             obj->mutable_data()->Reserve(count);
@@ -494,6 +511,15 @@ CreateScalarDataArrayFrom(const void* data_raw,
             auto obj = scalar_array->mutable_json_data();
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
+            }
+            break;
+        }
+        case DataType::GEOMETRY: {
+            auto data = reinterpret_cast<const std::string*>(data_raw);
+            auto obj = scalar_array->mutable_geometry_data();
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) =
+                    std::string(data[i].data(), data[i].size());
             }
             break;
         }
@@ -756,6 +782,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto& data = FIELD_DATA(src_field_data, json);
                 auto obj = scalar_array->mutable_json_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::GEOMETRY: {
+                auto& data = FIELD_DATA(src_field_data, geometry);
+                auto obj = scalar_array->mutable_geometry_data();
+                *(obj->mutable_data()->Add()) = std::string(
+                    data[src_offset].data(), data[src_offset].size());
                 break;
             }
             case DataType::ARRAY: {

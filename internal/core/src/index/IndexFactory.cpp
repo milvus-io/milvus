@@ -37,6 +37,7 @@
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
+#include "index/RTreeIndex.h"
 #include "knowhere/comp/knowhere_check.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
@@ -482,6 +483,15 @@ IndexFactory::CreateJsonIndex(
 }
 
 IndexBasePtr
+IndexFactory::CreateGeometryIndex(
+    IndexType index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    AssertInfo(index_type == RTREE_INDEX_TYPE,
+               "Invalid index type for geometry index");
+    return std::make_unique<RTreeIndex<std::string>>(file_manager_context);
+}
+
+IndexBasePtr
 IndexFactory::CreateScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
@@ -505,6 +515,10 @@ IndexFactory::CreateScalarIndex(
         }
         case DataType::JSON: {
             return CreateJsonIndex(create_index_info, file_manager_context);
+        }
+        case DataType::GEOMETRY: {
+            return CreateGeometryIndex(create_index_info.index_type,
+                                       file_manager_context);
         }
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
