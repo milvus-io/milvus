@@ -22,8 +22,15 @@ include_directories(
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
+# Collect test files from source directories using glob pattern
+file(GLOB_RECURSE SOURCE_TEST_FILES
+    "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
+    "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
+)
+
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
+        ${SOURCE_TEST_FILES}
         init_gtest.cpp
         test_packed_c.cpp
         test_arrow_fs_c.cpp
@@ -105,7 +112,6 @@ set(MILVUS_TEST_FILES
         test_chunked_column_group.cpp
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
-        test_thread_pool.cpp
         test_json_flat_index.cpp
         test_vector_array.cpp
         test_ngram_query.cpp
