@@ -59,6 +59,8 @@ const (
 	QueryCoord_TransferChannel_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferChannel"
 	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
 	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
+	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
+	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
 )
 
 // QueryCoordClient is the client API for QueryCoord service.
@@ -105,6 +107,8 @@ type QueryCoordClient interface {
 	TransferChannel(ctx context.Context, in *TransferChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type queryCoordClient struct {
@@ -448,6 +452,24 @@ func (c *queryCoordClient) UpdateLoadConfig(ctx context.Context, in *UpdateLoadC
 	return out, nil
 }
 
+func (c *queryCoordClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	out := new(milvuspb.RunAnalyzerResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_RunAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryCoord_ValidateAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryCoordServer is the server API for QueryCoord service.
 // All implementations should embed UnimplementedQueryCoordServer
 // for forward compatibility
@@ -492,6 +514,8 @@ type QueryCoordServer interface {
 	TransferChannel(context.Context, *TransferChannelRequest) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
+	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedQueryCoordServer should be embedded to have forward compatible implementations.
@@ -608,6 +632,12 @@ func (UnimplementedQueryCoordServer) CheckQueryNodeDistribution(context.Context,
 }
 func (UnimplementedQueryCoordServer) UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateLoadConfig not implemented")
+}
+func (UnimplementedQueryCoordServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
+func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 
 // UnsafeQueryCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1287,6 +1317,42 @@ func _QueryCoord_UpdateLoadConfig_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).RunAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_RunAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).RunAnalyzer(ctx, req.(*RunAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ValidateAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, req.(*ValidateAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryCoord_ServiceDesc is the grpc.ServiceDesc for QueryCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1442,6 +1508,14 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "UpdateLoadConfig",
 			Handler:    _QueryCoord_UpdateLoadConfig_Handler,
 		},
+		{
+			MethodName: "RunAnalyzer",
+			Handler:    _QueryCoord_RunAnalyzer_Handler,
+		},
+		{
+			MethodName: "ValidateAnalyzer",
+			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "query_coord.proto",
@@ -1475,6 +1549,7 @@ const (
 	QueryNode_DeleteBatch_FullMethodName          = "/milvus.proto.query.QueryNode/DeleteBatch"
 	QueryNode_UpdateSchema_FullMethodName         = "/milvus.proto.query.QueryNode/UpdateSchema"
 	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
+	QueryNode_ValidateAnalyzer_FullMethodName     = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
 )
 
 // QueryNodeClient is the client API for QueryNode service.
@@ -1511,6 +1586,7 @@ type QueryNodeClient interface {
 	DeleteBatch(ctx context.Context, in *DeleteBatchRequest, opts ...grpc.CallOption) (*DeleteBatchResponse, error)
 	UpdateSchema(ctx context.Context, in *UpdateSchemaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type queryNodeClient struct {
@@ -1810,6 +1886,15 @@ func (c *queryNodeClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerReques
 	return out, nil
 }
 
+func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryNode_ValidateAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryNodeServer is the server API for QueryNode service.
 // All implementations should embed UnimplementedQueryNodeServer
 // for forward compatibility
@@ -1844,6 +1929,7 @@ type QueryNodeServer interface {
 	DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error)
 	UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -1930,6 +2016,9 @@ func (UnimplementedQueryNodeServer) UpdateSchema(context.Context, *UpdateSchemaR
 }
 func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
+func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 
 // UnsafeQueryNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2435,6 +2524,24 @@ func _QueryNode_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).ValidateAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_ValidateAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).ValidateAnalyzer(ctx, req.(*ValidateAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryNode_ServiceDesc is the grpc.ServiceDesc for QueryNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2541,6 +2648,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunAnalyzer",
 			Handler:    _QueryNode_RunAnalyzer_Handler,
+		},
+		{
+			MethodName: "ValidateAnalyzer",
+			Handler:    _QueryNode_ValidateAnalyzer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

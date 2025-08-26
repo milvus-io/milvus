@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -569,10 +568,6 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
-
-	if err := validateAnalyzer(schema, field); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -632,107 +627,6 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 			return err
 		}
 	}
-	return nil
-}
-
-func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema) error {
-	var m map[string]json.RawMessage
-	var analyzerMap map[string]json.RawMessage
-	var mFileName string
-
-	err := json.Unmarshal([]byte(params), &m)
-	if err != nil {
-		return err
-	}
-
-	mfield, ok := m["by_field"]
-	if !ok {
-		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
-	}
-
-	err = json.Unmarshal(mfield, &mFileName)
-	if err != nil {
-		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
-	}
-
-	// check field exist
-	fieldExist := false
-	for _, field := range coll.GetFields() {
-		if field.GetName() == mFileName {
-			// only support string field now
-			if field.GetDataType() != schemapb.DataType_VarChar {
-				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
-			}
-			fieldExist = true
-			break
-		}
-	}
-
-	if !fieldExist {
-		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
-	}
-
-	if value, ok := m["alias"]; ok {
-		mapping := map[string]string{}
-		err = json.Unmarshal(value, &mapping)
-		if err != nil {
-			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
-		}
-	}
-
-	analyzers, ok := m["analyzers"]
-	if !ok {
-		return fmt.Errorf("multi analyzer params must set analyzers ")
-	}
-
-	err = json.Unmarshal(analyzers, &analyzerMap)
-	if err != nil {
-		return fmt.Errorf("unmarshal analyzers failed: %s", err)
-	}
-
-	hasDefault := false
-	for name, params := range analyzerMap {
-		if err := analyzer.ValidateAnalyzer(string(params)); err != nil {
-			return fmt.Errorf("analyzer %s params invalid: %s", name, err)
-		}
-		if name == "default" {
-			hasDefault = true
-		}
-	}
-
-	if !hasDefault {
-		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
-	}
-	return nil
-}
-
-func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema) error {
-	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !wasBm25FunctionInputField(collSchema, fieldSchema) {
-		return nil
-	}
-
-	if !h.EnableAnalyzer() {
-		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
-	}
-
-	if params, ok := h.GetMultiAnalyzerParams(); ok {
-		if h.EnableMatch() {
-			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
-		}
-		if h.HasAnalyzerParams() {
-			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
-		}
-
-		return validateMultiAnalyzerParams(params, collSchema)
-	}
-
-	for _, kv := range fieldSchema.GetTypeParams() {
-		if kv.GetKey() == "analyzer_params" {
-			return analyzer.ValidateAnalyzer(kv.Value)
-		}
-	}
-	// return nil when use default analyzer
 	return nil
 }
 

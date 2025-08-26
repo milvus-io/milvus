@@ -17,13 +17,14 @@
 package datacoord
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"google.golang.org/protobuf/proto"
 )
 
 // PreAllocateBinlogIDs pre-allocates binlog IDs based on the total number of binlogs from

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	ms "github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -113,6 +115,7 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req.GetNumPartitions() > 0 {
 		newPartNum = t.Req.GetNumPartitions()
 	}
+
 	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core)
 }
 
@@ -189,6 +192,29 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 	if err := validateStructArrayFieldDataType(schema.GetStructArrayFields()); err != nil {
 		return err
+	}
+
+	// check analyzer was vailed
+	analyzer_infos := make([]*querypb.AnalyzerInfo, 0)
+	for _, field := range schema.GetFields() {
+		err := validateAnalyzer(schema, field, &analyzer_infos)
+		if err != nil {
+			return err
+		}
+	}
+
+	// validate analyzer params at any streaming node
+	if len(analyzer_infos) > 0 {
+		resp, err := t.core.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: analyzer_infos,
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := merr.Error(resp); err != nil {
+			return err
+		}
 	}
 
 	return validateFieldDataType(schema.GetFields())
@@ -675,4 +701,119 @@ func executeCreateCollectionTaskSteps(ctx context.Context,
 		ts:           ts,
 	}, &nullStep{}) // We'll remove the whole collection anyway.
 	return undoTask.Execute(ctx)
+}
+
+func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, infos *[]*querypb.AnalyzerInfo) error {
+	var m map[string]json.RawMessage
+	var analyzerMap map[string]json.RawMessage
+	var mFileName string
+
+	err := json.Unmarshal([]byte(params), &m)
+	if err != nil {
+		return err
+	}
+
+	mfield, ok := m["by_field"]
+	if !ok {
+		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
+	}
+
+	err = json.Unmarshal(mfield, &mFileName)
+	if err != nil {
+		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
+	}
+
+	// check field exist
+	fieldExist := false
+	for _, field := range coll.GetFields() {
+		if field.GetName() == mFileName {
+			// only support string field now
+			if field.GetDataType() != schemapb.DataType_VarChar {
+				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
+			}
+			fieldExist = true
+			break
+		}
+	}
+
+	if !fieldExist {
+		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
+	}
+
+	if value, ok := m["alias"]; ok {
+		mapping := map[string]string{}
+		err = json.Unmarshal(value, &mapping)
+		if err != nil {
+			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
+		}
+	}
+
+	analyzers, ok := m["analyzers"]
+	if !ok {
+		return fmt.Errorf("multi analyzer params must set analyzers ")
+	}
+
+	err = json.Unmarshal(analyzers, &analyzerMap)
+	if err != nil {
+		return fmt.Errorf("unmarshal analyzers failed: %s", err)
+	}
+
+	hasDefault := false
+	for name, params := range analyzerMap {
+		*infos = append(*infos, &querypb.AnalyzerInfo{
+			Name:   name,
+			Field:  fieldSchema.GetName(),
+			Params: string(params),
+		})
+		if name == "default" {
+			hasDefault = true
+		}
+	}
+
+	if !hasDefault {
+		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
+	}
+	return nil
+}
+
+func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzer_infos *[]*querypb.AnalyzerInfo) error {
+	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
+	if !h.EnableMatch() && !wasBm25FunctionInputField(collSchema, fieldSchema) {
+		return nil
+	}
+
+	if !h.EnableAnalyzer() {
+		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
+	}
+
+	if params, ok := h.GetMultiAnalyzerParams(); ok {
+		if h.EnableMatch() {
+			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
+		}
+		if h.HasAnalyzerParams() {
+			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
+		}
+
+		return validateMultiAnalyzerParams(params, collSchema, fieldSchema, analyzer_infos)
+	}
+
+	for _, kv := range fieldSchema.GetTypeParams() {
+		if kv.GetKey() == "analyzer_params" {
+			*analyzer_infos = append(*analyzer_infos, &querypb.AnalyzerInfo{
+				Field:  fieldSchema.GetName(),
+				Params: kv.GetValue(),
+			})
+		}
+	}
+	// return nil when use default analyzer
+	return nil
+}
+
+func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fun := range coll.GetFunctions() {
+		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
 }
