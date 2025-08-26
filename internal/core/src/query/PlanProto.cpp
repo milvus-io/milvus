@@ -606,8 +606,12 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
 
 std::shared_ptr<rescores::Scorer>
 ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
-    auto expr = ParseExprs(function.filter());
-    return std::make_shared<rescores::WeightScorer>(expr, function.weight());
+    if (function.has_filter()) {
+        auto expr = ParseExprs(function.filter());
+        return std::make_shared<rescores::WeightScorer>(expr,
+                                                        function.weight());
+    }
+    return std::make_shared<rescores::WeightScorer>(nullptr, function.weight());
 }
 
 }  // namespace milvus::query

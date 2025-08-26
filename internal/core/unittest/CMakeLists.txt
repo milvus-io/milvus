@@ -112,6 +112,7 @@ set(MILVUS_TEST_FILES
         test_ngram_query.cpp
         test_stlsort_index.cpp
         test_vector_array_storage_v2.cpp
+        test_rescore.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

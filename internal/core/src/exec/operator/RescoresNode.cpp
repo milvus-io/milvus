@@ -73,8 +73,23 @@ PhyRescoresNode::GetOutput() {
         }
     }
 
+    // skip rescore if result was empty
+    if (offsets.empty()) {
+        query_context_->set_search_result(std::move(search_result));
+        return input_;
+    }
+
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
+        // rescore for all result if no filter
+        if (!filter) {
+            for (auto i = 0; i < offsets.size(); i++) {
+                search_result.distances_[offset_idx[i]] =
+                    scorer->rescore(search_result.distances_[offset_idx[i]]);
+            }
+            continue;
+        }
+
         std::vector<expr::TypedExprPtr> filters;
         filters.emplace_back(filter);
         auto expr_set = std::make_unique<ExprSet>(filters, exec_context);
