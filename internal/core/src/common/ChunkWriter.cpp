@@ -447,7 +447,7 @@ create_chunk_writer(const FieldMeta& field_meta, Args&&... args) {
                 field_meta.get_element_type(),
                 std::forward<Args>(args)...,
                 nullable);
-        case milvus::DataType::VECTOR_SPARSE_FLOAT:
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
             return std::make_shared<SparseFloatVectorChunkWriter>(
                 std::forward<Args>(args)..., nullable);
         case milvus::DataType::VECTOR_ARRAY:

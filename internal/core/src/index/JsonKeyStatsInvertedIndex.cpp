@@ -401,8 +401,12 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value(),
-                                                config[milvus::LOAD_PRIORITY]);
+                                                load_priority);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
 

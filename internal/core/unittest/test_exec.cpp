@@ -105,7 +105,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
 INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
                          TaskTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
-                                           DataType::VECTOR_SPARSE_FLOAT));
+                                           DataType::VECTOR_SPARSE_U32_F32));
 
 TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =

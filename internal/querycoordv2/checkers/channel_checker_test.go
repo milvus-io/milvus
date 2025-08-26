@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -54,6 +55,8 @@ func (suite *ChannelCheckerTestSuite) SetupSuite() {
 }
 
 func (suite *ChannelCheckerTestSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
+
 	var err error
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(

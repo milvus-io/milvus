@@ -210,7 +210,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 // TODO(SPARSE, size)
                 result += data->vectors().sparse_float_vector().ByteSizeLong();
                 break;
@@ -342,7 +342,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = 0;
-    if (data_type != DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type != DataType::VECTOR_SPARSE_U32_F32) {
         dim = field_meta.get_dim();
         vector_array->set_dim(dim);
     }
@@ -373,7 +373,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->resize(length * sizeof(bfloat16));
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             // does nothing here
             break;
         }
@@ -544,11 +544,11 @@ CreateVectorDataArrayFrom(const void* data_raw,
             obj->assign(data, length * sizeof(bfloat16));
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             SparseRowsToProto(
                 [&](size_t i) {
                     return reinterpret_cast<
-                               const knowhere::sparse::SparseRow<float>*>(
+                               const knowhere::sparse::SparseRow<sparseValueType>*>(
                                data_raw) +
                            i;
                 },
@@ -655,7 +655,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto obj = vector_array->mutable_binary_vector();
                 obj->assign(data + src_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_SPARSE_FLOAT) {
+                       DataType::VECTOR_SPARSE_U32_F32) {
                 auto src = src_field_data->vectors().sparse_float_vector();
                 auto dst = vector_array->mutable_sparse_float_vector();
                 if (src.dim() > dst->dim()) {

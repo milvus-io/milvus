@@ -21,8 +21,11 @@ var (
 // Balancer is a local component, it should promise all channel can be assigned, and reach the final consistency.
 // Balancer should be thread safe.
 type Balancer interface {
+	// GetAllStreamingNodes fetches all streaming node info.
+	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error)
+
 	// UpdateBalancePolicy update the balance policy.
-	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) error
+	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)
 
 	// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 	// If the error is returned, the balancer is closed.

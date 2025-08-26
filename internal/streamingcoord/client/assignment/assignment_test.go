@@ -98,8 +98,9 @@ func TestAssignmentService(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, assign.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
 
-	err = assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
+	resp, err := assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	assert.NoError(t, err)
+	assert.NotNil(t, resp)
 
 	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
 

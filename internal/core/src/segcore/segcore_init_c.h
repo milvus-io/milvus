@@ -46,6 +46,10 @@ void
 SegcoreSetRefineRatio(const float);
 
 void
+SegcoreSetIndexBuildRatio(const float);
+
+
+void
 SegcoreInterminDenseIndexType(const char*);
 
 CStatus
@@ -66,6 +70,9 @@ SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads);
 
 void
 SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads);
+
+void
+SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads);
 
 void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,

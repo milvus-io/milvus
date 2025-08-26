@@ -89,6 +89,9 @@ type Balancer interface {
 	// GetWALDistribution returns the wal distribution of the streaming node.
 	GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error)
 
+	// IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
+	IsRebalanceSuspended(ctx context.Context) (bool, error)
+
 	// SuspendRebalance suspends the rebalance of the wal.
 	SuspendRebalance(ctx context.Context) error
 

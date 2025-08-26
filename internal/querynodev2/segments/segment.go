@@ -23,6 +23,7 @@ package segments
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+#include "common/init_c.h"
 */
 import "C"
 
@@ -1319,7 +1320,10 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
-	usage := s.ResourceUsageEstimate()
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// erase expr-cache for this segment before deleting C segment
+		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
+	}
 
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
@@ -1327,6 +1331,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	}).Await()
 
 	// release reserved resource after the segment resource is really released.
+	usage := s.ResourceUsageEstimate()
 	s.manager.SubLogicalResource(usage)
 
 	log.Info("delete segment from memory")

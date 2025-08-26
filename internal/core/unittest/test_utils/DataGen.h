@@ -114,7 +114,7 @@ struct GeneratedData {
             } else {
                 if (field_meta.is_vector() &&
                     field_meta.get_data_type() !=
-                        DataType::VECTOR_SPARSE_FLOAT) {
+                        DataType::VECTOR_SPARSE_U32_F32) {
                     if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                         int len = raw_->num_rows() * field_meta.get_dim();
                         ret.resize(len);
@@ -164,7 +164,7 @@ struct GeneratedData {
                 }
                 if constexpr (std::is_same_v<
                                   T,
-                                  knowhere::sparse::SparseRow<float>>) {
+                                  knowhere::sparse::SparseRow<milvus::sparseValueType>>) {
                     auto sparse_float_array =
                         target_field_data.vectors().sparse_float_vector();
                     auto rows =
@@ -301,7 +301,7 @@ struct GeneratedData {
                         int array_len);
 };
 
-inline std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
+inline std::unique_ptr<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>
 GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
@@ -340,13 +340,13 @@ GenerateRandomSparseFloatVector(size_t rows,
         data[row][col] = val;
     }
 
-    auto tensor = std::make_unique<knowhere::sparse::SparseRow<float>[]>(rows);
+    auto tensor = std::make_unique<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>(rows);
 
     for (int32_t i = 0; i < rows; ++i) {
         if (data[i].size() == 0) {
             continue;
         }
-        knowhere::sparse::SparseRow<float> row(data[i].size());
+        knowhere::sparse::SparseRow<milvus::sparseValueType> row(data[i].size());
         size_t j = 0;
         for (auto& [idx, val] : data[i]) {
             row.set_at(j++, idx, val);
@@ -544,7 +544,7 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 auto res = GenerateRandomSparseFloatVector(
                     N, kTestSparseDim, kTestSparseVectorDensity, seed);
                 auto array = milvus::segcore::CreateDataArrayFrom(
@@ -595,7 +595,7 @@ DataGen(SchemaPtr schema,
                             obj->assign(data, length * sizeof(float16));
                             break;
                         }
-                        case DataType::VECTOR_SPARSE_FLOAT:
+                        case DataType::VECTOR_SPARSE_U32_F32:
                             ThrowInfo(DataTypeInvalid, "not implemented");
                             break;
                         case DataType::VECTOR_BFLOAT16: {
@@ -1195,10 +1195,10 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 auto sparse_float_array = data->vectors().sparse_float_vector();
                 auto rows = SparseBytesToRows(sparse_float_array.contents());
-                createFieldData(rows.get(), DataType::VECTOR_SPARSE_FLOAT, 0);
+                createFieldData(rows.get(), DataType::VECTOR_SPARSE_U32_F32, 0);
                 break;
             }
             case DataType::VECTOR_INT8: {

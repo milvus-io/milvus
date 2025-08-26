@@ -109,7 +109,7 @@ class GrowingTest
         } else if (index_type ==
                        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
                    index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
-            data_type = DataType::VECTOR_SPARSE_FLOAT;
+            data_type = DataType::VECTOR_SPARSE_U32_F32;
         } else {
             ASSERT_TRUE(false);
         }
@@ -242,7 +242,7 @@ TEST_P(GrowingTest, FillData) {
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);
-        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             EXPECT_EQ(
                 vec_result->vectors().sparse_float_vector().contents_size(),
                 num_inserted);

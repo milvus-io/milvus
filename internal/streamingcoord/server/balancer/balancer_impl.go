@@ -80,6 +80,11 @@ func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.Async
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
 }
 
+// GetAllStreamingNodes fetches all streaming node info.
+func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
 	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
@@ -98,15 +103,19 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 }
 
 // UpdateBalancePolicy update the balance policy.
-func (b *balancerImpl) UpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) error {
+func (b *balancerImpl) UpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return status.NewOnShutdownError("balancer is closing")
+		return nil, status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
 
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
-	return b.sendRequestAndWaitFinish(ctx, newOpUpdateBalancePolicy(ctx, req))
+	resp, err := b.sendRequestAndWaitFinish(ctx, newOpUpdateBalancePolicy(ctx, req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*types.UpdateWALBalancePolicyResponse), nil
 }
 
 // MarkAsUnavailable mark the pchannels as unavailable.
@@ -118,7 +127,8 @@ func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.
 
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
-	return b.sendRequestAndWaitFinish(ctx, newOpMarkAsUnavailable(ctx, pChannels))
+	_, err := b.sendRequestAndWaitFinish(ctx, newOpMarkAsUnavailable(ctx, pChannels))
+	return err
 }
 
 // Trigger trigger a re-balance.
@@ -130,17 +140,19 @@ func (b *balancerImpl) Trigger(ctx context.Context) error {
 
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
-	return b.sendRequestAndWaitFinish(ctx, newOpTrigger(ctx))
+	_, err := b.sendRequestAndWaitFinish(ctx, newOpTrigger(ctx))
+	return err
 }
 
 // sendRequestAndWaitFinish send a request to the background task and wait for it to finish.
-func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *request) error {
+func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *request) (any, error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case b.reqCh <- newReq:
 	}
-	return newReq.future.Get()
+	resp := newReq.future.Get()
+	return resp.resp, resp.err
 }
 
 // Close close the balancer.
