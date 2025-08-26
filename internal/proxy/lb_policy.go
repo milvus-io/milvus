@@ -323,7 +323,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	return wg.Wait()
 }
 
-// Execute will execute any one channel in collection workload
+// ExecuteOneChannel will execute at any one channel in collection
 func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
 	channelList, err := lb.GetShardLeaderList(ctx, workload.db, workload.collectionName, workload.collectionID, true)
 	if err != nil {
