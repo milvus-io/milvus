@@ -793,7 +793,7 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.EnableClientMetrics = ParamItem{
 		Key:          "pulsar.enableClientMetrics",
 		Version:      "2.3.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Whether to register pulsar client metrics into milvus metrics path.",
 		Export:       true,
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
@@ -96,6 +97,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		Authentication:    auth,
 		OperationTimeout:  timeout,
 		MetricsRegisterer: f.metricRegisterer,
+		Logger:            pulsarlog.NewLogger(),
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
@@ -123,6 +125,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 		Authentication:    auth,
 		OperationTimeout:  timeout,
 		MetricsRegisterer: f.metricRegisterer,
+		Logger:            pulsarlog.NewLogger(),
 	}
 
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
