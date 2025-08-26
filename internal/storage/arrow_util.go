@@ -247,7 +247,12 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", schema.Name))
 	}
 	dim, _ := typeutil.GetDim(schema)
-	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim))) // serdeEntry[schema.GetDataType()].newBuilder()
+
+	elementType := schemapb.DataType_None
+	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
+		elementType = schema.GetElementType()
+	}
+	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)) // serdeEntry[schema.GetDataType()].newBuilder()
 	if schema.GetDefaultValue() != nil {
 		switch schema.GetDataType() {
 		case schemapb.DataType_Bool:
@@ -369,7 +374,13 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 	builders := make([]array.Builder, len(fields))
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
-		builders[i] = array.NewBuilder(memory.DefaultAllocator, serdeMap[field.DataType].arrowType(int(dim)))
+
+		elementType := schemapb.DataType_None
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = field.GetElementType()
+		}
+		arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
+		builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 	}
 
 	return &RecordBuilder{

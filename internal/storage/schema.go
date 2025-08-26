@@ -23,7 +23,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		var dim int
 		switch field.DataType {
 		case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
-			schemapb.DataType_Int8Vector, schemapb.DataType_FloatVector:
+			schemapb.DataType_Int8Vector, schemapb.DataType_FloatVector, schemapb.DataType_ArrayOfVector:
 			var err error
 			dim, err = GetDimFromParams(field.TypeParams)
 			if err != nil {
@@ -32,7 +32,24 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		default:
 			dim = 0
 		}
-		arrowFields = append(arrowFields, ConvertToArrowField(field, serdeMap[field.DataType].arrowType(dim)))
+
+		var elementType = schemapb.DataType_None
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = field.GetElementType()
+		}
+
+		arrowType := serdeMap[field.DataType].arrowType(dim, elementType)
+		arrowField := ConvertToArrowField(field, arrowType)
+
+		// Add extra metadata for ArrayOfVector
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			arrowField.Metadata = arrow.NewMetadata(
+				[]string{packed.ArrowFieldIdMetadataKey, "elementType", "dim"},
+				[]string{strconv.Itoa(int(field.GetFieldID())), strconv.Itoa(int(elementType)), strconv.Itoa(dim)},
+			)
+		}
+
+		arrowFields = append(arrowFields, arrowField)
 		return nil
 	}
 	for _, field := range schema.GetFields() {
