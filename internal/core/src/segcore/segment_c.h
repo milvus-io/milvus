@@ -167,6 +167,9 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 FinishLoad(CSegmentInterface c_segment);
 
+CStatus
+ExprResCacheEraseSegment(int64_t segment_id);
+
 #ifdef __cplusplus
 }
 #endif
