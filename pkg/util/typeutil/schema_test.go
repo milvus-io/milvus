@@ -3078,7 +3078,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Check results
@@ -3141,7 +3141,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1 (second vector)
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Check results
@@ -3180,7 +3180,7 @@ func TestUpdateFieldData(t *testing.T) {
 		updateData := []*schemapb.FieldData{}
 
 		// Update should succeed but change nothing
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Data should remain unchanged
@@ -3225,9 +3225,9 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
-		err = UpdateFieldData(baseData, updateData, 2)
+		err = UpdateFieldData(baseData, updateData, 2, 2)
 		require.NoError(t, err)
 
 		// Check that ValidData was updated
@@ -3283,7 +3283,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating first row
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.NoError(t, err)
 
 		// Verify first row was correctly merged
@@ -3298,7 +3298,7 @@ func TestUpdateFieldData(t *testing.T) {
 		assert.Equal(t, "new_value", result["key5"])  // New value
 
 		// Test updating second row
-		err = UpdateFieldData(baseData, updateData, 1)
+		err = UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Verify second row was correctly merged
@@ -3356,7 +3356,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.NoError(t, err)
 
 		// For non-dynamic fields, the update should completely replace the old value
@@ -3407,7 +3407,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating with invalid base JSON
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to unmarshal base json")
 
@@ -3416,7 +3416,7 @@ func TestUpdateFieldData(t *testing.T) {
 		updateData[0].GetScalars().GetJsonData().Data[0] = []byte(`invalid json`)
 
 		// Test updating with invalid update JSON
-		err = UpdateFieldData(baseData, updateData, 0)
+		err = UpdateFieldData(baseData, updateData, 0, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to unmarshal update json")
 	})

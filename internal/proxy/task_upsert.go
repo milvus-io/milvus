@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -244,14 +245,14 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name))
 	}
 
-	oldIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	upsertIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
 		log.Warn("parse primary field data to IDs failed", zap.Error(err))
 		return err
 	}
 
-	oldIDSize := typeutil.GetSizeOfIDs(oldIDs)
-	if oldIDSize == 0 {
+	upsertIDSize := typeutil.GetSizeOfIDs(upsertIDs)
+	if upsertIDSize == 0 {
 		it.deletePKs = &schemapb.IDs{}
 		it.insertFieldData = it.req.GetFieldsData()
 		log.Info("old records not found, just do insert")
@@ -260,7 +261,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
 	// retrieve by primary key to get original field data
-	resp, err := retrieveByPKs(ctx, it, oldIDs, []string{"*"})
+	resp, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
 	if err != nil {
 		log.Info("retrieve by primary key failed", zap.Error(err))
 		return err
@@ -285,23 +286,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		zap.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
-	// check whether the primary key is exist in query result
-	idsChecker, err := typeutil.NewIDsChecker(existIDs)
-	if err != nil {
-		log.Info("create primary key checker failed", zap.Error(err))
-		return err
-	}
-
-	// Build mapping from existing primary keys to their positions in query result
-	// This ensures we can correctly locate data even if query results are not in the same order as request
-	existIDsLen := typeutil.GetSizeOfIDs(existIDs)
-	existPKToIndex := make(map[interface{}]int, existIDsLen)
-	for j := 0; j < existIDsLen; j++ {
-		pk := typeutil.GetPK(existIDs, int64(j))
-		existPKToIndex[pk] = j
-	}
-
-	// set field id for user passed field data
+	// set field id for user passed field data, prepare for merge logic
 	upsertFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
 	if len(upsertFieldData) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
@@ -320,72 +305,124 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldName = fieldName
 	}
 
-	lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
-	it.deletePKs = &schemapb.IDs{}
-	it.insertFieldData = make([]*schemapb.FieldData, len(existFieldData))
-	for i := 0; i < oldIDSize; i++ {
-		exist, err := idsChecker.Contains(oldIDs, i)
+	// Note: the most difficult part is to handle the merge progress of upsert and query result
+	// we need to enable merge logic on different length between upsertFieldData and it.insertFieldData
+	insertIdxInUpsert := make([]int, 0)
+	updateIdxInUpsert := make([]int, 0)
+	// 1. split upsert data into insert and update by query result
+	idsChecker, err := typeutil.NewIDsChecker(existIDs)
+	if err != nil {
+		log.Info("create primary key checker failed", zap.Error(err))
+		return err
+	}
+	for upsertIdx := 0; upsertIdx < upsertIDSize; upsertIdx++ {
+		exist, err := idsChecker.Contains(upsertIDs, upsertIdx)
 		if err != nil {
 			log.Info("check primary key exist in query result failed", zap.Error(err))
 			return err
 		}
-
 		if exist {
-			// treat upsert as update
-			// 1. if pk exist in query result, add it to deletePKs
-			typeutil.AppendIDs(it.deletePKs, oldIDs, i)
-			// 2. construct the field data for update using correct index mapping
-			oldPK := typeutil.GetPK(oldIDs, int64(i))
+			updateIdxInUpsert = append(updateIdxInUpsert, upsertIdx)
+		} else {
+			insertIdxInUpsert = append(insertIdxInUpsert, upsertIdx)
+		}
+	}
+
+	// 2. merge field data on update semantic
+	it.deletePKs = &schemapb.IDs{}
+	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
+	if len(updateIdxInUpsert) > 0 {
+		// Note: For fields containing default values, default values need to be set according to valid data during insertion,
+		// but query results fields do not set valid data when returning default value fields,
+		// therefore valid data needs to be manually set to true
+		for _, fieldData := range existFieldData {
+			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldData.GetFieldName())
+			if err != nil {
+				log.Info("get field schema failed", zap.Error(err))
+				return err
+			}
+
+			if fieldSchema.GetDefaultValue() != nil {
+				fieldData.ValidData = make([]bool, upsertIDSize)
+				for i := range fieldData.ValidData {
+					fieldData.ValidData[i] = true
+				}
+			}
+		}
+
+		// Build mapping from existing primary keys to their positions in query result
+		// This ensures we can correctly locate data even if query results are not in the same order as request
+		existIDsLen := typeutil.GetSizeOfIDs(existIDs)
+		existPKToIndex := make(map[interface{}]int, existIDsLen)
+		for j := 0; j < existIDsLen; j++ {
+			pk := typeutil.GetPK(existIDs, int64(j))
+			existPKToIndex[pk] = j
+		}
+
+		baseIdx := 0
+		for _, idx := range updateIdxInUpsert {
+			typeutil.AppendIDs(it.deletePKs, upsertIDs, idx)
+			oldPK := typeutil.GetPK(upsertIDs, int64(idx))
 			existIndex, ok := existPKToIndex[oldPK]
 			if !ok {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
 			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(i))
+			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(baseIdx), int64(idx))
+			baseIdx += 1
 			if err != nil {
 				log.Info("update field data failed", zap.Error(err))
 				return err
 			}
-		} else {
-			// treat upsert as insert
-			if lackOfFieldErr != nil {
-				log.Info("check fields data by schema failed", zap.Error(lackOfFieldErr))
-				return lackOfFieldErr
-			}
-			// use field data from upsert request
-			typeutil.AppendFieldData(it.insertFieldData, upsertFieldData, int64(i))
 		}
 	}
 
-	for _, fieldData := range it.insertFieldData {
-		if fieldData.GetIsDynamic() {
-			continue
-		}
-		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldData.GetFieldName())
-		if err != nil {
-			log.Info("get field schema failed", zap.Error(err))
-			return err
+	// 3. merge field data on insert semantic
+	if len(insertIdxInUpsert) > 0 {
+		// if necessary field is not exist in upsert request, return error
+		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
+		if lackOfFieldErr != nil {
+			log.Info("check fields data by schema failed", zap.Error(lackOfFieldErr))
+			return lackOfFieldErr
 		}
 
-		// Note: Since protobuf cannot correctly identify null values, zero values + valid data are used to identify null values,
-		// therefore for field data obtained from query results, if the field is nullable, it needs to be set to empty values
-		if fieldSchema.GetNullable() {
-			if getValidNumber(fieldData.GetValidData()) != len(fieldData.GetValidData()) {
-				err := ResetNullFieldData(fieldData, fieldSchema)
-				if err != nil {
-					log.Info("reset null field data failed", zap.Error(err))
-					return err
+		// if the nullable or default value field is not set in upsert request, which means the len(upsertFieldData) < len(it.insertFieldData)
+		// we need to generate the nullable field data before append as insert
+		insertWithNullField := make([]*schemapb.FieldData, 0)
+		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (string, *schemapb.FieldData) {
+			return field.GetFieldName(), field
+		})
+		for _, fieldSchema := range it.schema.CollectionSchema.Fields {
+			if fieldData, ok := upsertFieldMap[fieldSchema.Name]; !ok {
+				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
+					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
+					if err != nil {
+						log.Info("generate nullable field data failed", zap.Error(err))
+						return err
+					}
+					insertWithNullField = append(insertWithNullField, fieldData)
+				} else {
+					// unreachable code
+					return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %s is not nullable and has no default value", fieldSchema.Name))
 				}
+			} else {
+				insertWithNullField = append(insertWithNullField, fieldData)
 			}
 		}
+		for _, idx := range insertIdxInUpsert {
+			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx))
+		}
+	}
 
-		// Note: For fields containing default values, default values need to be set according to valid data during insertion,
-		// but query results fields do not set valid data when returning default value fields,
-		// therefore valid data needs to be manually set to true
-		if fieldSchema.GetDefaultValue() != nil {
-			fieldData.ValidData = make([]bool, oldIDSize)
-			for i := range fieldData.ValidData {
-				fieldData.ValidData[i] = true
+	// 4. clean field data with valid data after merge upsert and query result
+	for _, fieldData := range it.insertFieldData {
+		// Note: Since protobuf cannot correctly identify null values, zero values + valid data are used to identify null values,
+		// therefore for field data obtained from query results, if the field is nullable, it needs to clean zero values
+		if len(fieldData.GetValidData()) != 0 && getValidNumber(fieldData.GetValidData()) != len(fieldData.GetValidData()) {
+			err := ResetNullFieldData(fieldData)
+			if err != nil {
+				log.Info("reset null field data failed", zap.Error(err))
+				return err
 			}
 		}
 	}
@@ -393,11 +430,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	return nil
 }
 
-func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	if !fieldSchema.GetNullable() {
-		return nil
-	}
-
+func ResetNullFieldData(field *schemapb.FieldData) error {
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
@@ -406,7 +439,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.BoolData.Data = make([]bool, 0)
 			} else {
-				ret := make([]bool, validRowNum)
+				ret := make([]bool, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.BoolData.Data[i])
@@ -420,7 +453,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.IntData.Data = make([]int32, 0)
 			} else {
-				ret := make([]int32, validRowNum)
+				ret := make([]int32, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.IntData.Data[i])
@@ -434,7 +467,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.LongData.Data = make([]int64, 0)
 			} else {
-				ret := make([]int64, validRowNum)
+				ret := make([]int64, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.LongData.Data[i])
@@ -448,7 +481,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.FloatData.Data = make([]float32, 0)
 			} else {
-				ret := make([]float32, validRowNum)
+				ret := make([]float32, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.FloatData.Data[i])
@@ -462,7 +495,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.DoubleData.Data = make([]float64, 0)
 			} else {
-				ret := make([]float64, validRowNum)
+				ret := make([]float64, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.DoubleData.Data[i])
@@ -476,7 +509,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.StringData.Data = make([]string, 0)
 			} else {
-				ret := make([]string, validRowNum)
+				ret := make([]string, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.StringData.Data[i])
@@ -490,7 +523,7 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 			if validRowNum == 0 {
 				sd.JsonData.Data = make([][]byte, 0)
 			} else {
-				ret := make([][]byte, validRowNum)
+				ret := make([][]byte, 0, validRowNum)
 				for i, valid := range field.GetValidData() {
 					if valid {
 						ret = append(ret, sd.JsonData.Data[i])
@@ -508,6 +541,139 @@ func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSc
 	}
 
 	return nil
+}
+
+func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
+	switch field.DataType {
+	case schemapb.DataType_Bool:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: make([]bool, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Int32:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: make([]int32, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Int64:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: make([]int64, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Float:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: make([]float32, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Double:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: make([]float64, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_VarChar:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: make([]string, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_JSON:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: make([][]byte, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined scalar data type:%s", field.DataType.String()))
+	}
 }
 
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
