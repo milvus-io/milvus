@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -174,7 +176,7 @@ type IDScores[T PKType] struct {
 	size   int64
 }
 
-func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams) *IDScores[T] {
+func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, descendingOrder bool) *IDScores[T] {
 	ids := make([]T, 0, len(idScores))
 	for id := range idScores {
 		ids = append(ids, id)
@@ -184,7 +186,11 @@ func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams) *
 		if idScores[ids[i]] == idScores[ids[j]] {
 			return ids[i] < ids[j]
 		}
-		return idScores[ids[i]] > idScores[ids[j]]
+		if descendingOrder {
+			return idScores[ids[i]] > idScores[ids[j]]
+		} else {
+			return idScores[ids[i]] < idScores[ids[j]]
+		}
 	})
 	topk := searchParams.offset + searchParams.limit
 	if int64(len(ids)) > topk {
@@ -206,10 +212,6 @@ func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams) *
 	}
 	ret.size = int64(len(ret.ids))
 	return &ret
-}
-
-func genIDGroupValueMap[T PKType]() map[T]any {
-	return nil
 }
 
 func groupScore[T PKType](group *Group[T], scorerType string) (float32, error) {
@@ -378,6 +380,21 @@ func getIds(ids *schemapb.IDs, start int64, size int64) any {
 	return nil
 }
 
+type scoreMergeFunc[T PKType] func(cols []*columns) map[T]float32
+
+func getMergeFunc[T PKType](name string) (scoreMergeFunc[T], error) {
+	switch strings.ToLower(name) {
+	case "max":
+		return maxMerge[T], nil
+	case "avg":
+		return avgMerge[T], nil
+	case "sum":
+		return sumMerge[T], nil
+	default:
+		return nil, fmt.Errorf("Unsupport score mode: [%s], only supports: [max, avg, sum]", name)
+	}
+}
+
 func maxMerge[T PKType](cols []*columns) map[T]float32 {
 	srcScores := make(map[T]float32)
 
@@ -393,6 +410,54 @@ func maxMerge[T PKType](cols []*columns) map[T]float32 {
 				srcScores[id] = scores[idx]
 			} else {
 				srcScores[id] = max(score, scores[idx])
+			}
+		}
+	}
+	return srcScores
+}
+
+func avgMerge[T PKType](cols []*columns) map[T]float32 {
+	srcScores := make(map[T]*typeutil.Pair[float32, int32])
+
+	for _, col := range cols {
+		if col.size == 0 {
+			continue
+		}
+		scores := col.scores
+		ids := col.ids.([]T)
+
+		for idx, id := range ids {
+			if _, ok := srcScores[id]; !ok {
+				p := typeutil.NewPair[float32, int32](scores[idx], 1)
+				srcScores[id] = &p
+			} else {
+				srcScores[id].A += scores[idx]
+				srcScores[id].B += 1
+			}
+		}
+	}
+	retScores := make(map[T]float32, len(srcScores))
+	for id, item := range srcScores {
+		retScores[id] = item.A / float32(item.B)
+	}
+	return retScores
+}
+
+func sumMerge[T PKType](cols []*columns) map[T]float32 {
+	srcScores := make(map[T]float32)
+
+	for _, col := range cols {
+		if col.size == 0 {
+			continue
+		}
+		scores := col.scores
+		ids := col.ids.([]T)
+
+		for idx, id := range ids {
+			if _, ok := srcScores[id]; !ok {
+				srcScores[id] = scores[idx]
+			} else {
+				srcScores[id] += scores[idx]
 			}
 		}
 	}
@@ -430,4 +495,76 @@ func genIdGroupingMap(multipSearchResultData []*schemapb.SearchResultData) (map[
 		}
 	}
 	return idGroupValue, nil
+}
+
+type normalizeFunc func(float32) float32
+
+func getNormalizeFunc(normScore bool, metrics string, toGreater bool) normalizeFunc {
+	if !normScore {
+		if !toGreater {
+			return func(distance float32) float32 {
+				return distance
+			}
+		}
+		switch strings.ToUpper(metrics) {
+		case metric.COSINE, metric.IP, metric.BM25:
+			return func(distance float32) float32 {
+				return distance
+			}
+		default:
+			return func(distance float32) float32 {
+				return 1.0 - 2*float32(math.Atan(float64(distance)))/math.Pi
+			}
+		}
+	}
+	switch strings.ToUpper(metrics) {
+	case metric.COSINE:
+		return func(distance float32) float32 {
+			return (1 + distance) * 0.5
+		}
+	case metric.IP:
+		return func(distance float32) float32 {
+			return 0.5 + float32(math.Atan(float64(distance)))/math.Pi
+		}
+	case metric.BM25:
+		return func(distance float32) float32 {
+			return 2 * float32(math.Atan(float64(distance))) / math.Pi
+		}
+	default:
+		return func(distance float32) float32 {
+			return 1.0 - 2*float32(math.Atan(float64(distance)))/math.Pi
+		}
+	}
+}
+
+// analyzeMetricsType inspects the given metrics and determines
+// whether they contain mixed types and what the sorting order should be.
+//
+// Parameters:
+//
+//	metrics - A list of metric names (e.g., COSINE, IP, BM25).
+//
+// Returns:
+//
+//	mixed          - true if the input contains both "larger-is-more-similar"
+//	                 and "smaller-is-more-similar" metrics; false otherwise.
+//	sortDescending - true if results should be sorted in descending order
+//	                 (larger value = more similar, e.g., COSINE, IP, BM25);
+//	                 false if results should be sorted in ascending order
+//	                 (smaller value = more similar, e.g., L2 distance).
+func classifyMetricsOrder(metrics []string) (mixed bool, sortDescending bool) {
+	countLargerIsBetter := 0  // Larger value = more similar
+	countSmallerIsBetter := 0 // Smaller value = more similar
+	for _, m := range metrics {
+		switch strings.ToUpper(m) {
+		case metric.COSINE, metric.IP, metric.BM25:
+			countLargerIsBetter++
+		default:
+			countSmallerIsBetter++
+		}
+	}
+	if countLargerIsBetter > 0 && countSmallerIsBetter > 0 {
+		return true, true
+	}
+	return false, countSmallerIsBetter == 0
 }
