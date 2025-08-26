@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -1572,7 +1573,60 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 	}, nil
 }
 
+func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
+	if err != nil {
+		return nil, err
+	}
+
+	defer tokenizer.Destroy()
+
+	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
+	for i, text := range req.GetPlaceholder() {
+		stream := tokenizer.NewTokenStream(string(text))
+		defer stream.Destroy()
+
+		results[i] = &milvuspb.AnalyzerResult{
+			Tokens: make([]*milvuspb.AnalyzerToken, 0),
+		}
+
+		for stream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if req.GetWithDetail() {
+				token = stream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
+			}
+
+			if req.GetWithHash() {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			results[i].Tokens = append(results[i].Tokens, token)
+		}
+	}
+	return results, nil
+}
+
 func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	// build and run analyzer by analyzer params
+	// if channel not set
+	if req.GetChannel() == "" {
+		result, err := node.runAnalyzer(req)
+		return &milvuspb.RunAnalyzerResponse{
+			Status:  merr.Status(err),
+			Results: result,
+		}, nil
+	}
+
+	// run analyzer by delegator
 	// get delegator
 	sd, ok := node.delegators.Get(req.GetChannel())
 	if !ok {
@@ -1595,6 +1649,26 @@ func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 		Status:  merr.Status(nil),
 		Results: results,
 	}, nil
+}
+
+func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	for _, info := range req.AnalyzerInfos {
+		err := analyzer.ValidateAnalyzer(info.GetParams())
+		if err != nil {
+			if info.GetName() != "" {
+				return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %d, name: %d, error: %v", info.GetField(), info.GetName(), err)), nil
+			}
+			return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %d, error: %v", info.GetField(), err)), nil
+		}
+	}
+
+	return merr.Status(nil), nil
 }
 
 type deleteRequestStringer struct {

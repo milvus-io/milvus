@@ -920,6 +920,14 @@ func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 	return s.mixCoord.ListLoadedSegments(ctx, req)
 }
 
+func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.mixCoord.RunAnalyzer(ctx, req)
+}
+
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	return s.mixCoord.ValidateAnalyzer(ctx, req)
+}
+
 // AddFileResource add file resource
 func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AddFileResource(ctx, req)

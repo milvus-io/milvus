@@ -129,6 +129,10 @@ type Server struct {
 	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// for balance streaming node request
+	// now only used for run analyzer and validate analyzer
+	nodeIdx atomic.Uint32
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
