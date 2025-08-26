@@ -46,7 +46,8 @@ void
 VectorFieldIndexing::recreate_index(DataType data_type,
                                     const VectorBase* field_raw_data) {
     if (IsSparseFloatVectorDataType(data_type)) {
-        index_ = std::make_unique<index::VectorMemIndex<float>>(
+        index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
+            DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -62,6 +63,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             return (const void*)field_raw_data_ptr->get_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float>>(
+            DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -78,6 +80,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             return (const void*)field_raw_data_ptr->get_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float16>>(
+            DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -94,6 +97,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             return (const void*)field_raw_data_ptr->get_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
+            DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -146,7 +150,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
         auto dim = source->Dim();
 
         while (total_rows > 0) {
-            auto mat = static_cast<const knowhere::sparse::SparseRow<float>*>(
+            auto mat = static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                 source->get_chunk_data(chunk_id));
             auto rows = std::min(source->get_size_per_chunk(), total_rows);
             auto dataset = knowhere::GenDataSet(rows, dim, mat);
@@ -332,7 +336,7 @@ CreateIndex(const FieldMeta& field_meta,
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_BFLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_INT8 ||
-            field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+            field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32) {
             return std::make_unique<VectorFieldIndexing>(field_meta,
                                                          field_index_meta,
                                                          segment_max_row_count,
@@ -365,6 +369,9 @@ CreateIndex(const FieldMeta& field_meta,
                                                                 segcore_config);
         case DataType::DOUBLE:
             return std::make_unique<ScalarFieldIndexing<double>>(
+                field_meta, segcore_config);
+        case DataType::TIMESTAMPTZ:
+            return std::make_unique<ScalarFieldIndexing<int64_t>>(
                 field_meta, segcore_config);
         case DataType::VARCHAR:
             return std::make_unique<ScalarFieldIndexing<std::string>>(

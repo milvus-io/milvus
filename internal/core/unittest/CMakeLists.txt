@@ -105,6 +105,7 @@ set(MILVUS_TEST_FILES
         test_chunked_column_group.cpp
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
+        test_expr_cache.cpp
         test_thread_pool.cpp
         test_json_flat_index.cpp
         test_vector_array.cpp
@@ -213,9 +214,26 @@ add_subdirectory(bench)
 # install(TARGETS dynamic_simd_test DESTINATION unittest)
 # endif()
 
+# bitset unit test
+include(CheckCXXCompilerFlag)
+include(CheckIncludeFileCXX)
+
+check_cxx_compiler_flag("-march=armv8-a+sve" COMPILER_SUPPORTS_SVE)
+check_include_file_cxx("arm_sve.h" COMPILER_HAS_ARM_SVE_HEADER)
+
 add_executable(bitset_test
         test_bitset.cpp
 )
+
+if (COMPILER_SUPPORTS_SVE AND COMPILER_HAS_ARM_SVE_HEADER)
+        message(STATUS "SVE support for the bitset library UT is enabled")
+        target_compile_definitions(bitset_test PRIVATE BITSET_ENABLE_SVE_SUPPORT=1)
+
+        set_source_files_properties(test_bitset.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+else()
+        message(STATUS "SVE support for the bitset library UT is disabled")
+endif()
+
 target_link_libraries(bitset_test
         milvus_bitset
         gtest

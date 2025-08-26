@@ -55,6 +55,11 @@ TEST(GetArrowDataTypeTest, DOUBLE) {
     ASSERT_TRUE(result->Equals(arrow::float64()));
 }
 
+TEST(GetArrowDataTypeTest, TIMESTAMPTZ) {
+    auto result = GetArrowDataType(DataType::TIMESTAMPTZ);
+    ASSERT_TRUE(result->Equals(arrow::int64()));
+}
+
 TEST(GetArrowDataTypeTest, STRING_TYPES) {
     auto result1 = GetArrowDataType(DataType::STRING);
     auto result2 = GetArrowDataType(DataType::VARCHAR);
@@ -97,8 +102,8 @@ TEST(GetArrowDataTypeTest, VECTOR_BFLOAT16) {
     ASSERT_TRUE(result->Equals(arrow::fixed_size_binary(dim * 2)));
 }
 
-TEST(GetArrowDataTypeTest, VECTOR_SPARSE_FLOAT) {
-    auto result = GetArrowDataType(DataType::VECTOR_SPARSE_FLOAT);
+TEST(GetArrowDataTypeTest, VECTOR_SPARSE_U32_F32) {
+    auto result = GetArrowDataType(DataType::VECTOR_SPARSE_U32_F32);
     ASSERT_TRUE(result->Equals(arrow::binary()));
 }
 

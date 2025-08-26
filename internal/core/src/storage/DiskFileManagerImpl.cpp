@@ -47,6 +47,9 @@
 #include "storage/Util.h"
 #include "storage/FileWriter.h"
 
+#include "storage/RemoteOutputStream.h"
+#include "storage/RemoteInputStream.h"
+
 namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
@@ -74,6 +77,12 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
     std::string remote_prefix;
     remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
+}
+
+std::string
+DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
+    std::string remote_prefix = GetRemoteIndexFilePrefixV2();
+    return remote_prefix + "/" + file_name;
 }
 
 std::string
@@ -145,12 +154,53 @@ DiskFileManagerImpl::AddFileInternal(
     return true;
 }  // namespace knowhere
 
+std::shared_ptr<InputStream>
+DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
+    auto local_file_name = GetFileName(filename);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    auto remote_file = fs->OpenInputFile(remote_file_path);
+    AssertInfo(remote_file.ok(), "failed to open remote file");
+    return std::static_pointer_cast<milvus::InputStream>(
+        std::make_shared<milvus::storage::RemoteInputStream>(
+            std::move(remote_file.ValueOrDie())));
+}
+
+std::shared_ptr<OutputStream>
+DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
+    auto local_file_name = GetFileName(filename);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    auto remote_stream = fs->OpenOutputStream(remote_file_path);
+    AssertInfo(remote_stream.ok(),
+               "failed to open remote stream, reason: {}",
+               remote_stream.status().ToString());
+
+    return std::make_shared<milvus::storage::RemoteOutputStream>(
+        std::move(remote_stream.ValueOrDie()));
+}
+
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     return AddFileInternal(file,
                            [this](const std::string& file_name, int slice_num) {
                                return GetRemoteIndexPath(file_name, slice_num);
                            });
+}
+
+bool
+DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
+    auto local_file_name = GetFileName(file_meta.file_path);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    remote_paths_to_size_[remote_file_path] = file_meta.file_size;
+    return true;
 }
 
 bool
@@ -262,7 +312,9 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
-            auto file_writer = storage::FileWriter(local_index_file_name);
+            auto file_writer = storage::FileWriter(
+                local_index_file_name,
+                storage::io::GetPriorityFromLoadPriority(priority));
             auto appendIndexFiles = [&]() {
                 auto index_chunks_futures =
                     GetObjectData(rcm_.get(),
@@ -424,7 +476,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                                   GetFieldDataMeta().segment_id,
                                   GetFieldDataMeta().field_id) +
                               "raw_data";
-            if (dt == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+            if (dt == milvus::DataType::VECTOR_SPARSE_U32_F32) {
                 local_data_path += ".sparse_u32_f32";
             }
             local_chunk_manager->CreateFile(local_data_path);
@@ -432,13 +484,13 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         init_file_info(data_type);
         file_created = true;
     }
-    if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type == milvus::DataType::VECTOR_SPARSE_U32_F32) {
         dim =
             (uint32_t)(std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
                            field_data)
                            ->Dim());
         auto sparse_rows =
-            static_cast<const knowhere::sparse::SparseRow<float>*>(
+            static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                 field_data->Data());
         for (size_t i = 0; i < field_data->Length(); ++i) {
             auto row = sparse_rows[i];
@@ -568,9 +620,11 @@ WriteOptFieldIvfDataImpl(
 
     // Do not write to disk if there is only one value
     if (mp.size() <= 1) {
+        LOG_INFO("There are only one category, skip caching to local disk");
         return false;
     }
 
+    LOG_INFO("Get opt fields with {} categories", mp.size());
     local_chunk_manager->Write(local_data_path,
                                write_offset,
                                const_cast<int64_t*>(&field_id),
@@ -660,7 +714,31 @@ WriteOptFieldsIvfMeta(
 }
 
 std::string
-DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
+DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return "";
+    }
+
+    std::vector<std::vector<std::string>> remote_files_storage_v2;
+    if (storage_version == STORAGE_V2) {
+        auto segment_insert_files =
+            index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+                config, SEGMENT_INSERT_FILES_KEY);
+        AssertInfo(segment_insert_files.has_value(),
+                   "segment insert files is empty when build index while "
+                   "caching opt fields");
+        remote_files_storage_v2 = segment_insert_files.value();
+        for (auto& remote_files : remote_files_storage_v2) {
+            SortByPath(remote_files);
+        }
+    }
+
+    auto fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
@@ -685,15 +763,22 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
-        auto& field_paths = std::get<2>(tup);
-        if (0 == field_paths.size()) {
-            LOG_WARN("optional field {} has no data", field_id);
-            return "";
-        }
 
-        SortByPath(field_paths);
-        std::vector<FieldDataPtr> field_datas =
-            FetchFieldData(rcm_.get(), field_paths);
+        std::vector<FieldDataPtr> field_datas;
+        // fetch scalar data from storage v2
+        if (storage_version == STORAGE_V2) {
+            field_datas = GetFieldDatasFromStorageV2(
+                remote_files_storage_v2, field_id, field_type, 1, fs_);
+        } else {  // original way
+            auto& field_paths = std::get<2>(tup);
+            if (0 == field_paths.size()) {
+                LOG_WARN("optional field {} has no data", field_id);
+                return "";
+            }
+
+            SortByPath(field_paths);
+            field_datas = FetchFieldData(rcm_.get(), field_paths);
+        }
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,
@@ -882,5 +967,12 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
+
+std::string
+DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {
+    return FileManagerImpl::GetRemoteIndexFilePrefixV2();
+}
 
 }  // namespace milvus::storage

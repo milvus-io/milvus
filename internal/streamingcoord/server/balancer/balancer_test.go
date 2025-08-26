@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
@@ -18,10 +19,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -30,12 +31,7 @@ import (
 
 func TestBalancer(t *testing.T) {
 	paramtable.Init()
-	err := etcd.InitEtcdServer(true, "", t.TempDir(), "stdout", "info")
-	assert.NoError(t, err)
-	defer etcd.StopEtcdServer()
-
-	etcdClient, err := etcd.GetEmbedEtcdClient()
-	assert.NoError(t, err)
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 
@@ -184,18 +180,70 @@ func TestBalancer(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	assert.False(t, f.Ready())
 
+	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	resp, err := b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{
+			AllowRebalance: false,
+		},
+		Nodes: &streamingpb.WALBalancePolicyNodes{
+			FreezeNodeIds:   []int64{1},
+			DefreezeNodeIds: []int64{},
+		},
+	})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{1}, resp.FreezeNodeIds)
+	assert.False(t, resp.Config.AllowRebalance)
+	assert.False(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	b.Trigger(ctx)
+	err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+		for _, relation := range relations {
+			if relation.Node.ServerID == 1 {
+				return nil
+			}
+		}
+		return doneErr
+	})
+	assert.ErrorIs(t, err, doneErr)
+
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{
+			AllowRebalance: true,
+		},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance},
+		},
+	})
+	assert.True(t, resp.Config.AllowRebalance)
+	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	assert.NoError(t, err)
+	b.Trigger(ctx)
+
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{
+			AllowRebalance: false,
+		},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{},
+		},
+		Nodes: &streamingpb.WALBalancePolicyNodes{
+			FreezeNodeIds:   []int64{},
+			DefreezeNodeIds: []int64{1},
+		},
+	})
+	assert.True(t, resp.Config.AllowRebalance)
+	assert.Empty(t, resp.FreezeNodeIds)
+	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	assert.NoError(t, err)
+	b.Trigger(ctx)
+
 	b.Close()
 	assert.ErrorIs(t, f.Get(), balancer.ErrBalancerClosed)
 }
 
 func TestBalancer_WithRecoveryLag(t *testing.T) {
 	paramtable.Init()
-	err := etcd.InitEtcdServer(true, "", t.TempDir(), "stdout", "info")
-	assert.NoError(t, err)
-	defer etcd.StopEtcdServer()
 
-	etcdClient, err := etcd.GetEmbedEtcdClient()
-	assert.NoError(t, err)
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 

@@ -86,6 +86,7 @@ func (suite *ChannelDistManagerSuite) SetupSuite() {
 }
 
 func (suite *ChannelDistManagerSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
 	suite.dist = NewChannelDistManager()
 	// Distribution:
 	// node 0 contains channel dmc0
@@ -347,27 +348,20 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	suite.Nil(leader)
 
 	// Test streaming node
+	snmanager.ResetStreamingNodeManager()
 	balancer := mock_balancer.NewMockBalancer(suite.T())
 	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
-		versions := []typeutil.VersionInt64Pair{
-			{Global: 1, Local: 2},
-		}
-		pchans := [][]types.PChannelInfoAssigned{
-			{
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 4, Address: "localhost:1"},
-				},
-			},
-		}
-		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
-		}
 		<-ctx.Done()
-		return context.Cause(ctx)
+		return ctx.Err()
 	})
-	defer snmanager.ResetStreamingNodeManager()
+	balancer.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		4: {
+			ServerID: 4,
+			Address:  "localhost:1",
+		},
+	}, nil)
 	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	defer snmanager.ResetStreamingNodeManager()
 	suite.Eventually(func() bool {
 		nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
 		return nodeIDs.Contain(4)

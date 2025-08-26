@@ -29,9 +29,12 @@ package initcore
 import "C"
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"path"
+	"strconv"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -269,16 +272,145 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
-func InitFileWriterConfig(params *paramtable.ComponentParam) error {
+func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	mode := params.CommonCfg.DiskWriteMode.GetValue()
 	bufferSize := params.CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()
 	numThreads := params.CommonCfg.DiskWriteNumThreads.GetAsInt()
+	refillPeriodUs := params.CommonCfg.DiskWriteRateLimiterRefillPeriodUs.GetAsInt64()
+	maxBurstKBps := params.CommonCfg.DiskWriteRateLimiterMaxBurstKBps.GetAsInt64()
+	avgKBps := params.CommonCfg.DiskWriteRateLimiterAvgKBps.GetAsInt64()
+	highPriorityRatio := params.CommonCfg.DiskWriteRateLimiterHighPriorityRatio.GetAsInt()
+	middlePriorityRatio := params.CommonCfg.DiskWriteRateLimiterMiddlePriorityRatio.GetAsInt()
+	lowPriorityRatio := params.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.GetAsInt()
 	cMode := C.CString(mode)
 	cBufferSize := C.uint64_t(bufferSize)
 	cNumThreads := C.int(numThreads)
 	defer C.free(unsafe.Pointer(cMode))
-	status := C.InitFileWriterConfig(cMode, cBufferSize, cNumThreads)
-	return HandleCStatus(&status, "InitFileWriterConfig failed")
+	diskWriteRateLimiterConfig := C.CDiskWriteRateLimiterConfig{
+		refill_period_us:      C.int64_t(refillPeriodUs),
+		avg_bps:               C.int64_t(avgKBps * 1024),
+		max_burst_bps:         C.int64_t(maxBurstKBps * 1024),
+		high_priority_ratio:   C.int32_t(highPriorityRatio),
+		middle_priority_ratio: C.int32_t(middlePriorityRatio),
+		low_priority_ratio:    C.int32_t(lowPriorityRatio),
+	}
+	diskWriteConfig := C.CDiskWriteConfig{
+		mode:                cMode,
+		buffer_size_kb:      cBufferSize,
+		nr_threads:          cNumThreads,
+		rate_limiter_config: diskWriteRateLimiterConfig,
+	}
+	status := C.InitDiskFileWriterConfig(diskWriteConfig)
+	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
+}
+
+var coreParamCallbackInitOnce sync.Once
+
+func SetupCoreConfigChangelCallback() {
+	coreParamCallbackInitOnce.Do(func() {
+		paramtable.Get().CommonCfg.IndexSliceSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateIndexSliceSize(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateHighPriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateMiddlePriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateLowPriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultOptimizeExprEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultGrowingJSONKeyStatsEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultConfigParamTypeCheck(enable)
+			return nil
+		})
+
+		paramtable.Get().LogCfg.Level.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			return UpdateLogLevel(newValue)
+		})
+
+		paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultExprEvalBatchSize(size)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			interval, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultJSONKeyStatsCommitInterval(interval)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateExprResCacheEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			capacity, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateExprResCacheCapacityBytes(capacity)
+			return nil
+		})
+	})
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
@@ -296,6 +428,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 
 	refineRatio := C.float(params.QueryNodeCfg.InterimIndexRefineRatio.GetAsFloat())
 	C.SegcoreSetRefineRatio(refineRatio)
+
+	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
+	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
 
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))

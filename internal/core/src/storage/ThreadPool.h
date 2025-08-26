@@ -24,6 +24,7 @@
 #include <thread>
 #include <vector>
 #include <utility>
+#include <cassert>
 
 #include "SafeQueue.h"
 #include "log/Log.h"

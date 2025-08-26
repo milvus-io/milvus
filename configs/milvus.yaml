@@ -233,7 +233,7 @@ pulsar:
   tenant: public
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
-  enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
+  enableClientMetrics: true # Whether to register pulsar client metrics into milvus metrics path.
   # Perform a backlog cleanup every time the data of given bytes is written.
   # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
   # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
@@ -452,6 +452,7 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
+      indexBuildRatio: 0.1 # the ratio of building interim index rows count with max row count of a flush segment, should set to be < 1.0
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
       refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
@@ -474,9 +475,9 @@ queryNode:
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
       # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
-      memoryLowWatermarkRatio: 0.6
+      memoryLowWatermarkRatio: 0.75
       memoryHighWatermarkRatio: 0.8
-      diskLowWatermarkRatio: 0.6
+      diskLowWatermarkRatio: 0.75
       diskHighWatermarkRatio: 0.8
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
@@ -555,6 +556,9 @@ queryNode:
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
+  exprCache:
+    enabled: false # enable expression result cache
+    capacityBytes: 268435456 # max capacity in bytes for expression result cache
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -851,7 +855,7 @@ msgChannel:
 
 # Configures the system log output.
 log:
-  # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
+  # Milvus log level. Option: trace, debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
   level: info
   file:
@@ -934,6 +938,16 @@ common:
   # The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
   # In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.
   diskWriteNumThreads: 0
+  diskWriteRateLimiter:
+    refillPeriodUs: 100000 # refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)
+    avgKBps: 262144 # average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)
+    maxBurstKBps: 524288 # max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)
+    # amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+    # The ratio is the multiplication factor of the configured bandwidth.
+    # For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.
+    highPriorityRatio: -1
+    middlePriorityRatio: -1 # amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
+    lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
@@ -1313,6 +1327,16 @@ streaming:
     # growing segment flush process will try to flush some growing segment into sealed 
     # until the total bytes of growing segment is less than this threshold, 0.1 by default.
     growingSegmentBytesLwmThreshold: 0.1
+    l0:
+      # The max lifetime of l0 segment, 10 minutes by default.
+      # If the l0 segment is older than this time, it will be flushed.
+      maxLifetime: 10m
+      # The max row num of l0 segment, 500000 by default.
+      # If the row num of l0 segment is greater than this num, it will be flushed.
+      maxRowNum: 500000
+      # The max size of l0 segment, 32m by default.
+      # If the binary size of l0 segment is greater than this size, it will be flushed.
+      maxSize: 32m
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
@@ -1377,37 +1401,59 @@ function:
     providers:
       azure_openai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable azure openai model service
         resource_name:  # Your azure openai resource name
         url:  # Your azure openai embedding url, Default is the official embedding url
       bedrock:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable bedrock model service
       cohere:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable cohere model service
         url:  # Your cohere embedding url, Default is the official embedding url
       dashscope:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable dashscope model service
         url:  # Your dashscope embedding url, Default is the official embedding url
       openai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable openai model service
         url:  # Your openai embedding url, Default is the official embedding url
       siliconflow:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable siliconflow model service
         url:  # Your siliconflow embedding url, Default is the official embedding url
       tei:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable TEI model service
       vertexai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable vertexai model service
         url:  # Your VertexAI embedding url
       voyageai:
         credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable voyageai model service
         url:  # Your voyageai embedding url, Default is the official embedding url
   rerank:
     model:
       providers:
+        cohere:
+          credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable cohere model service
+          url:  # Your cohere rerank url, Default is the official rerank url
+        siliconflow:
+          credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable siliconflow model service
+          url:  # Your siliconflow rerank url, Default is the official rerank url
         tei:
+          credential:  # The name in the crendential configuration item
           enable: true # Whether to enable TEI rerank service
         vllm:
+          credential:  # The name in the crendential configuration item
           enable: true # Whether to enable vllm rerank service
+        voyageai:
+          credential:  # The name in the crendential configuration item
+          enable: true # Whether to enable voyageai model service
+          url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer

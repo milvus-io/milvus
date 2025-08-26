@@ -695,12 +695,19 @@ SegmentGrowingImpl::search_batch_pks(
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
+                                  const size_t* query_lims,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-    query::SearchOnGrowing(
-        *this, search_info, query_data, query_count, timestamp, bitset, output);
+    query::SearchOnGrowing(*this,
+                           search_info,
+                           query_data,
+                           query_lims,
+                           query_count,
+                           timestamp,
+                           bitset,
+                           output);
 }
 
 std::unique_ptr<DataArray>
@@ -775,7 +782,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
-                   DataType::VECTOR_SPARSE_FLOAT) {
+                   DataType::VECTOR_SPARSE_U32_F32) {
             bulk_subscript_sparse_float_vector_impl(
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
@@ -886,6 +893,16 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_double_data()
                                             ->mutable_data()
                                             ->mutable_data());
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::VARCHAR:

@@ -221,6 +221,17 @@ func (suite *ServiceSuite) SetupTest() {
 		proxyClientManager:  suite.proxyManager,
 	}
 
+	// Initialize checkerController to prevent nil pointer dereference in handleNodeUp
+	suite.server.checkerController = checkers.NewCheckerController(
+		suite.meta,
+		suite.dist,
+		suite.targetMgr,
+		suite.nodeMgr,
+		suite.taskScheduler,
+		suite.broker,
+		suite.server.getBalancerFunc,
+	)
+
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 

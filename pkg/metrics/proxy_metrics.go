@@ -31,7 +31,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "received_nq",
 			Help:      "counter of nq of received search and query requests",
-		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxySearchVectors record the number of vectors search successfully.
 	ProxySearchVectors = prometheus.NewCounterVec(
@@ -87,7 +87,7 @@ var (
 			Name:      "collection_sq_latency",
 			Help:      "latency of search or query successfully, per collection",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyMutationLatency record the latency that mutate successfully.
 	ProxyMutationLatency = prometheus.NewHistogramVec(
@@ -108,7 +108,7 @@ var (
 			Name:      "collection_mutation_latency",
 			Help:      "latency of insert or delete successfully, per collection",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, msgTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyWaitForSearchResultLatency record the time that the proxy waits for the search result.
 	ProxyWaitForSearchResultLatency = prometheus.NewHistogramVec(
@@ -252,7 +252,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "receive_bytes_count",
 			Help:      "count of bytes received  from sdk",
-		}, []string{nodeIDLabelName, msgTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyReadReqSendBytes record the bytes sent back to client by Proxy
 	ProxyReadReqSendBytes = prometheus.NewCounterVec(
@@ -397,7 +397,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "retry_search_cnt",
 			Help:      "counter of retry search",
-		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
 	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
@@ -407,7 +407,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "retry_search_result_insufficient_cnt",
 			Help:      "counter of retry search which does not have enough results",
-		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyRecallSearchCount records the counter that users issue recall evaluation requests, which are cpu-intensive
 	ProxyRecallSearchCount = prometheus.NewCounterVec(
@@ -416,7 +416,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "recall_search_cnt",
 			Help:      "counter of recall search",
-		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
 	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
@@ -557,99 +557,132 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 	})
 }
 
-func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
+func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
 	ProxySearchVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyInsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyUpsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
-		collectionName:  collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 
 	ProxyCollectionSQLatency.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel, collectionName: collection,
+		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
 	})
 	ProxyCollectionSQLatency.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel, collectionName: collection,
+		queryTypeLabelName: QueryLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
 	})
 	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: InsertLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  InsertLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: DeleteLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  DeleteLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyReceivedNQ.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel, collectionName: collection,
+		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
 	})
 	ProxyReceivedNQ.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel, collectionName: collection,
+		queryTypeLabelName: QueryLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
 	})
 	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: SearchLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  SearchLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: QueryLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: InsertLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  InsertLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: DeleteLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  DeleteLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName: UpsertLabel, collectionName: collection,
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  UpsertLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 	ProxyRetrySearchCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
 	ProxyRetrySearchCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: HybridSearchLabel,
+		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
 	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
 	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: HybridSearchLabel,
+		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
 	ProxyRecallSearchCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
 }

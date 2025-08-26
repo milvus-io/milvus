@@ -198,6 +198,17 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 builder, double_data, payload.valid_data, nullable, length);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            auto timestamptz_data = reinterpret_cast<int64_t*>(raw_data);
+            add_numeric_payload<int64_t, arrow::Int64Builder>(
+                builder,
+                timestamptz_data,
+                payload.valid_data,
+                nullable,
+                length);
+            break;
+        }
+
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_BINARY:
@@ -206,7 +217,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             add_vector_payload(builder, const_cast<uint8_t*>(raw_data), length);
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             ThrowInfo(DataTypeInvalid,
                       "Sparse Float Vector payload should be added by calling "
                       "add_one_binary_payload",
@@ -276,6 +287,9 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::DOUBLE: {
             return std::make_shared<arrow::DoubleBuilder>();
         }
+        case DataType::TIMESTAMPTZ: {
+            return std::make_shared<arrow::Int64Builder>();
+        }
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {
@@ -287,7 +301,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         // sparse float vector doesn't require a dim
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
@@ -360,6 +374,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::DOUBLE:
             return std::make_shared<arrow::DoubleScalar>(
                 default_value.double_data());
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<arrow::Int64Scalar>(
+                default_value.timestamptz_data());
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
@@ -403,6 +420,10 @@ CreateArrowSchema(DataType data_type, bool nullable) {
             return arrow::schema(
                 {arrow::field("val", arrow::float64(), nullable)});
         }
+        case DataType::TIMESTAMPTZ: {
+            return arrow::schema(
+                {arrow::field("val", arrow::int64(), nullable)});
+        }
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {
@@ -416,7 +437,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::binary(), nullable)});
         }
         // sparse float vector doesn't require a dim
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
@@ -456,7 +477,7 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
                               arrow::fixed_size_binary(dim * sizeof(bfloat16)),
                               nullable)});
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
@@ -490,7 +511,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
         case DataType::VECTOR_BFLOAT16: {
             return schema->type_length() / sizeof(bfloat16);
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("GetDimensionFromFileMetaData should not be "
                                   "called for sparse vector"));
@@ -948,6 +969,9 @@ CreateFieldData(const DataType& type,
         case DataType::DOUBLE:
             return std::make_shared<FieldData<double>>(
                 type, nullable, total_num_rows);
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
+                type, nullable, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
@@ -971,7 +995,7 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_BFLOAT16:
             return std::make_shared<FieldData<BFloat16Vector>>(
                 dim, type, total_num_rows);
-        case DataType::VECTOR_SPARSE_FLOAT:
+        case DataType::VECTOR_SPARSE_U32_F32:
             return std::make_shared<FieldData<SparseFloatVector>>(
                 type, total_num_rows);
         case DataType::VECTOR_INT8:

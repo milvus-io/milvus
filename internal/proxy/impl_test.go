@@ -1203,6 +1203,18 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Empty(t, resp.GetStatus().GetReason())
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+
+	t.Run("batch describe collection ok", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:         "test_1",
+			CollectionName: []string{"test_collection"},
+		})
+		assert.NoError(t, err)
+		assert.Empty(t, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 1, len(resp.GetResponses()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetResponses()[0].GetStatus().GetErrorCode())
+	})
 }
 
 func TestProxy_AllocTimestamp(t *testing.T) {

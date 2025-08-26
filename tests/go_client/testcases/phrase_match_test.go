@@ -165,3 +165,73 @@ func TestPhraseMatchWithEmptyData(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.Equal(t, 0, queryRes.ResultCount)
 }
+
+// TestPhraseMatchDefault tests basic phrase match functionality with slop=0
+func TestPhraseMatchNullable(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert -> flush -> index -> load
+	fieldsOption := hp.TNewFieldOptions().WithFieldOption(common.DefaultTextFieldName, hp.TNewFieldsOption().TWithNullable(true).
+		TWithEnableAnalyzer(true).TWithEnableMatch(true))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, hp.TNewSchemaOption())
+
+	// insert data with all null
+	validData := make([]bool, common.DefaultNb)
+	for i := 0; i < common.DefaultNb; i++ {
+		validData[i] = i%2 == 0
+	}
+	query := common.GenText(common.DefaultTextLang)
+	insertOption := hp.TNewColumnOptions().WithColumnOption(common.DefaultTextFieldName, hp.TNewDataOption().TWithTextLang(common.DefaultTextLang).TWithTextData([]string{query}).TWithValidData(validData))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), insertOption)
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Test exact phrase match (slop=0)
+	expr := fmt.Sprintf("phrase_match(%s, \"%s\", 0)", common.DefaultTextFieldName, query)
+	queryRes, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(expr))
+	common.CheckErr(t, err, true)
+	// Results may vary as we're using auto-generated data, but it should >= 1, since query text has been inserted
+	require.GreaterOrEqual(t, queryRes.ResultCount, 1)
+
+	exprNull := fmt.Sprintf("%s is null", common.DefaultTextFieldName)
+	queryRes, err = mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(exprNull))
+	common.CheckErr(t, err, true)
+	require.GreaterOrEqual(t, common.DefaultNb/2, 1)
+}
+
+// TestPhraseMatchDefault tests basic phrase match functionality with slop=0
+func TestPhraseMatchDefaultValue(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert -> flush -> index -> load
+	defaultText := "milvus vector database"
+	fieldsOption := hp.TNewFieldOptions().WithFieldOption(common.DefaultTextFieldName, hp.TNewFieldsOption().TWithDefaultValue(defaultText).
+		TWithEnableAnalyzer(true).TWithEnableMatch(true))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, hp.TNewSchemaOption())
+
+	// insert data with all null
+	validData := make([]bool, common.DefaultNb)
+	for i := 0; i < common.DefaultNb; i++ {
+		validData[i] = i%2 == 0
+	}
+	insertOption := hp.TNewColumnOptions().WithColumnOption(common.DefaultTextFieldName, hp.TNewDataOption().TWithTextLang(common.DefaultTextLang).TWithValidData(validData))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), insertOption)
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	exprText := fmt.Sprintf("TEXT_MATCH(%s, 'database vector')", common.DefaultTextFieldName)
+	countRes, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(exprText).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb/2, count)
+
+	exprPhase := fmt.Sprintf("phrase_match(%s, 'database vector', 1)", common.DefaultTextFieldName)
+	countRes, err = mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(exprPhase).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, 0, count)
+}

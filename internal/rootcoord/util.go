@@ -446,6 +446,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if dtype != schemapb.DataType_Double {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
 				}
+			case *schemapb.ValueField_TimestamptzData:
+				if dtype != schemapb.DataType_Timestamptz {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
+				}
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
@@ -476,9 +480,16 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 
 func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, schema := range schemas {
-		// todo(SpadeA): check struct array field schema
+		if len(schema.GetFields()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("empty fields in StructArrayField is not allowed")
+		}
 
 		for _, field := range schema.GetFields() {
+			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+				msg := fmt.Sprintf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+
 			if field.IsPartitionKey || field.IsPrimaryKey {
 				msg := fmt.Sprintf("partition key or primary key can not be in struct array field. data type:%s, element type:%s, name:%s",
 					field.DataType.String(), field.ElementType.String(), field.Name)

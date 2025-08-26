@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/resolver"
 
-	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	bbalancer "github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -18,6 +17,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+type testSubConn struct {
+	balancer.SubConn
+}
+
+func (sc *testSubConn) UpdateAddresses(addresses []resolver.Address) {}
+
+func (sc *testSubConn) Connect() {}
+
+func (sc *testSubConn) GetOrBuildProducer(balancer.ProducerBuilder) (balancer.Producer, func()) {
+	return nil, nil
+}
+
+func (sc *testSubConn) RegisterHealthListener(func(balancer.SubConnState)) {}
+
+func (sc *testSubConn) Shutdown() {}
 
 func TestServerIDPickerBuilder(t *testing.T) {
 	builder := &serverIDPickerBuilder{}
@@ -29,7 +44,7 @@ func TestServerIDPickerBuilder(t *testing.T) {
 
 	picker = builder.Build(bbalancer.PickerBuildInfo{
 		ReadySCs: map[balancer.SubConn]base.SubConnInfo{
-			mock_balancer.NewMockSubConn(t): {
+			&testSubConn{}: {
 				Address: resolver.Address{
 					Addr: "localhost:1",
 					BalancerAttributes: attributes.WithServerID(
@@ -38,7 +53,7 @@ func TestServerIDPickerBuilder(t *testing.T) {
 					),
 				},
 			},
-			mock_balancer.NewMockSubConn(t): {
+			&testSubConn{}: {
 				Address: resolver.Address{
 					Addr: "localhost:2",
 					BalancerAttributes: attributes.WithServerID(
@@ -49,7 +64,7 @@ func TestServerIDPickerBuilder(t *testing.T) {
 			},
 		},
 		UnReadySCs: map[balancer.SubConn]base.SubConnInfo{
-			mock_balancer.NewMockSubConn(t): {
+			&testSubConn{}: {
 				Address: resolver.Address{
 					Addr: "localhost:3",
 					BalancerAttributes: attributes.WithServerID(

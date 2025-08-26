@@ -45,6 +45,7 @@ class SealedIndexTranslator
         bool enable_mmap;
         std::string mmap_dir_path;
         DataType field_type;
+        DataType element_type;
         std::map<std::string, std::string> index_params;
         int64_t index_size;
         int64_t index_engine_version;

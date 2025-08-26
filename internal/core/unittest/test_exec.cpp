@@ -105,7 +105,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
 INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
                          TaskTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
-                                           DataType::VECTOR_SPARSE_FLOAT));
+                                           DataType::VECTOR_SPARSE_U32_F32));
 
 TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =
@@ -742,7 +742,8 @@ TEST_P(TaskTest, Test_MultiNotEqualConvert) {
         EXPECT_EQ(inputs.size(), 1);
         EXPECT_STREQ(inputs[0]->name().c_str(), "PhyLogicalUnaryExpr");
         EXPECT_EQ(inputs[0]->GetInputsRef().size(), 1);
-        EXPECT_STREQ(inputs[0]->GetInputsRef()[0]->name().c_str(), "PhyTermFilterExpr");
+        EXPECT_STREQ(inputs[0]->GetInputsRef()[0]->name().c_str(),
+                     "PhyTermFilterExpr");
     }
 
     {
@@ -852,12 +853,15 @@ TEST_P(TaskTest, Test_MultiNotEqualConvert) {
         EXPECT_EQ(inputs.size(), 2);
         EXPECT_STREQ(inputs[0]->name().c_str(), "PhyConjunctFilterExpr");
         EXPECT_STREQ(inputs[1]->name().c_str(), "PhyLogicalUnaryExpr");
-        auto phy_expr1 = std::static_pointer_cast<milvus::exec::PhyLogicalUnaryExpr>(
-            inputs[1]);
+        auto phy_expr1 =
+            std::static_pointer_cast<milvus::exec::PhyLogicalUnaryExpr>(
+                inputs[1]);
         EXPECT_EQ(phy_expr1->GetInputsRef().size(), 1);
-        EXPECT_STREQ(phy_expr1->GetInputsRef()[0]->name().c_str(), "PhyTermFilterExpr");
-        phy_expr = std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
-            inputs[0]);
+        EXPECT_STREQ(phy_expr1->GetInputsRef()[0]->name().c_str(),
+                     "PhyTermFilterExpr");
+        phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                inputs[0]);
         inputs = phy_expr->GetInputsRef();
         EXPECT_EQ(inputs.size(), 2);
     }
@@ -908,12 +912,13 @@ TEST_P(TaskTest, Test_MultiNotEqualConvert) {
         auto inputs = phy_expr->GetInputsRef();
         EXPECT_EQ(inputs.size(), 1);
         EXPECT_STREQ(inputs[0]->name().c_str(), "PhyLogicalUnaryExpr");
-        auto phy_expr1 = std::static_pointer_cast<milvus::exec::PhyLogicalUnaryExpr>(
-            inputs[0]);
+        auto phy_expr1 =
+            std::static_pointer_cast<milvus::exec::PhyLogicalUnaryExpr>(
+                inputs[0]);
         EXPECT_EQ(phy_expr1->GetInputsRef().size(), 1);
-        EXPECT_STREQ(phy_expr1->GetInputsRef()[0]->name().c_str(), "PhyTermFilterExpr");
+        EXPECT_STREQ(phy_expr1->GetInputsRef()[0]->name().c_str(),
+                     "PhyTermFilterExpr");
     }
-
 }
 
 TEST_P(TaskTest, Test_MultiInConvert) {

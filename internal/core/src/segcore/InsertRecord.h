@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -37,6 +38,8 @@ constexpr int64_t NoLimit = 0;
 // Otherwise, we use bruteforce to retrieve all the pks and then sort them.
 constexpr int64_t BruteForceSelectivity = 10;
 
+using Condition = std::function<bool(int64_t)>;
+
 class OffsetMap {
  public:
     virtual ~OffsetMap() = default;
@@ -46,6 +49,12 @@ class OffsetMap {
 
     virtual std::vector<int64_t>
     find(const PkType& pk) const = 0;
+
+    virtual void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const = 0;
 
     virtual void
     insert(const PkType& pk, int64_t offset) = 0;
@@ -82,6 +91,65 @@ class OffsetOrderedMap : public OffsetMap {
         auto offset_vector = map_.find(std::get<T>(pk));
         return offset_vector != map_.end() ? offset_vector->second
                                            : std::vector<int64_t>();
+    }
+
+    void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        const T& target = std::get<T>(pk);
+
+        if (op == proto::plan::OpType::Equal) {
+            auto it = map_.find(target);
+            if (it != map_.end()) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterEqual) {
+            auto it = map_.lower_bound(target);
+            for (; it != map_.end(); ++it) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterThan) {
+            auto it = map_.upper_bound(target);
+            for (; it != map_.end(); ++it) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::LessEqual) {
+            auto it = map_.upper_bound(target);
+            for (auto ptr = map_.begin(); ptr != it; ++ptr) {
+                for (auto offset : ptr->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::LessThan) {
+            auto it = map_.lower_bound(target);
+            for (auto ptr = map_.begin(); ptr != it; ++ptr) {
+                for (auto offset : ptr->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      fmt::format("unsupported op type {}", op));
+        }
     }
 
     void
@@ -195,6 +263,68 @@ class OffsetOrderedArray : public OffsetMap {
         }
 
         return offset_vector;
+    }
+
+    void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const override {
+        check_search();
+        auto lower_bound_comp = [](const std::pair<T, int64_t>& elem,
+                                   const T& value) {
+            return elem.first < value;
+        };
+        auto upper_bound_comp = [](const T& value,
+                                   const std::pair<T, int64_t>& elem) {
+            return value < elem.first;
+        };
+
+        const T& target = std::get<T>(pk);
+        if (op == proto::plan::OpType::Equal) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (; it != array_.end() && it->first == target; ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterEqual) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (; it < array_.end(); ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterThan) {
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
+            for (; it < array_.end(); ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::LessEqual) {
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
+            for (auto ptr = array_.begin(); ptr < it; ++ptr) {
+                if (condition(ptr->second)) {
+                    bitset[ptr->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::LessThan) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (auto ptr = array_.begin(); ptr < it; ++ptr) {
+                if (condition(ptr->second)) {
+                    bitset[ptr->second] = true;
+                }
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      fmt::format("unsupported op type {}", op));
+        }
     }
 
     void
@@ -339,6 +469,17 @@ struct InsertRecord {
             }
         }
         return res_offsets;
+    }
+
+    void
+    search_pk_range(const PkType& pk,
+                    Timestamp timestamp,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        auto condition = [this, timestamp](int64_t offset) {
+            return timestamps_[offset] <= timestamp;
+        };
+        pk2offset_->find_range(pk, op, bitset, condition);
     }
 
     void
@@ -561,7 +702,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                                                   dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_SPARSE_FLOAT) {
+                       DataType::VECTOR_SPARSE_U32_F32) {
                 this->append_data<SparseFloatVector>(
                     field_id, size_per_chunk, vec_mmap_descriptor);
                 return;
@@ -616,6 +757,11 @@ struct InsertRecord<false> : public InsertRecord<true> {
             }
             case DataType::DOUBLE: {
                 this->append_data<double>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::TIMESTAMPTZ: {
+                this->append_data<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }

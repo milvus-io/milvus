@@ -75,3 +75,12 @@ func GenSchema(option *GenSchemaOption) *entity.Schema {
 	}
 	return schema
 }
+
+// TNewTextEmbeddingSchemaOption creates schema option with text embedding function
+func TNewTextEmbeddingSchemaOption() *GenSchemaOption {
+	function := TNewTextEmbeddingFunction("document", "dense", map[string]any{
+		"provider": "TEI",
+		"endpoint": GetTEIEndpoint(),
+	})
+	return TNewSchemaOption().TWithFunction(function)
+}

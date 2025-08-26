@@ -92,7 +92,11 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 	}
 	replaceLeveledLoggers(debugL)
 	level := zapcore.DebugLevel
-	if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+	parsedLevel := cfg.Level
+	if strings.EqualFold(parsedLevel, "trace") {
+		parsedLevel = "debug"
+	}
+	if err := level.UnmarshalText([]byte(parsedLevel)); err != nil {
 		return nil, nil, err
 	}
 	r.Level.SetLevel(level)

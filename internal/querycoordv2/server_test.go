@@ -18,19 +18,19 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/client-go/v2/txnkv"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -46,29 +46,20 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
 
 func TestMain(m *testing.M) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		log.Fatal("failed to start embed etcd server", zap.Error(err))
-	}
-	defer os.RemoveAll(tempDir)
-	defer embedetcdServer.Close()
-
-	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-
 	paramtable.Init()
-	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
@@ -198,7 +189,6 @@ func (suite *ServerSuite) TestNodeUp() {
 	suite.NoError(err)
 	defer node1.Stop()
 
-	suite.server.notifyNodeUp <- struct{}{}
 	suite.Eventually(func() bool {
 		node := suite.server.nodeMgr.Get(node1.ID)
 		if node == nil {
@@ -206,54 +196,6 @@ func (suite *ServerSuite) TestNodeUp() {
 		}
 		for _, collection := range suite.collections {
 			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
-			if replica == nil {
-				return false
-			}
-		}
-		return true
-	}, 5*time.Second, time.Second)
-
-	// mock unhealthy node
-	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1001,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-
-	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
-	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()
-	err = node2.Start()
-	suite.NoError(err)
-	defer node2.Stop()
-
-	// expect node2 won't be add to qc, due to unhealthy nodes exist
-	suite.server.notifyNodeUp <- struct{}{}
-	suite.Eventually(func() bool {
-		node := suite.server.nodeMgr.Get(node2.ID)
-		if node == nil {
-			return false
-		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node2.ID)
-			if replica == nil {
-				return true
-			}
-		}
-		return false
-	}, 5*time.Second, time.Second)
-
-	// mock unhealthy node down, so no unhealthy nodes exist
-	suite.server.nodeMgr.Remove(1001)
-	suite.server.notifyNodeUp <- struct{}{}
-
-	// expect node2 will be add to qc
-	suite.Eventually(func() bool {
-		node := suite.server.nodeMgr.Get(node2.ID)
-		if node == nil {
-			return false
-		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node2.ID)
 			if replica == nil {
 				return false
 			}
@@ -746,6 +688,244 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	suite.hackBroker(server)
 	err = server.Init()
 	return server, err
+}
+
+// TestRewatchNodes tests the rewatchNodes function behavior
+func TestRewatchNodes(t *testing.T) {
+	// Arrange: Create simple server instance
+	server := createSimpleTestServer()
+
+	// Create test sessions
+	sessions := map[string]*sessionutil.Session{
+		"querynode-1001": createTestSession(1001, "localhost:19530", false),
+		"querynode-1002": createTestSession(1002, "localhost:19531", false),
+		"querynode-1003": createTestSession(1003, "localhost:19532", true), // stopping
+	}
+
+	// Pre-add some nodes to node manager to test removal logic
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1004, // This node will be removed as it's not in sessions
+		Address:  "localhost:19533",
+		Hostname: "localhost",
+	}))
+
+	// Mock external calls
+	mockHandleNodeUp := mockey.Mock((*Server).handleNodeUp).Return().Build()
+	defer mockHandleNodeUp.UnPatch()
+
+	mockHandleNodeDown := mockey.Mock((*Server).handleNodeDown).Return().Build()
+	defer mockHandleNodeDown.UnPatch()
+
+	mockHandleNodeStopping := mockey.Mock((*Server).handleNodeStopping).Return().Build()
+	defer mockHandleNodeStopping.UnPatch()
+
+	server.meta = &meta.Meta{
+		ResourceManager: meta.NewResourceManager(nil, nil),
+	}
+	mockCheckNodesInResourceGroup := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+	defer mockCheckNodesInResourceGroup.UnPatch()
+
+	// Act: Call rewatchNodes
+	err := server.rewatchNodes(sessions)
+
+	// Assert: Verify no error occurred
+	assert.NoError(t, err)
+
+	// Verify node 1004 was removed
+	assert.Nil(t, server.nodeMgr.Get(1004), "Offline node should be removed")
+
+	// Verify nodes 1001, 1002 exist
+	assert.NotNil(t, server.nodeMgr.Get(1001), "Online node should exist")
+	assert.NotNil(t, server.nodeMgr.Get(1002), "Online node should exist")
+	assert.NotNil(t, server.nodeMgr.Get(1003), "Stopping node should exist")
+}
+
+// TestRewatchNodesWithEmptySessions tests rewatchNodes with empty sessions
+func TestRewatchNodesWithEmptySessions(t *testing.T) {
+	// Arrange: Create server with existing nodes
+	server := createSimpleTestServer()
+
+	// Add some existing nodes
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "localhost:19531",
+		Hostname: "localhost",
+	}))
+
+	// Mock external calls
+	mockHandleNodeDown := mockey.Mock((*Server).handleNodeDown).Return().Build()
+	defer mockHandleNodeDown.UnPatch()
+
+	server.meta = &meta.Meta{
+		ResourceManager: meta.NewResourceManager(nil, nil),
+	}
+	mockCheckNodesInResourceGroup := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+	defer mockCheckNodesInResourceGroup.UnPatch()
+
+	// Act: Call rewatchNodes with empty sessions
+	err := server.rewatchNodes(nil)
+
+	// Assert: All nodes should be removed
+	assert.NoError(t, err)
+	assert.Nil(t, server.nodeMgr.Get(1001), "All nodes should be removed when no sessions exist")
+	assert.Nil(t, server.nodeMgr.Get(1002), "All nodes should be removed when no sessions exist")
+}
+
+// TestHandleNodeUpWithMissingNode tests handleNodeUp when node doesn't exist
+func TestHandleNodeUpWithMissingNode(t *testing.T) {
+	// Arrange: Create server without adding the node
+	server := createSimpleTestServer()
+
+	nodeID := int64(1001)
+
+	// Act: Handle node up for non-existent node
+	server.handleNodeUp(nodeID)
+
+	// Assert: Should handle gracefully (no panic, early return)
+	// The function should return early when node is not found
+}
+
+// TestHandleNodeDownMetricsCleanup tests that handleNodeDown cleans up metrics properly
+func TestHandleNodeDownMetricsCleanup(t *testing.T) {
+	// Arrange: Set up metrics with test value
+	nodeID := int64(1001)
+
+	// Setup metrics with test value
+	registry := prometheus.NewRegistry()
+	metrics.RegisterQueryCoord(registry)
+
+	// Set a test metric value
+	metrics.QueryCoordLastHeartbeatTimeStamp.WithLabelValues(fmt.Sprint(nodeID)).Set(1640995200.0)
+
+	// Verify metric exists before deletion
+	metricFamilies, err := registry.Gather()
+	assert.NoError(t, err)
+
+	found := false
+	for _, mf := range metricFamilies {
+		if mf.GetName() == "milvus_querycoord_last_heartbeat_timestamp" {
+			for _, metric := range mf.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "node_id" && label.GetValue() == fmt.Sprint(nodeID) {
+						found = true
+						break
+					}
+				}
+			}
+		}
+	}
+	assert.True(t, found, "Metric should exist before cleanup")
+
+	// Create a minimal server
+	ctx := context.Background()
+	server := &Server{
+		ctx:                 ctx,
+		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
+		dist:                meta.NewDistributionManager(),
+		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil),
+		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+		meta: &meta.Meta{
+			ResourceManager: meta.NewResourceManager(nil, nil),
+		},
+	}
+
+	mockRemoveExecutor := mockey.Mock((task.Scheduler).RemoveExecutor).Return().Build()
+	defer mockRemoveExecutor.UnPatch()
+	mockRemoveByNode := mockey.Mock((task.Scheduler).RemoveByNode).Return().Build()
+	defer mockRemoveByNode.UnPatch()
+	mockDistControllerRemove := mockey.Mock((*dist.ControllerImpl).Remove).Return().Build()
+	defer mockDistControllerRemove.UnPatch()
+	mockRemoveFromManager := mockey.Mock(server.dist.ChannelDistManager.Update).Return().Build()
+	defer mockRemoveFromManager.UnPatch()
+	mockRemoveFromManager = mockey.Mock(server.dist.SegmentDistManager.Update).Return().Build()
+	defer mockRemoveFromManager.UnPatch()
+	mockInvalidateSystemInfoMetrics := mockey.Mock((*metricsinfo.MetricsCacheManager).InvalidateSystemInfoMetrics).Return().Build()
+	defer mockInvalidateSystemInfoMetrics.UnPatch()
+
+	mockResourceManagerHandleNodeDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).Return().Build()
+	defer mockResourceManagerHandleNodeDown.UnPatch()
+
+	// Act: Call handleNodeDown which should clean up metrics
+	server.handleNodeDown(nodeID)
+
+	metricFamilies, err = registry.Gather()
+	assert.NoError(t, err)
+
+	// Check that the heartbeat metric for this node was deleted
+	found = false
+	for _, mf := range metricFamilies {
+		if mf.GetName() == "milvus_querycoord_last_heartbeat_timestamp" {
+			for _, metric := range mf.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "node_id" && label.GetValue() == fmt.Sprint(nodeID) {
+						found = true
+						break
+					}
+				}
+			}
+		}
+	}
+	assert.False(t, found, "Metric should be cleaned up after handleNodeDown")
+}
+
+// TestNodeManagerStopping tests the node manager stopping functionality
+func TestNodeManagerStopping(t *testing.T) {
+	// Arrange: Create node manager and add a node
+	nodeID := int64(1001)
+	nodeMgr := session.NewNodeManager()
+
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	})
+	nodeMgr.Add(nodeInfo)
+
+	// Verify node exists and is not stopping initially
+	node := nodeMgr.Get(nodeID)
+	assert.NotNil(t, node)
+	assert.False(t, node.IsStoppingState(), "Node should not be stopping initially")
+
+	// Act: Mark node as stopping
+	nodeMgr.Stopping(nodeID)
+
+	// Assert: Node should be in stopping state
+	node = nodeMgr.Get(nodeID)
+	assert.NotNil(t, node)
+	assert.True(t, node.IsStoppingState(), "Node should be in stopping state after calling Stopping()")
+}
+
+// Helper function to create a simple test server
+func createSimpleTestServer() *Server {
+	ctx := context.Background()
+	server := &Server{
+		ctx:     ctx,
+		nodeMgr: session.NewNodeManager(),
+	}
+	return server
+}
+
+// Helper function to create a test session
+func createTestSession(nodeID int64, address string, stopping bool) *sessionutil.Session {
+	session := &sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: nodeID,
+			Address:  address,
+			Stopping: stopping,
+			HostName: "localhost",
+		},
+	}
+	return session
 }
 
 func TestServer(t *testing.T) {

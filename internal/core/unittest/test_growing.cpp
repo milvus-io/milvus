@@ -109,7 +109,7 @@ class GrowingTest
         } else if (index_type ==
                        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
                    index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
-            data_type = DataType::VECTOR_SPARSE_FLOAT;
+            data_type = DataType::VECTOR_SPARSE_U32_F32;
         } else {
             ASSERT_TRUE(false);
         }
@@ -144,6 +144,8 @@ TEST_P(GrowingTest, FillData) {
     auto int16_field = schema->AddDebugField("int16", DataType::INT16);
     auto int32_field = schema->AddDebugField("int32", DataType::INT32);
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
@@ -207,6 +209,8 @@ TEST_P(GrowingTest, FillData) {
             float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
             double_field, ids_ds->GetIds(), num_inserted);
+        auto timestamptz_result = segment->bulk_subscript(
+            timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
@@ -232,6 +236,8 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(int32_result->scalars().int_data().data_size(), num_inserted);
         EXPECT_EQ(int64_result->scalars().long_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
+                  num_inserted);
         EXPECT_EQ(float_result->scalars().float_data().data_size(),
                   num_inserted);
         EXPECT_EQ(double_result->scalars().double_data().data_size(),
@@ -242,7 +248,7 @@ TEST_P(GrowingTest, FillData) {
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);
-        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             EXPECT_EQ(
                 vec_result->vectors().sparse_float_vector().contents_size(),
                 num_inserted);
@@ -269,6 +275,7 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(int64_result->valid_data_size(), 0);
         EXPECT_EQ(float_result->valid_data_size(), 0);
         EXPECT_EQ(double_result->valid_data_size(), 0);
+        EXPECT_EQ(timestamptz_result->valid_data_size(), 0);
         EXPECT_EQ(varchar_result->valid_data_size(), 0);
         EXPECT_EQ(json_result->valid_data_size(), 0);
         EXPECT_EQ(int_array_result->valid_data_size(), 0);
@@ -290,6 +297,8 @@ TEST(Growing, FillNullableData) {
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT, true);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE, true);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
@@ -353,6 +362,8 @@ TEST(Growing, FillNullableData) {
             float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
             double_field, ids_ds->GetIds(), num_inserted);
+        auto timestamptz_result = segment->bulk_subscript(
+            timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
@@ -382,6 +393,8 @@ TEST(Growing, FillNullableData) {
                   num_inserted);
         EXPECT_EQ(double_result->scalars().double_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
+                  num_inserted);
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
@@ -405,6 +418,7 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(int32_result->valid_data_size(), num_inserted);
         EXPECT_EQ(float_result->valid_data_size(), num_inserted);
         EXPECT_EQ(double_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(timestamptz_result->valid_data_size(), num_inserted);
         EXPECT_EQ(varchar_result->valid_data_size(), num_inserted);
         EXPECT_EQ(json_result->valid_data_size(), num_inserted);
         EXPECT_EQ(int_array_result->valid_data_size(), num_inserted);
@@ -540,4 +554,88 @@ TEST(GrowingTest, LoadVectorArrayData) {
             array_vec_values[ids_ds->GetIds()[i]].float_vector().data();
         verify_float_vectors(arrow_array, expected_array);
     }
+}
+
+TEST(GrowingTest, SearchVectorArray) {
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::MAX_SIM;
+
+    // Add fields
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    // Configure segment
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
+        {"metric_type", metric_type},
+        {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        array_vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{array_vec, fieldIndexMeta}};
+
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
+    auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
+    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+
+    // Insert data
+    int64_t N = 100;
+    uint64_t seed = 42;
+    int emb_list_len = 5;  // Each row contains 5 vectors
+    auto dataset = DataGen(schema, N, seed, 0, 1, emb_list_len);
+
+    auto offset = 0;
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Prepare search query
+    int vec_num = 10;  // Total number of query vectors
+    int dim = 128;
+    std::vector<float> query_vec = generate_float_vector(vec_num, dim);
+
+    // Create query dataset with lims for VectorArray
+    std::vector<size_t> query_vec_lims;
+    query_vec_lims.push_back(0);  // First query has 3 vectors
+    query_vec_lims.push_back(3);
+    query_vec_lims.push_back(10);  // Second query has 7 vectors
+
+    // Create search plan
+    const char* raw_plan = R"(vector_anns: <
+                                  field_id: 101
+                                  query_info: <
+                                    topk: 5
+                                    round_decimal: 3
+                                    metric_type: "MAX_SIM"
+                                    search_params: "{\"nprobe\": 10}"
+                                  >
+                                  placeholder_tag: "$0"
+      >)";
+
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    // Use CreatePlaceholderGroupFromBlob for VectorArray
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        vec_num, dim, query_vec.data(), query_vec_lims);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Execute search
+    Timestamp timestamp = 10000000;
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr_parsed = SearchResultToJson(*sr);
+    std::cout << sr_parsed.dump(1) << std::endl;
 }

@@ -51,6 +51,36 @@ func SetupNoopWALForTest() {
 	singleton = &noopWALAccesser{}
 }
 
+type noopBalancer struct{}
+
+func (n *noopBalancer) ListStreamingNode(ctx context.Context) ([]types.StreamingNodeInfo, error) {
+	return nil, nil
+}
+
+func (n *noopBalancer) GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error) {
+	return nil, nil
+}
+
+func (n *noopBalancer) IsRebalanceSuspended(ctx context.Context) (bool, error) {
+	return false, nil
+}
+
+func (n *noopBalancer) SuspendRebalance(ctx context.Context) error {
+	return nil
+}
+
+func (n *noopBalancer) ResumeRebalance(ctx context.Context) error {
+	return nil
+}
+
+func (n *noopBalancer) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
+	return nil
+}
+
+func (n *noopBalancer) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
+	return nil
+}
+
 type noopLocal struct{}
 
 func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
@@ -107,6 +137,10 @@ func (n *noopTxn) Rollback(ctx context.Context) error {
 }
 
 type noopWALAccesser struct{}
+
+func (n *noopWALAccesser) Balancer() Balancer {
+	return &noopBalancer{}
+}
 
 func (n *noopWALAccesser) WALName() string {
 	return "noop"

@@ -203,6 +203,11 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema2->set_fieldid(102);
     other_field_schema2->set_data_type(schema::DataType::Double);
 
+    auto other_field_schema3 = collection_schema.add_fields();
+    other_field_schema3->set_name("timestamptzField");
+    other_field_schema3->set_fieldid(103);
+    other_field_schema3->set_data_type(schema::DataType::Timestamptz);
+
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(
         collection_schema, &schema_string);
@@ -1936,6 +1941,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
     auto index = std::make_unique<VectorMemIndex<float>>(
+        DataType::NONE,
         index_params["index_type"],
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber());

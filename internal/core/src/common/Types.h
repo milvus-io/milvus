@@ -63,6 +63,7 @@ using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
 using bin1 = knowhere::bin1;
 using int8 = knowhere::int8;
+using sparse_u32_f32 = knowhere::sparse_u32_f32;
 
 // See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
 enum class DataType {
@@ -82,6 +83,7 @@ enum class DataType {
     JSON = 23,
     // GEOMETRY = 24 // reserved in proto
     TEXT = 25,
+    TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -91,7 +93,7 @@ enum class DataType {
     VECTOR_FLOAT = 101,
     VECTOR_FLOAT16 = 102,
     VECTOR_BFLOAT16 = 103,
-    VECTOR_SPARSE_FLOAT = 104,
+    VECTOR_SPARSE_U32_F32 = 104,
     VECTOR_INT8 = 105,
     VECTOR_ARRAY = 106,
 };
@@ -127,6 +129,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(float);
         case DataType::DOUBLE:
             return sizeof(double);
+        case DataType::TIMESTAMPTZ:
+            return sizeof(int64_t);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -139,7 +143,7 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(bfloat16) * dim;
         case DataType::VECTOR_INT8:
             return sizeof(int8) * dim;
-        // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
+        // Not supporting variable length types(such as VECTOR_SPARSE_U32_F32 and
         // VARCHAR) here intentionally. We can't easily estimate the size of
         // them. Caller of this method must handle this case themselves and must
         // not pass variable length types to this method.
@@ -169,6 +173,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::float32();
         case DataType::DOUBLE:
             return arrow::float64();
+        case DataType::TIMESTAMPTZ:
+            return arrow::int64();
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
@@ -184,7 +190,7 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
             return arrow::fixed_size_binary(dim * 2);
-        case DataType::VECTOR_SPARSE_FLOAT:
+        case DataType::VECTOR_SPARSE_U32_F32:
             return arrow::binary();
         case DataType::VECTOR_INT8:
             return arrow::fixed_size_binary(dim);
@@ -226,6 +232,8 @@ GetDataTypeName(DataType data_type) {
             return "float";
         case DataType::DOUBLE:
             return "double";
+        case DataType::TIMESTAMPTZ:
+            return "timestamptz";
         case DataType::STRING:
             return "string";
         case DataType::VARCHAR:
@@ -244,8 +252,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_float16";
         case DataType::VECTOR_BFLOAT16:
             return "vector_bfloat16";
-        case DataType::VECTOR_SPARSE_FLOAT:
-            return "vector_sparse_float";
+        case DataType::VECTOR_SPARSE_U32_F32:
+            return "VECTOR_SPARSE_U32_F32";
         case DataType::VECTOR_INT8:
             return "vector_int8";
         case DataType::VECTOR_ARRAY:
@@ -386,7 +394,7 @@ IsDenseFloatVectorDataType(DataType data_type) {
 
 inline bool
 IsSparseFloatVectorDataType(DataType data_type) {
-    return data_type == DataType::VECTOR_SPARSE_FLOAT;
+    return data_type == DataType::VECTOR_SPARSE_U32_F32;
 }
 
 inline bool
@@ -493,7 +501,8 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
            metric_type == knowhere::metric::COSINE ||
-           metric_type == knowhere::metric::BM25;
+           metric_type == knowhere::metric::BM25 ||
+           metric_type == knowhere::metric::MAX_SIM;
 }
 
 inline bool
@@ -593,6 +602,15 @@ struct TypeTraits<DataType::DOUBLE> {
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
     static constexpr const char* Name = "DOUBLE";
+};
+
+template <>
+struct TypeTraits<DataType::TIMESTAMPTZ> {
+    using NativeType = double;
+    static constexpr DataType TypeKind = DataType::TIMESTAMPTZ;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "TIMESTAMPTZ";
 };
 
 template <>
@@ -718,6 +736,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
             case milvus::DataType::DOUBLE:
                 name = "DOUBLE";
                 break;
+            case milvus::DataType::TIMESTAMPTZ:
+                name = "TIMESTAMPTZ";
+                break;
             case milvus::DataType::STRING:
                 name = "STRING";
                 break;
@@ -748,8 +769,8 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
             case milvus::DataType::VECTOR_BFLOAT16:
                 name = "VECTOR_BFLOAT16";
                 break;
-            case milvus::DataType::VECTOR_SPARSE_FLOAT:
-                name = "VECTOR_SPARSE_FLOAT";
+            case milvus::DataType::VECTOR_SPARSE_U32_F32:
+                name = "VECTOR_SPARSE_U32_F32";
                 break;
             case milvus::DataType::VECTOR_INT8:
                 name = "VECTOR_INT8";

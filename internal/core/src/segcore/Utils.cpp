@@ -188,6 +188,14 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         }
                         break;
                     }
+                    case DataType::TIMESTAMPTZ: {
+                        for (auto& array_bytes : array_data) {
+                            result +=
+                                array_bytes.timestamptz_data().data_size() *
+                                sizeof(int64_t);
+                        }
+                        break;
+                    }
                     case DataType::VARCHAR:
                     case DataType::STRING:
                     case DataType::TEXT: {
@@ -210,7 +218,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 // TODO(SPARSE, size)
                 result += data->vectors().sparse_float_vector().ByteSizeLong();
                 break;
@@ -295,6 +303,11 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->mutable_data()->Resize(count, 0);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            auto obj = scalar_array->mutable_timestamptz_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {
@@ -342,7 +355,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = 0;
-    if (data_type != DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type != DataType::VECTOR_SPARSE_U32_F32) {
         dim = field_meta.get_dim();
         vector_array->set_dim(dim);
     }
@@ -373,7 +386,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->resize(length * sizeof(bfloat16));
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             // does nothing here
             break;
         }
@@ -461,6 +474,12 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            auto data = reinterpret_cast<const int64_t*>(data_raw);
+            auto obj = scalar_array->mutable_timestamptz_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
@@ -544,11 +563,11 @@ CreateVectorDataArrayFrom(const void* data_raw,
             obj->assign(data, length * sizeof(bfloat16));
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             SparseRowsToProto(
                 [&](size_t i) {
                     return reinterpret_cast<
-                               const knowhere::sparse::SparseRow<float>*>(
+                               const knowhere::sparse::SparseRow<sparseValueType>*>(
                                data_raw) +
                            i;
                 },
@@ -655,7 +674,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto obj = vector_array->mutable_binary_vector();
                 obj->assign(data + src_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_SPARSE_FLOAT) {
+                       DataType::VECTOR_SPARSE_U32_F32) {
                 auto src = src_field_data->vectors().sparse_float_vector();
                 auto dst = vector_array->mutable_sparse_float_vector();
                 if (src.dim() > dst->dim()) {
@@ -668,7 +687,11 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto obj = vector_array->mutable_int8_vector();
                 obj->assign(data, dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-                ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+                auto data = src_field_data->vectors().vector_array();
+                auto obj = vector_array->mutable_vector_array();
+                obj->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
+                obj->CopyFrom(data);
             } else {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
@@ -713,6 +736,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             case DataType::DOUBLE: {
                 auto data = FIELD_DATA(src_field_data, double).data();
                 auto obj = scalar_array->mutable_double_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::TIMESTAMPTZ: {
+                auto data = FIELD_DATA(src_field_data, timestamptz)
+                                .data();  //Here is a marco
+                auto obj = scalar_array->mutable_timestamptz_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
@@ -904,6 +934,26 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            using IndexType = index::ScalarIndex<int64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
+                auto obj = scalar_array->mutable_timestamptz_data();
+                *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+                break;
+            }
         }
         case DataType::VARCHAR: {
             using IndexType = index::ScalarIndex<std::string>;

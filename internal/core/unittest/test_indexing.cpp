@@ -184,7 +184,8 @@ TEST(Indexing, BinaryBruteForce) {
                                               search_info,
                                               index_info,
                                               nullptr,
-                                              DataType::VECTOR_BINARY);
+                                              DataType::VECTOR_BINARY,
+                                              DataType::NONE);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;
@@ -330,7 +331,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         if (index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
             index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
             is_sparse = true;
-            vec_field_data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
+            vec_field_data_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
         } else if (IsBinaryVectorMetricType(metric_type)) {
             is_binary = true;
             vec_field_data_type = milvus::DataType::VECTOR_BINARY;
@@ -348,7 +349,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         } else if (is_sparse) {
             // sparse vector
             xb_sparse_data =
-                dataset.get_col<knowhere::sparse::SparseRow<float>>(
+                dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(
                     milvus::FieldId(100));
             xb_dataset =
                 knowhere::GenDataSet(NB, kTestSparseDim, xb_sparse_data.data());
@@ -381,7 +382,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     knowhere::DataSetPtr xb_dataset;
     FixedVector<float> xb_data;
     FixedVector<uint8_t> xb_bin_data;
-    FixedVector<knowhere::sparse::SparseRow<float>> xb_sparse_data;
+    FixedVector<knowhere::sparse::SparseRow<milvus::sparseValueType>> xb_sparse_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 3000;  // will be updated to 27000 for mmap+hnsw
@@ -685,7 +686,7 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     }
     NB = 3;
 
-    std::vector<knowhere::sparse::SparseRow<float>> vec;
+    std::vector<knowhere::sparse::SparseRow<milvus::sparseValueType>> vec;
     vec.reserve(NB);
     vec.emplace_back(2);
     vec[0].set_at(0, 1, 1.0);

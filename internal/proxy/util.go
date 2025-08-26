@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -619,9 +619,6 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
-
-	// todo(SpadeA): add more check when index is enabled
-
 	return nil
 }
 
@@ -838,6 +835,11 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
+	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
+	for _, field := range coll.Fields {
+		field.IsFunctionOutput = false
+	}
+
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
 			return err
@@ -896,7 +898,7 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		}
 	}
 
-	if err := function.ValidateFunctions(coll); err != nil {
+	if err := embedding.ValidateFunctions(coll); err != nil {
 		return err
 	}
 	return nil
@@ -913,7 +915,7 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if err := function.TextEmbeddingOutputsCheck(fields); err != nil {
+		if err := embedding.TextEmbeddingOutputsCheck(fields); err != nil {
 			return err
 		}
 	default:
@@ -1934,6 +1936,38 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	return ids, nil
 }
 
+// check whether insertMsg has all fields in schema
+func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
+	log := log.With(zap.String("collection", schema.GetName()))
+
+	// find bm25 generated fields
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(schema)...)
+	dataNameMap := make(map[string]*schemapb.FieldData)
+	for _, data := range fieldsData {
+		dataNameMap[data.GetFieldName()] = data
+	}
+
+	for _, fieldSchema := range schema.Fields {
+		if bm25Fields.Contain(fieldSchema.GetName()) {
+			continue
+		}
+
+		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
+				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
+				// autoGenField
+				continue
+			}
+
+			log.Info("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+		}
+	}
+
+	return nil
+}
+
 // for some varchar with analzyer
 // we need check char format before insert it to message queue
 // now only support utf-8
@@ -2490,6 +2524,14 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	return false
 }
 
+func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		fields = append(fields, fSchema.OutputFieldNames...)
+	}
+	return fields
+}
+
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	properties := make(map[string]string)
 	for _, pair := range pairs {
@@ -2506,4 +2548,98 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	}
 
 	return 0
+}
+
+// reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
+// It works with both QueryResults and SearchResults by operating on the common data structures
+func reconstructStructFieldDataCommon(
+	fieldsData []*schemapb.FieldData,
+	outputFields []string,
+	schema *schemapb.CollectionSchema,
+) ([]*schemapb.FieldData, []string) {
+	if len(outputFields) == 1 && outputFields[0] == "count(*)" {
+		return fieldsData, outputFields
+	}
+
+	if len(schema.StructArrayFields) == 0 {
+		return fieldsData, outputFields
+	}
+
+	regularFieldIDs := make(map[int64]interface{})
+	subFieldToStructMap := make(map[int64]int64)
+	groupedStructFields := make(map[int64][]*schemapb.FieldData)
+	structFieldNames := make(map[int64]string)
+	reconstructedOutputFields := make([]string, 0, len(fieldsData))
+
+	// record all regular field IDs
+	for _, field := range schema.Fields {
+		regularFieldIDs[field.GetFieldID()] = nil
+	}
+
+	// build the mapping from sub-field ID to struct field ID
+	for _, structField := range schema.StructArrayFields {
+		for _, subField := range structField.GetFields() {
+			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
+		}
+		structFieldNames[structField.GetFieldID()] = structField.GetName()
+	}
+
+	newFieldsData := make([]*schemapb.FieldData, 0, len(fieldsData))
+	for _, field := range fieldsData {
+		fieldID := field.GetFieldId()
+		if _, ok := regularFieldIDs[fieldID]; ok {
+			newFieldsData = append(newFieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
+		} else {
+			structFieldID := subFieldToStructMap[fieldID]
+			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		}
+	}
+
+	for structFieldID, fields := range groupedStructFields {
+		fieldData := &schemapb.FieldData{
+			FieldName: structFieldNames[structFieldID],
+			FieldId:   structFieldID,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		}
+		newFieldsData = append(newFieldsData, fieldData)
+		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
+	}
+
+	return newFieldsData, reconstructedOutputFields
+}
+
+// Wrapper for QueryResults
+func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.FieldsData,
+		results.OutputFields,
+		schema,
+	)
+	results.FieldsData = fieldsData
+	results.OutputFields = outputFields
+}
+
+// New wrapper for SearchResults
+func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
+	if results.Results == nil {
+		return
+	}
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.Results.FieldsData,
+		results.Results.OutputFields,
+		schema,
+	)
+	results.Results.FieldsData = fieldsData
+	results.Results.OutputFields = outputFields
+}
+
+func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Timestamptz {
+			return true
+		}
+	}
+	return false
 }

@@ -94,6 +94,11 @@ KnowhereInitSearchThreadPool(const uint32_t num_threads) {
 }
 
 void
+KnowhereInitFetchThreadPool(const uint32_t num_threads) {
+    knowhere::KnowhereConfig::SetFetchThreadPoolSize(num_threads);
+}
+
+void
 KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size) {
     if (init_size == 0 && max_size == 0) {
         knowhere::KnowhereConfig::SetRaftMemPool();

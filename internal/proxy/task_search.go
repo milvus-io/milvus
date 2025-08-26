@@ -19,7 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -466,10 +466,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
-	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
+	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
-		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
@@ -544,7 +544,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 	t.needRequery = len(vectorOutputFields) > 0
@@ -584,10 +585,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
-		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
@@ -634,7 +635,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues)
+	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore())
 	if planErr != nil {
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
@@ -765,6 +766,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.fillResult()
 	t.result.Results.OutputFields = t.userOutputFields
+	reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
 	t.result.CollectionName = t.request.GetCollectionName()
 
 	primaryFieldSchema, _ := t.schema.GetPkField()

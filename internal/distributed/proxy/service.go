@@ -89,6 +89,7 @@ const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
+	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
 	ctx                context.Context
@@ -238,9 +239,10 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			proxy.DatabaseInterceptor(),
+			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.DatabaseInterceptor(),
 			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
@@ -639,6 +641,11 @@ func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.Releas
 // DescribeCollection notifies Proxy to describe a collection
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.proxy.DescribeCollection(ctx, request)
+}
+
+// BatchDescribeCollection notifies Proxy to describe a collection
+func (s *Server) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	return s.proxy.BatchDescribeCollection(ctx, request)
 }
 
 // AddCollectionField add a field to collection

@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -244,7 +245,12 @@ func (mr *MilvusRoles) setupLogger() {
 		if !event.HasUpdated || event.EventType == config.DeleteType {
 			return
 		}
-		logLevel, err := zapcore.ParseLevel(event.Value)
+		v := event.Value
+		// trace is not a valid log level for non-segcore part, so we convert it to debug
+		if strings.EqualFold(v, "trace") {
+			v = "debug"
+		}
+		logLevel, err := zapcore.ParseLevel(v)
 		if err != nil {
 			log.Warn("failed to parse log level", zap.Error(err))
 			return

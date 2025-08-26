@@ -19,6 +19,7 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
+#include "exec/expression/ExprCache.h"
 #include "common/type_c.h"
 #include "log/Log.h"
 
@@ -1469,17 +1470,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+            std::move(index->FilterByPath(pointer,
+                                          active_count_,
+                                          is_growing,
+                                          is_strong_consistency,
+                                          filter_func)));
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1505,11 +1505,79 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
+    if (!has_offset_input_ && is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+        if (pk_type_ == DataType::VARCHAR) {
+            return ExecRangeVisitorImplForPk<std::string_view>(context);
+        } else {
+            return ExecRangeVisitorImplForPk<int64_t>(context);
+        }
+    }
+
     if (CanUseIndex<T>() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
     }
+}
+
+template <typename T>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
+    if (auto res = PreCheckOverflow<T>()) {
+        return res;
+    }
+
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (cached_index_chunk_id_ != 0) {
+        cached_index_chunk_id_ = 0;
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
+        auto cache_view = cached_index_chunk_res_->view();
+
+        auto op_type = expr_->op_type_;
+        PkType pk = value_arg_.GetValue<IndexInnerType>();
+        auto query_timestamp = context.get_exec_context()
+                                   ->get_query_context()
+                                   ->get_query_timestamp();
+
+        switch (op_type) {
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual:
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual:
+            case proto::plan::Equal:
+                segment_->pk_range(op_type, pk, query_timestamp, cache_view);
+                break;
+            case proto::plan::NotEqual: {
+                segment_->pk_range(
+                    proto::plan::Equal, pk, query_timestamp, cache_view);
+                cache_view.flip();
+                break;
+            }
+            default:
+                ThrowInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op_type));
+        }
+    }
+    TargetBitmap result;
+    result.append(
+        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename T>
@@ -1879,7 +1947,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
+    use_index_ =
+        is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
+        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
+        // TODO: if multiple indexes are supported, this logic should be changed
+        !segment_->HasNgramIndex(field_id_);
     return use_index_;
 }
 
@@ -1928,6 +2000,25 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         }
     }
     auto op_type = expr_->op_type_;
+
+    // Process-level LRU cache lookup by (segment_id, expr signature)
+    if (cached_match_res_ == nullptr &&
+        exec::ExprResCacheManager::IsEnabled() &&
+        segment_->type() == SegmentType::Sealed) {
+        exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                           this->ToString()};
+        exec::ExprResCacheManager::Value v;
+        if (exec::ExprResCacheManager::Instance().Get(key, v)) {
+            cached_match_res_ = v.result;
+            cached_index_chunk_valid_res_ = v.valid_result;
+            AssertInfo(cached_match_res_->size() == active_count_,
+                       "internal error: expr res cache size {} not equal "
+                       "expect active count {}",
+                       cached_match_res_->size(),
+                       active_count_);
+        }
+    }
+
     auto func = [op_type, slop](Index* index,
                                 const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
@@ -1951,13 +2042,26 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         auto res = std::move(func(index, query));
         auto valid_res = index->IsNotNull();
         cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-        cached_index_chunk_valid_res_ = std::move(valid_res);
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(valid_res));
         if (cached_match_res_->size() < active_count_) {
             // some entities are not visible in inverted index.
             // only happend on growing segment.
             TargetBitmap tail(active_count_ - cached_match_res_->size());
             cached_match_res_->append(tail);
-            cached_index_chunk_valid_res_.append(tail);
+            cached_index_chunk_valid_res_->append(tail);
+        }
+
+        // Insert into process-level cache
+        if (exec::ExprResCacheManager::IsEnabled() &&
+            segment_->type() == SegmentType::Sealed) {
+            exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                               this->ToString()};
+            exec::ExprResCacheManager::Value v;
+            v.result = cached_match_res_;
+            v.valid_result = cached_index_chunk_valid_res_;
+            v.active_count = active_count_;
+            exec::ExprResCacheManager::Instance().Put(key, v);
         }
     }
 
@@ -1965,7 +2069,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     TargetBitmap valid_result;
     result.append(
         *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(cached_index_chunk_valid_res_,
+    valid_result.append(*cached_index_chunk_valid_res_,
                         current_data_global_pos_,
                         real_batch_size);
     MoveCursor();
@@ -2008,15 +2112,14 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        index::NgramInvertedIndex* index;
+        PinWrapper<index::NgramInvertedIndex*> pinned_index;
         if (expr_->column_.data_type_ == DataType::JSON) {
-            auto pinned_index = segment_->GetNgramIndexForJson(
+            pinned_index = segment_->GetNgramIndexForJson(
                 field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
-            index = pinned_index.get();
         } else {
-            auto pinned_index = segment_->GetNgramIndex(field_id_);
-            index = pinned_index.get();
+            pinned_index = segment_->GetNgramIndex(field_id_);
         }
+        index::NgramInvertedIndex* index = pinned_index.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
@@ -2024,17 +2127,17 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         if (!res_opt.has_value()) {
             return std::nullopt;
         }
-        auto valid_res = index->IsNotNull();
         cached_ngram_match_res_ =
             std::make_shared<TargetBitmap>(std::move(res_opt.value()));
-        cached_index_chunk_valid_res_ = std::move(valid_res);
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(index->IsNotNull()));
     }
 
     TargetBitmap result;
     TargetBitmap valid_result;
     result.append(
         *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(cached_index_chunk_valid_res_,
+    valid_result.append(*cached_index_chunk_valid_res_,
                         current_data_global_pos_,
                         real_batch_size);
     MoveCursor();

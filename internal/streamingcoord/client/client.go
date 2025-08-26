@@ -32,6 +32,13 @@ var _ Client = (*clientImpl)(nil)
 type AssignmentService interface {
 	// AssignmentDiscover is used to watches the assignment discovery.
 	types.AssignmentDiscoverWatcher
+
+	// GetLatestAssignments returns the latest assignment discovery result.
+	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
+
+	// UpdateWALBalancePolicy is used to update the WAL balance policy.
+	// Return the WAL balance policy after the update.
+	UpdateWALBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error)
 }
 
 // BroadcastService is the interface of broadcast service.

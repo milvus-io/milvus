@@ -45,7 +45,7 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checker.StaticCheck(tt.dataType, tt.params)
+			err := checker.StaticCheck(tt.dataType, schemapb.DataType_None, tt.params)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

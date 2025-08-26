@@ -26,10 +26,12 @@
 #include "exec/operator/IterativeFilterNode.h"
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
+#include "exec/operator/RescoresNode.h"
 #include "exec/operator/VectorSearchNode.h"
 #include "exec/operator/RandomSampleNode.h"
 #include "exec/operator/GroupByNode.h"
 #include "exec/Task.h"
+#include "plan/PlanNode.h"
 
 namespace milvus {
 namespace exec {
@@ -87,6 +89,11 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                            plannode)) {
             operators.push_back(std::make_unique<PhyRandomSampleNode>(
                 id, ctx.get(), samplenode));
+        } else if (auto rescoresnode =
+                       std::dynamic_pointer_cast<const plan::RescoresNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyRescoresNode>(id, ctx.get(), rescoresnode));
         }
         // TODO: add more operators
     }

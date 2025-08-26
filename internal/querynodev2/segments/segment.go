@@ -23,6 +23,7 @@ package segments
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+#include "common/init_c.h"
 */
 import "C"
 
@@ -1091,6 +1092,11 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {
 	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()), zap.Any("text logs", textLogs))
 
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
 	f, err := schemaHelper.GetFieldFromID(textLogs.GetFieldID())
 	if err != nil {
 		return err
@@ -1125,6 +1131,11 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 }
 
 func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
@@ -1309,7 +1320,10 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
-	usage := s.ResourceUsageEstimate()
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// erase expr-cache for this segment before deleting C segment
+		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
+	}
 
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
@@ -1317,6 +1331,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	}).Await()
 
 	// release reserved resource after the segment resource is really released.
+	usage := s.ResourceUsageEstimate()
 	s.manager.SubLogicalResource(usage)
 
 	log.Info("delete segment from memory")

@@ -72,7 +72,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	result, err = m.AllocRows(&AssignSegmentRequest{
 		TimeTick: 120,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 120,
 		},
@@ -83,7 +83,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	result, err = m.AllocRows(&AssignSegmentRequest{
 		TimeTick: 120,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 50,
 		},
@@ -97,7 +97,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	result, err = m.AllocRows(&AssignSegmentRequest{
 		TimeTick: 120,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 70,
 		},
@@ -108,7 +108,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	result, err = m.AllocRows(&AssignSegmentRequest{
 		TimeTick: 120,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 50,
 		},

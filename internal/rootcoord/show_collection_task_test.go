@@ -82,10 +82,12 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 			return []*model.Collection{
 				{
-					Name: "test coll",
+					Name:      "test coll",
+					ShardsNum: 2,
 				},
 				{
-					Name: "test coll2",
+					Name:      "test coll2",
+					ShardsNum: 3,
 				},
 			}, nil
 		}
@@ -103,6 +105,8 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, int32(2), task.Rsp.GetShardsNum()[0])
+		assert.Equal(t, int32(3), task.Rsp.GetShardsNum()[1])
 	})
 }
 
@@ -212,6 +216,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -293,6 +298,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CreateTime:   tsoutil.GetCurrentTime(),
 			},
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -326,6 +332,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				},
 			}, nil).Once()
 		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error: select grant")).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -374,6 +381,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CreateTime:   tsoutil.GetCurrentTime(),
 			},
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -425,7 +433,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CreateTime:   tsoutil.GetCurrentTime(),
 			},
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String())).Return(false, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -472,6 +480,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CreateTime:   tsoutil.GetCurrentTime(),
 			},
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -530,7 +539,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CreateTime:   tsoutil.GetCurrentTime(),
 			},
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, mock.Anything).Return(false, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := &showCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -574,13 +583,18 @@ func TestShowCollectionsAuth(t *testing.T) {
 				ObjectName: "test_collection",
 			},
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "privilege_group").Return(true, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{
+			{
+				GroupName: "privilege_group",
+			},
+		}, nil).Once()
 		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
 			{
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "test_collection",
 				CreateTime:   tsoutil.GetCurrentTime(),
+				ShardsNum:    2,
 			},
 		}, nil).Once()
 
@@ -594,5 +608,6 @@ func TestShowCollectionsAuth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
 		assert.Equal(t, "test_collection", task.Rsp.GetCollectionNames()[0])
+		assert.Equal(t, int32(2), task.Rsp.GetShardsNum()[0])
 	})
 }

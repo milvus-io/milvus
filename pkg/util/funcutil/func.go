@@ -190,6 +190,18 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 	return "", fmt.Errorf("key %s not found", key)
 }
 
+// TryGetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
+// return false if key not exist
+func TryGetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, true
+		}
+	}
+
+	return "", false
+}
+
 // CheckCtxValid check if the context is valid
 func CheckCtxValid(ctx context.Context) bool {
 	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled
@@ -405,6 +417,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetFloatData().GetData())
 	case schemapb.DataType_Double:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_Timestamptz:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetTimestamptzData().GetData())
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
@@ -470,6 +484,8 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetFloatData().Data)
 		case *schemapb.ScalarField_DoubleData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
+		case *schemapb.ScalarField_TimestamptzData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimestamptzData().Data)
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:

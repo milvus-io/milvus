@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -221,6 +222,16 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	// RemoveResourceGroup will remove all nodes from the resource group.
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
 	suite.NoError(err)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   10,
+		Address:  "localhost",
+		Hostname: "localhost",
+		Labels: map[string]string{
+			sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+		},
+	}))
+	suite.manager.HandleNodeUp(ctx, 10)
 }
 
 func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
@@ -1004,4 +1015,209 @@ func (suite *ResourceManagerSuite) TestNodeLabels_NodeDown() {
 	for _, node := range nodesInRG {
 		suite.Equal("label2", suite.manager.nodeMgr.Get(node).Labels()["dc_name"])
 	}
+}
+
+// createTestResourceManager creates a ResourceManager for testing
+func createTestResourceManager(t *testing.T) *ResourceManager {
+	// Create a mock catalog
+	mockCatalog := &mocks.MetaKv{}
+	mockCatalog.On("MultiSave", mock.Anything, mock.Anything).Return(nil)
+
+	// Create a mock node manager
+	nodeMgr := session.NewNodeManager()
+
+	// Create resource manager
+	store := querycoord.NewCatalog(mockCatalog)
+	manager := NewResourceManager(store, nodeMgr)
+
+	return manager
+}
+
+// TestResourceManager_handleNodeUp tests the private handleNodeUp method
+func TestResourceManager_handleNodeUp(t *testing.T) {
+	// Arrange
+	manager := createTestResourceManager(t)
+	ctx := context.Background()
+	nodeID := int64(1001)
+
+	// Add node to node manager
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
+	manager.nodeMgr.Add(nodeInfo)
+
+	// Act
+	manager.handleNodeUp(ctx, nodeID)
+
+	// Assert
+	// After successful assignment, node should be removed from incomingNode
+	assert.False(t, manager.incomingNode.Contain(nodeID))
+
+	// Verify node was assigned to default resource group
+	nodes, err := manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.Contains(t, nodes, nodeID)
+}
+
+// TestResourceManager_handleNodeDown tests the private handleNodeDown method
+func TestResourceManager_handleNodeDown(t *testing.T) {
+	// Arrange
+	manager := createTestResourceManager(t)
+	ctx := context.Background()
+	nodeID := int64(1002)
+
+	// Add node to node manager
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
+	manager.nodeMgr.Add(nodeInfo)
+
+	// Add node to incoming set and assign it to a resource group first
+	manager.handleNodeUp(ctx, nodeID)
+	nodes, err := manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.Contains(t, nodes, nodeID)
+
+	// Act
+	manager.handleNodeDown(ctx, nodeID)
+
+	// Assert
+	assert.False(t, manager.incomingNode.Contain(nodeID))
+
+	// Verify node was removed from resource group
+	nodes, err = manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.NotContains(t, nodes, nodeID)
+
+	// Verify node is no longer in nodeIDMap
+	_, exists := manager.nodeIDMap[nodeID]
+	assert.False(t, exists)
+}
+
+// TestResourceManager_handleNodeStopping tests the private handleNodeStopping method
+func TestResourceManager_handleNodeStopping(t *testing.T) {
+	// Arrange
+	manager := createTestResourceManager(t)
+	ctx := context.Background()
+	nodeID := int64(1003)
+
+	// Add node to node manager
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
+	manager.nodeMgr.Add(nodeInfo)
+
+	// Add node to incoming set and assign it to a resource group first
+	manager.handleNodeUp(ctx, nodeID)
+	nodes, err := manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.Contains(t, nodes, nodeID)
+
+	// Act
+	manager.handleNodeStopping(ctx, nodeID)
+
+	// Assert
+	assert.False(t, manager.incomingNode.Contain(nodeID))
+
+	// Verify node was removed from resource group
+	nodes, err = manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.NotContains(t, nodes, nodeID)
+
+	// Verify node is no longer in nodeIDMap
+	_, exists := manager.nodeIDMap[nodeID]
+	assert.False(t, exists)
+}
+
+// TestResourceManager_CheckNodesInResourceGroup tests the CheckNodesInResourceGroup method
+func TestResourceManager_CheckNodesInResourceGroup(t *testing.T) {
+	// Arrange
+	manager := createTestResourceManager(t)
+
+	// Add some nodes to node manager
+	nodeInfo1 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost:1001",
+		Hostname: "localhost",
+	})
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "localhost:1002",
+		Hostname: "localhost",
+	})
+	nodeInfo3 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1003,
+		Address:  "localhost:1003",
+		Hostname: "localhost",
+	})
+	manager.nodeMgr.Add(nodeInfo1)
+	manager.nodeMgr.Add(nodeInfo2)
+	manager.nodeMgr.Add(nodeInfo3)
+
+	// Set node 1002 as stopping
+	nodeInfo2.SetState(session.NodeStateStopping)
+
+	// Add nodes to default resource group
+	ctx := context.Background()
+	manager.handleNodeUp(ctx, 1001)
+	manager.handleNodeUp(ctx, 1002)
+	manager.handleNodeUp(ctx, 1004)
+
+	// Act
+	manager.CheckNodesInResourceGroup(ctx)
+
+	// Verify final state: offline node (1004) should be removed
+	finalNodes, err := manager.GetNodes(context.Background(), DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.NotContains(t, finalNodes, int64(1004), "Offline node should be removed")
+
+	// Verify stopping node (1002) should be removed
+	assert.NotContains(t, finalNodes, int64(1002), "Stopping node should be removed")
+
+	// Verify healthy node (1001) should remain
+	assert.Contains(t, finalNodes, int64(1001), "Healthy node should remain")
+
+	// Verify new node (1003) should be added
+	assert.Contains(t, finalNodes, int64(1003), "New node should be added")
+}
+
+// TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy tests CheckNodesInResourceGroup with all healthy nodes
+func TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy(t *testing.T) {
+	// Arrange
+	manager := createTestResourceManager(t)
+
+	// Add some healthy nodes to node manager
+	nodeInfo1 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost:1001",
+		Hostname: "localhost",
+	})
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "localhost:1002",
+		Hostname: "localhost",
+	})
+	manager.nodeMgr.Add(nodeInfo1)
+	manager.nodeMgr.Add(nodeInfo2)
+
+	// Add nodes to default resource group
+	ctx := context.Background()
+	manager.handleNodeUp(ctx, 1001)
+	manager.handleNodeUp(ctx, 1002)
+
+	// Act
+	manager.CheckNodesInResourceGroup(ctx)
+
+	// Verify that healthy nodes remain unchanged
+	finalNodes, err := manager.GetNodes(ctx, DefaultResourceGroupName)
+	assert.NoError(t, err)
+	assert.Contains(t, finalNodes, int64(1001), "Healthy node should remain")
+	assert.Contains(t, finalNodes, int64(1002), "Healthy node should remain")
+	assert.Equal(t, 2, len(finalNodes), "Should have exactly 2 nodes")
 }

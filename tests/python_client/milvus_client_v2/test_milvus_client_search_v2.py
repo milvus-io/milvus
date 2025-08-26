@@ -67,13 +67,11 @@ vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_
 uid = "test_search"
 nq = 1
 epsilon = 0.001
-field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
@@ -721,9 +719,10 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize with data
-        num = int(field[3:])
+        field_name = field.name.lower()
+        num = int(field_name[3:])
         offset = 2 ** (num - 1)
-        nullable_fields = {field: null_data_percent}
+        nullable_fields = {field_name: null_data_percent}
         default_schema = cf.gen_collection_schema_all_datatype(nullable_fields=nullable_fields)
         collection_w = self.init_collection_wrap(schema=default_schema)
         collection_w = cf.insert_data(collection_w, is_all_data_type=True, insert_offset=offset - 1000,
@@ -738,18 +737,18 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search using expression which field value is out of bound
-        expression = f"{field} >= {offset}"
+        expression = f"{field_name} >= {offset}"
         collection_w.search(vectors, default_search_field, default_search_params,
-                            default_limit, expression, output_fields=[field],
+                            default_limit, expression, output_fields=[field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq, "limit": 0})
         # 4. search normal using all the scalar type as output fields
         collection_w.search(vectors, default_search_field, default_search_params,
-                            default_limit, output_fields=[field],
+                            default_limit, output_fields=[field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "output_fields": [field]})
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_comparative_expression(self, _async):

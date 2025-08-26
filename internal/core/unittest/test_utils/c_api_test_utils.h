@@ -31,12 +31,46 @@
 #include "segcore/segment_c.h"
 #include "futures/Future.h"
 #include "futures/future_c.h"
+#include "segcore/load_index_c.h"
 #include "DataGen.h"
 #include "PbHelper.h"
 #include "indexbuilder_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+
+// Test utility function for AppendFieldInfo
+inline CStatus
+AppendFieldInfo(CLoadIndexInfo c_load_index_info,
+                int64_t collection_id,
+                int64_t partition_id,
+                int64_t segment_id,
+                int64_t field_id,
+                enum CDataType field_type,
+                bool enable_mmap,
+                const char* mmap_dir_path) {
+    try {
+        auto load_index_info =
+            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        load_index_info->collection_id = collection_id;
+        load_index_info->partition_id = partition_id;
+        load_index_info->segment_id = segment_id;
+        load_index_info->field_id = field_id;
+        load_index_info->field_type = milvus::DataType(field_type);
+        load_index_info->enable_mmap = enable_mmap;
+        load_index_info->mmap_dir_path = std::string(mmap_dir_path);
+
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
 
 namespace {
 

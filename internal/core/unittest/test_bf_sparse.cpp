@@ -27,8 +27,8 @@ using namespace milvus::query;
 namespace {
 
 std::vector<int>
-SearchRef(const knowhere::sparse::SparseRow<float>* base,
-          const knowhere::sparse::SparseRow<float>& query,
+SearchRef(const knowhere::sparse::SparseRow<milvus::sparseValueType>* base,
+          const knowhere::sparse::SparseRow<milvus::sparseValueType>& query,
           int nb,
           int topk) {
     std::vector<std::tuple<float, int>> res;
@@ -51,8 +51,8 @@ SearchRef(const knowhere::sparse::SparseRow<float>* base,
 }
 
 std::vector<int>
-RangeSearchRef(const knowhere::sparse::SparseRow<float>* base,
-               const knowhere::sparse::SparseRow<float>& query,
+RangeSearchRef(const knowhere::sparse::SparseRow<milvus::sparseValueType>* base,
+               const knowhere::sparse::SparseRow<milvus::sparseValueType>& query,
                int nb,
                float radius,
                float range_filter,
@@ -113,7 +113,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                               search_info,
                                               index_info,
                                               bitset_view,
-                                              DataType::VECTOR_SPARSE_FLOAT));
+                                              DataType::VECTOR_SPARSE_U32_F32,
+                                              DataType::NONE));
             return;
         }
         auto result = BruteForceSearch(query_dataset,
@@ -121,7 +122,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                        search_info,
                                        index_info,
                                        bitset_view,
-                                       DataType::VECTOR_SPARSE_FLOAT);
+                                       DataType::VECTOR_SPARSE_U32_F32,
+                                       DataType::NONE);
         for (int i = 0; i < nq; i++) {
             auto ref = SearchRef(base.get(), *(query.get() + i), nb, topk);
             auto ans = result.get_seg_offsets() + i * topk;
@@ -135,7 +137,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                         search_info,
                                         index_info,
                                         bitset_view,
-                                        DataType::VECTOR_SPARSE_FLOAT);
+                                        DataType::VECTOR_SPARSE_U32_F32,
+                                        DataType::NONE);
         for (int i = 0; i < nq; i++) {
             auto ref = RangeSearchRef(
                 base.get(), *(query.get() + i), nb, 0.1, 0.5, topk);
@@ -149,7 +152,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             search_info,
             index_info,
             bitset_view,
-            DataType::VECTOR_SPARSE_FLOAT);
+            DataType::VECTOR_SPARSE_U32_F32);
         auto iterators = result3.chunk_iterators();
         for (int i = 0; i < nq; i++) {
             auto it = iterators[i];

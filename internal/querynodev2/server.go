@@ -200,16 +200,22 @@ func ResizeHighPriorityPool(evt *config.Event) {
 	}
 }
 
-func (node *QueryNode) ReconfigFileWriterParams(evt *config.Event) {
+func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 	if evt.HasUpdated {
-		if err := initcore.InitFileWriterConfig(paramtable.Get()); err != nil {
+		if err := initcore.InitDiskFileWriterConfig(paramtable.Get()); err != nil {
 			log.Ctx(node.ctx).Warn("QueryNode failed to reconfigure file writer params", zap.Error(err))
 			return
 		}
 		log.Ctx(node.ctx).Info("QueryNode reconfig file writer params successfully",
 			zap.String("mode", paramtable.Get().CommonCfg.DiskWriteMode.GetValue()),
 			zap.Uint64("bufferSize", paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()),
-			zap.Int("nrThreads", paramtable.Get().CommonCfg.DiskWriteNumThreads.GetAsInt()))
+			zap.Int("nrThreads", paramtable.Get().CommonCfg.DiskWriteNumThreads.GetAsInt()),
+			zap.Uint64("refillPeriodUs", paramtable.Get().CommonCfg.DiskWriteRateLimiterRefillPeriodUs.GetAsUint64()),
+			zap.Uint64("maxBurstKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterMaxBurstKBps.GetAsUint64()),
+			zap.Uint64("avgKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterAvgKBps.GetAsUint64()),
+			zap.Int("highPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterHighPriorityRatio.GetAsInt()),
+			zap.Int("middlePriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterMiddlePriorityRatio.GetAsInt()),
+			zap.Int("lowPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterLowPriorityRatio.GetAsInt()))
 	}
 }
 
@@ -218,11 +224,23 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
 	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
-		config.NewHandler("common.diskWriteMode", node.ReconfigFileWriterParams))
+		config.NewHandler("common.diskWriteMode", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
-		config.NewHandler("common.diskWriteBufferSizeKb", node.ReconfigFileWriterParams))
+		config.NewHandler("common.diskWriteBufferSizeKb", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteNumThreads.Key,
-		config.NewHandler("common.diskWriteNumThreads", node.ReconfigFileWriterParams))
+		config.NewHandler("common.diskWriteNumThreads", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterRefillPeriodUs.Key,
+		config.NewHandler("common.diskWriteRateLimiter.refillPeriodUs", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterMaxBurstKBps.Key,
+		config.NewHandler("common.diskWriteRateLimiter.maxBurstKBps", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterAvgKBps.Key,
+		config.NewHandler("common.diskWriteRateLimiter.avgKBps", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterHighPriorityRatio.Key,
+		config.NewHandler("common.diskWriteRateLimiter.highPriorityRatio", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterMiddlePriorityRatio.Key,
+		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
+		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
 }
 
 // InitSegcore set init params of segCore, such as chunkRows, SIMD type...
@@ -231,12 +249,18 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	// update log level based on current setup
+	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
+
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
+
+	cKnowhereFetchThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereFetchThreadPoolSize.GetAsUint32())
+	C.SegcoreSetKnowhereFetchThreadPoolNum(cKnowhereFetchThreadPoolSize)
 
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
@@ -291,6 +315,12 @@ func (node *QueryNode) InitSegcore() error {
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
+	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
+	C.SetExprResCacheEnable(cExprResCacheEnabled)
+
+	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
+	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
@@ -299,7 +329,7 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	err = initcore.InitFileWriterConfig(paramtable.Get())
+	err = initcore.InitDiskFileWriterConfig(paramtable.Get())
 	if err != nil {
 		return err
 	}
@@ -412,6 +442,9 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
+
+	// init paramtable change callback for core related config
+	initcore.SetupCoreConfigChangelCallback()
 	return nil
 }
 

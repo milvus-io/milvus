@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 )
 
 func TestFunctionScore(t *testing.T) {
@@ -61,12 +61,21 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 		Type:            schemapb.FunctionType_Rerank,
 		InputFieldNames: []string{"ts"},
 		Params: []*commonpb.KeyValuePair{
-			{Key: reranker, Value: decayFunctionName},
+			{Key: reranker, Value: DecayFunctionName},
 			{Key: originKey, Value: "4"},
 			{Key: scaleKey, Value: "4"},
 			{Key: offsetKey, Value: "4"},
 			{Key: decayKey, Value: "0.5"},
 			{Key: functionKey, Value: "gauss"},
+		},
+	}
+
+	segmentScorer := &schemapb.FunctionSchema{
+		Name: "test",
+		Type: schemapb.FunctionType_Rerank,
+		Params: []*commonpb.KeyValuePair{
+			{Key: reranker, Value: BoostName},
+			{Key: WeightKey, Value: "2"},
 		},
 	}
 	funcScores := &schemapb.FunctionScore{
@@ -80,6 +89,14 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 	s.Equal(true, f.IsSupportGroup())
 	s.Equal("decay", f.reranker.GetRankName())
 
+	// two ranker but one was boost scorer
+	{
+		funcScores.Functions = append(funcScores.Functions, segmentScorer)
+		_, err := NewFunctionScore(schema, funcScores)
+		s.NoError(err)
+		funcScores.Functions = funcScores.Functions[:1]
+	}
+
 	{
 		schema.Fields[3].Nullable = true
 		_, err := NewFunctionScore(schema, funcScores)
@@ -91,13 +108,13 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 		funcScores.Functions[0].Params[0].Value = "NotExist"
 		_, err := NewFunctionScore(schema, funcScores)
 		s.ErrorContains(err, "Unsupported rerank function")
-		funcScores.Functions[0].Params[0].Value = decayFunctionName
+		funcScores.Functions[0].Params[0].Value = DecayFunctionName
 	}
 
 	{
 		funcScores.Functions = append(funcScores.Functions, functionSchema)
 		_, err := NewFunctionScore(schema, funcScores)
-		s.ErrorContains(err, "Currently only supports one rerank, but got")
+		s.ErrorContains(err, "Currently only supports one rerank")
 		funcScores.Functions = funcScores.Functions[:1]
 	}
 
@@ -136,7 +153,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		Type:            schemapb.FunctionType_Rerank,
 		InputFieldNames: []string{"ts"},
 		Params: []*commonpb.KeyValuePair{
-			{Key: reranker, Value: decayFunctionName},
+			{Key: reranker, Value: DecayFunctionName},
 			{Key: originKey, Value: "4"},
 			{Key: scaleKey, Value: "4"},
 			{Key: offsetKey, Value: "4"},
@@ -164,7 +181,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	// nq = 1
 	{
 		nq := int64(1)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
@@ -176,7 +193,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	// nq=1, input is empty
 	{
 		nq := int64(1)
-		data := function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
@@ -188,7 +205,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	// nq=3
 	{
 		nq := int64(3)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
@@ -200,7 +217,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	// nq=3, all input is empty
 	{
 		nq := int64(3)
-		data := function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
+		data := embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
@@ -215,11 +232,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(1)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -230,11 +247,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(1)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -245,11 +262,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(1)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -260,11 +277,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(3)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -275,11 +292,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(3)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -290,11 +307,11 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	{
 		nq := int64(3)
 		searchData1 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
 
 		searchData2 := &milvuspb.SearchResults{
-			Results: function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
+			Results: embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
@@ -322,7 +339,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 		rankParams := []*commonpb.KeyValuePair{}
 		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
 		s.NoError(err)
-		s.Equal(f.RerankName(), rrfName)
+		s.Equal(f.RerankName(), RRFName)
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
@@ -363,7 +380,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 		}
 		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
 		s.NoError(err)
-		s.Equal(f.reranker.GetRankName(), weightedName)
+		s.Equal(f.reranker.GetRankName(), WeightedName)
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{

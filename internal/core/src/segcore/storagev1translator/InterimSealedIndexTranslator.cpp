@@ -81,6 +81,7 @@ InterimSealedIndexTranslator::get_cells(
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
             vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                DataType::NONE,
                 index_type_,
                 metric_type_,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -88,6 +89,7 @@ InterimSealedIndexTranslator::get_cells(
                 false);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                DataType::NONE,
                 index_type_,
                 metric_type_,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -95,6 +97,7 @@ InterimSealedIndexTranslator::get_cells(
                 false);
         } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                DataType::NONE,
                 index_type_,
                 metric_type_,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -102,7 +105,9 @@ InterimSealedIndexTranslator::get_cells(
                 false);
         }
     } else {
-        vec_index = std::make_unique<index::VectorMemIndex<float>>(
+        // sparse vector case
+        vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
+            DataType::NONE,
             index_type_,
             metric_type_,
             knowhere::Version::GetCurrentVersion().VersionNumber(),

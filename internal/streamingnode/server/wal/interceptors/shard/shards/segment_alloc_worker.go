@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -112,7 +113,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		storageVersion = storage.StorageV2
 	}
 	// Getnerate growing segment limitation.
-	limitation := getSegmentLimitationPolicy().GenerateLimitation()
+	limitation := getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
 	// Create a new segment by sending a create segment message into wal directly.
 	w.msg = message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).
@@ -121,7 +122,9 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 			PartitionId:    w.partitionID,
 			SegmentId:      int64(segmentID),
 			StorageVersion: storageVersion,
+			MaxRows:        limitation.SegmentRows,
 			MaxSegmentSize: limitation.SegmentSize,
+			Level:          datapb.SegmentLevel_L1,
 		}).
 		WithBody(&message.CreateSegmentMessageBody{}).
 		MustBuildMutable()
