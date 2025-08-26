@@ -121,6 +121,7 @@ fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 fragment DoubleSCharSequence: DoubleSChar+;
 fragment SingleSCharSequence: SingleSChar+;
 
+
 fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment Nondigit: [a-zA-Z_];
@@ -157,9 +158,12 @@ fragment HexadecimalDigitSequence: HexadecimalDigit+;
 fragment BinaryExponentPart: [pP] [+-]? DigitSequence;
 fragment EscapeSequence:
 	'\\' ['"?abfnrtv\\]
+	| '\\' MilvusWildcards
 	| '\\' OctalDigit OctalDigit? OctalDigit?
 	| '\\x' HexadecimalDigitSequence
 	| UniversalCharacterName;
+
+fragment MilvusWildcards: '_' | '%';
 
 Whitespace: [ \t]+ -> skip;
 
