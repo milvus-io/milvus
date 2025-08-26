@@ -319,8 +319,14 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType, isEmbe
 			placeholderType = commonpb.PlaceholderType_EmbListFloatVector
 		}
 		for i := 0; i < nq; i++ {
-			bs := make([]byte, 0, dim*4)
-			for j := 0; j < dim; j++ {
+			vecCount := dim
+			// generate some embedding lists with random number of vectors
+			if isEmbeddingList {
+				vecCount = vecCount * (rand.Intn(10) + 3)
+			}
+
+			bs := make([]byte, 0, vecCount*4)
+			for j := 0; j < vecCount; j++ {
 				var buffer bytes.Buffer
 				f := rand.Float32()
 				err := binary.Write(&buffer, common.Endian, f)

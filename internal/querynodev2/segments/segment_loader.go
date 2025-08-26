@@ -743,8 +743,9 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 			fieldID := fieldBinlog.FieldID
 
 			if fieldID == storagecommon.DefaultShortColumnGroupID {
+				allFields := typeutil.GetAllFieldSchemas(schema)
 				// for short column group, we need to load all fields in the group
-				for _, field := range schema.GetFields() {
+				for _, field := range allFields {
 					if infos, ok := fieldID2IndexInfo[field.GetFieldID()]; ok {
 						for _, indexInfo := range infos {
 							fieldInfo := &IndexedFieldInfo{

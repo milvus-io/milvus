@@ -725,6 +725,60 @@ func TestTranslateOutputFields(t *testing.T) {
 	})
 }
 
+func TestTranslateOutputFields_StructArrayField(t *testing.T) {
+	const (
+		idFieldName                = "id"
+		tsFieldName                = "timestamp"
+		floatVectorFieldName       = "float_vector"
+		binaryVectorFieldName      = "binary_vector"
+		float16VectorFieldName     = "float16_vector"
+		bfloat16VectorFieldName    = "bfloat16_vector"
+		sparseFloatVectorFieldName = "sparse_float_vector"
+	)
+	var outputFields []string
+	var userOutputFields []string
+	var userDynamicFields []string
+	var requestedPK bool
+	var err error
+
+	collSchema := &schemapb.CollectionSchema{
+		Name:        "TestTranslateOutputFields",
+		Description: "TestTranslateOutputFields",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: idFieldName, FieldID: 0, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: tsFieldName, FieldID: 1, DataType: schemapb.DataType_Int64},
+			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 101,
+				Name:    "struct_array_field",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "sub_field", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+					{Name: "sub_vector_field", FieldID: 103, DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	// Test struct array field
+	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"sub_vector_field"}, outputFields)
+	assert.ElementsMatch(t, []string{"sub_vector_field"}, userOutputFields)
+	assert.ElementsMatch(t, []string{}, userDynamicFields)
+	assert.False(t, requestedPK)
+
+	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"struct_array_field", "sub_field"}, schema, false)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, outputFields)
+	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, userOutputFields)
+	assert.ElementsMatch(t, []string{}, userDynamicFields)
+	assert.False(t, requestedPK)
+}
+
 func TestAddFieldTask(t *testing.T) {
 	rc := NewMixCoordMock()
 	ctx := context.Background()

@@ -266,8 +266,10 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
         ThrowInfo(
             ErrorCode::Unsupported,
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
@@ -620,13 +622,16 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         }
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(int64_t chunk_id,
+                     std::optional<std::pair<int64_t, int64_t>> offset_len =
+                         std::nullopt) const override {
         auto ca =
             SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<std::vector<VectorArrayView>>(
-            ca, static_cast<VectorArrayChunk*>(chunk)->Views());
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+            ca, static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
     }
 
     PinWrapper<const size_t*>
