@@ -1183,6 +1183,14 @@ func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.List
 	return s.queryCoordServer.ListLoadedSegments(ctx, req)
 }
 
+func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.queryCoordServer.RunAnalyzer(ctx, req)
+}
+
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
+}
+
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
 	return s.datacoordServer.FlushAll(ctx, req)
 }
