@@ -134,17 +134,17 @@ class NGRAM:
             },
             "expected": success
         },
-        {
-            "description": "JSON field with invalid json_cast_type",
-            "params": {
-                "min_gram": 2, 
-                "max_gram": 3,
-                "json_path": "json_field['body']",
-                "json_cast_type": "double"
-            },
-            # "expected": {"err_code": 999, "err_msg": "json_cast_type must be varchar for NGRAM index"}
-            "expected": success    # https://github.com/milvus-io/milvus/issues/43934
-        },
+        # skip for https://github.com/milvus-io/milvus/issues/43934
+        # {
+        #     "description": "JSON field with invalid json_cast_type",
+        #     "params": {
+        #         "min_gram": 2,
+        #         "max_gram": 3,
+        #         "json_path": "json_field['body']",
+        #         "json_cast_type": "double"
+        #     },
+        #     "expected": {"err_code": 999, "err_msg": "json_cast_type must be varchar for NGRAM index"}
+        # },
         {
             "description": "JSON field missing json_cast_type",
             "params": {

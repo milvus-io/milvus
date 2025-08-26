@@ -48,26 +48,34 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # Insert test data
-        nb = 3
+        nb = default_nb
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
         
         if has_json_params:
-            # JSON test data
-            json_test_data = [
-                {"body": "The stadium is large", "title": "Sports"},
-                {"body": "The park is beautiful", "title": "Nature"},
-                {"body": "The school is nearby", "title": "Education"}
-            ]
+            # Generate JSON test data with varied content
+            json_keywords = ["stadium", "park", "school", "library", "hospital", "restaurant", "office", "store"]
             for i, row in enumerate(rows):
+                keyword_idx = i % len(json_keywords)
+                keyword = json_keywords[keyword_idx]
                 row[content_field_name] = f"text content {i}"  # Still provide VARCHAR data
-                row[json_field_name] = json_test_data[i]
+                row[json_field_name] = {
+                    "body": f"This is a {keyword} building",
+                    "title": f"Location {i}",
+                    "description": f"Description for {keyword} number {i}"
+                }
         else:
-            # VARCHAR test data
-            varchar_test_data = ["The stadium is large", "The park is beautiful", "The school is nearby"]
+            # Generate VARCHAR test data with varied content
+            varchar_keywords = ["stadium", "park", "school", "library", "hospital", "restaurant", "office", "store"]
             for i, row in enumerate(rows):
-                row[content_field_name] = varchar_test_data[i]
+                keyword_idx = i % len(varchar_keywords)
+                keyword = varchar_keywords[keyword_idx]
+                row[content_field_name] = f"The {keyword} is large and beautiful number {i}"
                 
-        self.insert(client, collection_name, rows)
+        # Insert data in batches for better performance
+        batch_size = 1000
+        for i in range(0, nb, batch_size):
+            batch_rows = rows[i:i + batch_size]
+            self.insert(client, collection_name, batch_rows)
         self.flush(client, collection_name)
 
         # Create index
@@ -106,11 +114,15 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
             else:
                 filter_expr = f'{content_field_name} LIKE "%stadium%"'
                 
+            # Calculate expected count: 2000 data points with 8 keywords cycling
+            # Each keyword appears 2000/8 = 250 times
+            expected_count = default_nb // 8  # 250 matches for "stadium"
+            
             self.query(client, collection_name, filter=filter_expr,
                        output_fields=["count(*)"],
                        check_task=CheckTasks.check_query_results,
                        check_items={"enable_milvus_client_api": True,
-                                    "count(*)": 1})
+                                    "count(*)": expected_count})
 
             # Verify the index params are persisted
             idx_info = client.describe_index(collection_name, index_name)
@@ -144,33 +156,43 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # Generate appropriate test data for each field type
-        nb = 3
+        nb = default_nb
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=0)
         
         # Update scalar field with appropriate test data
         if scalar_field_type == DataType.VARCHAR:
-            test_data = ["The stadium is large", "The park is beautiful", "The school is nearby"]
+            # Generate varied VARCHAR data for better testing
+            keywords = ["stadium", "park", "school", "library", "hospital", "restaurant", "office", "store"]
             for i, row in enumerate(rows):
-                row["scalar_field"] = test_data[i]
+                keyword_idx = i % len(keywords)
+                keyword = keywords[keyword_idx]
+                row["scalar_field"] = f"The {keyword} is a large building number {i}"
         elif scalar_field_type == DataType.JSON:
-            test_data = [
-                {"body": "This is a school", "title": "Education"},
-                {"body": "This is a park", "title": "Recreation"},
-                {"body": "This is a mall", "title": "Shopping"}
-            ]
+            # Generate varied JSON data for better testing
+            keywords = ["school", "park", "mall", "library", "hospital", "restaurant", "office", "store"]
             for i, row in enumerate(rows):
-                row["scalar_field"] = test_data[i]
+                keyword_idx = i % len(keywords)
+                keyword = keywords[keyword_idx]
+                row["scalar_field"] = {
+                    "body": f"This is a {keyword}",
+                    "title": f"Location {i}",
+                    "category": f"Category {keyword_idx}"
+                }
         elif scalar_field_type == DataType.ARRAY:
-            test_data = [
-                ["word1", "word2", "stadium"],
-                ["text1", "text2", "park"],
-                ["data1", "data2", "school"]
-            ]
+            # Generate varied ARRAY data for better testing
+            base_words = ["word", "text", "data", "item", "element"]
+            keywords = ["stadium", "park", "school", "library", "hospital"]
             for i, row in enumerate(rows):
-                row["scalar_field"] = test_data[i]
+                base_idx = i % len(base_words)
+                keyword_idx = i % len(keywords)
+                row["scalar_field"] = [f"{base_words[base_idx]}1", f"{base_words[base_idx]}2", keywords[keyword_idx]]
         # For other scalar types, keep the auto-generated data
 
-        self.insert(client, collection_name, rows)
+        # Insert data in batches for better performance
+        batch_size = 1000
+        for i in range(0, nb, batch_size):
+            batch_rows = rows[i:i + batch_size]
+            self.insert(client, collection_name, batch_rows)
         self.flush(client, collection_name)
 
         # Create index
@@ -216,17 +238,23 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
             # Test query for supported types
             if scalar_field_type == DataType.VARCHAR:
+                # Calculate expected count: 2000 data points with 8 keywords cycling
+                # Each keyword appears 2000/8 = 250 times
+                expected_count = default_nb // 8  # 250 matches for "stadium"
                 filter_expr = 'scalar_field LIKE "%stadium%"'
                 self.query(client, collection_name, filter=filter_expr,
                           output_fields=["count(*)"],
                           check_task=CheckTasks.check_query_results,
                           check_items={"enable_milvus_client_api": True,
-                                       "count(*)": 1})
+                                       "count(*)": expected_count})
             elif scalar_field_type == DataType.JSON:
+                # Calculate expected count: 2000 data points with 8 keywords cycling
+                # Each keyword appears 2000/8 = 250 times
+                expected_count = default_nb // 8  # 250 matches for "school"
                 filter_expr = "scalar_field['body'] LIKE \"%school%\""
                 self.query(client, collection_name, filter=filter_expr,
                           output_fields=["count(*)"],
                           check_task=CheckTasks.check_query_results,
                           check_items={"enable_milvus_client_api": True,
-                                       "count(*)": 1})
+                                       "count(*)": expected_count})
 
