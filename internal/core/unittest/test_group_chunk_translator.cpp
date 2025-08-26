@@ -133,11 +133,15 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         auto [file_idx, row_group_idx] =
             translator->get_file_and_row_group_index(i);
-        // Get the expected memory size from the file directly
-        auto expected_memory_size = static_cast<int64_t>(
+        // Get the expected size from the file directly
+        auto expected_size = static_cast<int64_t>(
             row_group_metadata_vector.Get(row_group_idx).memory_size());
         auto usage = translator->estimated_byte_size_of_cell(i).first;
-        EXPECT_EQ(usage.memory_bytes, expected_memory_size);
+        if (use_mmap) {
+            EXPECT_EQ(usage.memory_bytes, expected_size);
+        } else {
+            EXPECT_EQ(usage.file_bytes, expected_size);
+        }
     }
 
     // getting cells
@@ -288,12 +292,16 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
             fs_, multi_file_paths[file_idx]);
         auto row_group_metadata_vector =
             fr->file_metadata()->GetRowGroupMetadataVector();
-        auto expected_memory_size = static_cast<int64_t>(
+        auto expected_size = static_cast<int64_t>(
             row_group_metadata_vector.Get(row_group_idx).memory_size());
         auto status = fr->Close();
         AssertInfo(status.ok(), "failed to close file reader");
 
-        EXPECT_EQ(usage.memory_bytes, expected_memory_size);
+        if (use_mmap) {
+            EXPECT_EQ(usage.memory_bytes, expected_size);
+        } else {
+            EXPECT_EQ(usage.file_bytes, expected_size);
+        }
     }
 
     // Clean up test files
