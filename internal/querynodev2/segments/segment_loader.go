@@ -532,10 +532,12 @@ func (loader *segmentLoader) freeRequest(resource LoadResource, logicalResource 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
-	C.ReleaseLoadingResource(C.CResourceUsage{
-		memory_bytes: C.int64_t(resource.MemorySize),
-		disk_bytes:   C.int64_t(resource.DiskSize),
-	})
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
+		C.ReleaseLoadingResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(resource.MemorySize),
+			disk_bytes:   C.int64_t(resource.DiskSize),
+		})
+	}
 
 	loader.committedResource.Sub(resource)
 	loader.committedLogicalResource.Sub(logicalResource)
@@ -1618,19 +1620,39 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Int("mmapFieldCount", mmapFieldCount),
 	)
 
-	// try to reserve loading resource from caching layer
-	if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
-		memory_bytes: C.int64_t(predictMemUsage - memUsage),
-		disk_bytes:   C.int64_t(predictDiskUsage - diskUsage),
-	}, 1000); !ok {
-		return 0, 0, fmt.Errorf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
-			logutil.ToMB(float64(predictMemUsage)),
-			logutil.ToMB(float64(predictDiskUsage)),
-			logutil.ToMB(float64(memUsage)),
-			logutil.ToMB(float64(diskUsage)),
-			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
-			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
-		)
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
+		// try to reserve loading resource from caching layer
+		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+			memory_bytes: C.int64_t(predictMemUsage - memUsage),
+			disk_bytes:   C.int64_t(predictDiskUsage - diskUsage),
+		}, 1000); !ok {
+			return 0, 0, fmt.Errorf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
+				logutil.ToMB(float64(predictMemUsage)),
+				logutil.ToMB(float64(predictDiskUsage)),
+				logutil.ToMB(float64(memUsage)),
+				logutil.ToMB(float64(diskUsage)),
+				paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
+				paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
+			)
+		}
+	} else {
+		// fallback to original segment loading logic
+		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
+			return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
+				logutil.ToMB(float64(maxSegmentSize)),
+				logutil.ToMB(float64(memUsage)),
+				logutil.ToMB(float64(predictMemUsage)),
+				logutil.ToMB(float64(totalMem)),
+				paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		}
+
+		if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
+			return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
+				logutil.ToMB(float64(diskUsage)),
+				logutil.ToMB(float64(predictDiskUsage)),
+				logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()))),
+				paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
+		}
 	}
 
 	err := checkSegmentGpuMemSize(predictGpuMemUsage, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
@@ -1885,7 +1907,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		// here we skip interim index checking since it has been controlled by caching layer
+		if !multiplyFactor.TieredEvictionEnabled {
+			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			if interimIndexEnable {
+				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+			}
+		}
 
 		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
