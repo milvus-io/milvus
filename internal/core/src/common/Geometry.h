@@ -126,6 +126,15 @@ class Geometry {
         return geometry_->exportToWkt();
     }
 
+    // used for test
+    std::string
+    to_wkb_string() const {
+        std::unique_ptr<unsigned char[]> wkb(new unsigned char[geometry_->WkbSize()]);
+        geometry_->exportToWkb(wkbNDR, wkb.get());
+        return std::string(reinterpret_cast<const char*>(wkb.get()),
+                           geometry_->WkbSize());
+    }
+
  private:
     std::unique_ptr<OGRGeometry, OGRGeometryDeleter> geometry_;
 };
