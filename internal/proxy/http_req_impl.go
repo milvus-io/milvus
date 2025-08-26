@@ -46,9 +46,27 @@ var (
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
+	sensitiveKeys      = []string{"secretaccesskey", "secret_access_key", "password"}
 )
 
+func hideSensitive(configs map[string]string) {
+	checkFunc := func(key string) bool {
+		for _, sensitive := range sensitiveKeys {
+			if strings.Contains(strings.ToLower(key), sensitive) {
+				return true
+			}
+		}
+		return false
+	}
+	for key, _ := range configs {
+		if checkFunc(key) {
+			configs[key] = "*****"
+		}
+	}
+}
+
 func getConfigs(configs map[string]string) gin.HandlerFunc {
+	hideSensitive(configs)
 	return func(c *gin.Context) {
 		bs, err := json.Marshal(configs)
 		if err != nil {
