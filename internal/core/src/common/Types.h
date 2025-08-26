@@ -83,6 +83,7 @@ enum class DataType {
     JSON = 23,
     // GEOMETRY = 24 // reserved in proto
     TEXT = 25,
+    TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -128,6 +129,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(float);
         case DataType::DOUBLE:
             return sizeof(double);
+        case DataType::TIMESTAMPTZ:
+            return sizeof(int64_t);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -170,6 +173,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::float32();
         case DataType::DOUBLE:
             return arrow::float64();
+        case DataType::TIMESTAMPTZ:
+            return arrow::int64();
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
@@ -227,6 +232,8 @@ GetDataTypeName(DataType data_type) {
             return "float";
         case DataType::DOUBLE:
             return "double";
+        case DataType::TIMESTAMPTZ:
+            return "timestamptz";
         case DataType::STRING:
             return "string";
         case DataType::VARCHAR:
@@ -598,6 +605,15 @@ struct TypeTraits<DataType::DOUBLE> {
 };
 
 template <>
+struct TypeTraits<DataType::TIMESTAMPTZ> {
+    using NativeType = double;
+    static constexpr DataType TypeKind = DataType::TIMESTAMPTZ;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "TIMESTAMPTZ";
+};
+
+template <>
 struct TypeTraits<DataType::VARCHAR> {
     using NativeType = std::string;
     static constexpr DataType TypeKind = DataType::VARCHAR;
@@ -719,6 +735,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::DOUBLE:
                 name = "DOUBLE";
+                break;
+            case milvus::DataType::TIMESTAMPTZ:
+                name = "TIMESTAMPTZ";
                 break;
             case milvus::DataType::STRING:
                 name = "STRING";

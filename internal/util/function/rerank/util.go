@@ -344,6 +344,11 @@ func getField(inputField *schemapb.FieldData, start int64, size int64) (any, err
 			return inputField.GetScalars().GetDoubleData().Data[start : start+size], nil
 		}
 		return []float64{}, nil
+	case schemapb.DataType_Timestamptz:
+		if inputField.GetScalars() != nil && inputField.GetScalars().GetTimestamptzData() != nil {
+			return inputField.GetScalars().GetTimestamptzData().Data[start : start+size], nil
+		}
+		return []int64{}, nil
 	case schemapb.DataType_Bool:
 		if inputField.GetScalars() != nil && inputField.GetScalars().GetBoolData() != nil {
 			return inputField.GetScalars().GetBoolData().Data[start : start+size], nil

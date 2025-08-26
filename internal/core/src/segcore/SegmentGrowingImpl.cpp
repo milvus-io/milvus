@@ -895,6 +895,16 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_data());
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
+        }
         case DataType::VARCHAR:
         case DataType::TEXT: {
             bulk_subscript_ptr_impl<std::string>(vec_ptr,

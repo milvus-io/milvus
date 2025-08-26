@@ -975,7 +975,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 	log.Debug("received query request",
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()), // should be empty
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 		zap.Bool("isCount", req.GetReq().GetIsCount()),

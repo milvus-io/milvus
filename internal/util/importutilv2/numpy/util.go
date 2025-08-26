@@ -240,7 +240,7 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 		return schemapb.DataType_Int16, nil
 	case "i4", "<i4", "|i4", ">i4", "int32":
 		return schemapb.DataType_Int32, nil
-	case "i8", "<i8", "|i8", ">i8", "int64":
+	case "i8", "<i8", "|i8", ">i8", "int64": // todo: how to handle Timestamptz?
 		return schemapb.DataType_Int64, nil
 	case "f4", "<f4", "|f4", ">f4", "float32":
 		return schemapb.DataType_Float, nil
