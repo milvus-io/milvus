@@ -41,8 +41,10 @@
 
 namespace milvus {
 
-bool isObjectEmpty(simdjson::ondemand::value value);
-bool isObjectEmpty(simdjson::ondemand::document document);
+bool
+isObjectEmpty(simdjson::ondemand::value value);
+bool
+isDocEmpty(simdjson::ondemand::document document);
 
 // function to extract specific keys and convert them to json
 // rapidjson is suitable for extract and reconstruct serialization
@@ -214,10 +216,12 @@ class Json {
     exist(std::string_view pointer) const {
         auto doc = this->doc();
         if (pointer.empty()) {
-            return doc.error() == simdjson::SUCCESS && !isObjectEmpty(doc);
+            return doc.error() == simdjson::SUCCESS &&
+                   !isDocEmpty(std::move(doc));
         } else {
             auto res = doc.at_pointer(pointer);
-            return res.error() == simdjson::SUCCESS && !isObjectEmpty(res.value());
+            return res.error() == simdjson::SUCCESS &&
+                   !isObjectEmpty(res.value());
         }
     }
 
@@ -343,7 +347,7 @@ isObjectEmpty(simdjson::ondemand::value value) {
 }
 
 inline bool
-isObjectEmpty(simdjson::ondemand::document document) {
+isDocEmpty(simdjson::ondemand::document document) {
     if (document.is_null()) {
         return true;
     }

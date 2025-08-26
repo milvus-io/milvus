@@ -16762,9 +16762,9 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     // bool: exists or not
     std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
         test_cases = {
-            {{"a"}, true, 0b1111111000000100},
+            {{"a"}, true, 0b1111101000000100},
             {{"a", "b"}, true, 0b0000100000000000},
-            {{"a"}, false, 0b0000000111111011},
+            {{"a"}, false, 0b0000010111111011},
             {{"a", "b"}, false, 0b1111011111111111},
         };
 
