@@ -39,6 +39,23 @@ PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
     init_dimension(dim);
 }
 
+// create payload writer for VectorArray with element_type
+PayloadWriter::PayloadWriter(const DataType column_type,
+                             int dim,
+                             DataType element_type,
+                             bool nullable)
+    : column_type_(column_type),
+      nullable_(nullable),
+      element_type_(element_type) {
+    AssertInfo(column_type == DataType::VECTOR_ARRAY,
+               "This constructor is only for VECTOR_ARRAY");
+    AssertInfo(element_type != DataType::NONE,
+               "element_type must be specified for VECTOR_ARRAY");
+    dimension_ = dim;
+    builder_ = CreateArrowBuilder(column_type, dim);
+    schema_ = CreateArrowSchema(column_type, dim, element_type, nullable);
+}
+
 void
 PayloadWriter::init_dimension(int dim) {
     if (dimension_.has_value()) {
@@ -94,6 +111,14 @@ PayloadWriter::finish() {
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();
     auto mem_pool = arrow::default_memory_pool();
+
+    // For VectorArray, we need to store schema metadata
+    parquet::ArrowWriterProperties::Builder arrow_props_builder;
+    if (column_type_ == DataType::VECTOR_ARRAY) {
+        arrow_props_builder.store_schema();
+    }
+    auto arrow_props = arrow_props_builder.build();
+
     ast = parquet::arrow::WriteTable(*table,
                                      mem_pool,
                                      output_,
@@ -101,7 +126,8 @@ PayloadWriter::finish() {
                                      parquet::WriterProperties::Builder()
                                          .compression(arrow::Compression::ZSTD)
                                          ->compression_level(3)
-                                         ->build());
+                                         ->build(),
+                                     arrow_props);
     AssertInfo(ast.ok(), ast.ToString());
 }
 

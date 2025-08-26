@@ -734,7 +734,11 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 
 	// Prepare metadata for VectorArray type
 	var metadata arrow.Metadata
-	if w.dataType == schemapb.DataType_ArrayOfVector && w.elementType != nil {
+	if w.dataType == schemapb.DataType_ArrayOfVector {
+		if w.elementType == nil {
+			return errors.New("element type for DataType_ArrayOfVector must be set")
+		}
+
 		metadata = arrow.NewMetadata(
 			[]string{"elementType", "dim"},
 			[]string{fmt.Sprintf("%d", int32(*w.elementType)), fmt.Sprintf("%d", w.dim.GetValue())},
@@ -761,7 +765,7 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	defer table.Release()
 
 	arrowWriterProps := pqarrow.DefaultWriterProps()
-	if w.dataType == schemapb.DataType_ArrayOfVector && w.elementType != nil {
+	if w.dataType == schemapb.DataType_ArrayOfVector {
 		// Store metadata in the Arrow writer properties
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),

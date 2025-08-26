@@ -356,7 +356,8 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr CreateTestSchema() {
+inline SchemaPtr
+CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     auto bool_field =
         schema->AddDebugField("bool", milvus::DataType::BOOL, true);
@@ -1141,18 +1142,21 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     int64_t dim = 1;
     FieldDataPtr field_data = nullptr;
 
-    auto createFieldData = [&field_data, &raw_count](const void* raw_data,
-                                                     DataType data_type,
-                                                     int64_t dim) {
-        field_data = storage::CreateFieldData(data_type, false, dim);
-        field_data->FillFieldData(raw_data, raw_count);
-    };
-    auto createNullableFieldData = [&field_data, &raw_count](
+    auto element_type = field_meta.get_element_type();
+    auto createFieldData =
+        [&field_data, &raw_count, &element_type](
+            const void* raw_data, DataType data_type, int64_t dim) {
+            field_data =
+                storage::CreateFieldData(data_type, element_type, false, dim);
+            field_data->FillFieldData(raw_data, raw_count);
+        };
+    auto createNullableFieldData = [&field_data, &raw_count, &element_type](
                                        const void* raw_data,
                                        const bool* raw_valid_data,
                                        DataType data_type,
                                        int64_t dim) {
-        field_data = storage::CreateFieldData(data_type, true, dim);
+        field_data =
+            storage::CreateFieldData(data_type, element_type, true, dim);
         int byteSize = (raw_count + 7) / 8;
         std::vector<uint8_t> valid_data(byteSize);
         for (int i = 0; i < raw_count; i++) {

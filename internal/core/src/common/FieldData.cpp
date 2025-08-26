@@ -297,18 +297,72 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::VECTOR_ARRAY: {
-            auto array_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            auto list_array =
+                std::dynamic_pointer_cast<arrow::ListArray>(array);
+            AssertInfo(list_array != nullptr,
+                       "Failed to cast to ListArray for VECTOR_ARRAY");
+
+            auto vector_array_field =
+                dynamic_cast<FieldData<VectorArray>*>(this);
+            AssertInfo(vector_array_field != nullptr,
+                       "Failed to cast to FieldData<VectorArray>");
+            int64_t dim = vector_array_field->get_dim();
+            DataType element_type = vector_array_field->get_element_type();
+
+            AssertInfo(dim > 0, "Invalid dimension {} in VECTOR_ARRAY", dim);
+            AssertInfo(element_type != DataType::NONE,
+                       "Element type not set for VECTOR_ARRAY");
+
+            auto values_array = list_array->values();
             std::vector<VectorArray> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                VectorFieldProto field_data;
-                if (array_array->GetString(index) == "") {
-                    ThrowInfo(DataTypeInvalid, "empty vector array");
+
+            switch (element_type) {
+                case DataType::VECTOR_FLOAT: {
+                    auto float_array =
+                        std::dynamic_pointer_cast<arrow::FloatArray>(
+                            values_array);
+                    AssertInfo(
+                        float_array != nullptr,
+                        "Expected FloatArray for VECTOR_FLOAT element type");
+
+                    for (size_t index = 0; index < element_count; ++index) {
+                        int64_t start_offset = list_array->value_offset(index);
+                        int64_t end_offset =
+                            list_array->value_offset(index + 1);
+                        int64_t num_floats = end_offset - start_offset;
+                        AssertInfo(num_floats % dim == 0,
+                                   "Invalid data: number of floats ({}) not "
+                                   "divisible by "
+                                   "dimension ({})",
+                                   num_floats,
+                                   dim);
+
+                        // Create VectorFieldProto and populate with data
+                        VectorFieldProto field_data;
+                        field_data.set_dim(dim);
+
+                        auto* float_vector = field_data.mutable_float_vector();
+                        for (int64_t i = start_offset; i < end_offset; ++i) {
+                            float_vector->add_data(float_array->Value(i));
+                        }
+
+                        values[index] = VectorArray(field_data);
+                    }
+                    break;
                 }
-                auto success =
-                    field_data.ParseFromString(array_array->GetString(index));
-                AssertInfo(success, "parse from string failed");
-                values[index] = VectorArray(field_data);
+                case DataType::VECTOR_BINARY:
+                case DataType::VECTOR_FLOAT16:
+                case DataType::VECTOR_BFLOAT16:
+                case DataType::VECTOR_INT8:
+                    ThrowInfo(
+                        NotImplemented,
+                        "Element type {} in VectorArray not implemented yet",
+                        GetDataTypeName(element_type));
+                    break;
+                default:
+                    ThrowInfo(DataTypeInvalid,
+                              "Unsupported element type {} in VectorArray",
+                              GetDataTypeName(element_type));
             }
             return FillFieldData(values.data(), element_count);
         }

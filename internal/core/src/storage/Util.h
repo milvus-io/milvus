@@ -80,13 +80,12 @@ CreateArrowSchema(DataType data_type, bool nullable);
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
 
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(DataType data_type, int dim, DataType element_type, bool nullable);
+
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
                              DataType data_type);
-
-int
-GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
-                           DataType data_type);
 
 std::string
 GenIndexPathIdentifier(int64_t build_id,
@@ -195,6 +194,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
 FieldDataPtr
 CreateFieldData(const DataType& type,
+                const DataType& element_type,
                 bool nullable = false,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);

@@ -322,6 +322,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto lack_num = info.row_count - total;
             auto field_data = storage::CreateFieldData(
                 static_cast<DataType>(field_meta.get_data_type()),
+                DataType::NONE,
                 true,
                 1,
                 lack_num);
@@ -527,6 +528,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         auto data_type = field.second.get_data_type();
                         auto field_data = storage::CreateFieldData(
                             data_type,
+                            DataType::NONE,
                             field.second.is_nullable(),
                             IsVectorDataType(data_type) &&
                                     !IsSparseFloatVectorDataType(data_type)
