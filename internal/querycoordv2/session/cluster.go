@@ -53,6 +53,8 @@ type Cluster interface {
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
 	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
+	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
+	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)
 	Start()
 	Stop()
 }
@@ -279,6 +281,36 @@ func (c *QueryCluster) DropIndex(ctx context.Context, nodeID int64, req *querypb
 	})
 	if err1 != nil {
 		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	var (
+		resp *milvuspb.RunAnalyzerResponse
+		err  error
+	)
+
+	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.RunAnalyzer(ctx, req)
+	})
+	if sendErr != nil {
+		return nil, sendErr
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	var (
+		resp *commonpb.Status
+		err  error
+	)
+
+	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.ValidateAnalyzer(ctx, req)
+	})
+	if sendErr != nil {
+		return nil, sendErr
 	}
 	return resp, err
 }
