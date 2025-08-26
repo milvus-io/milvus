@@ -93,6 +93,12 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
                 value_size = 1;  // 1 for null
             }
             break;
+        case milvus::DataType::JSON:
+            value_size = sizeof(Json);
+            break;
+        case milvus::DataType::ARRAY:
+            value_size = sizeof(Array);
+            break;
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported default value data type {}",
