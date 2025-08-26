@@ -63,6 +63,13 @@ InitDefaultOptimizeExprEnable(bool val);
 void
 InitDefaultConfigParamTypeCheck(bool val);
 
+// Expr result cache
+void
+InitExprResCacheEnable(bool val);
+
+void
+InitExprResCacheCapacityBytes(int64_t bytes);
+
 #ifdef __cplusplus
 };
 #endif

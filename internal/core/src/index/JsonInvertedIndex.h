@@ -168,7 +168,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     }
 
     // Returns a bitmap indicating which rows have values that are indexed.
-    const TargetBitmap
+    TargetBitmap
     Exists();
 
  protected:
