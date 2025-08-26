@@ -38,7 +38,7 @@ const (
 
 	databaseHeader = `dbname`
 
-	// ClientRequestMsecKey temp const value, TODO use common packge def after upgrading milvus/pkg version
+	// ClientRequestMsecKey temp const value, TODO use common package def after upgrading milvus/pkg version
 	ClientRequestMsecKey string = "client-request-unixmsec"
 )
 
