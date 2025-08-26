@@ -65,6 +65,7 @@ type mixCompactionTask struct {
 	tr   *timerecord.TimeRecorder
 
 	compactionParams compaction.Params
+	sortByFieldIDs   []int64
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -74,6 +75,7 @@ func NewMixCompactionTask(
 	binlogIO io.BinlogIO,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
+	sortByFieldIDs []int64,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
@@ -85,6 +87,7 @@ func NewMixCompactionTask(
 		currentTime:      time.Now(),
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
+		sortByFieldIDs:   sortByFieldIDs,
 	}
 }
 
@@ -366,7 +369,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		// TODO: the implementation of mergeSortMultipleSegments is not correct, also see issue: https://github.com/milvus-io/milvus/issues/43034
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err
