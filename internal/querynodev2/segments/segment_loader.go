@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -511,16 +512,13 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	result.LogicalResource.MemorySize = lmu
 	result.LogicalResource.DiskSize = ldu
 
-	toMB := func(mem uint64) float64 {
-		return float64(mem) / 1024 / 1024
-	}
 	loader.committedResource.Add(result.Resource)
 	loader.committedLogicalResource.Add(result.LogicalResource)
 	log.Info("request resource for loading segments (unit in MiB)",
-		zap.Float64("memory", toMB(result.Resource.MemorySize)),
-		zap.Float64("committedMemory", toMB(loader.committedResource.MemorySize)),
-		zap.Float64("disk", toMB(result.Resource.DiskSize)),
-		zap.Float64("committedDisk", toMB(loader.committedResource.DiskSize)),
+		zap.Float64("memory", logutil.ToMB(float64(result.Resource.MemorySize))),
+		zap.Float64("committedMemory", logutil.ToMB(float64(loader.committedResource.MemorySize))),
+		zap.Float64("disk", logutil.ToMB(float64(result.Resource.DiskSize))),
+		zap.Float64("committedDisk", logutil.ToMB(float64(loader.committedResource.DiskSize))),
 	)
 
 	return result, nil
@@ -1479,10 +1477,6 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 		zap.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
-	toMB := func(mem uint64) float64 {
-		return float64(mem) / 1024 / 1024
-	}
-
 	logicalMemUsage := loader.manager.Segment.GetLogicalResource().MemorySize
 	logicalDiskUsage := loader.manager.Segment.GetLogicalResource().DiskSize
 
@@ -1513,29 +1507,29 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 
 		log.Debug("segment logical resource for loading",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
-			zap.Float64("memoryUsage(MB)", toMB(finalUsage.MemorySize)),
-			zap.Float64("diskUsage(MB)", toMB(finalUsage.DiskSize)),
+			zap.Float64("memoryUsage(MB)", logutil.ToMB(float64(finalUsage.MemorySize))),
+			zap.Float64("diskUsage(MB)", logutil.ToMB(float64(finalUsage.DiskSize))),
 		)
 		predictLogicalDiskUsage += finalUsage.DiskSize
 		predictLogicalMemUsage += finalUsage.MemorySize
 	}
 
 	log.Info("predict memory and disk logical usage after loaded (in MiB)",
-		zap.Float64("predictLogicalMemUsage(MB)", toMB(predictLogicalMemUsage)),
-		zap.Float64("predictLogicalDiskUsage(MB)", toMB(predictLogicalDiskUsage)),
+		zap.Float64("predictLogicalMemUsage(MB)", logutil.ToMB(float64(predictLogicalMemUsage))),
+		zap.Float64("predictLogicalDiskUsage(MB)", logutil.ToMB(float64(predictLogicalDiskUsage))),
 	)
 
 	if predictLogicalMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, OOM if load, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(predictLogicalMemUsage),
-			toMB(totalMem),
+			logutil.ToMB(float64(predictLogicalMemUsage)),
+			logutil.ToMB(float64(totalMem)),
 			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
 	if predictLogicalDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
 		return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictLogicalDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-			toMB(predictLogicalDiskUsage),
-			toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())),
+			logutil.ToMB(float64(predictLogicalDiskUsage)),
+			logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()))),
 			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
 	}
 
@@ -1553,10 +1547,6 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
-
-	toMB := func(mem uint64) float64 {
-		return float64(mem) / 1024 / 1024
-	}
 
 	memUsage = memUsage + loader.committedResource.MemorySize
 	if memUsage == 0 || totalMem == 0 {
@@ -1592,8 +1582,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 
 		log.Debug("segment resource for loading",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
-			zap.Float64("loadingMemoryUsage(MB)", toMB(loadingUsage.MemorySize)),
-			zap.Float64("loadingDiskUsage(MB)", toMB(loadingUsage.DiskSize)),
+			zap.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(loadingUsage.MemorySize))),
+			zap.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(loadingUsage.DiskSize))),
 			zap.Float64("memoryLoadFactor", maxFactor.memoryUsageFactor),
 		)
 		mmapFieldCount += loadingUsage.MmapFieldCount
@@ -1606,31 +1596,31 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Float64("maxSegmentSize(MB)", toMB(maxSegmentSize)),
-		zap.Float64("committedMemSize(MB)", toMB(loader.committedResource.MemorySize)),
-		zap.Float64("memLimit(MB)", toMB(totalMem)),
-		zap.Float64("memUsage(MB)", toMB(memUsage)),
-		zap.Float64("committedDiskSize(MB)", toMB(loader.committedResource.DiskSize)),
-		zap.Float64("diskUsage(MB)", toMB(diskUsage)),
-		zap.Float64("predictMemUsage(MB)", toMB(predictMemUsage)),
-		zap.Float64("predictDiskUsage(MB)", toMB(predictDiskUsage)),
+		zap.Float64("maxSegmentSize(MB)", logutil.ToMB(float64(maxSegmentSize))),
+		zap.Float64("committedMemSize(MB)", logutil.ToMB(float64(loader.committedResource.MemorySize))),
+		zap.Float64("memLimit(MB)", logutil.ToMB(float64(totalMem))),
+		zap.Float64("memUsage(MB)", logutil.ToMB(float64(memUsage))),
+		zap.Float64("committedDiskSize(MB)", logutil.ToMB(float64(loader.committedResource.DiskSize))),
+		zap.Float64("diskUsage(MB)", logutil.ToMB(float64(diskUsage))),
+		zap.Float64("predictMemUsage(MB)", logutil.ToMB(float64(predictMemUsage))),
+		zap.Float64("predictDiskUsage(MB)", logutil.ToMB(float64(predictDiskUsage))),
 		zap.Int("mmapFieldCount", mmapFieldCount),
 	)
 
 	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(maxSegmentSize),
-			toMB(memUsage),
-			toMB(predictMemUsage),
-			toMB(totalMem),
+			logutil.ToMB(float64(maxSegmentSize)),
+			logutil.ToMB(float64(memUsage)),
+			logutil.ToMB(float64(predictMemUsage)),
+			logutil.ToMB(float64(totalMem)),
 			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
 	if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
 		return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-			toMB(diskUsage),
-			toMB(predictDiskUsage),
-			toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())),
+			logutil.ToMB(float64(diskUsage)),
+			logutil.ToMB(float64(predictDiskUsage)),
+			logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()))),
 			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
 	}
 
