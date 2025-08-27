@@ -84,7 +84,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	initcore.InitLocalChunkManager(suite.rootPath)
-	initcore.InitMmapManager(paramtable.Get())
+	initcore.InitMmapManager(paramtable.Get(), 1)
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
