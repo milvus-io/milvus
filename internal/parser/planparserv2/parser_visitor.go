@@ -1629,7 +1629,7 @@ func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareCo
 		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
 	}
 
-	arithOp := planpb.ArithOpType_Add
+	arithOp := planpb.ArithOpType_Unknown
 	interval := &planpb.Interval{}
 	if ctx.GetOp1() != nil {
 		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
