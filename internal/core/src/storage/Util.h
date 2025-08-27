@@ -97,6 +97,17 @@ GenIndexPathIdentifier(int64_t build_id,
 // is_temp: true for temporary path used during index building,
 // false for path to store pre-built index contents downloaded from remote storage
 std::string
+GenIndexPathPrefixByType(ChunkManagerPtr cm,
+                         int64_t build_id,
+                         int64_t index_version,
+                         int64_t segment_id,
+                         int64_t field_id,
+                         const std::string& index_type,
+                         bool is_temp);
+
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version,

@@ -170,7 +170,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             res = knowhere::BruteForce::RangeSearch<
-                knowhere::sparse::SparseRow<sparseValueType>>(
+                knowhere::sparse::SparseRow<SparseValueType>>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_INT8) {
             res = knowhere::BruteForce::RangeSearch<int8>(
@@ -281,7 +281,7 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_SPARSE_U32_F32:
             return knowhere::BruteForce::AnnIterator<
-                knowhere::sparse::SparseRow<sparseValueType>>(
+                knowhere::sparse::SparseRow<SparseValueType>>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(

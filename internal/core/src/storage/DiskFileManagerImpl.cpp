@@ -492,7 +492,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                            field_data)
                            ->Dim());
         auto sparse_rows =
-            static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
         for (size_t i = 0; i < field_data->Length(); ++i) {
             auto row = sparse_rows[i];

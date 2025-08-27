@@ -80,12 +80,6 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
 	}
-
-	if len(req.MMapDir) > 0 {
-		mmapDir := C.CString(req.MMapDir)
-		defer C.free(unsafe.Pointer(mmapDir))
-		C.AppendMMapDirPath(cLoadFieldDataInfo, mmapDir)
-	}
 	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,

@@ -165,7 +165,7 @@ struct GeneratedData {
                 }
                 if constexpr (std::is_same_v<
                                   T,
-                                  knowhere::sparse::SparseRow<milvus::sparseValueType>>) {
+                                  knowhere::sparse::SparseRow<milvus::SparseValueType>>) {
                     auto sparse_float_array =
                         target_field_data.vectors().sparse_float_vector();
                     auto rows =
@@ -311,7 +311,7 @@ struct GeneratedData {
                         int array_len);
 };
 
-inline std::unique_ptr<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>
+inline std::unique_ptr<knowhere::sparse::SparseRow<milvus::SparseValueType>[]>
 GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
@@ -350,13 +350,13 @@ GenerateRandomSparseFloatVector(size_t rows,
         data[row][col] = val;
     }
 
-    auto tensor = std::make_unique<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>(rows);
+    auto tensor = std::make_unique<knowhere::sparse::SparseRow<milvus::SparseValueType>[]>(rows);
 
     for (int32_t i = 0; i < rows; ++i) {
         if (data[i].size() == 0) {
             continue;
         }
-        knowhere::sparse::SparseRow<milvus::sparseValueType> row(data[i].size());
+        knowhere::sparse::SparseRow<milvus::SparseValueType> row(data[i].size());
         size_t j = 0;
         for (auto& [idx, val] : data[i]) {
             row.set_at(j++, idx, val);

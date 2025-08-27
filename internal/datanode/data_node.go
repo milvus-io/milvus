@@ -204,7 +204,7 @@ func (node *DataNode) Init() error {
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 
-		err := index.InitSegcore()
+		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
 		}

@@ -315,6 +315,8 @@ type commonConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 
 	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
+
+	EnablePosixMode ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1154,6 +1156,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnableConfigParamTypeCheck.Init(base.mgr)
+
+	p.EnablePosixMode = ParamItem{
+		Key:          "common.enablePosixMode",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Specifies whether to run in POSIX mode for enhanced file system compatibility",
+		Export:       true,
+	}
+	p.EnablePosixMode.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2927,7 +2938,8 @@ type queryNodeConfig struct {
 	// cache limit
 	// Deprecated: Never used
 	CacheMemoryLimit ParamItem `refreshable:"false"`
-	MmapDirPath      ParamItem `refreshable:"false"`
+	// Deprecated: Since 2.6.0, use local storage path instead
+	MmapDirPath ParamItem `refreshable:"false"`
 	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
 	MmapEnabled                         ParamItem `refreshable:"false"`
 	MmapVectorField                     ParamItem `refreshable:"false"`
@@ -3535,7 +3547,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.3.0",
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
-		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				return path.Join(base.Get("localStorage.path"), "mmap")

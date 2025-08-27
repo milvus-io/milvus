@@ -43,7 +43,7 @@ func (s *ManagerSuite) SetupSuite() {
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
-	initcore.InitMmapManager(paramtable.Get())
+	initcore.InitMmapManager(paramtable.Get(), 1)
 }
 
 func (s *ManagerSuite) SetupTest() {

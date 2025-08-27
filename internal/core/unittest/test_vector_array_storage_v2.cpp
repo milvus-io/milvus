@@ -208,13 +208,11 @@ class TestVectorArrayStorageV2 : public testing::Test {
                             false,
                             std::vector<std::string>({paths[1]})});
 
-        load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
         segment_->AddFieldDataInfoForSealed(load_info);
         for (auto& [id, info] : load_info.field_infos) {
             LoadFieldDataInfo load_field_info;
             load_field_info.storage_version = 2;
-            load_field_info.mmap_dir_path = "";
             load_field_info.field_infos.emplace(id, info);
             segment_->LoadFieldData(load_field_info);
         }

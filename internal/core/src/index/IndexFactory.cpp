@@ -604,14 +604,6 @@ IndexFactory::CreateVectorIndex(
                             version,
                             use_knowhere_build_pool,
                             file_manager_context);
-                    case DataType::VECTOR_SPARSE_U32_F32:
-                        return std::make_unique<VectorMemIndex<sparse_u32_f32>>(
-                            element_type,
-                            index_type,
-                            metric_type,
-                            version,
-                            use_knowhere_build_pool,
-                            file_manager_context);
                     default:
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented data type to "
