@@ -45,10 +45,6 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         const char* file_path);
 
 void
-AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
-                  const char* dir_path);
-
-void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version);
 

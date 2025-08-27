@@ -446,9 +446,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
         storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-
         auto column_group_info =
-            FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
+            FieldDataInfo(column_group_id.get(), num_rows, "");
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
 
         LOG_INFO(

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 )
@@ -344,4 +345,15 @@ func (i *GrpcAccessInfo) QueryParams() string {
 		return kvsToString(req.GetQueryParams())
 	}
 	return Unknown
+}
+
+// ClientRequestTime returns client-side request time string
+// this attribute is passed via grpc metadata
+func (i *GrpcAccessInfo) ClientRequestTime() string {
+	unixmsec, ok := logutil.GetClientReqUnixmsecGrpc(i.ctx)
+	if !ok {
+		return Unknown
+	}
+
+	return time.UnixMilli(unixmsec).Format(timeFormat)
 }

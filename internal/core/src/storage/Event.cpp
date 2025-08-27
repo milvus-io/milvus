@@ -325,7 +325,7 @@ BaseEventData::Serialize() {
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
                     auto row =
-                        static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
+                        static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                             field_data->RawValue(offset));
                     payload_writer->add_one_binary_payload(
                         static_cast<const uint8_t*>(row->data()),

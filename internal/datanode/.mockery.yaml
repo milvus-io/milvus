@@ -6,13 +6,7 @@ mockname: "Mock{{.InterfaceName}}"
 outpkg: "{{.PackageName}}"
 dir: "{{.InterfaceDir}}"
 packages:
-  github.com/milvus-io/milvus/internal/datanode/allocator:
-    interfaces:
-      Allocator:
-  github.com/milvus-io/milvus/internal/datanode/channel:
-    interfaces:
-      ChannelManager:
-  github.com/milvus-io/milvus/internal/datanode/compaction:
+  github.com/milvus-io/milvus/internal/datanode/compactor:
     interfaces:
       Compactor:
   github.com/milvus-io/milvus/internal/datanode/importv2:

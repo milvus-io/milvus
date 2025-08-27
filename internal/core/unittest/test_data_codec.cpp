@@ -685,7 +685,7 @@ TEST(storage, InsertDataSparseFloat) {
     ASSERT_EQ(new_payload->get_num_rows(), n_rows);
     ASSERT_EQ(new_payload->get_null_count(), 0);
     auto new_data = static_cast<
-        const knowhere::sparse::SparseRow<milvus::sparseValueType>*>(
+        const knowhere::sparse::SparseRow<milvus::SparseValueType>*>(
         new_payload->Data());
 
     for (auto i = 0; i < n_rows; ++i) {

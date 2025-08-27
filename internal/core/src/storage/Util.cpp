@@ -686,13 +686,30 @@ GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t segment_id,
                    int64_t field_id,
                    bool is_temp) {
+    return GenIndexPathPrefixByType(cm,
+                                    build_id,
+                                    index_version,
+                                    segment_id,
+                                    field_id,
+                                    INDEX_ROOT_PATH,
+                                    is_temp);
+}
+
+std::string
+GenIndexPathPrefixByType(ChunkManagerPtr cm,
+                         int64_t build_id,
+                         int64_t index_version,
+                         int64_t segment_id,
+                         int64_t field_id,
+                         const std::string& index_type,
+                         bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
 
     if (is_temp) {
         prefix = prefix / TEMP;
     }
 
-    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
+    boost::filesystem::path path = std::string(index_type);
     boost::filesystem::path path1 =
         GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
@@ -705,16 +722,13 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t segment_id,
                        int64_t field_id,
                        bool is_temp) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-
-    if (is_temp) {
-        prefix = prefix / TEMP;
-    }
-
-    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
-    boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
+    return GenIndexPathPrefixByType(cm,
+                                    build_id,
+                                    index_version,
+                                    segment_id,
+                                    field_id,
+                                    TEXT_LOG_ROOT_PATH,
+                                    is_temp);
 }
 
 std::string
@@ -724,16 +738,13 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id,
                           bool is_temp) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-
-    if (is_temp) {
-        prefix = prefix / TEMP;
-    }
-
-    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
-    boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
+    return GenIndexPathPrefixByType(cm,
+                                    build_id,
+                                    index_version,
+                                    segment_id,
+                                    field_id,
+                                    JSON_KEY_INDEX_LOG_ROOT_PATH,
+                                    is_temp);
 }
 
 std::string
@@ -774,16 +785,13 @@ GenNgramIndexPrefix(ChunkManagerPtr cm,
                     int64_t segment_id,
                     int64_t field_id,
                     bool is_temp) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-
-    if (is_temp) {
-        prefix = prefix / TEMP;
-    }
-
-    boost::filesystem::path path = std::string(NGRAM_LOG_ROOT_PATH);
-    boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
+    return GenIndexPathPrefixByType(cm,
+                                    build_id,
+                                    index_version,
+                                    segment_id,
+                                    field_id,
+                                    NGRAM_LOG_ROOT_PATH,
+                                    is_temp);
 }
 
 std::string
