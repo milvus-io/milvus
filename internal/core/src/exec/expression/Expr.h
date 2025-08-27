@@ -323,11 +323,9 @@ class SegmentExpr : public Expr {
         auto current_chunk_pos = SegmentExpr::CanUseIndex() && use_index_
                                      ? current_index_chunk_pos_
                                      : current_data_chunk_pos_;
-        LOG_DEBUG("index mode: {}, use index: {}", is_index_mode_, use_index_);
-        LOG_DEBUG("current chunk: {}, current_chunk_pos: {}", current_chunk, current_chunk_pos);
         auto current_rows = 0;
-        if (segment_->is_chunked()) {;
-            LOG_DEBUG("is chunked");
+        if (segment_->is_chunked()) {
+            ;
             current_rows =
                 SegmentExpr::CanUseIndex() && use_index_ &&
                         segment_->type() == SegmentType::Sealed
@@ -335,11 +333,8 @@ class SegmentExpr : public Expr {
                     : segment_->num_rows_until_chunk(field_id_, current_chunk) +
                           current_chunk_pos;
         } else {
-            LOG_DEBUG("is not chunked");
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
-        LOG_DEBUG("current rows: {}, batch size: {}, active count: {}",
-                  current_rows, batch_size_, active_count_);
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
                    : batch_size_;

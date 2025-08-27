@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
-#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -639,9 +638,6 @@ class InsertRecordGrowing {
                     }
                 }
             }
-            LOG_DEBUG("Appending field: {} with type {}",
-                      field_meta.get_name().get(),
-                      GetDataTypeName(field_meta.get_data_type()));
             append_field_meta(
                 field_id, field_meta, size_per_chunk, mmap_descriptor);
         }

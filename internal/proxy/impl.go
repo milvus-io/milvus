@@ -2660,7 +2660,6 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
-	log.Ctx(ctx).Debug("receive search request", zap.Any("search params", request.GetSearchParams()))
 
 	optimizedSearch := true
 	resultSizeInsufficient := false
@@ -3396,7 +3395,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
-	log.Ctx(ctx).Debug("receive query request", zap.Any("query params", request.GetQueryParams()))
 
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
@@ -3448,7 +3446,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		r, _ := protojson.Marshal(res)
 		log.Ctx(ctx).Debug("Count result", zap.String("result", string(r)))
 	}
-	log.Debug("Query done", zap.Any("Results field data", res.GetFieldsData()))
 	return res, nil
 }
 
