@@ -76,6 +76,14 @@ func NewPriorityQueue() PriorityQueue {
 	}
 }
 
+func NewPriorityQueuePtr() *PriorityQueue {
+	hq := make(heapQueue, 0)
+	heap.Init(&hq)
+	return &PriorityQueue{
+		heapQueue: hq,
+	}
+}
+
 func (pq *PriorityQueue) Push(item Item) {
 	heap.Push(&pq.heapQueue, item)
 }

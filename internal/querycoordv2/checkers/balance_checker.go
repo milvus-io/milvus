@@ -133,10 +133,10 @@ type BalanceChecker struct {
 
 	// normalBalanceQueue maintains collections pending normal balance operations,
 	// ordered by priority (row count or collection ID)
-	normalBalanceQueue balance.PriorityQueue
+	normalBalanceQueue *balance.PriorityQueue
 	// stoppingBalanceQueue maintains collections pending stopping balance operations,
 	// used when nodes are being gracefully stopped
-	stoppingBalanceQueue balance.PriorityQueue
+	stoppingBalanceQueue *balance.PriorityQueue
 
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
@@ -154,8 +154,8 @@ func NewBalanceChecker(meta *meta.Meta,
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		nodeManager:          nodeMgr,
-		normalBalanceQueue:   balance.NewPriorityQueue(),
-		stoppingBalanceQueue: balance.NewPriorityQueue(),
+		normalBalanceQueue:   balance.NewPriorityQueuePtr(),
+		stoppingBalanceQueue: balance.NewPriorityQueuePtr(),
 		scheduler:            scheduler,
 		getBalancerFunc:      getBalancerFunc,
 	}
@@ -213,14 +213,14 @@ func (b *BalanceChecker) filterCollectionForBalance(ctx context.Context, filter 
 //
 // Returns a new priority queue with all eligible collections for stopping balance.
 // Note: cause stopping balance need to move out all data from the node, so we need to check all collections.
-func (b *BalanceChecker) constructStoppingBalanceQueue(ctx context.Context) balance.PriorityQueue {
+func (b *BalanceChecker) constructStoppingBalanceQueue(ctx context.Context) *balance.PriorityQueue {
 	sortOrder := strings.ToLower(Params.QueryCoordCfg.BalanceTriggerOrder.GetValue())
 	if sortOrder == "" {
 		sortOrder = "byrowcount" // Default to ByRowCount
 	}
 
 	ret := b.filterCollectionForBalance(ctx, b.readyToCheck)
-	pq := balance.NewPriorityQueue()
+	pq := balance.NewPriorityQueuePtr()
 	for _, cid := range ret {
 		rowCount := b.targetMgr.GetCollectionRowCount(ctx, cid, meta.CurrentTargetFirst)
 		item := newCollectionBalanceItem(cid, int(rowCount), sortOrder)
@@ -238,7 +238,7 @@ func (b *BalanceChecker) constructStoppingBalanceQueue(ctx context.Context) bala
 //  3. Have current target ready (consistent state)
 //
 // Returns a new priority queue with all eligible collections for normal balance.
-func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) balance.PriorityQueue {
+func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *balance.PriorityQueue {
 	filterLoadedCollections := func(ctx context.Context, cid int64) bool {
 		collection := b.meta.GetCollection(ctx, cid)
 		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
@@ -254,7 +254,7 @@ func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) balanc
 	}
 
 	ret := b.filterCollectionForBalance(ctx, b.readyToCheck, filterLoadedCollections, filterTargetReadyCollections)
-	pq := balance.NewPriorityQueue()
+	pq := balance.NewPriorityQueuePtr()
 	for _, cid := range ret {
 		rowCount := b.targetMgr.GetCollectionRowCount(ctx, cid, meta.CurrentTargetFirst)
 		item := newCollectionBalanceItem(cid, int(rowCount), sortOrder)
@@ -387,30 +387,30 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, r
 //   - config: balance configuration with batch sizes and limits
 //
 // Returns:
-//   - segmentTasks: accumulated segment balance tasks
-//   - channelTasks: accumulated channel balance tasks
+//   - generatedSegmentTaskNum: number of generated segment balance tasks
+//   - generatedChannelTaskNum: number of generated channel balance tasks
 func (b *BalanceChecker) processBalanceQueue(
 	ctx context.Context,
 	getReplicasFunc func(context.Context, int64) []int64,
-	constructQueueFunc func(context.Context) balance.PriorityQueue,
-	getQueueFunc func() balance.PriorityQueue,
+	constructQueueFunc func(context.Context) *balance.PriorityQueue,
+	getQueueFunc func() *balance.PriorityQueue,
 	config balanceConfig,
-) ([]task.Task, []task.Task) {
+) (int, int) {
 	checkCollectionCount := 0
-	segmentTasks := make([]task.Task, 0)
-	channelTasks := make([]task.Task, 0)
-
 	pq := getQueueFunc()
-	if pq.Len() == 0 {
+	if pq == nil || pq.Len() == 0 {
 		pq = constructQueueFunc(ctx)
 	}
 
-	for len(segmentTasks) < config.segmentBatchSize &&
-		len(channelTasks) < config.channelBatchSize &&
+	generatedSegmentTaskNum := 0
+	generatedChannelTaskNum := 0
+
+	for generatedSegmentTaskNum < config.segmentBatchSize &&
+		generatedChannelTaskNum < config.channelBatchSize &&
 		checkCollectionCount < config.maxCheckCollectionCount &&
 		pq.Len() > 0 {
 		// Break if balanceOnMultipleCollections is disabled and we already have tasks
-		if !config.balanceOnMultipleCollections && (len(segmentTasks) > 0 || len(channelTasks) > 0) {
+		if !config.balanceOnMultipleCollections && (generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0) {
 			log.Debug("Balance on multiple collections disabled, stopping after first collection")
 			break
 		}
@@ -424,11 +424,11 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, replicasToBalance, config)
-		segmentTasks = append(segmentTasks, newSegmentTasks...)
-		channelTasks = append(channelTasks, newChannelTasks...)
+		generatedSegmentTaskNum += len(newSegmentTasks)
+		generatedChannelTaskNum += len(newChannelTasks)
+		b.submitTasks(newSegmentTasks, newChannelTasks)
 	}
-
-	return segmentTasks, channelTasks
+	return generatedSegmentTaskNum, generatedChannelTaskNum
 }
 
 // submitTasks submits the generated balance tasks to the scheduler for execution.
@@ -495,16 +495,17 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	// Phase 1: Process stopping balance first (higher priority)
 	// This handles nodes that are being gracefully stopped and need immediate attention
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-		segmentTasks, channelTasks := b.processBalanceQueue(ctx,
+		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
 			b.getReplicaForStoppingBalance,
 			b.constructStoppingBalanceQueue,
-			func() balance.PriorityQueue { return b.stoppingBalanceQueue },
+			func() *balance.PriorityQueue { return b.stoppingBalanceQueue },
 			config)
 
-		// If stopping balance generated tasks, submit them and skip normal balance
-		// This ensures stopping operations get immediate attention
-		if len(segmentTasks) > 0 || len(channelTasks) > 0 {
-			b.submitTasks(segmentTasks, channelTasks)
+		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
+			// clean up the normal balance queue when stopping balance generated tasks
+			// make sure that next time when trigger normal balance, a new normal balance round will be started
+			b.normalBalanceQueue = nil
+
 			return nil
 		}
 	}
@@ -517,17 +518,20 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			return nil
 		}
 
-		segmentTasks, channelTasks := b.processBalanceQueue(ctx,
+		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
 			b.getReplicaForNormalBalance,
 			b.constructNormalBalanceQueue,
-			func() balance.PriorityQueue { return b.normalBalanceQueue },
+			func() *balance.PriorityQueue { return b.normalBalanceQueue },
 			config)
 
 		// Submit normal balance tasks if any were generated
 		// Update the auto balance timestamp to enforce the interval
-		if len(segmentTasks) > 0 || len(channelTasks) > 0 {
+		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
 			b.autoBalanceTs = time.Now()
-			b.submitTasks(segmentTasks, channelTasks)
+
+			// clean up the stopping balance queue when normal balance generated tasks
+			// make sure that next time when trigger stopping balance, a new stopping balance round will be started
+			b.stoppingBalanceQueue = nil
 		}
 	}
 

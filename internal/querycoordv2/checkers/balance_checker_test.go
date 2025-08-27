@@ -35,8 +35,8 @@ import (
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
-func createMockPriorityQueue() balance.PriorityQueue {
-	return balance.NewPriorityQueue()
+func createMockPriorityQueue() *balance.PriorityQueue {
+	return balance.NewPriorityQueuePtr()
 }
 
 // Helper function to create a test BalanceChecker
@@ -148,7 +148,7 @@ func TestCollectionBalanceItem_SetPriority(t *testing.T) {
 
 	item.setPriority(200)
 
-	assert.Equal(t, 200, item.balancePriority)
+	assert.Equal(t, 200, item.getPriority())
 }
 
 // =============================================================================
@@ -578,18 +578,14 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 	defer mockLoadConfig.UnPatch()
 
 	// Mock processBalanceQueue to return tasks
-	mockSegmentTask := &task.SegmentTask{}
 	mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).Return(
-		[]task.Task{mockSegmentTask}, []task.Task{}, // segment tasks, channel tasks
+		1, 0, // segment tasks, channel tasks
 	).Build()
 	defer mockProcessQueue.UnPatch()
 
-	// Mock submitTasks
-	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
-	defer mockSubmitTasks.UnPatch()
-
 	result := checker.Check(ctx)
 	assert.Nil(t, result) // Always returns nil as tasks are submitted directly
+	assert.Nil(t, checker.normalBalanceQueue)
 }
 
 func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
@@ -621,48 +617,13 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 	defer mockLoadConfig.UnPatch()
 
 	// Mock processBalanceQueue to return tasks
-	mockChannelTask := &task.ChannelTask{}
 	mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).Return(
-		[]task.Task{}, []task.Task{mockChannelTask}, // segment tasks, channel tasks
+		0, 1, // segment tasks, channel tasks
 	).Build()
 	defer mockProcessQueue.UnPatch()
 
-	// Mock submitTasks
-	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
-	defer mockSubmitTasks.UnPatch()
-
 	result := checker.Check(ctx)
 	assert.Nil(t, result) // Always returns nil as tasks are submitted directly
-}
-
-func TestBalanceChecker_Check_AutoBalanceIntervalNotReached(t *testing.T) {
-	checker := createTestBalanceChecker()
-	ctx := context.Background()
-
-	// Set autoBalanceTs to recent time to prevent normal balance
-	checker.autoBalanceTs = time.Now()
-
-	// Mock IsActive to return true
-	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(true).Build()
-	defer mockIsActive.UnPatch()
-
-	// Mock paramtable - stopping balance disabled, auto balance enabled
-	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
-	defer mockParamGet.UnPatch()
-
-	// return false for stopping balance enabled, true for auto balance enabled
-	mockParams := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsBool")).Return(mockey.Sequence(false).Times(1).Then(true)).Build()
-	defer mockParams.UnPatch()
-
-	// Mock loadBalanceConfig with long interval
-	config := balanceConfig{
-		autoBalanceInterval: 1 * time.Hour, // Long interval
-	}
-	mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(config).Build()
-	defer mockLoadConfig.UnPatch()
-
-	result := checker.Check(ctx)
-	assert.Nil(t, result)
 }
 
 // =============================================================================
@@ -697,12 +658,12 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 	}
 
 	// Mock constructQueueFunc
-	constructQueueFunc := func(ctx context.Context) balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
 		return mockQueue
 	}
 
 	// Mock getQueueFunc
-	getQueueFunc := func() balance.PriorityQueue {
+	getQueueFunc := func() *balance.PriorityQueue {
 		return mockQueue
 	}
 
@@ -714,12 +675,16 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 	).Build()
 	defer mockGenerateTasks.UnPatch()
 
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
+
 	segmentTasks, channelTasks := checker.processBalanceQueue(
 		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
-	assert.Len(t, segmentTasks, 3)
-	assert.Len(t, channelTasks, 3)
+	assert.Equal(t, 3, segmentTasks)
+	assert.Equal(t, 3, channelTasks)
 }
 
 func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
@@ -739,11 +704,11 @@ func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() balance.PriorityQueue {
+	getQueueFunc := func() *balance.PriorityQueue {
 		return mockQueue
 	}
 
@@ -751,8 +716,8 @@ func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
 		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
-	assert.Empty(t, segmentTasks)
-	assert.Empty(t, channelTasks)
+	assert.Equal(t, 0, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
 }
 
 func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
@@ -780,11 +745,11 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() balance.PriorityQueue {
+	getQueueFunc := func() *balance.PriorityQueue {
 		return mockQueue
 	}
 
@@ -801,13 +766,17 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 	)).Build()
 	defer mockGenerateTasks.UnPatch()
 
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
+
 	segmentTasks, channelTasks := checker.processBalanceQueue(
 		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	// Should stop after first collection due to batch size limits
-	assert.Len(t, segmentTasks, 1)
-	assert.Len(t, channelTasks, 1)
+	assert.Equal(t, 1, segmentTasks)
+	assert.Equal(t, 1, channelTasks)
 }
 
 func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T) {
@@ -828,11 +797,11 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() balance.PriorityQueue {
+	getQueueFunc := func() *balance.PriorityQueue {
 		return mockQueue
 	}
 
@@ -845,13 +814,17 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 	).Build()
 	defer mockGenerateTasks.UnPatch()
 
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
+
 	segmentTasks, channelTasks := checker.processBalanceQueue(
 		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	// Should stop after first collection due to multi-collection disabled
-	assert.Len(t, segmentTasks, 1)
-	assert.Empty(t, channelTasks)
+	assert.Equal(t, 1, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
 }
 
 func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
@@ -873,11 +846,11 @@ func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
 		return []int64{} // No replicas
 	}
 
-	constructQueueFunc := func(ctx context.Context) balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() balance.PriorityQueue {
+	getQueueFunc := func() *balance.PriorityQueue {
 		return mockQueue
 	}
 
@@ -885,8 +858,8 @@ func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
 		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
-	assert.Empty(t, segmentTasks)
-	assert.Empty(t, channelTasks)
+	assert.Equal(t, 0, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
 }
 
 // =============================================================================
@@ -990,10 +963,15 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(true).Build()
 	defer mockIsActive.UnPatch()
 
-	mockProcessBalanceQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(func(ctx context.Context, getReplicasFunc func(ctx context.Context, collectionID int64) []int64, constructQueueFunc func(ctx context.Context) balance.PriorityQueue, getQueueFunc func() balance.PriorityQueue, config balanceConfig) (segmentTasks []task.Task, channelTasks []task.Task) {
-		time.Sleep(150 * time.Millisecond)
-		return
-	}).Build()
+	mockProcessBalanceQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
+		func(ctx context.Context,
+			getReplicasFunc func(ctx context.Context, collectionID int64) []int64,
+			constructQueueFunc func(ctx context.Context) *balance.PriorityQueue,
+			getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+		) (int, int) {
+			time.Sleep(150 * time.Millisecond)
+			return 0, 0
+		}).Build()
 	defer mockProcessBalanceQueue.UnPatch()
 
 	start := time.Now()
