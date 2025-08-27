@@ -30,6 +30,9 @@ type Balancer interface {
 	// GetPChannels returns all pchannels.
 	GetPChannels() []string
 
+	// GetAllStreamingNodes fetches all streaming node info.
+	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error)
+
 	// UpdateBalancePolicy update the balance policy.
 	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)
 

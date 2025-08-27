@@ -165,7 +165,6 @@ func (s *StreamingNodeManager) execute() (err error) {
 		if err := b.WatchChannelAssignments(s.notifier.Context(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 			s.cond.LockAndBroadcast()
 			s.latestAssignments = make(map[string]types.PChannelInfoAssigned)
-			s.streamingNodes = typeutil.NewUniqueSet()
 			for _, relation := range param.Relations {
 				s.latestAssignments[relation.Channel.Name] = relation
 			}
