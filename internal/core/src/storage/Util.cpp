@@ -243,6 +243,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                    "value_builder must be FloatBuilder for "
                                    "FloatVector");
 
+                        arrow::Status ast;
                         for (int i = 0; i < length; ++i) {
                             auto status = list_builder->Append();
                             AssertInfo(status.ok(),
@@ -260,7 +261,11 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
 
                             for (int j = 0; j < num_vectors; ++j) {
                                 auto vec_data = array.get_data<float>(j);
-                                value_builder->AppendValues(vec_data, dim);
+                                ast =
+                                    value_builder->AppendValues(vec_data, dim);
+                                AssertInfo(ast.ok(),
+                                           "Failed to append list: {}",
+                                           ast.ToString());
                             }
                         }
                         break;
