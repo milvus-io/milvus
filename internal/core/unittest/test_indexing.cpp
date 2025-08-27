@@ -348,9 +348,9 @@ class IndexTest : public ::testing::TestWithParam<Param> {
                 NQ, DIM, xb_bin_data.data() + DIM * query_offset);
         } else if (is_sparse) {
             // sparse vector
-            xb_sparse_data =
-                dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
-                    milvus::FieldId(100));
+            xb_sparse_data = dataset.get_col<
+                knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                milvus::FieldId(100));
             xb_dataset =
                 knowhere::GenDataSet(NB, kTestSparseDim, xb_sparse_data.data());
             xb_dataset->SetIsSparse(true);
@@ -382,7 +382,8 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     knowhere::DataSetPtr xb_dataset;
     FixedVector<float> xb_data;
     FixedVector<uint8_t> xb_bin_data;
-    FixedVector<knowhere::sparse::SparseRow<milvus::SparseValueType>> xb_sparse_data;
+    FixedVector<knowhere::sparse::SparseRow<milvus::SparseValueType>>
+        xb_sparse_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 3000;  // will be updated to 27000 for mmap+hnsw

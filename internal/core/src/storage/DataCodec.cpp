@@ -32,8 +32,9 @@ std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                     int64_t length,
                     bool is_field_data) {
-    auto buff_to_keep = input_data; // ref += 1
-    auto reader = std::make_shared<BinlogReader>(buff_to_keep, length); //ref += 1
+    auto buff_to_keep = input_data;  // ref += 1
+    auto reader =
+        std::make_shared<BinlogReader>(buff_to_keep, length);  //ref += 1
     ReadMediumType(reader);
 
     DescriptorEvent descriptor_event(reader);
@@ -49,37 +50,50 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                             descriptor_fix_part.segment_id,
                             descriptor_fix_part.field_id};
 
-
     auto edek = descriptor_event.GetEdekFromExtra();
     if (edek.length() > 0) {
         auto cipherPlugin = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(cipherPlugin != nullptr, "cipher plugin missing for an encrypted file");
+        AssertInfo(cipherPlugin != nullptr,
+                   "cipher plugin missing for an encrypted file");
 
         int64_t ez_id = descriptor_event.GetEZFromExtra();
         AssertInfo(ez_id != -1, "ez_id meta not exist for a encrypted file");
-        auto decryptor = cipherPlugin->GetDecryptor(ez_id, descriptor_fix_part.collection_id, edek);
+        auto decryptor = cipherPlugin->GetDecryptor(
+            ez_id, descriptor_fix_part.collection_id, edek);
 
         auto left_size = length - descriptor_event.event_header.next_position_;
-        LOG_INFO("start decrypting data, ez_id: {}, collection_id: {}, total length: {}, descriptor_length: {}, cipher text length: {}",
-                 ez_id, descriptor_fix_part.collection_id, length, descriptor_event.event_header.next_position_, left_size);
+        LOG_INFO(
+            "start decrypting data, ez_id: {}, collection_id: {}, total "
+            "length: {}, descriptor_length: {}, cipher text length: {}",
+            ez_id,
+            descriptor_fix_part.collection_id,
+            length,
+            descriptor_event.event_header.next_position_,
+            left_size);
 
         AssertInfo(left_size > 0, "cipher text length is 0");
         std::string cipher_str;
         cipher_str.resize(left_size);  // allocate enough space for size bytes
 
-        auto err = reader->Read(left_size, reinterpret_cast<void*>(cipher_str.data()));
+        auto err =
+            reader->Read(left_size, reinterpret_cast<void*>(cipher_str.data()));
         AssertInfo(err.ok(), "Read binlog failed, err = {}", err.what());
 
         auto decrypted_str = decryptor->Decrypt(cipher_str);
-        LOG_INFO("cipher plugin decrypted data: cipher text length: {}, plain text length: {}", left_size, decrypted_str.size());
+        LOG_INFO(
+            "cipher plugin decrypted data: cipher text length: {}, plain text "
+            "length: {}",
+            left_size,
+            decrypted_str.size());
 
-        auto decrypted_ptr = std::shared_ptr<uint8_t[]>(
-            new uint8_t[decrypted_str.size()],
-            [](uint8_t* ptr) { delete[] ptr; });
+        auto decrypted_ptr =
+            std::shared_ptr<uint8_t[]>(new uint8_t[decrypted_str.size()],
+                                       [](uint8_t* ptr) { delete[] ptr; });
         memcpy(decrypted_ptr.get(), decrypted_str.data(), decrypted_str.size());
         buff_to_keep = decrypted_ptr;
 
-        reader = std::make_shared<BinlogReader>(buff_to_keep, decrypted_str.size());
+        reader =
+            std::make_shared<BinlogReader>(buff_to_keep, decrypted_str.size());
     }
 
     EventHeader header(reader);

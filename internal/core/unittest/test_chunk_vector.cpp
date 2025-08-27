@@ -206,7 +206,9 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         auto fp16_vec_gt = dataset.get_col<float16>(fp16_vec);
         auto bf16_vec_gt = dataset.get_col<bfloat16>(bf16_vec);
         auto sparse_vec_gt =
-            dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(sparse_vec);
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    sparse_vec);
         auto int8_vec_gt = dataset.get_col<int8>(int8_vec);
 
         for (size_t i = 0; i < num_inserted; ++i) {

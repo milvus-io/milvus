@@ -67,9 +67,9 @@ TestVecIndex() {
         auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
         status = BuildBinaryVecIndex(index, NB * DIM / 8, xb_data.data());
     } else if (std::is_same_v<TraitType, milvus::SparseFloatVector>) {
-        auto xb_data =
-            dataset.template get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
-                milvus::FieldId(100));
+        auto xb_data = dataset.template get_col<
+            knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+            milvus::FieldId(100));
         status = BuildSparseFloatVecIndex(
             index,
             NB,
