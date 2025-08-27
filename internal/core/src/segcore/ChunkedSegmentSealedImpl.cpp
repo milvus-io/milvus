@@ -1797,7 +1797,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                     auto row =
                         offset != INVALID_SEG_OFFSET
                             ? static_cast<
-                                  const knowhere::sparse::SparseRow<sparseValueType>*>(
+                                  const knowhere::sparse::SparseRow<SparseValueType>*>(
                                   static_cast<const void*>(value))
                             : nullptr;
                     if (row == nullptr) {
