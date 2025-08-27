@@ -43,7 +43,7 @@ struct FieldChunkMetrics {
     bool hasValue_;
     int64_t null_count_;
 
-    FieldChunkMetrics() : hasValue_(false){};
+    FieldChunkMetrics() : hasValue_(false) {};
 
     template <typename T>
     std::pair<MetricsDataType<T>, MetricsDataType<T>>
@@ -91,7 +91,8 @@ class FieldChunkMetricsTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override {
         return uid;
     }
-    std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
+    std::pair<milvus::cachinglayer::ResourceUsage,
+              milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(
         milvus::cachinglayer::cid_t cid) const override {
         // TODO(tiered storage 1): provide a better estimation.

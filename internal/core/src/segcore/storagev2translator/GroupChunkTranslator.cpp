@@ -137,7 +137,8 @@ GroupChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 GroupChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);

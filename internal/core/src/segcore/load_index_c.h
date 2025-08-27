@@ -42,7 +42,8 @@ LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
 bool
-TryReserveLoadingResourceWithTimeout(CResourceUsage size, int64_t millisecond_timeout);
+TryReserveLoadingResourceWithTimeout(CResourceUsage size,
+                                     int64_t millisecond_timeout);
 
 void
 ReleaseLoadingResource(CResourceUsage size);

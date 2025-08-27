@@ -57,7 +57,8 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     int64_t value_size = 0;
@@ -88,7 +89,8 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
         case milvus::DataType::TEXT:
             if (field_meta_.default_value().has_value()) {
                 auto default_value = field_meta_.default_value().value();
-                value_size = default_value.string_data().size() + 1;  // +1 for null terminator
+                value_size = default_value.string_data().size() +
+                             1;  // +1 for null terminator
             } else {
                 value_size = 1;  // 1 for null
             }
@@ -104,7 +106,8 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
                       "unsupported default value data type {}",
                       field_meta_.get_data_type());
     }
-    return {{value_size * meta_.num_rows_until_chunk_[1], 0}, {2 * value_size * meta_.num_rows_until_chunk_[1], 0}};
+    return {{value_size * meta_.num_rows_until_chunk_[1], 0},
+            {2 * value_size * meta_.num_rows_until_chunk_[1], 0}};
 }
 
 const std::string&

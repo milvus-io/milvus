@@ -49,7 +49,8 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     LoadResourceRequest request =
@@ -65,7 +66,8 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
     int64_t final_disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
     int64_t max_memory_cost = request.max_memory_cost * 1024 * 1024 * 1024;
     int64_t max_disk_cost = request.max_disk_cost * 1024 * 1024 * 1024;
-    return {{final_memory_cost, final_disk_cost}, {max_memory_cost, max_disk_cost}};
+    return {{final_memory_cost, final_disk_cost},
+            {max_memory_cost, max_disk_cost}};
 }
 
 const std::string&
