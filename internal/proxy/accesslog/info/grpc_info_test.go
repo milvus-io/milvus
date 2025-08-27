@@ -288,7 +288,10 @@ func (s *GrpcAccessInfoSuite) TestClientRequestTime() {
 	result := Get(s.info, "$method_expr")
 	s.Equal(Unknown, result[0])
 
-	s.info.ctx = metadata.AppendToOutgoingContext(s.info.ctx, common.ClientRequestMsecKey, strconv.Itoa(int(time.Now().UnixNano()/int64(time.Millisecond))))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{
+		common.ClientRequestMsecKey: []string{strconv.FormatInt(time.Now().UnixMilli(), 10)},
+	})
+	s.info.ctx = ctx
 	s.NotEqual(Unknown, Get(s.info, "$client_request_time")[0])
 }
 
