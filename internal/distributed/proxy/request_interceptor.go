@@ -20,24 +20,32 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var retryableCode typeutil.Set[int32]
+var (
+	retryableCode      typeutil.Set[int32]
+	fullMethodName2Tag *typeutil.ConcurrentMap[string, string]
+	sf                 conc.Singleflight[string]
+)
 
 func init() {
 	retryableCode = typeutil.NewSet(
 		merr.Code(merr.ErrServiceRateLimit),
 		merr.Code(merr.ErrCollectionSchemaMismatch),
 	)
+
+	fullMethodName2Tag = typeutil.NewConcurrentMap[string, string]()
 }
 
 // UnaryRequestStatsInterceptor implements `grpc.UnaryServerInterceptor`
@@ -46,7 +54,7 @@ func init() {
 // when some retirable error occurs, it will record it as `RetryLabel` instead of failure one
 // when other interceptor rejects the request, it will record it as `RejectedLabel`
 func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	methodTag := ParseShortMethodName(rpcInfo.FullMethod)
+	methodTag := FullMethodName2Tag(rpcInfo.FullMethod)
 	db, _ := requestutil.GetDbNameFromRequest(req)
 	collection, _ := requestutil.GetCollectionNameFromRequest(req)
 
@@ -61,17 +69,45 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		collectionName,
 	).Inc()
 
+	start := time.Now()
 	resp, err := handler(ctx, req)
+	label := ParseMetricLabel(resp, err)
 
+	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
-		ParseMetricLabel(resp, err),
+		label,
 		dbName,
 		collectionName,
 	).Inc()
 
+	// set metrics for latency
+	metrics.ProxyGRPCLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		methodTag,
+		label,
+	).Observe(float64(time.Since(start).Milliseconds()))
+
 	return resp, err
+}
+
+// FullMethodName2Tag returns method tag for grpc full method name
+// it utilizes `fullMethodName2Tag` as cache result
+// if cache miss, it will call `ParseShortMethodName` to parse method tag
+// SingleFlight `sf` will make sure there is only one call.
+func FullMethodName2Tag(fullMethodName string) string {
+	tag, ok := fullMethodName2Tag.Get(fullMethodName)
+	if ok {
+		return tag
+	}
+
+	tag, _, _ = sf.Do(fullMethodName, func() (string, error) {
+		tag = ParseShortMethodName(fullMethodName)
+		fullMethodName2Tag.Insert(fullMethodName, tag)
+		return tag, nil
+	})
+	return tag
 }
 
 // ParseShortMethodName parse short method name from full method name
