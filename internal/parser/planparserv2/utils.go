@@ -12,7 +12,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -845,7 +844,6 @@ func parseISOWithTimezone(isoString string, preferredZones []string) (int64, err
 		if err != nil {
 			return 0, fmt.Errorf("failed to parse timezone-aware string '%s': %w", isoString, err)
 		}
-		log.Debug("use timezone in string")
 		return t.UnixMicro(), nil
 	}
 	for _, zoneName := range preferredZones {
@@ -855,7 +853,6 @@ func parseISOWithTimezone(isoString string, preferredZones []string) (int64, err
 		}
 		t, err := time.ParseInLocation(layoutForNaiveTime, isoString, loc)
 		if err == nil {
-			log.Debug("use preferred timezone")
 			return t.UnixMicro(), nil
 		}
 	}
@@ -863,6 +860,5 @@ func parseISOWithTimezone(isoString string, preferredZones []string) (int64, err
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse naive time string '%s' even with UTC fallback: %w", isoString, err)
 	}
-	log.Debug("use UTC timezone")
 	return t.UnixMicro(), nil
 }
