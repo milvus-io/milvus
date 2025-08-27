@@ -113,6 +113,13 @@ func (bw *BulkPackWriterV2) getRootPath() string {
 	return bw.chunkManager.RootPath()
 }
 
+func (bw *BulkPackWriterV2) getBucketName() string {
+	if bw.storageConfig != nil {
+		return bw.storageConfig.BucketName
+	}
+	return paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+}
+
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
@@ -144,7 +151,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	bucketName := bw.storageConfig.BucketName
+	bucketName := bw.getBucketName()
 
 	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig)
 	if err != nil {
