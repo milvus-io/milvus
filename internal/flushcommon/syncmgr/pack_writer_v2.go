@@ -144,7 +144,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	bucketName := bw.storageConfig.BucketName
 
 	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig)
 	if err != nil {
