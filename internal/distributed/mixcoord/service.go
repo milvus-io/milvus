@@ -896,6 +896,10 @@ func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*
 	return s.mixCoord.GcControl(ctx, req)
 }
 
+func (s *Server) GetGcStatus(ctx context.Context, req *datapb.GetGcStatusRequest) (*datapb.GetGcStatusResponse, error) {
+	return s.mixCoord.GetGcStatus(ctx, req)
+}
+
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	return s.mixCoord.ImportV2(ctx, in)
 }
