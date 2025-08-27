@@ -16,6 +16,7 @@
 
 #include <glog/logging.h>
 #include <any>
+#include <cstdint>
 #include <string>
 #include "common/Array.h"
 #include "common/Consts.h"
@@ -173,6 +174,14 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     if (json.contains(NULLABLE)) {
         extras[NULLABLE] = static_cast<bool>(json[NULLABLE]);
     }
+
+    if (json.contains(EDEK)) {
+        extras[EDEK] = static_cast<std::string>(json[EDEK]);
+    }
+
+    if (json.contains(EZID)) {
+        extras[EZID] = static_cast<int64_t>(json[EZID]);
+    }
 }
 
 std::vector<uint8_t>
@@ -182,6 +191,8 @@ DescriptorEventData::Serialize() {
     for (auto v : extras) {
         if (v.first == NULLABLE) {
             extras_json.emplace(v.first, std::any_cast<bool>(v.second));
+        } else if (v.first == EZID) {
+            extras_json.emplace(v.first, std::any_cast<int64_t>(v.second));
         } else {
             extras_json.emplace(v.first, std::any_cast<std::string>(v.second));
         }
@@ -397,26 +408,46 @@ DescriptorEvent::DescriptorEvent(BinlogReaderPtr reader) {
     event_data = DescriptorEventData(reader);
 }
 
+std::string
+DescriptorEvent::GetEdekFromExtra(){
+    auto it = event_data.extras.find(EDEK);
+    if (it != event_data.extras.end()) {
+        return std::any_cast<std::string>(it->second);
+    }
+    return "";
+}
+
+int64_t
+DescriptorEvent::GetEZFromExtra(){
+    auto it = event_data.extras.find(EZID);
+    if (it != event_data.extras.end()) {
+        return std::any_cast<int64_t>(it->second);
+    }
+    return -1;
+}
+
+
 std::vector<uint8_t>
 DescriptorEvent::Serialize() {
+    auto data_bytes = event_data.Serialize();
+
     event_header.event_type_ = EventType::DescriptorEvent;
-    auto data = event_data.Serialize();
-    int data_size = data.size();
+    event_header.event_length_ = GetEventHeaderSize(event_header) + data_bytes.size();
+    event_header.next_position_ = event_header.event_length_ + sizeof(MAGIC_NUM);
+    auto header_bytes = event_header.Serialize();
 
-    event_header.event_length_ = GetEventHeaderSize(event_header) + data_size;
-    auto header = event_header.Serialize();
-    int header_size = header.size();
+    LOG_INFO("DescriptorEvent next position:{}, magic size:{}, header_size:{}, data_size:{}",
+            event_header.next_position_,
+            sizeof(MAGIC_NUM), header_bytes.size(), data_bytes.size());
 
-    int len = header_size + data_size + sizeof(MAGIC_NUM);
-    std::vector<uint8_t> res(len, 0);
-    int offset = 0;
+    std::vector<uint8_t> res(event_header.next_position_, 0);
+    int32_t offset = 0;
     memcpy(res.data(), &MAGIC_NUM, sizeof(MAGIC_NUM));
     offset += sizeof(MAGIC_NUM);
-    memcpy(res.data() + offset, header.data(), header_size);
-    offset += header_size;
-    memcpy(res.data() + offset, data.data(), data_size);
-    offset += data_size;
-    event_header.next_position_ = offset;
+    memcpy(res.data() + offset, header_bytes.data(), header_bytes.size());
+    offset += header_bytes.size();
+    memcpy(res.data() + offset, data_bytes.data(), data_bytes.size());
+    offset += data_bytes.size();
 
     return res;
 }

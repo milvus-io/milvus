@@ -20,6 +20,7 @@
 #include "arrow/array/builder_nested.h"
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
+#include "common/type_c.h"
 #include "fmt/format.h"
 #include "index/Utils.h"
 #include "log/Log.h"
@@ -28,6 +29,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "pb/common.pb.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/azure/AzureChunkManager.h"
 #endif
@@ -50,6 +52,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -796,7 +799,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           int64_t batch_size,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
-                          std::string object_key) {
+                          std::string object_key,
+                          std::shared_ptr<CPluginContext> plugin_context) {
     std::shared_ptr<IndexData> index_data = nullptr;
     if (index_meta.index_non_encoding) {
         index_data = std::make_shared<IndexData>(buf, batch_size);
@@ -812,7 +816,7 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     // index not use valid_data, so no need to set nullable==true
     index_data->set_index_meta(index_meta);
     index_data->SetFieldDataMeta(field_meta);
-    auto serialized_index_data = index_data->serialize_to_remote_file();
+    auto serialized_index_data = index_data->serialize_to_remote_file(plugin_context);
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
@@ -828,9 +832,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager,
-                                      const std::string& file,
-                                      bool is_field_data) {
+    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager, bool is_field_data, const std::string file) {
         // TODO remove this Size() cost
         auto fileSize = chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
@@ -840,8 +842,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDeserialize, remote_chunk_manager, file, is_field_data));
+        futures.emplace_back(pool.Submit(DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
     }
     return futures;
 }
@@ -852,7 +853,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
-             IndexMeta& index_meta) {
+             IndexMeta& index_meta,
+             std::shared_ptr<CPluginContext> plugin_context) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(),
@@ -871,7 +873,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
                                       slice_sizes[i],
                                       index_meta,
                                       field_meta,
-                                      slice_names[i]));
+                                      slice_names[i],
+                                      plugin_context));
     }
 
     std::map<std::string, int64_t> remote_paths_to_size;
@@ -1233,7 +1236,10 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs, column_group_file);
+            fs,
+            column_group_file,
+            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+            GetReaderProperties());
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1259,7 +1265,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
-                                    nullptr);
+                                    nullptr,
+                                    milvus::proto::common::LoadPriority::HIGH);
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;
@@ -1347,7 +1354,9 @@ GetFieldIDList(FieldId column_group_id,
         return field_id_list;
     }
     auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-        fs, filepath, arrow_schema);
+        fs, filepath, arrow_schema,
+        milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+        GetReaderProperties());
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());

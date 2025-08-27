@@ -445,7 +445,7 @@ func (node *QueryNode) InitSegcore() error {
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()
-	return nil
+	return initcore.InitPluginLoader()
 }
 
 func getIndexEngineVersion() (minimal, current int32) {

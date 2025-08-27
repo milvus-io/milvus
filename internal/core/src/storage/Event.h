@@ -97,6 +97,12 @@ struct DescriptorEvent {
 
     std::vector<uint8_t>
     Serialize();
+
+    std::string
+    GetEdekFromExtra();
+
+    int64_t
+    GetEZFromExtra();
 };
 
 struct BaseEvent {

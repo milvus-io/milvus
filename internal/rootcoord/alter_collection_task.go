@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -50,26 +51,35 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
-	// Now we only support alter properties of collection
+	log := log.Ctx(ctx).With(
+		zap.String("alterCollectionTask", a.Req.GetCollectionName()),
+		zap.Int64("collectionID", a.Req.GetCollectionID()),
+		zap.Uint64("ts", a.GetTs()))
+
 	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
-		return errors.New("The collection properties to alter and keys to delete must not be empty at the same time")
+		log.Warn("alter collection with empty properties and delete keys, expected to set either properties or delete keys ")
+		return errors.New("alter collection with empty properties and delete keys, expect to set either properties or delete keys ")
 	}
 
 	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
-		return errors.New("can not provide properties and deletekeys at the same time")
+		return errors.New("alter collection cannot provide properties and delete keys at the same time")
 	}
 
-	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
+	if hookutil.ContainsCipherProperties(a.Req.GetProperties(), a.Req.GetDeleteKeys()) {
+		log.Info("skip to alter collection due to cipher properties were detected in the properties")
+		return errors.New("can not alter cipher related properties")
+	}
+
+	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.GetTs())
 	if err != nil {
-		log.Ctx(ctx).Warn("get collection failed during changing collection state",
-			zap.String("collectionName", a.Req.GetCollectionName()), zap.Uint64("ts", a.ts))
+		log.Warn("get collection failed during changing collection state", zap.Error(err))
 		return err
 	}
 
 	var newProperties []*commonpb.KeyValuePair
 	if len(a.Req.Properties) > 0 {
-		if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
-			log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
+		if IsSubsetOfProperties(a.Req.GetProperties(), oldColl.Properties) {
+			log.Info("skip to alter collection due to no changes were detected in the properties")
 			return nil
 		}
 		newProperties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
@@ -77,8 +87,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		newProperties = DeleteProperties(oldColl.Properties, a.Req.GetDeleteKeys())
 	}
 
-	ts := a.GetTs()
-	return executeAlterCollectionTaskSteps(ctx, a.core, oldColl, oldColl.Properties, newProperties, a.Req, ts)
+	return executeAlterCollectionTaskSteps(ctx, a.core, oldColl, oldColl.Properties, newProperties, a.Req, a.GetTs())
 }
 
 func (a *alterCollectionTask) GetLockerKey() LockerKey {

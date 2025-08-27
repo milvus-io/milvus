@@ -42,6 +42,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -464,7 +465,9 @@ SegmentGrowingImpl::load_column_group_data_internal(
         row_group_lists.reserve(insert_files.size());
         for (const auto& file : insert_files) {
             auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
+                    milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                    storage::GetReaderProperties());
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);

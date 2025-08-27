@@ -153,7 +153,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           int64_t batch_size,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
-                          std::string object_key);
+                          std::string object_key,
+                          std::shared_ptr<CPluginContext> plugin_context);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(
@@ -175,7 +176,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
-             IndexMeta& index_meta);
+             IndexMeta& index_meta,
+             std::shared_ptr<CPluginContext> plugin_context);
 
 int64_t
 GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
