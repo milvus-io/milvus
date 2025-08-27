@@ -103,3 +103,6 @@ const int64_t STORAGE_V2 = 2;
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
 
 const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
+
+// VectorArray related, used for fetch metadata from Arrow schema
+const std::string ELEMENT_TYPE_KEY = "elementType";

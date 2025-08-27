@@ -115,7 +115,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 			return nil, merr.WrapErrParameterInvalidMsg("ArrayOfVector requires elementType, use WithElementType option")
 		}
 		w.arrowType = VectorArrayToArrowType(*w.elementType)
-		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Float32) // Currently only FloatVector supported
+		w.builder = array.NewListBuilder(memory.DefaultAllocator, w.arrowType)
 	} else {
 		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)

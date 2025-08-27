@@ -632,7 +632,7 @@ CreateArrowSchema(DataType data_type,
     auto list_type = arrow::list(value_type);
 
     auto metadata = arrow::KeyValueMetadata::Make(
-        {"elementType", "dim"},
+        {ELEMENT_TYPE_KEY, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
     auto field =

@@ -98,16 +98,17 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
 
             // Get element type
             AssertInfo(
-                metadata->Contains("elementType"),
+                metadata->Contains(ELEMENT_TYPE_KEY),
                 "VectorArray metadata missing required 'elementType' field");
-            auto element_type_str = metadata->Get("elementType").ValueOrDie();
+            auto element_type_str =
+                metadata->Get(ELEMENT_TYPE_KEY).ValueOrDie();
             auto element_type_int = std::stoi(element_type_str);
             element_type = static_cast<DataType>(element_type_int);
 
             // Get dimension from metadata
-            AssertInfo(metadata->Contains("dim"),
+            AssertInfo(metadata->Contains(DIM_KEY),
                        "VectorArray metadata missing required 'dim' field");
-            auto dim_str = metadata->Get("dim").ValueOrDie();
+            auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
             dim_ = std::stoi(dim_str);
             AssertInfo(
                 dim_ > 0, "VectorArray dim must be positive, got {}", dim_);

@@ -29,8 +29,8 @@ type PayloadReader struct {
 	colType     schemapb.DataType
 	numRows     int64
 	nullable    bool
-	elementType *schemapb.DataType // For VectorArray type
-	dim         *int64             // For VectorArray type
+	elementType schemapb.DataType // For VectorArray type
+	dim         int64             // For VectorArray type
 }
 
 var _ PayloadReaderInterface = (*PayloadReader)(nil)
@@ -90,7 +90,7 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_Int8Vector,
 			schemapb.DataType_SparseFloatVector:
-			reader.elementType = &elementType
+			reader.elementType = elementType
 		default:
 			return nil, fmt.Errorf("invalid vector type for VectorArray: %s", elementType.String())
 		}
@@ -106,7 +106,7 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 		if dimVal <= 0 {
 			return nil, fmt.Errorf("VectorArray dim must be positive, got %d", dimVal)
 		}
-		reader.dim = &dimVal
+		reader.dim = dimVal
 	}
 
 	return reader, nil
@@ -596,8 +596,8 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 
 	result := make([]*schemapb.VectorField, 0, int(r.numRows))
 
-	elementType := *r.elementType
-	dim := *r.dim
+	elementType := r.elementType
+	dim := r.dim
 	for _, chunk := range column.Data().Chunks() {
 		listArray, ok := chunk.(*array.List)
 		if !ok {
@@ -620,10 +620,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 
 				start, end := listArray.ValueOffsets(i)
 				vectorData := make([]float32, end-start)
-
-				for j := start; j < end; j++ {
-					vectorData[j-start] = floatArray.Value(int(j))
-				}
+				copy(vectorData, floatArray.Float32Values()[start:end])
 
 				vectorField := &schemapb.VectorField{
 					Dim: dim,
