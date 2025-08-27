@@ -5,35 +5,52 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-func (c *Client) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) error {
+// UpdateReplicateConfiguration updates the replicate configuration to the Milvus cluster.
+// Use ReplicateConfigurationBuilder to build the configuration.
+func (c *Client) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration, opts ...grpc.CallOption) error {
+	req := &milvuspb.UpdateReplicateConfigurationRequest{
+		ReplicateConfiguration: config,
+	}
+
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.UpdateReplicateConfiguration(ctx, in, opts...)
+		resp, err := milvusService.UpdateReplicateConfiguration(ctx, req, opts...)
 		return merr.CheckRPCCall(resp, err)
 	})
 	return err
 }
 
-func (c *Client) GetReplicateInfo(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
+// GetReplicateInfo gets replicate information from the Milvus cluster
+func (c *Client) GetReplicateInfo(ctx context.Context, sourceClusterID string, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
+	req := &milvuspb.GetReplicateInfoRequest{
+		SourceClusterId: sourceClusterID,
+	}
 	var resp *milvuspb.GetReplicateInfoResponse
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		var err error
-		resp, err = milvusService.GetReplicateInfo(ctx, in, opts...)
+		resp, err = milvusService.GetReplicateInfo(ctx, req, opts...)
 		return merr.CheckRPCCall(resp, err)
 	})
 	return resp, err
 }
 
+// CreateReplicateStream creates a replicate stream
 func (c *Client) CreateReplicateStream(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
-	var resp milvuspb.MilvusService_CreateReplicateStreamClient
+	var streamClient milvuspb.MilvusService_CreateReplicateStreamClient
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		var err error
-		resp, err = milvusService.CreateReplicateStream(ctx, opts...)
-		return merr.CheckRPCCall(resp, err)
+		streamClient, err = milvusService.CreateReplicateStream(ctx, opts...)
+		if err != nil {
+			return err
+		}
+		if streamClient == nil {
+			return errors.New("stream client is nil")
+		}
+		return nil
 	})
-	return resp, err
+	return streamClient, err
 }

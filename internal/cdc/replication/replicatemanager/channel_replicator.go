@@ -141,9 +141,8 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 	}
 	defer milvusClient.Close(r.ctx)
 
-	replicateInfo, err := milvusClient.GetReplicateInfo(r.ctx, &milvuspb.GetReplicateInfoRequest{
-		SourceClusterId: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
-	})
+	sourceClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	replicateInfo, err := milvusClient.GetReplicateInfo(r.ctx, sourceClusterID)
 	if err != nil {
 		return nil, err
 	}

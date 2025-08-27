@@ -10,12 +10,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/replicate"
-	"github.com/milvus-io/milvus/internal/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -64,7 +63,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	}
 	pchannels := balancer.GetPChannels()
 
-	validator := replicate.NewReplicateConfigValidator(config, pchannels)
+	validator := replicateutil.NewReplicateConfigValidator(config, pchannels)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err

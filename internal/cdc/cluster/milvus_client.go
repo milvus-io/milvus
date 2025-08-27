@@ -25,10 +25,8 @@ import (
 )
 
 type MilvusClient interface {
-	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) error
 	// GetReplicateInfo gets the replicate information from the milvus cluster.
-	GetReplicateInfo(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)
+	GetReplicateInfo(ctx context.Context, sourceClusterID string, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)
 	// CreateReplicateStream creates a replicate stream to the milvus cluster.
 	CreateReplicateStream(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error)
 	// Close closes the milvus client.

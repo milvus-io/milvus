@@ -144,14 +144,14 @@ func (_c *MockMilvusClient_CreateReplicateStream_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// GetReplicateInfo provides a mock function with given fields: ctx, in, opts
-func (_m *MockMilvusClient) GetReplicateInfo(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
+// GetReplicateInfo provides a mock function with given fields: ctx, sourceClusterID, opts
+func (_m *MockMilvusClient) GetReplicateInfo(ctx context.Context, sourceClusterID string, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, ctx, sourceClusterID)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -161,19 +161,19 @@ func (_m *MockMilvusClient) GetReplicateInfo(ctx context.Context, in *milvuspb.G
 
 	var r0 *milvuspb.GetReplicateInfoResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateInfoRequest, ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)); ok {
-		return rf(ctx, in, opts...)
+	if rf, ok := ret.Get(0).(func(context.Context, string, ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)); ok {
+		return rf(ctx, sourceClusterID, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateInfoRequest, ...grpc.CallOption) *milvuspb.GetReplicateInfoResponse); ok {
-		r0 = rf(ctx, in, opts...)
+	if rf, ok := ret.Get(0).(func(context.Context, string, ...grpc.CallOption) *milvuspb.GetReplicateInfoResponse); ok {
+		r0 = rf(ctx, sourceClusterID, opts...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.GetReplicateInfoResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetReplicateInfoRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
+	if rf, ok := ret.Get(1).(func(context.Context, string, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, sourceClusterID, opts...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -188,14 +188,14 @@ type MockMilvusClient_GetReplicateInfo_Call struct {
 
 // GetReplicateInfo is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *milvuspb.GetReplicateInfoRequest
+//   - sourceClusterID string
 //   - opts ...grpc.CallOption
-func (_e *MockMilvusClient_Expecter) GetReplicateInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockMilvusClient_GetReplicateInfo_Call {
+func (_e *MockMilvusClient_Expecter) GetReplicateInfo(ctx interface{}, sourceClusterID interface{}, opts ...interface{}) *MockMilvusClient_GetReplicateInfo_Call {
 	return &MockMilvusClient_GetReplicateInfo_Call{Call: _e.mock.On("GetReplicateInfo",
-		append([]interface{}{ctx, in}, opts...)...)}
+		append([]interface{}{ctx, sourceClusterID}, opts...)...)}
 }
 
-func (_c *MockMilvusClient_GetReplicateInfo_Call) Run(run func(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption)) *MockMilvusClient_GetReplicateInfo_Call {
+func (_c *MockMilvusClient_GetReplicateInfo_Call) Run(run func(ctx context.Context, sourceClusterID string, opts ...grpc.CallOption)) *MockMilvusClient_GetReplicateInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -203,7 +203,7 @@ func (_c *MockMilvusClient_GetReplicateInfo_Call) Run(run func(ctx context.Conte
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*milvuspb.GetReplicateInfoRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(string), variadicArgs...)
 	})
 	return _c
 }
@@ -213,69 +213,7 @@ func (_c *MockMilvusClient_GetReplicateInfo_Call) Return(_a0 *milvuspb.GetReplic
 	return _c
 }
 
-func (_c *MockMilvusClient_GetReplicateInfo_Call) RunAndReturn(run func(context.Context, *milvuspb.GetReplicateInfoRequest, ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)) *MockMilvusClient_GetReplicateInfo_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateReplicateConfiguration provides a mock function with given fields: ctx, in, opts
-func (_m *MockMilvusClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) error {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateReplicateConfiguration")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) error); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockMilvusClient_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
-type MockMilvusClient_UpdateReplicateConfiguration_Call struct {
-	*mock.Call
-}
-
-// UpdateReplicateConfiguration is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.UpdateReplicateConfigurationRequest
-//   - opts ...grpc.CallOption
-func (_e *MockMilvusClient_Expecter) UpdateReplicateConfiguration(ctx interface{}, in interface{}, opts ...interface{}) *MockMilvusClient_UpdateReplicateConfiguration_Call {
-	return &MockMilvusClient_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockMilvusClient_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption)) *MockMilvusClient_UpdateReplicateConfiguration_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*milvuspb.UpdateReplicateConfigurationRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockMilvusClient_UpdateReplicateConfiguration_Call) Return(_a0 error) *MockMilvusClient_UpdateReplicateConfiguration_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockMilvusClient_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) error) *MockMilvusClient_UpdateReplicateConfiguration_Call {
+func (_c *MockMilvusClient_GetReplicateInfo_Call) RunAndReturn(run func(context.Context, string, ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error)) *MockMilvusClient_GetReplicateInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
