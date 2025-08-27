@@ -481,7 +481,7 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
             PrepareOptionalField<TYPE>(file_manager, insert_file_path);      \
         milvus::Config config;                                               \
         config[VEC_OPT_FIELDS] = opt_fields;                                 \
-        auto res = file_manager->CacheOptFieldToDisk(config);            \
+        auto res = file_manager->CacheOptFieldToDisk(config);                \
         ASSERT_FALSE(res.empty());                                           \
         CheckOptFieldCorrectness(res, RANGE);                                \
     };

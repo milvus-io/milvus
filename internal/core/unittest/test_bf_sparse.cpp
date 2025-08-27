@@ -51,12 +51,13 @@ SearchRef(const knowhere::sparse::SparseRow<milvus::SparseValueType>* base,
 }
 
 std::vector<int>
-RangeSearchRef(const knowhere::sparse::SparseRow<milvus::SparseValueType>* base,
-               const knowhere::sparse::SparseRow<milvus::SparseValueType>& query,
-               int nb,
-               float radius,
-               float range_filter,
-               int topk) {
+RangeSearchRef(
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>* base,
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>& query,
+    int nb,
+    float radius,
+    float range_filter,
+    int topk) {
     std::vector<int> offsets;
     for (int i = 0; i < nb; i++) {
         auto& row = base[i];

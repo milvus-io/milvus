@@ -610,7 +610,10 @@ TEST(chunk, test_sparse_float) {
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
     auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_U32_F32, false, kTestSparseDim, n_rows);
+        storage::DataType::VECTOR_SPARSE_U32_F32,
+        false,
+        kTestSparseDim,
+        n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;

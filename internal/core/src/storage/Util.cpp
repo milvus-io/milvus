@@ -747,7 +747,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     // index not use valid_data, so no need to set nullable==true
     index_data->set_index_meta(index_meta);
     index_data->SetFieldDataMeta(field_meta);
-    auto serialized_index_data = index_data->serialize_to_remote_file(plugin_context);
+    auto serialized_index_data =
+        index_data->serialize_to_remote_file(plugin_context);
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
@@ -763,7 +764,9 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager, bool is_field_data, const std::string file) {
+    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager,
+                                     bool is_field_data,
+                                     const std::string file) {
         // TODO remove this Size() cost
         auto fileSize = chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
@@ -773,7 +776,8 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
+        futures.emplace_back(pool.Submit(
+            DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
     }
     return futures;
 }
@@ -1279,7 +1283,9 @@ GetFieldIDList(FieldId column_group_id,
         return field_id_list;
     }
     auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-        fs, filepath, arrow_schema,
+        fs,
+        filepath,
+        arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties());
     field_id_list =
