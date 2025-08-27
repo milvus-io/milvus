@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -276,13 +275,24 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
+func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
+	switch policy {
+	case "sync":
+		return C.CacheWarmupPolicy_Sync, nil
+	case "disable":
+		return C.CacheWarmupPolicy_Disable, nil
+	default:
+		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
+	}
+}
+
 func InitTieredStorage(params *paramtable.ComponentParam) error {
 	// init tiered storage
-	scalarFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	scalarFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
 	if err != nil {
 		return err
 	}
-	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	vectorFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorField.GetValue())
 	if err != nil {
 		return err
 	}
@@ -295,11 +305,11 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	} else if deprecatedCacheWarmupPolicy == "async" {
 		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
-	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {
 		return err
 	}
-	vectorIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	vectorIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
 	if err != nil {
 		return err
 	}
@@ -351,10 +361,10 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
 	defer C.free(unsafe.Pointer(diskPath))
 
-	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
-		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
-		C.CacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
-		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
+	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
+		vectorFieldCacheWarmupPolicy,
+		scalarIndexCacheWarmupPolicy,
+		vectorIndexCacheWarmupPolicy,
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
 		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
