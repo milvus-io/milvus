@@ -70,7 +70,7 @@ class ParallelDegreeSplitStrategy : public RowGroupSplitStrategy {
 
 /*
  * Load storage v2 files with specified strategy. The number of row group readers is determined by the strategy.
- * 
+ *
  * @param remote_files: list of remote files
  * @param channel: channel to store the loaded data
  * @param memory_limit: memory limit for each chunk

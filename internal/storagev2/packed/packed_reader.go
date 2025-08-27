@@ -32,10 +32,11 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
-func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig) (*PackedReader, error) {
+func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -53,6 +54,17 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
+
+	var pluginContextPtr *C.CPluginContext
+	if storagePluginContext != nil {
+		ckey := C.CString(storagePluginContext.EncryptionKey)
+		defer C.free(unsafe.Pointer(ckey))
+		var pluginContext C.CPluginContext
+		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
+		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
+		pluginContext.key = ckey
+		pluginContextPtr = &pluginContext
+	}
 
 	if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
@@ -87,9 +99,9 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader)
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
-		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader)
+		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

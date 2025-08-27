@@ -59,8 +59,7 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 	}
 }
 
-// packSegmentLoadInfo packs SegmentLoadInfo for given segment,
-// packs with index if withIndex is true, this fetch indexes from IndexCoord
+// packSegmentLoadInfo packs SegmentLoadInfo for given segment
 func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
 	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)

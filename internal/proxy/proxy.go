@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -261,6 +262,10 @@ func (node *Proxy) Init() error {
 	// Only proxy generates UUID for now, and one Milvus process only has one proxy
 	uuid.EnableRandPool()
 	log.Debug("enable rand pool for UUIDv4 generation")
+
+	if hookutil.IsClusterEncyptionEnabled() {
+		message.RegisterCipher(hookutil.GetCipher())
+	}
 
 	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil

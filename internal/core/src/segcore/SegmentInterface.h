@@ -31,6 +31,8 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "folly/SharedMutex.h"
+#include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"

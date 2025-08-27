@@ -56,11 +56,17 @@ struct FileManagerContext {
         for_loading_index = value;
     }
 
+    void
+    set_plugin_context(std::shared_ptr<CPluginContext> context) {
+        plugin_context = context;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
     bool for_loading_index{false};
+    std::shared_ptr<CPluginContext> plugin_context;
 };
 
 #define FILEMANAGER_TRY try {
@@ -201,6 +207,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::shared_ptr<CPluginContext> plugin_context_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;
