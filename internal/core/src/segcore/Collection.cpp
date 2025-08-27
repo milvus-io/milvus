@@ -40,7 +40,6 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
     Assert(schema_proto != nullptr);
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_proto, length);
-    LOG_DEBUG("Collection schema: {}", collection_schema.DebugString());
     if (!suc) {
         LOG_WARN("unmarshal schema string failed");
     }

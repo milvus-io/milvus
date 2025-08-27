@@ -176,9 +176,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
-            LOG_DEBUG("Set data for field: {} with type {}",
-                      field_meta.get_name().get(),
-                      GetDataTypeName(field_meta.get_data_type()));
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {

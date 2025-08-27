@@ -2647,6 +2647,7 @@ func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
 	}
 	return false
 }
+
 func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
 	for _, p := range props {
 		// used in collection or database

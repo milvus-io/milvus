@@ -630,7 +630,6 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	defer sd.distribution.Unpin(version)
 
 	if req.Req.IgnoreGrowing {
-		log.Debug("query ignore growing segments")
 		growing = []SegmentEntry{}
 	}
 
