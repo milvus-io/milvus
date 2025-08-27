@@ -203,6 +203,11 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema2->set_fieldid(102);
     other_field_schema2->set_data_type(schema::DataType::Double);
 
+    auto other_field_schema3 = collection_schema.add_fields();
+    other_field_schema3->set_name("timestamptzField");
+    other_field_schema3->set_fieldid(103);
+    other_field_schema3->set_data_type(schema::DataType::Timestamptz);
+
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(
         collection_schema, &schema_string);
@@ -945,7 +950,7 @@ TEST(CApiTest, SearchTestWhenNullable) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, 111, &segment, false);
+    auto status = NewSegment(collection, Growing, 112, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 

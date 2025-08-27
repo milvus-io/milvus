@@ -103,6 +103,7 @@ message CreateJobRequest {
   int64 storage_version = 29;
   int64 lack_binlog_rows = 30;
   repeated data.FieldBinlog insert_logs = 31;
+  repeated common.KeyValuePair plugin_context = 32;
 }
 
 message QueryJobsRequest {
@@ -155,6 +156,7 @@ message AnalyzeRequest {
   double max_cluster_size_ratio = 16;
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
+  repeated common.KeyValuePair plugin_context = 19;
 }
 
 message CreateStatsRequest {
@@ -189,6 +191,7 @@ message CreateStatsRequest {
   int64 task_slot = 24;
   int64 storage_version = 25;
   int32 current_scalar_index_version = 26;
+  repeated common.KeyValuePair plugin_context = 27;
 }
 
 message CreateJobV2Request {

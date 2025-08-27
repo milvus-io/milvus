@@ -70,7 +70,7 @@ JsonInvertedIndex<T>::build_index_for_json(
 }
 
 template <typename T>
-const TargetBitmap
+TargetBitmap
 JsonInvertedIndex<T>::Exists() {
     int64_t count = this->Count();
     TargetBitmap bitset(count, true);

@@ -63,21 +63,24 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
             case JsonCastType::DataType::DOUBLE: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<double>*>(index);
-                cached_index_chunk_res_ = json_index->Exists().clone();
+                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                    std::move(json_index->Exists()));
                 break;
             }
 
             case JsonCastType::DataType::VARCHAR: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<std::string>*>(index);
-                cached_index_chunk_res_ = json_index->Exists().clone();
+                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                    std::move(json_index->Exists()));
                 break;
             }
 
             case JsonCastType::DataType::BOOL: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<bool>*>(index);
-                cached_index_chunk_res_ = json_index->Exists().clone();
+                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                    std::move(json_index->Exists()));
                 break;
             }
 
@@ -86,7 +89,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     dynamic_cast<index::JsonFlatIndex*>(index);
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
-                cached_index_chunk_res_ = executor->IsNotNull().clone();
+                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                    std::move(executor->IsNotNull()));
                 break;
             }
 
@@ -98,7 +102,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
     }
     TargetBitmap res;
     res.append(
-        cached_index_chunk_res_, current_index_chunk_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_index_chunk_pos_, real_batch_size);
     current_index_chunk_pos_ += real_batch_size;
     return std::make_shared<ColumnVector>(std::move(res),
                                           TargetBitmap(real_batch_size, true));
@@ -209,17 +213,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+            std::move(index->FilterByPath(pointer,
+                                          active_count_,
+                                          is_growing,
+                                          is_strong_consistency,
+                                          filter_func)));
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));

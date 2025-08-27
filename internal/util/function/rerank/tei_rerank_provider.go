@@ -71,7 +71,7 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		}
 	}
 
-	client, err := tei.NewTEIClient(apiKey, endpoint, conf["enable"])
+	client, err := tei.NewTEIClient(apiKey, endpoint)
 	if err != nil {
 		return nil, err
 	}

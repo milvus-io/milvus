@@ -64,6 +64,13 @@ InitTrace(CTraceConfig* config);
 void
 SetTrace(CTraceConfig* config);
 
+// Expr result cache
+void
+SetExprResCacheEnable(bool val);
+
+void
+SetExprResCacheCapacityBytes(int64_t bytes);
+
 #ifdef __cplusplus
 };
 #endif

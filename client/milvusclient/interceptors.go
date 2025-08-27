@@ -18,6 +18,7 @@ package milvusclient
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -36,12 +37,16 @@ const (
 	identifierHeader = `identifier`
 
 	databaseHeader = `dbname`
+
+	// ClientRequestMsecKey temp const value, TODO use common package def after upgrading milvus/pkg version
+	ClientRequestMsecKey string = "client-request-unixmsec"
 )
 
 func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx = c.metadata(ctx)
 		ctx = c.state(ctx)
+		ctx = c.extraInfo(ctx)
 
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
@@ -65,6 +70,11 @@ func (c *Client) state(ctx context.Context) context.Context {
 		ctx = metadata.AppendToOutgoingContext(ctx, identifierHeader, c.identifier)
 	}
 
+	return ctx
+}
+
+func (c *Client) extraInfo(ctx context.Context) context.Context {
+	ctx = metadata.AppendToOutgoingContext(ctx, ClientRequestMsecKey, strconv.FormatInt(time.Now().UnixMilli(), 10))
 	return ctx
 }
 

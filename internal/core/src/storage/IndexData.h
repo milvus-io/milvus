@@ -46,7 +46,7 @@ class IndexData : public DataCodec {
     set_index_meta(const IndexMeta& meta);
 
     std::vector<uint8_t>
-    serialize_to_remote_file();
+    serialize_to_remote_file(std::shared_ptr<CPluginContext> context = nullptr);
 
     std::vector<uint8_t>
     serialize_to_local_file();

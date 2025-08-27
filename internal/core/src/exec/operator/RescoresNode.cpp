@@ -66,14 +66,30 @@ PhyRescoresNode::GetOutput() {
     for (size_t i = 0; i < search_result.seg_offsets_.size(); i++) {
         // remain offset will be -1 if result count not enough (less than topk)
         // skip placeholder offset
-        if (search_result.seg_offsets_[i] >= 0){
-            offsets.push_back(static_cast<int32_t>(search_result.seg_offsets_[i]));
+        if (search_result.seg_offsets_[i] >= 0) {
+            offsets.push_back(
+                static_cast<int32_t>(search_result.seg_offsets_[i]));
             offset_idx.push_back(i);
         }
     }
 
+    // skip rescore if result was empty
+    if (offsets.empty()) {
+        query_context_->set_search_result(std::move(search_result));
+        return input_;
+    }
+
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
+        // rescore for all result if no filter
+        if (!filter) {
+            for (auto i = 0; i < offsets.size(); i++) {
+                search_result.distances_[offset_idx[i]] =
+                    scorer->rescore(search_result.distances_[offset_idx[i]]);
+            }
+            continue;
+        }
+
         std::vector<expr::TypedExprPtr> filters;
         filters.emplace_back(filter);
         auto expr_set = std::make_unique<ExprSet>(filters, exec_context);
@@ -99,8 +115,8 @@ PhyRescoresNode::GetOutput() {
             Assert(bitsetview.size() == offsets.size());
             for (auto i = 0; i < offsets.size(); i++) {
                 if (bitsetview[i] > 0) {
-                    search_result.distances_[offset_idx[i]] =
-                        scorer->rescore(search_result.distances_[offset_idx[i]]);
+                    search_result.distances_[offset_idx[i]] = scorer->rescore(
+                        search_result.distances_[offset_idx[i]]);
                 }
             }
         } else {
@@ -115,8 +131,8 @@ PhyRescoresNode::GetOutput() {
             bitset.append(view);
             for (auto i = 0; i < offsets.size(); i++) {
                 if (bitset[offsets[i]] > 0) {
-                    search_result.distances_[offset_idx[i]] =
-                        scorer->rescore(search_result.distances_[offset_idx[i]]);
+                    search_result.distances_[offset_idx[i]] = scorer->rescore(
+                        search_result.distances_[offset_idx[i]]);
                 }
             }
         }

@@ -259,6 +259,9 @@ func (node *QueryNode) InitSegcore() error {
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
+	cKnowhereFetchThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereFetchThreadPoolSize.GetAsUint32())
+	C.SegcoreSetKnowhereFetchThreadPoolNum(cKnowhereFetchThreadPoolSize)
+
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
 	C.SegcoreSetSimdType(cSimdType)
@@ -311,6 +314,12 @@ func (node *QueryNode) InitSegcore() error {
 
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
+
+	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
+	C.SetExprResCacheEnable(cExprResCacheEnabled)
+
+	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
+	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
@@ -436,7 +445,7 @@ func (node *QueryNode) InitSegcore() error {
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()
-	return nil
+	return initcore.InitPluginLoader()
 }
 
 func getIndexEngineVersion() (minimal, current int32) {

@@ -30,6 +30,8 @@ class BinlogReader {
         : data_(binlog_data), size_(length), tell_(0) {
     }
 
+    ~BinlogReader(){};
+
     template <typename T>
     SegcoreError
     ReadSingleValue(T& val) {

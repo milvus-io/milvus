@@ -371,8 +371,7 @@ func (_c *MockCompactor_Stop_Call) RunAndReturn(run func()) *MockCompactor_Stop_
 func NewMockCompactor(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockCompactor {
+}) *MockCompactor {
 	mock := &MockCompactor{}
 	mock.Mock.Test(t)
 

@@ -455,16 +455,20 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
     opt_fields[kOptFieldId + 1] = {
         kOptFieldName + "second", DataType::INT64, {insert_file_path}};
-    EXPECT_THROW(file_manager->CacheOptFieldToDisk(opt_fields), SegcoreError);
+    milvus::Config config;
+    config[VEC_OPT_FIELDS] = opt_fields;
+    EXPECT_THROW(file_manager->CacheOptFieldToDisk(config), SegcoreError);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
     auto file_manager = CreateFileManager(cm_);
     const auto insert_file_path =
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
-    auto opt_fileds =
+    auto opt_fields =
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
-    auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
+    milvus::Config config;
+    config[VEC_OPT_FIELDS] = opt_fields;
+    auto res = file_manager->CacheOptFieldToDisk(config);
     ASSERT_FALSE(res.empty());
     CheckOptFieldCorrectness(res);
 }
@@ -475,7 +479,9 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
         auto insert_file_path = PrepareInsertData<TYPE, NATIVE_TYPE>(RANGE); \
         auto opt_fields =                                                    \
             PrepareOptionalField<TYPE>(file_manager, insert_file_path);      \
-        auto res = file_manager->CacheOptFieldToDisk(opt_fields);            \
+        milvus::Config config;                                               \
+        config[VEC_OPT_FIELDS] = opt_fields;                                 \
+        auto res = file_manager->CacheOptFieldToDisk(config);            \
         ASSERT_FALSE(res.empty());                                           \
         CheckOptFieldCorrectness(res, RANGE);                                \
     };
@@ -496,9 +502,11 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
     {
         const auto insert_file_path =
             PrepareInsertData<DataType::INT64, int64_t>(1);
-        auto opt_fileds = PrepareOptionalField<DataType::INT64>(
+        auto opt_fields = PrepareOptionalField<DataType::INT64>(
             file_manager, insert_file_path);
-        auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
+        milvus::Config config;
+        config[VEC_OPT_FIELDS] = opt_fields;
+        auto res = file_manager->CacheOptFieldToDisk(config);
         ASSERT_TRUE(res.empty());
     }
 }

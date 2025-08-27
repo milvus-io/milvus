@@ -556,7 +556,8 @@ func (_c *MockStreamingCoordCataLog_SaveVersion_Call) RunAndReturn(run func(cont
 func NewMockStreamingCoordCataLog(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockStreamingCoordCataLog {
+},
+) *MockStreamingCoordCataLog {
 	mock := &MockStreamingCoordCataLog{}
 	mock.Mock.Test(t)
 

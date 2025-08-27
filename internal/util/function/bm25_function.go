@@ -27,8 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -46,7 +45,7 @@ type BM25FunctionRunner struct {
 	mu     sync.RWMutex
 	closed bool
 
-	tokenizer   tokenizerapi.Tokenizer
+	tokenizer   analyzer.Analyzer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	inputField  *schemapb.FieldSchema
@@ -88,7 +87,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	params = getAnalyzerParams(inputField)
-	tokenizer, err := ctokenizer.NewTokenizer(params)
+	tokenizer, err := analyzer.NewAnalyzer(params)
 	if err != nil {
 		return nil, err
 	}

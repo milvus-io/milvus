@@ -69,6 +69,9 @@ func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
 		if strings.ToLower(param.Key) == providerParamName {
 			provider := strings.ToLower(param.Value)
 			conf := paramtable.Get().FunctionCfg.GetRerankModelProviders(provider)
+			if !models.IsEnable(conf) {
+				return nil, fmt.Errorf("Rerank provider: [%s] is disabled", provider)
+			}
 			credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 			switch provider {
 			case vllmProviderName:

@@ -303,7 +303,7 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
     }
 }
 
-const TargetBitmap
+TargetBitmap
 StringIndexMarisa::IsNotNull() {
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < bitset.size(); i++) {

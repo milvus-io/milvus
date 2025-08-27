@@ -42,33 +42,14 @@ import (
 )
 
 // EqualKeyPairArray check whether 2 KeyValuePairs are equal
-func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {
-	if len(p1) != len(p2) {
-		return false
-	}
-	m1 := make(map[string]string)
-	for _, p := range p1 {
-		m1[p.Key] = p.Value
-	}
-	for _, p := range p2 {
-		val, ok := m1[p.Key]
-		if !ok {
-			return false
-		}
-		if val != p.Value {
-			return false
-		}
-	}
-	return ContainsKeyPairArray(p1, p2)
-}
-
-func ContainsKeyPairArray(src []*commonpb.KeyValuePair, target []*commonpb.KeyValuePair) bool {
-	m1 := make(map[string]string)
+func IsSubsetOfProperties(src, target []*commonpb.KeyValuePair) bool {
+	tmpMap := make(map[string]string)
 	for _, p := range target {
-		m1[p.Key] = p.Value
+		tmpMap[p.Key] = p.Value
 	}
 	for _, p := range src {
-		val, ok := m1[p.Key]
+		// new key value in src
+		val, ok := tmpMap[p.Key]
 		if !ok {
 			return false
 		}
@@ -445,6 +426,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			case *schemapb.ValueField_DoubleData:
 				if dtype != schemapb.DataType_Double {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
+				}
+			case *schemapb.ValueField_TimestamptzData:
+				if dtype != schemapb.DataType_Timestamptz {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar {

@@ -84,7 +84,7 @@ func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int, n
 	if nullPercent == 100 {
 		useNullType = true
 	}
-	pqSchema, err := ConvertToArrowSchema(schema, useNullType)
+	pqSchema, err := ConvertToArrowSchemaForUT(schema, useNullType)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +667,7 @@ func TestParquetReaderError(t *testing.T) {
 		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 		assert.NoError(t, err)
 
-		pqSchema, err := ConvertToArrowSchema(colSchema, false)
+		pqSchema, err := ConvertToArrowSchemaForUT(colSchema, false)
 		assert.NoError(t, err)
 
 		fw, err := pqarrow.NewFileWriter(pqSchema, wf, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())

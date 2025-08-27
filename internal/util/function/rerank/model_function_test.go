@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -124,14 +123,10 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "is not enabled")
+		s.ErrorContains(err, "Rerank provider: [vllm] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
-		os.Setenv(models.EnableVllmEnvStr, "false")
-		_, err = newProvider(params)
-		s.ErrorContains(err, "is not enabled")
-		os.Unsetenv(models.EnableVllmEnvStr)
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -183,14 +178,10 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "is not enabled")
+		s.ErrorContains(err, "Rerank provider: [tei] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
-		os.Setenv(models.EnableTeiEnvStr, "false")
-		_, err = newProvider(params)
-		s.ErrorContains(err, "is not enabled")
-		os.Unsetenv(models.EnableTeiEnvStr)
 	}
 	{
 		params := []*commonpb.KeyValuePair{

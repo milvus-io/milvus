@@ -73,7 +73,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         // Initialize file system
         auto conf = milvus_storage::ArrowFileSystemConfig();
         conf.storage_type = "local";
-        conf.root_path = "test_data";
+        conf.root_path = "/tmp/test_data";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();

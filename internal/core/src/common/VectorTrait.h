@@ -28,22 +28,22 @@
 
 namespace milvus {
 
-#define GET_ELEM_TYPE_FOR_VECTOR_TRAIT                                 \
-    using elem_type = std::conditional_t<                              \
-        std::is_same_v<TraitType, milvus::EmbListFloatVector>,         \
-        milvus::EmbListFloatVector::embedded_type,                     \
-        std::conditional_t<                                            \
-            std::is_same_v<TraitType, milvus::FloatVector>,            \
-            milvus::FloatVector::embedded_type,                        \
-            std::conditional_t<                                        \
-                std::is_same_v<TraitType, milvus::Float16Vector>,      \
-                milvus::Float16Vector::embedded_type,                  \
-                std::conditional_t<                                    \
-                    std::is_same_v<TraitType, milvus::BFloat16Vector>, \
-                    milvus::BFloat16Vector::embedded_type,             \
-                    std::conditional_t<                                \
-                        std::is_same_v<TraitType, milvus::Int8Vector>, \
-                        milvus::Int8Vector::embedded_type,             \
+#define GET_ELEM_TYPE_FOR_VECTOR_TRAIT                                   \
+    using elem_type = std::conditional_t<                                \
+        std::is_same_v<TraitType, milvus::EmbListFloatVector>,           \
+        milvus::EmbListFloatVector::embedded_type,                       \
+        std::conditional_t<                                              \
+            std::is_same_v<TraitType, milvus::FloatVector>,              \
+            milvus::FloatVector::embedded_type,                          \
+            std::conditional_t<                                          \
+                std::is_same_v<TraitType, milvus::Float16Vector>,        \
+                milvus::Float16Vector::embedded_type,                    \
+                std::conditional_t<                                      \
+                    std::is_same_v<TraitType, milvus::BFloat16Vector>,   \
+                    milvus::BFloat16Vector::embedded_type,               \
+                    std::conditional_t<                                  \
+                        std::is_same_v<TraitType, milvus::Int8Vector>,   \
+                        milvus::Int8Vector::embedded_type,               \
                         milvus::BinaryVector::embedded_type>>>>>;
 
 #define GET_SCHEMA_DATA_TYPE_FOR_VECTOR_TRAIT               \
@@ -122,7 +122,7 @@ class SparseFloatVector : public VectorTrait {
  public:
     using embedded_type = float;
     static constexpr int32_t dim_factor = 1;
-    static constexpr auto data_type = DataType::VECTOR_SPARSE_FLOAT;
+    static constexpr auto data_type = DataType::VECTOR_SPARSE_U32_F32;
     static constexpr auto c_data_type = CDataType::SparseFloatVector;
     static constexpr auto schema_data_type =
         proto::schema::DataType::SparseFloatVector;

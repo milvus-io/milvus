@@ -5,6 +5,7 @@ package segcore
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
+#include "storage/storage_c.h"
 */
 import "C"
 
@@ -12,9 +13,12 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -113,4 +117,37 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 func (c *CCollection) Release() {
 	C.DeleteCollection(c.ptr)
 	c.ptr = nil
+}
+
+func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
+	log.Info("PutOrRefPluginContext",
+		zap.Int64("ez_id", ez.EzID),
+		zap.Int64("collection_id", ez.CollectionID))
+	ckey := C.CString(key)
+	defer C.free(unsafe.Pointer(ckey))
+	pluginContext := C.CPluginContext{
+		ez_id:         C.int64_t(ez.EzID),
+		collection_id: C.int64_t(ez.CollectionID),
+		key:           ckey,
+	}
+	cstatus := C.PutOrRefPluginContext(pluginContext)
+	if err := ConsumeCStatusIntoError(&cstatus); err != nil {
+		return err
+	}
+	return nil
+}
+
+func UnRefPluginContext(ez *hookutil.EZ) error {
+	log.Info("UnRefPluginContext",
+		zap.Int64("ez_id", ez.EzID),
+		zap.Int64("collection_id", ez.CollectionID))
+	pluginContext := C.CPluginContext{
+		ez_id:         C.int64_t(ez.EzID),
+		collection_id: C.int64_t(ez.CollectionID),
+	}
+	cstatus := C.UnRefPluginContext(pluginContext)
+	if err := ConsumeCStatusIntoError(&cstatus); err != nil {
+		return err
+	}
+	return nil
 }

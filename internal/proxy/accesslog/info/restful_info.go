@@ -255,3 +255,7 @@ func (i *RestfulInfo) QueryParams() string {
 	}
 	return Unknown
 }
+
+func (i *RestfulInfo) ClientRequestTime() string {
+	return Unknown
+}

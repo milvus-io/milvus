@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -279,6 +282,17 @@ func (s *GrpcAccessInfoSuite) TestQueryParams() {
 	}
 
 	s.Equal(kvsToString(params), Get(s.info, "$query_params")[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestClientRequestTime() {
+	result := Get(s.info, "$method_expr")
+	s.Equal(Unknown, result[0])
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{
+		common.ClientRequestMsecKey: []string{strconv.FormatInt(time.Now().UnixMilli(), 10)},
+	})
+	s.info.ctx = ctx
+	s.NotEqual(Unknown, Get(s.info, "$client_request_time")[0])
 }
 
 func TestGrpcAccssInfo(t *testing.T) {

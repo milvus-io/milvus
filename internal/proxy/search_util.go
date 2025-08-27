@@ -288,17 +288,17 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
 			if strings.Contains(searchParamStr, radiusKey) {
 				return nil, merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 
 			if groupByFieldId > 0 {
 				return nil, merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 
 			if isIterator {
 				return nil, merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+					"search iterator is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 		}
 	}

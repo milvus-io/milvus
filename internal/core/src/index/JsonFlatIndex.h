@@ -53,7 +53,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
-    const TargetBitmap
+    TargetBitmap
     IsNotNull() override {
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_exist_query(json_path_, &bitset);

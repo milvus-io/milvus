@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelDistManagerSuite struct {
@@ -88,6 +87,7 @@ func (suite *ChannelDistManagerSuite) SetupSuite() {
 }
 
 func (suite *ChannelDistManagerSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
 	suite.dist = NewChannelDistManager()
 	// Distribution:
 	// node 0 contains channel dmc0
@@ -370,8 +370,15 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 			})
 		}
 		<-ctx.Done()
-		return context.Cause(ctx)
+		return ctx.Err()
 	})
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		4: {
+			ServerID: 4,
+			Address:  "localhost:1",
+		},
+	}, nil)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 	defer snmanager.ResetStreamingNodeManager()
 	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 	suite.Eventually(func() bool {

@@ -51,6 +51,8 @@ const (
 	Int8Embd
 )
 
+const EnableConf string = "enable"
+
 // common params
 const (
 	ModelNameParamKey          string = "model_name"
@@ -63,16 +65,16 @@ const (
 
 // ali text embedding
 const (
-	DashscopeAKEnvStr string = "MILVUSAI_DASHSCOPE_API_KEY"
+	DashscopeAKEnvStr string = "MILVUS_DASHSCOPE_API_KEY"
 )
 
 // openai/azure text embedding
 
 const (
-	OpenaiAKEnvStr string = "MILVUSAI_OPENAI_API_KEY"
+	OpenaiAKEnvStr string = "MILVUS_OPENAI_API_KEY"
 
-	AzureOpenaiAKEnvStr     string = "MILVUSAI_AZURE_OPENAI_API_KEY"
-	AzureOpenaiResourceName string = "MILVUSAI_AZURE_OPENAI_RESOURCE_NAME"
+	AzureOpenaiAKEnvStr     string = "MILVUS_AZURE_OPENAI_API_KEY"
+	AzureOpenaiResourceName string = "MILVUS_AZURE_OPENAI_RESOURCE_NAME"
 
 	UserParamKey string = "user"
 )
@@ -85,8 +87,8 @@ const (
 	RegionParamKey    string = "region"
 	NormalizeParamKey string = "normalize"
 
-	BedrockAccessKeyId string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
-	BedrockSAKEnvStr   string = "MILVUSAI_BEDROCK_SECRET_ACCESS_KEY"
+	BedrockAccessKeyId string = "MILVUS_BEDROCK_ACCESS_KEY_ID"
+	BedrockSAKEnvStr   string = "MILVUS_BEDROCK_SECRET_ACCESS_KEY"
 )
 
 // vertexAI
@@ -96,20 +98,20 @@ const (
 	ProjectIDParamKey string = "projectid"
 	TaskTypeParamKey  string = "task"
 
-	VertexServiceAccountJSONEnv string = "MILVUSAI_GOOGLE_APPLICATION_CREDENTIALS"
+	VertexServiceAccountJSONEnv string = "MILVUS_GOOGLE_APPLICATION_CREDENTIALS"
 )
 
 // voyageAI
 const (
 	TruncationParamKey string = "truncation"
-	VoyageAIAKEnvStr   string = "MILVUSAI_VOYAGEAI_API_KEY"
+	VoyageAIAKEnvStr   string = "MILVUS_VOYAGEAI_API_KEY"
 )
 
 // cohere
 
 const (
 	MaxTKsPerDocParamKey string = "max_tokens_per_doc"
-	CohereAIAKEnvStr     string = "MILVUSAI_COHERE_API_KEY"
+	CohereAIAKEnvStr     string = "MILVUS_COHERE_API_KEY"
 )
 
 // siliconflow
@@ -118,7 +120,7 @@ const (
 	MaxChunksPerDocParamKey string = "max_chunks_per_doc"
 	OverlapTokensParamKey   string = "overlap_tokens"
 
-	SiliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
+	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
 // TEI and vllm
@@ -132,9 +134,6 @@ const (
 	VllmTruncateParamName string = "truncate_prompt_tokens"
 
 	TeiTruncateParamName string = "truncate"
-
-	EnableTeiEnvStr  string = "MILVUSAI_ENABLE_TEI"
-	EnableVllmEnvStr string = "MILVUSAI_ENABLE_VLLM"
 )
 
 func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
@@ -170,6 +169,14 @@ func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyV
 	if apiKey == "" {
 		apiKey = os.Getenv(apiKeyEnv)
 	}
+
+	// DEPRECATED: MILVUSAI_* env variables will be removed in Milvus 3.0.
+	// Use NEW_ENV_* instead.
+	if apiKey == "" {
+		newEnvStr := "MILVUSAI_" + strings.TrimPrefix(apiKeyEnv, "MILVUS_")
+		apiKey = os.Getenv(newEnvStr)
+	}
+
 	return apiKey, url, nil
 }
 
@@ -240,21 +247,13 @@ func NewBaseURL(endpoint string) (*url.URL, error) {
 	return base, nil
 }
 
-func IsEnable(enableConf string, envStr string) bool {
+func IsEnable(conf map[string]string) bool {
 	// milvus.yaml
-	if enableConf != "" {
-		//  Disabled only if false is explicitly configured
-		if strings.ToLower(enableConf) == "false" {
-			return false
-		}
-		return true
-	}
-
-	// env
-	return strings.ToLower(os.Getenv(envStr)) != "false"
+	enableConf := conf[EnableConf]
+	return strings.ToLower(enableConf) != "false"
 }
 
-type Response interface{}
+type Response any
 
 func PostRequest[T Response](req any, url string, headers map[string]string, timeoutSec int64) (*T, error) {
 	data, err := json.Marshal(req)

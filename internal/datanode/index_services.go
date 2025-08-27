@@ -30,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -98,7 +100,11 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager)
+	pluginContext, err := ParseCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		log.Warn("DataNode failed to schedule",
@@ -302,7 +308,13 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager)
+
+	pluginContext, err := ParseCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		log.Warn("DataNode failed to schedule",
@@ -598,4 +610,18 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		log.Warn("DataNode receive dropping unknown type jobs")
 		return merr.Status(errors.New("DataNode receive dropping unknown type jobs")), nil
 	}
+}
+
+func ParseCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	pluginContext, err := hookutil.CreateLocalEZByPluginContext(context)
+	if err != nil {
+		return nil, err
+	}
+
+	if pluginContext != nil {
+		pluginContext.CollectionId = collectionID
+		return pluginContext, nil
+	}
+
+	return nil, nil
 }

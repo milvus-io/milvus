@@ -44,11 +44,7 @@ type VLLMClient struct {
 	endpoint string
 }
 
-func NewVLLMClient(apiKey string, endpoint string, enable string) (*VLLMClient, error) {
-	if !models.IsEnable(enable, models.EnableVllmEnvStr) {
-		return nil, fmt.Errorf("Vllm model serving is not enabled")
-	}
-
+func NewVLLMClient(apiKey string, endpoint string) (*VLLMClient, error) {
 	return &VLLMClient{
 		apiKey:   apiKey,
 		endpoint: endpoint,

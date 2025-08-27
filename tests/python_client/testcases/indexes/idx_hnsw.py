@@ -40,11 +40,11 @@ class HNSW:
             "params": {"M": "16"},
             "expected": success
         },
-        # {
-        #     "description": "Float Type Test",
-        #     "params": {"M": 16.0},
-        #     "expected": {"err_code": 999, "err_msg": "wrong data type in json"}
-        # },
+        {
+            "description": "Float Type Test",
+            "params": {"M": 16.0},
+            "expected": {"err_code": 999, "err_msg": "wrong data type in json"}
+        },
         {
             "description": "Boolean Type Test",
             "params": {"M": True},

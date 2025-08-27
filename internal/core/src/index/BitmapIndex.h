@@ -94,7 +94,7 @@ class BitmapIndex : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
-    const TargetBitmap
+    TargetBitmap
     IsNotNull() override;
 
     const TargetBitmap

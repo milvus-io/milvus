@@ -233,6 +233,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	}
 
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
+		storage.WithCollectionID(st.req.CollectionID),
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
 		storage.WithStorageConfig(st.req.GetStorageConfig()),

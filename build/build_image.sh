@@ -44,8 +44,17 @@ fi
 
 echo ${IMAGE_ARCH}
 
-
-BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
+if [[ "$USE_ASAN" == "ON" ]]; then
+    if [[ "$OS_NAME" == "ubuntu20.04" ]]; then
+        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH} --build-arg MILVUS_ASAN_LIB=/milvus/lib/libasan.so.6}"
+    elif [[ "$OS_NAME" == "ubuntu22.04" ]]; then
+        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH} --build-arg MILVUS_ASAN_LIB=/milvus/lib/libasan.so.8}"
+    else
+        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
+    fi
+else
+    BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
+fi
 
 pushd "${toplevel}"
 

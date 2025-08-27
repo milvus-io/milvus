@@ -36,10 +36,32 @@ const (
 	sparseVectorValues = "values"
 )
 
-func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) error {
+func WrapTypeErr(expect *schemapb.FieldSchema, actual string) error {
+	nullable := ""
+	if expect.GetNullable() {
+		nullable = "nullable"
+	}
+	elementType := ""
+	if expect.GetDataType() == schemapb.DataType_Array {
+		elementType = expect.GetElementType().String()
+	}
+	// error message examples:
+	// "expect 'Int32' type for field 'xxx', but got 'bool' type"
+	// "expect nullable 'Int32 Array' type for field 'xxx', but got 'bool' type"
+	// "expect 'FloatVector' type for field 'xxx', but got 'bool' type"
 	return merr.WrapErrImportFailed(
-		fmt.Sprintf("expect '%s' type for field '%s', but got '%s' type",
-			expect, field.GetName(), actual))
+		fmt.Sprintf("expect %s '%s %s' type for field '%s', but got '%s' type",
+			nullable, elementType, expect.GetDataType().String(), expect.GetName(), actual))
+}
+
+func WrapNullRowErr(field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(
+		fmt.Sprintf("the field '%s' is not nullable but the file contains null value", field.GetName()))
+}
+
+func WrapNullElementErr(field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(
+		fmt.Sprintf("array element is not allowed to be null value for field '%s'", field.GetName()))
 }
 
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
@@ -219,7 +241,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.Int16Type{}, nil
 	case schemapb.DataType_Int32:
 		return &arrow.Int32Type{}, nil
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		return &arrow.Int64Type{}, nil
 	case schemapb.DataType_Float:
 		return &arrow.Float32Type{}, nil
@@ -270,7 +292,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 
 // This method is used only by import util and related tests. Returned arrow.Schema
 // doesn't include function output fields.
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
+func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
@@ -323,8 +345,8 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			return err
 		}
 		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
-				field.Name, field.DataType.String(), arrField.Type.String()))
+			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
+				field.Name, toArrDataType.String(), arrField.Type.String()))
 		}
 	}
 	return nil

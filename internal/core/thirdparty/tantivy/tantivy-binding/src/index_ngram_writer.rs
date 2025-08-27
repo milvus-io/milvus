@@ -63,7 +63,7 @@ impl IndexWriterWrapper {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::c_void;
+    use std::{collections::HashSet, ffi::c_void};
 
     use tempfile::TempDir;
 
@@ -107,11 +107,11 @@ mod tests {
         writer.commit().unwrap();
 
         let reader = writer.create_reader(set_bitset).unwrap();
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
             .ngram_match_query("ic", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![2, 4, 5]);
+        assert_eq!(res, vec![2, 4, 5].into_iter().collect::<HashSet<u32>>());
     }
 
     #[test]
@@ -136,22 +136,22 @@ mod tests {
         writer.commit().unwrap();
 
         let reader = writer.create_reader(set_bitset).unwrap();
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
             .ngram_match_query("测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![0, 1, 2, 4]);
+        assert_eq!(res, vec![0, 1, 2, 4].into_iter().collect::<HashSet<u32>>());
 
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
             .ngram_match_query("m测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![0, 2]);
+        assert_eq!(res, vec![0, 2].into_iter().collect::<HashSet<u32>>());
 
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
             .ngram_match_query("需要被测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![4]);
+        assert_eq!(res, vec![4].into_iter().collect::<HashSet<u32>>());
     }
 }

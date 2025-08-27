@@ -42,6 +42,19 @@ ResizeTheadPool(int64_t priority, float ratio);
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
+// Plugin related APIs
+CStatus
+InitPluginLoader(const char* plugin_path);
+
+void
+CleanPluginLoader();
+
+CStatus
+PutOrRefPluginContext(CPluginContext c_plugin_context);
+
+CStatus
+UnRefPluginContext(CPluginContext c_plugin_context);
+
 #ifdef __cplusplus
 };
 #endif

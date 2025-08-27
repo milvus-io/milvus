@@ -88,7 +88,7 @@ type IndexServiceSuite struct {
 	cm            storage.ChunkManager
 }
 
-func Test_IndexServiceSuite(t *testing.T) {
+func TestIndexServiceSuite(t *testing.T) {
 	suite.Run(t, new(IndexServiceSuite))
 }
 

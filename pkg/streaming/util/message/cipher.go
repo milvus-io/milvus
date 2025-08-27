@@ -1,22 +1,24 @@
 package message
 
 import (
+	"sync"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 )
 
 // cipher is a global variable that is used to encrypt and decrypt messages.
 // It should be initialized at initialization stage.
 var (
-	cipher hook.Cipher
+	cipher   hook.Cipher
+	initOnce sync.Once
 )
 
 // RegisterCipher registers a cipher to be used for encrypting and decrypting messages.
 // It should be called only once when the program starts and initialization stage.
 func RegisterCipher(c hook.Cipher) {
-	if cipher != nil {
-		panic("cipher already registered")
-	}
-	cipher = c
+	initOnce.Do(func() {
+		cipher = c
+	})
 }
 
 // mustGetCipher returns the registered cipher.

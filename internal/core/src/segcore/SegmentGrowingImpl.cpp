@@ -42,6 +42,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -463,7 +464,9 @@ SegmentGrowingImpl::load_column_group_data_internal(
         row_group_lists.reserve(insert_files.size());
         for (const auto& file : insert_files) {
             auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
+                    milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                    storage::GetReaderProperties());
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);
@@ -644,6 +647,16 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
+PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_vector_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    ThrowInfo(ErrorCode::NotImplemented,
+              "chunk vector array view impl not implement for growing segment");
+}
+
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
@@ -782,7 +795,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
-                   DataType::VECTOR_SPARSE_FLOAT) {
+                   DataType::VECTOR_SPARSE_U32_F32) {
             bulk_subscript_sparse_float_vector_impl(
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
@@ -893,6 +906,16 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_double_data()
                                             ->mutable_data()
                                             ->mutable_data());
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::VARCHAR:

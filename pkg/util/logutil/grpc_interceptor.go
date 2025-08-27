@@ -2,6 +2,7 @@ package logutil
 
 import (
 	"context"
+	"strconv"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.opentelemetry.io/otel/trace"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
@@ -78,6 +80,12 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 			}
 		}
 	}
+	// client request unixsecs
+	requestUnixmsec, ok := GetClientReqUnixmsecGrpc(newctx)
+	if ok {
+		newctx = log.WithFields(newctx, zap.Int64("clientRequestUnixmsec", requestUnixmsec))
+	}
+
 	// traceID not valid, generate a new one
 	if !traceID.IsValid() {
 		traceID = trace.SpanContextFromContext(newctx).TraceID()
@@ -86,6 +94,23 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 		newctx = log.WithTraceID(newctx, traceID.String())
 	}
 	return newctx
+}
+
+func GetClientReqUnixmsecGrpc(ctx context.Context) (int64, bool) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return -1, false
+	}
+
+	requestUnixmsecs := GetMetadata(md, common.ClientRequestMsecKey)
+	if len(requestUnixmsecs) < 1 {
+		return -1, false
+	}
+	requestUnixmsec, err := strconv.ParseInt(requestUnixmsecs[0], 10, 64)
+	if err != nil {
+		return -1, false
+	}
+	return requestUnixmsec, true
 }
 
 func GetMetadata(md metadata.MD, keys ...string) []string {

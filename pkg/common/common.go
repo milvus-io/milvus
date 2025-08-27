@@ -220,8 +220,9 @@ const (
 )
 
 const (
-	PropertiesKey string = "properties"
-	TraceIDKey    string = "uber-trace-id"
+	PropertiesKey        string = "properties"
+	TraceIDKey           string = "uber-trace-id"
+	ClientRequestMsecKey string = "client-request-unixmsec"
 )
 
 func IsSystemField(fieldID int64) bool {

@@ -31,7 +31,8 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
                                  CStorageConfig c_storage_config,
-                                 CPackedReader* c_packed_reader);
+                                 CPackedReader* c_packed_reader,
+                                 CPluginContext* c_plugin_context);
 
 /**
  * @brief Open a packed reader to read needed columns in the specified path.
@@ -46,7 +47,8 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
-                CPackedReader* c_packed_reader);
+                CPackedReader* c_packed_reader,
+                CPluginContext* c_plugin_context);
 
 /**
  * @brief Read the next record batch from the packed reader.

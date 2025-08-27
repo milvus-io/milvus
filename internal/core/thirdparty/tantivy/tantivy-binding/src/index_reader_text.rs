@@ -6,8 +6,12 @@ use tantivy::{
     Term,
 };
 
-use crate::error::Result;
-use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
+use crate::{
+    analyzer::standard_analyzer, error::TantivyBindingError, index_reader::IndexReaderWrapper,
+};
+use crate::{
+    bitset_wrapper::BitsetWrapper, direct_bitset_collector::DirectBitsetCollector, error::Result,
+};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
@@ -25,8 +29,15 @@ impl IndexReaderWrapper {
             let token = token_stream.token();
             terms.push(Term::from_field_text(self.field, &token.text));
         }
-        let query = BooleanQuery::new_multiterms_query(terms);
-        self.search(&query, bitset)
+        let collector = DirectBitsetCollector {
+            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
+            terms,
+        };
+        let query = BooleanQuery::new_multiterms_query(vec![]);
+        let searcher = self.reader.searcher();
+        searcher
+            .search(&query, &collector)
+            .map_err(TantivyBindingError::TantivyError)
     }
 
     // split the query string into multiple tokens using index's default tokenizer,
@@ -65,9 +76,8 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::c_void;
+    use std::{collections::HashSet, ffi::c_void};
 
-    use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
     use crate::{index_writer::IndexWriterWrapper, util::set_bitset, TantivyIndexVersion};
@@ -95,19 +105,19 @@ mod tests {
 
         let slop = 1;
         let reader = writer.create_reader(set_bitset).unwrap();
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
             .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![0]);
+        assert_eq!(res, vec![0].into_iter().collect::<HashSet<u32>>());
 
         let slop = 2;
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         let reader = writer.create_reader(set_bitset).unwrap();
         reader
             .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, vec![0, 1]);
+        assert_eq!(res, vec![0, 1].into_iter().collect::<HashSet<u32>>());
     }
 
     #[test]
@@ -125,22 +135,17 @@ mod tests {
         )
         .unwrap();
 
-        for i in 0..10000 {
+        for i in 0..100000 {
             writer.add("hello world", Some(i)).unwrap();
         }
         writer.commit().unwrap();
 
         let reader = writer.create_reader(set_bitset).unwrap();
 
-        let query = TermQuery::new(
-            tantivy::Term::from_field_text(reader.field.clone(), "hello"),
-            tantivy::schema::IndexRecordOption::Basic,
-        );
-
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader
-            .search(&query, &mut res as *mut _ as *mut c_void)
+            .match_query("hello world", &mut res as *mut _ as *mut c_void)
             .unwrap();
-        assert_eq!(res, (0..10000).collect::<Vec<u32>>());
+        assert_eq!(res, (0..100000).collect::<HashSet<u32>>());
     }
 }

@@ -143,6 +143,12 @@ typedef struct CNewSegmentResult {
     CStatus status;
     CSegmentInterface segmentPtr;
 } CNewSegmentResult;
+
+typedef struct CPluginContext {
+    int64_t ez_id;
+    int64_t collection_id;
+    const char* key;
+} CPluginContext;
 #ifdef __cplusplus
 }
 

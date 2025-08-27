@@ -68,6 +68,8 @@ func (suite *ReplicaObserverSuite) SetupSuite() {
 }
 
 func (suite *ReplicaObserverSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
+
 	var err error
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
@@ -260,7 +262,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 			<-change
 		}
 		<-ctx.Done()
-		return context.Cause(ctx)
+		return ctx.Err()
 	})
 	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 
@@ -311,9 +313,12 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.Equal(nodes.Len(), 2)
 }
 
+func (suite *ReplicaObserverSuite) TearDownTest() {
+	suite.observer.Stop()
+}
+
 func (suite *ReplicaObserverSuite) TearDownSuite() {
 	suite.kv.Close()
-	suite.observer.Stop()
 	streamingutil.UnsetStreamingServiceEnabled()
 }
 

@@ -158,7 +158,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheRawDataToDisk(const Config& config);
 
     std::string
-    CacheOptFieldToDisk(OptFieldT& fields_map);
+    CacheOptFieldToDisk(const Config& config);
 
     std::string
     GetRemoteIndexPrefix() const {
