@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <cstring>
 
 #include "FieldMeta.h"
 #include "Types.h"
@@ -30,6 +31,32 @@ class VectorArray : public milvus::VectorTrait {
     VectorArray() = default;
 
     ~VectorArray() = default;
+
+    // Direct construction from raw data (avoids protobuf overhead)
+    VectorArray(const void* data,
+                int num_vectors,
+                int64_t dim,
+                DataType element_type)
+        : dim_(dim), length_(num_vectors), element_type_(element_type) {
+        assert(data != nullptr);
+        assert(num_vectors > 0);
+        assert(dim > 0);
+
+        // Calculate size based on element type
+        switch (element_type) {
+            case DataType::VECTOR_FLOAT:
+                size_ = num_vectors * dim * sizeof(float);
+                break;
+            default:
+                ThrowInfo(NotImplemented,
+                          "Direct VectorArray construction only supports "
+                          "VECTOR_FLOAT, got {}",
+                          GetDataTypeName(element_type));
+        }
+
+        data_ = std::make_unique<char[]>(size_);
+        std::memcpy(data_.get(), data, size_);
+    }
 
     // One row of VectorFieldProto
     explicit VectorArray(const VectorFieldProto& vector_field) {

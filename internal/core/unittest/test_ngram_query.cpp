@@ -61,7 +61,8 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
 
     size_t nb = data.size();
 
-    auto field_data = storage::CreateFieldData(DataType::VARCHAR, false);
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(data.data(), data.size());
 
     auto segment = CreateSealedSegment(schema);

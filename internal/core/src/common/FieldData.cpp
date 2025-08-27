@@ -337,16 +337,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                                    num_floats,
                                    dim);
 
-                        // Create VectorFieldProto and populate with data
-                        VectorFieldProto field_data;
-                        field_data.set_dim(dim);
-
-                        auto* float_vector = field_data.mutable_float_vector();
-                        for (int64_t i = start_offset; i < end_offset; ++i) {
-                            float_vector->add_data(float_array->Value(i));
-                        }
-
-                        values[index] = VectorArray(field_data);
+                        // Direct construction from Arrow data (avoids protobuf overhead)
+                        int num_vectors = num_floats / dim;
+                        const float* data_ptr =
+                            float_array->raw_values() + start_offset;
+                        values[index] =
+                            VectorArray(static_cast<const void*>(data_ptr),
+                                        num_vectors,
+                                        dim,
+                                        element_type);
                     }
                     break;
                 }

@@ -89,7 +89,8 @@ class JsonFlatIndexTest : public ::testing::Test {
             R"({"profile": {"name": {"first": "Charlie", "last": "Williams"}, "team": {"name": "Design", "supervisor": {"name": "Alice"}}, "is_active": true, "employee_id": 1003, "skills": ["python", "javascript"], "scores": [87, 91, 89]}})"};
 
         // Create field data with JSON values
-        auto field_data = storage::CreateFieldData(DataType::JSON);
+        auto field_data =
+            storage::CreateFieldData(DataType::JSON, DataType::NONE);
         std::vector<Json> json_vec;
         for (const auto& json_str : json_data_) {
             json_vec.push_back(Json(simdjson::padded_string(json_str)));
