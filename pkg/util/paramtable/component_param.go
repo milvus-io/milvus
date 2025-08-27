@@ -246,6 +246,13 @@ type commonConfig struct {
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
 	DiskWriteNumThreads   ParamItem `refreshable:"true"`
 
+	DiskWriteRateLimiterRefillPeriodUs      ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterAvgKBps             ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMaxBurstKBps        ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterHighPriorityRatio   ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -685,6 +692,62 @@ In this case, the maximum concurrency of disk write operations is determined by 
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
+
+	p.DiskWriteRateLimiterRefillPeriodUs = ParamItem{
+		Key:          "common.diskWriteRateLimiter.refillPeriodUs",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterRefillPeriodUs.Init(base.mgr)
+
+	p.DiskWriteRateLimiterAvgKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.avgKBps",
+		Version:      "2.6.0",
+		DefaultValue: "262144",
+		Doc:          "average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterAvgKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMaxBurstKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.maxBurstKBps",
+		Version:      "2.6.0",
+		DefaultValue: "524288",
+		Doc:          "max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMaxBurstKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterHighPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.highPriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc: `amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+The ratio is the multiplication factor of the configured bandwidth.
+For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.`,
+		Export: true,
+	}
+	p.DiskWriteRateLimiterHighPriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMiddlePriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.middlePriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMiddlePriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterLowPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.lowPriorityRatio",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterLowPriorityRatio.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
@@ -1326,7 +1389,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.level",
 		DefaultValue: "info",
 		Version:      "2.0.0",
-		Doc: `Milvus log level. Option: debug, info, warn, error, panic, and fatal.
+		Doc: `Milvus log level. Option: trace, debug, info, warn, error, panic, and fatal.
 It is recommended to use debug level under test and development environments, and info level in production environment.`,
 		Export: true,
 	}
@@ -2816,6 +2879,7 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
+	KnowhereFetchThreadPoolSize   ParamItem `refreshable:"false"`
 	KnowhereThreadPoolSize        ParamItem `refreshable:"false"`
 	ChunkRows                     ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
@@ -2823,6 +2887,7 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexSubDim            ParamItem `refreshable:"false"`
 	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio        ParamItem `refreshable:"false"`
 	InterimIndexRefineQuantType   ParamItem `refreshable:"false"`
 	InterimIndexRefineWithQuant   ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
@@ -2924,6 +2989,9 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+	// expr cache
+	ExprResCacheEnabled       ParamItem `refreshable:"false"`
+	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -3255,6 +3323,25 @@ If set to 0, time based eviction is disabled.`,
 	}
 	p.KnowhereThreadPoolSize.Init(base.mgr)
 
+	p.KnowhereFetchThreadPoolSize = ParamItem{
+		Key:          "queryNode.segcore.knowhereFetchThreadPoolNumRatio",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Formatter: func(v string) string {
+			factor := getAsInt64(v)
+			if factor <= 0 {
+				factor = 1
+			} else if factor > 32 {
+				factor = 32
+			}
+			knowhereFetchThreadPoolSize := uint32(hardware.GetCPUNum()) * uint32(factor)
+			return strconv.FormatUint(uint64(knowhereFetchThreadPoolSize), 10)
+		},
+		Doc:    "The number of threads in knowhere's fetch thread pool for object storage. The pool size will multiply with knowhereThreadPoolNumRatio([1, 32])",
+		Export: false,
+	}
+	p.KnowhereFetchThreadPoolSize.Init(base.mgr)
+
 	p.ChunkRows = ParamItem{
 		Key:          "queryNode.segcore.chunkRows",
 		Version:      "2.0.0",
@@ -3396,6 +3483,21 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexRefineRatio.Init(base.mgr)
+
+	p.InterimIndexBuildRatio = ParamItem{
+		Key:     "queryNode.segcore.interimIndex.indexBuildRatio",
+		Version: "2.5.18",
+		Formatter: func(v string) string {
+			if getAsFloat(v) > 1.0 {
+				return "0.1"
+			}
+			return v
+		},
+		DefaultValue: "0.1",
+		Doc:          "the ratio of building interim index rows count with max row count of a flush segment, should set to be < 1.0",
+		Export:       true,
+	}
+	p.InterimIndexBuildRatio.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",
@@ -3895,6 +3997,27 @@ user-task-polling:
 		Doc:          "expr eval batch size for getnext interface",
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	// expr cache
+	p.ExprResCacheEnabled = ParamItem{
+		Key:          "queryNode.exprCache.enabled",
+		FallbackKeys: []string{"enable_expr_cache"},
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "enable expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheEnabled.Init(base.mgr)
+
+	p.ExprResCacheCapacityBytes = ParamItem{
+		Key:          "queryNode.exprCache.capacityBytes",
+		FallbackKeys: []string{"max_expr_cache_size"},
+		Version:      "2.6.0",
+		DefaultValue: "268435456", // 256MB
+		Doc:          "max capacity in bytes for expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheCapacityBytes.Init(base.mgr)
 
 	p.JSONKeyStatsCommitInterval = ParamItem{
 		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",

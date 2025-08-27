@@ -580,6 +580,22 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
               "chunk_array_view_impl only used for chunk column field ");
 }
 
+PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        return it->second->VectorArrayViews(chunk_id, offset_len);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_vector_array_view_impl only used for chunk column field ");
+}
+
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_string_view_impl(
     FieldId field_id,
@@ -813,7 +829,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     if (has_raw_data) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
-        if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+        if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32) {
             auto res = vec_index->GetSparseVector(ids_ds);
             return segcore::CreateVectorDataArrayFrom(
                 res.get(), count, field_meta);
@@ -1705,6 +1721,16 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                                                     ->mutable_data());
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(column.get(),
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
+        }
         case DataType::VECTOR_FLOAT: {
             bulk_subscript_impl(field_meta.get_sizeof(),
                                 column.get(),
@@ -1752,7 +1778,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             int64_t max_dim = 0;
             column->BulkValueAt(
@@ -1761,7 +1787,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                     auto row =
                         offset != INVALID_SEG_OFFSET
                             ? static_cast<
-                                  const knowhere::sparse::SparseRow<float>*>(
+                                  const knowhere::sparse::SparseRow<sparseValueType>*>(
                                   static_cast<const void*>(value))
                             : nullptr;
                     if (row == nullptr) {
@@ -2108,7 +2134,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
     auto& index_params = field_index_meta.GetIndexParams();
 
     bool is_sparse =
-        field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
+        field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
 
     bool enable_growing_mmap = storage::MmapManager::GetInstance()
                                    .GetMmapConfig()

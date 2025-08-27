@@ -234,7 +234,7 @@ GenFieldData(int64_t N,
     schema->AddDebugField(
         "fakevec",
         data_type,
-        (data_type != milvus::DataType::VECTOR_SPARSE_FLOAT ? dim : 0),
+        (data_type != milvus::DataType::VECTOR_SPARSE_U32_F32 ? dim : 0),
         metric_type);
     return milvus::segcore::DataGen(schema, N);
 }

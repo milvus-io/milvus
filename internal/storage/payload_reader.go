@@ -143,6 +143,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Double:
 		val, validData, err := r.GetDoubleFromPayload()
 		return val, validData, 0, err
+	case schemapb.DataType_Timestamptz:
+		val, validData, err := r.GetTimestamptzFromPayload()
+		return val, validData, 0, err
 	case schemapb.DataType_BinaryVector:
 		val, dim, err := r.GetBinaryVectorFromPayload()
 		return val, nil, dim, err
@@ -435,6 +438,37 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 	if valuesRead != r.numRows {
 		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
 	}
+	return values, nil, nil
+}
+
+func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
+	if r.colType != schemapb.DataType_Timestamptz {
+		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get timestamptz from datatype %v", r.colType.String()))
+	}
+
+	values := make([]int64, r.numRows)
+	if r.nullable {
+		validData := make([]bool, r.numRows)
+		valuesRead, err := ReadData[int64, *array.Int64](r.reader, values, validData, r.numRows)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if valuesRead != r.numRows {
+			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		}
+
+		return values, validData, nil
+	}
+	valuesRead, err := ReadDataFromAllRowGroups[int64, *file.Int64ColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+	}
+
 	return values, nil, nil
 }
 

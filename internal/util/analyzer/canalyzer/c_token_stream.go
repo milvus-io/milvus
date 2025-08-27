@@ -1,4 +1,4 @@
-package ctokenizer
+package canalyzer
 
 /*
 #cgo pkg-config: milvus_core
@@ -11,10 +11,10 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 )
 
-var _ tokenizerapi.TokenStream = (*CTokenStream)(nil)
+var _ interfaces.TokenStream = (*CTokenStream)(nil)
 
 type CTokenStream struct {
 	ptr C.CTokenStream

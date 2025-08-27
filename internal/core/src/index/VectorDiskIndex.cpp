@@ -99,8 +99,11 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                    "index file paths is empty when load disk ann index data");
         // If index is loaded with stream, we don't need to cache index to disk
         if (!index_.LoadIndexWithStream()) {
-            file_manager_->CacheIndexToDisk(index_files.value(),
-                                            config[milvus::LOAD_PRIORITY]);
+            auto load_priority =
+                GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                    config, milvus::LOAD_PRIORITY)
+                    .value_or(milvus::proto::common::LoadPriority::HIGH);
+            file_manager_->CacheIndexToDisk(index_files.value(), load_priority);
         }
         read_file_span->End();
     }
@@ -165,7 +168,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         index_.IsAdditionalScalarSupported(
             is_partition_key_isolation.value_or(false))) {
         build_config[VEC_OPT_FIELDS_PATH] =
-            file_manager_->CacheOptFieldToDisk(opt_fields.value());
+            file_manager_->CacheOptFieldToDisk(config);
         // `partition_key_isolation` is already in the config, so it falls through
         // into the index Build call directly
     }
@@ -412,5 +415,6 @@ template class VectorDiskAnnIndex<float>;
 template class VectorDiskAnnIndex<float16>;
 template class VectorDiskAnnIndex<bfloat16>;
 template class VectorDiskAnnIndex<bin1>;
+template class VectorDiskAnnIndex<sparse_u32_f32>;
 
 }  // namespace milvus::index

@@ -30,6 +30,9 @@ class RemoteInputStream : public milvus::InputStream {
     Read(void* data, size_t size) override;
 
     size_t
+    ReadAt(void* data, size_t offset, size_t size) override;
+
+    size_t
     Read(int fd, size_t size) override;
 
     size_t

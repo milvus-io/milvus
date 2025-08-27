@@ -29,7 +29,7 @@ INSTANTIATE_TEST_SUITE_P(
     ExprAlwaysTrueParameters,
     ExprAlwaysTrueTest,
     ::testing::Values(milvus::DataType::VECTOR_FLOAT,
-                      milvus::DataType::VECTOR_SPARSE_FLOAT));
+                      milvus::DataType::VECTOR_SPARSE_U32_F32));
 
 TEST_P(ExprAlwaysTrueTest, AlwaysTrue) {
     using namespace milvus;

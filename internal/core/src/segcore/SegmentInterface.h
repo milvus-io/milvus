@@ -202,6 +202,8 @@ class SegmentInternalInterface : public SegmentInterface {
             return chunk_string_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+            return chunk_vector_array_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_view_impl(field_id, chunk_id, offset_len);
             auto [string_views, valid_data] = pw.get();
@@ -532,6 +534,13 @@ class SegmentInternalInterface : public SegmentInterface {
                           int64_t chunk_id,
                           std::optional<std::pair<int64_t, int64_t>>
                               offset_len = std::nullopt) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    chunk_vector_array_view_impl(FieldId field_id,
+                                 int64_t chunk_id,
+                                 std::optional<std::pair<int64_t, int64_t>>
+                                     offset_len = std::nullopt) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>

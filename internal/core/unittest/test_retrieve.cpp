@@ -46,7 +46,7 @@ class RetrieveTest : public ::testing::TestWithParam<Param> {
 INSTANTIATE_TEST_SUITE_P(RetrieveTest,
                          RetrieveTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
-                                           DataType::VECTOR_SPARSE_FLOAT));
+                                           DataType::VECTOR_SPARSE_U32_F32));
 
 TEST_P(RetrieveTest, AutoID) {
     auto schema = std::make_shared<Schema>();
@@ -422,7 +422,7 @@ TEST_P(RetrieveTest, LargeTimestamp) {
                 Assert(field_data.vectors().float_vector().data_size() ==
                        target_num * DIM);
             }
-            if (DataType(field_data.type()) == DataType::VECTOR_SPARSE_FLOAT) {
+            if (DataType(field_data.type()) == DataType::VECTOR_SPARSE_U32_F32) {
                 Assert(field_data.vectors()
                            .sparse_float_vector()
                            .contents_size() == target_num);

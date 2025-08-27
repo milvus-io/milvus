@@ -76,6 +76,48 @@ TEST(chunk, test_int64_field) {
     }
 }
 
+TEST(chunk, test_timestmamptz_field) {
+    FixedVector<int64_t> data = {
+        1, 2, 3, 4, 5};  // Timestamptz is stored as int64
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ);
+    field_data->FillFieldData(data.data(), data.size());
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::TIMESTAMPTZ,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_EQ(span.row_count(), data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
+        EXPECT_EQ(n, data[i]);
+    }
+}
+
 TEST(chunk, test_variable_field) {
     FixedVector<std::string> data = {
         "test1", "test2", "test3", "test4", "test5"};
@@ -568,12 +610,12 @@ TEST(chunk, test_sparse_float) {
     auto n_rows = 100;
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::VECTOR_SPARSE_FLOAT,
-                                         DataType::NONE,
-                                         false,
-                                         kTestSparseDim,
-                                         n_rows);
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_SPARSE_U32_F32,
+        DataType::NONE,
+        false,
+        kTestSparseDim,
+        n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;
@@ -598,7 +640,7 @@ TEST(chunk, test_sparse_float) {
 
     FieldMeta field_meta(FieldName("a"),
                          milvus::FieldId(1),
-                         DataType::VECTOR_SPARSE_FLOAT,
+                         DataType::VECTOR_SPARSE_U32_F32,
                          kTestSparseDim,
                          "IP",
                          false,

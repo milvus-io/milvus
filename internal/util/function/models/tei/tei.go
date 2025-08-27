@@ -29,11 +29,7 @@ type TEIClient struct {
 	endpoint string
 }
 
-func NewTEIClient(apiKey string, endpoint string, enable string) (*TEIClient, error) {
-	if !models.IsEnable(enable, models.EnableTeiEnvStr) {
-		return nil, fmt.Errorf("TEI model serving is not enabled")
-	}
-
+func NewTEIClient(apiKey string, endpoint string) (*TEIClient, error) {
 	return &TEIClient{
 		apiKey:   apiKey,
 		endpoint: endpoint,

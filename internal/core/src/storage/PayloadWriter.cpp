@@ -32,7 +32,7 @@ PayloadWriter::PayloadWriter(const DataType column_type, bool nullable)
 // create payload writer for vector data type
 PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
     : column_type_(column_type), nullable_(nullable) {
-    AssertInfo(column_type != DataType::VECTOR_SPARSE_FLOAT,
+    AssertInfo(column_type != DataType::VECTOR_SPARSE_U32_F32,
                "PayloadWriter for Sparse Float Vector should be created "
                "using the constructor without dimension");
     AssertInfo(nullable == false, "only scalcar type support null now");

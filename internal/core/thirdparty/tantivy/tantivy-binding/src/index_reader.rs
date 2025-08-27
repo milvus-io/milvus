@@ -577,6 +577,7 @@ impl IndexReaderWrapper {
 #[cfg(test)]
 mod test {
     use std::{
+        collections::HashSet,
         ffi::{c_void, CString},
         sync::Arc,
     };
@@ -607,7 +608,7 @@ mod test {
         index_writer.commit().unwrap();
 
         let index_shared = Arc::new(index);
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         let index_reader_wrapper =
             IndexReaderWrapper::from_index(index_shared, set_bitset).unwrap();
         index_reader_wrapper
@@ -683,13 +684,13 @@ mod test {
         let arrays: Vec<*const libc::c_char> =
             arrays.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
 
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader_wrapper
             .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res.len(), 1000);
         for i in 0..1000 {
-            assert_eq!(res[i], i as u32);
+            assert!(res.contains(&(i as u32)));
         }
 
         let arrays = (0..20000)
@@ -697,7 +698,7 @@ mod test {
             .collect::<Vec<_>>();
         let arrays: Vec<*const libc::c_char> =
             arrays.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
-        let mut res: Vec<u32> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
         reader_wrapper
             .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
             .unwrap();

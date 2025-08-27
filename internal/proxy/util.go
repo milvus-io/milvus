@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -692,7 +692,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema)
 
 	hasDefault := false
 	for name, params := range analyzerMap {
-		if err := ctokenizer.ValidateTokenizer(string(params)); err != nil {
+		if err := analyzer.ValidateAnalyzer(string(params)); err != nil {
 			return fmt.Errorf("analyzer %s params invalid: %s", name, err)
 		}
 		if name == "default" {
@@ -729,7 +729,7 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 
 	for _, kv := range fieldSchema.GetTypeParams() {
 		if kv.GetKey() == "analyzer_params" {
-			return ctokenizer.ValidateTokenizer(kv.Value)
+			return analyzer.ValidateAnalyzer(kv.Value)
 		}
 	}
 	// return nil when use default analyzer

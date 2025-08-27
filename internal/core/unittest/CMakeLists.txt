@@ -105,11 +105,14 @@ set(MILVUS_TEST_FILES
         test_chunked_column_group.cpp
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
+        test_expr_cache.cpp
         test_thread_pool.cpp
         test_json_flat_index.cpp
         test_vector_array.cpp
         test_ngram_query.cpp
         test_stlsort_index.cpp
+        test_vector_array_storage_v2.cpp
+        test_rescore.cpp
         test_vector_array_chunk.cpp
         )
 

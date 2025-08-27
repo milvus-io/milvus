@@ -553,6 +553,72 @@ TEST(storage, InsertDataDoubleNullable) {
     delete[] valid_data;
 }
 
+TEST(storage, InsertDataTimestamptz) {
+    FixedVector<int64_t> data = {
+        1000000000, 2000000000, 3000000000, 400000, 5000};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::TIMESTAMPTZ);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    ASSERT_EQ(new_payload->get_null_count(), 0);
+    FixedVector<int64_t> new_data(data.size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
+    ASSERT_EQ(data, new_data);
+}
+
+TEST(storage, InsertDataTimestamptzNullable) {
+    FixedVector<int64_t> data = {
+        1000000000, 2000000000, 3000000000, 400000, 5000};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ, true);
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::TIMESTAMPTZ);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    FixedVector<int64_t> new_data(data.size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
+    data = {1000000000, 2000000000, 0, 0, 5000};
+    ASSERT_EQ(data, new_data);
+    ASSERT_EQ(new_payload->get_null_count(), 2);
+    ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+    delete[] valid_data;
+}
+
 TEST(storage, InsertDataFloatVector) {
     std::vector<float> data = {1, 2, 3, 4, 5, 6, 7, 8};
     int DIM = 2;
@@ -590,12 +656,12 @@ TEST(storage, InsertDataSparseFloat) {
     auto n_rows = 100;
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::VECTOR_SPARSE_FLOAT,
-                                         DataType::NONE,
-                                         false,
-                                         kTestSparseDim,
-                                         n_rows);
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_SPARSE_U32_F32,
+        DataType::NONE,
+        false,
+        kTestSparseDim,
+        n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     auto payload_reader =
@@ -615,10 +681,11 @@ TEST(storage, InsertDataSparseFloat) {
               std::make_pair(Timestamp(0), Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_TRUE(new_payload->get_data_type() ==
-                storage::DataType::VECTOR_SPARSE_FLOAT);
+                storage::DataType::VECTOR_SPARSE_U32_F32);
     ASSERT_EQ(new_payload->get_num_rows(), n_rows);
     ASSERT_EQ(new_payload->get_null_count(), 0);
-    auto new_data = static_cast<const knowhere::sparse::SparseRow<float>*>(
+    auto new_data = static_cast<
+        const knowhere::sparse::SparseRow<milvus::sparseValueType>*>(
         new_payload->Data());
 
     for (auto i = 0; i < n_rows; ++i) {

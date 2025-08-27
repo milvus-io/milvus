@@ -12,6 +12,7 @@
 #pragma once
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <random>
@@ -114,7 +115,7 @@ struct GeneratedData {
             } else {
                 if (field_meta.is_vector() &&
                     field_meta.get_data_type() !=
-                        DataType::VECTOR_SPARSE_FLOAT) {
+                        DataType::VECTOR_SPARSE_U32_F32) {
                     if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                         int len = raw_->num_rows() * field_meta.get_dim();
                         ret.resize(len);
@@ -164,7 +165,7 @@ struct GeneratedData {
                 }
                 if constexpr (std::is_same_v<
                                   T,
-                                  knowhere::sparse::SparseRow<float>>) {
+                                  knowhere::sparse::SparseRow<milvus::sparseValueType>>) {
                     auto sparse_float_array =
                         target_field_data.vectors().sparse_float_vector();
                     auto rows =
@@ -220,6 +221,15 @@ struct GeneratedData {
                             auto src_data = reinterpret_cast<const T*>(
                                 target_field_data.scalars()
                                     .double_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::TIMESTAMPTZ: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .timestamptz_data()
                                     .data()
                                     .data());
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
@@ -301,7 +311,7 @@ struct GeneratedData {
                         int array_len);
 };
 
-inline std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
+inline std::unique_ptr<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>
 GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
@@ -340,13 +350,13 @@ GenerateRandomSparseFloatVector(size_t rows,
         data[row][col] = val;
     }
 
-    auto tensor = std::make_unique<knowhere::sparse::SparseRow<float>[]>(rows);
+    auto tensor = std::make_unique<knowhere::sparse::SparseRow<milvus::sparseValueType>[]>(rows);
 
     for (int32_t i = 0; i < rows; ++i) {
         if (data[i].size() == 0) {
             continue;
         }
-        knowhere::sparse::SparseRow<float> row(data[i].size());
+        knowhere::sparse::SparseRow<milvus::sparseValueType> row(data[i].size());
         size_t j = 0;
         for (auto& [idx, val] : data[i]) {
             row.set_at(j++, idx, val);
@@ -368,6 +378,8 @@ CreateTestSchema() {
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
@@ -545,7 +557,7 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 auto res = GenerateRandomSparseFloatVector(
                     N, kTestSparseDim, kTestSparseVectorDensity, seed);
                 auto array = milvus::segcore::CreateDataArrayFrom(
@@ -596,7 +608,7 @@ DataGen(SchemaPtr schema,
                             obj->assign(data, length * sizeof(float16));
                             break;
                         }
-                        case DataType::VECTOR_SPARSE_FLOAT:
+                        case DataType::VECTOR_SPARSE_U32_F32:
                             ThrowInfo(DataTypeInvalid, "not implemented");
                             break;
                         case DataType::VECTOR_BFLOAT16: {
@@ -635,6 +647,19 @@ DataGen(SchemaPtr schema,
                 FixedVector<bool> data(N);
                 for (int i = 0; i < N; ++i) {
                     data[i] = i % 2 == 0 ? true : false;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::TIMESTAMPTZ: {
+                vector<int64_t> data(N);
+                for (int i = 0; i < N; ++i) {
+                    int64_t x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
@@ -1199,10 +1224,10 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 auto sparse_float_array = data->vectors().sparse_float_vector();
                 auto rows = SparseBytesToRows(sparse_float_array.contents());
-                createFieldData(rows.get(), DataType::VECTOR_SPARSE_FLOAT, 0);
+                createFieldData(rows.get(), DataType::VECTOR_SPARSE_U32_F32, 0);
                 break;
             }
             case DataType::VECTOR_INT8: {
@@ -1305,6 +1330,18 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                         raw_data, raw_valid_data, DataType::DOUBLE, dim);
                 } else {
                     createFieldData(raw_data, DataType::DOUBLE, dim);
+                }
+                break;
+            }
+            case DataType::TIMESTAMPTZ: {
+                auto raw_data =
+                    data->scalars().timestamptz_data().data().data();
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(
+                        raw_data, raw_valid_data, DataType::TIMESTAMPTZ, dim);
+                } else {
+                    createFieldData(raw_data, DataType::TIMESTAMPTZ, dim);
                 }
                 break;
             }
@@ -1609,6 +1646,8 @@ gen_all_data_types_schema() {
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
         schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    auto timestamptz_field = schema->AddDebugField(
+        "timestamptz", milvus::DataType::TIMESTAMPTZ, true);
     auto varchar_field =
         schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
     auto json_field =

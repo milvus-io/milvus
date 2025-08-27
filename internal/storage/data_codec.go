@@ -392,6 +392,10 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		if err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data, singleData.(*DoubleFieldData).ValidData); err != nil {
 			return err
 		}
+	case schemapb.DataType_Timestamptz:
+		if err = eventWriter.AddTimestamptzToPayload(singleData.(*TimestamptzFieldData).Data, singleData.(*TimestamptzFieldData).ValidData); err != nil {
+			return err
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for i, singleString := range singleData.(*StringFieldData).Data {
 			isValid := true
@@ -647,6 +651,18 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
 		doubleFieldData.ValidData = append(doubleFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = doubleFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Timestamptz:
+		singleData := data.([]int64)
+		if fieldData == nil {
+			fieldData = &TimestamptzFieldData{Data: make([]int64, 0, rowNum)}
+		}
+		timestamptzFieldData := fieldData.(*TimestamptzFieldData)
+
+		timestamptzFieldData.Data = append(timestamptzFieldData.Data, singleData...)
+		timestamptzFieldData.ValidData = append(timestamptzFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = timestamptzFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:

@@ -305,8 +305,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(int64_t chunk_id,
+                     std::optional<std::pair<int64_t, int64_t>> offset_len =
+                         std::nullopt) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] VectorArrayViews only supported for "
@@ -314,9 +316,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
-        return PinWrapper<std::vector<VectorArrayView>>(
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
             chunk_wrapper,
-            static_cast<VectorArrayChunk*>(chunk.get())->Views());
+            static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
     PinWrapper<const size_t*>
@@ -519,8 +522,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 auto chunk = group_chunk->GetChunk(field_id_);
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
                 auto value = static_cast<StringChunk*>(chunk.get())
-                                 ->
-                                 operator[](offsets_in_chunk[i]);
+                                 ->operator[](offsets_in_chunk[i]);
                 fn(value, i, valid);
             }
         }
@@ -547,8 +549,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto chunk = group_chunk->GetChunk(field_id_);
             auto valid = chunk->isValid(offsets_in_chunk[i]);
             auto str_view = static_cast<StringChunk*>(chunk.get())
-                                ->
-                                operator[](offsets_in_chunk[i]);
+                                ->operator[](offsets_in_chunk[i]);
             fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }

@@ -311,11 +311,11 @@ BaseEventData::Serialize() {
                 }
                 break;
             }
-            case DataType::VECTOR_SPARSE_FLOAT: {
+            case DataType::VECTOR_SPARSE_U32_F32: {
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
                     auto row =
-                        static_cast<const knowhere::sparse::SparseRow<float>*>(
+                        static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                             field_data->RawValue(offset));
                     payload_writer->add_one_binary_payload(
                         static_cast<const uint8_t*>(row->data()),

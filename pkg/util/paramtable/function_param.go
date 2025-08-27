@@ -44,32 +44,48 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your azure openai embedding url, Default is the official embedding url"
 			case "azure_openai.resource_name":
 				return "Your azure openai resource name"
+			case "azure_openai.enable":
+				return "Whether to enable azure openai model service"
 			case "openai.credential":
 				return "The name in the crendential configuration item"
 			case "openai.url":
 				return "Your openai embedding url, Default is the official embedding url"
+			case "openai.enable":
+				return "Whether to enable openai model service"
 			case "dashscope.credential":
 				return "The name in the crendential configuration item"
 			case "dashscope.url":
 				return "Your dashscope embedding url, Default is the official embedding url"
+			case "dashscope.enable":
+				return "Whether to enable dashscope model service"
 			case "cohere.credential":
 				return "The name in the crendential configuration item"
 			case "cohere.url":
 				return "Your cohere embedding url, Default is the official embedding url"
+			case "cohere.enable":
+				return "Whether to enable cohere model service"
 			case "voyageai.credential":
 				return "The name in the crendential configuration item"
 			case "voyageai.url":
 				return "Your voyageai embedding url, Default is the official embedding url"
+			case "voyageai.enable":
+				return "Whether to enable voyageai model service"
 			case "siliconflow.url":
 				return "Your siliconflow embedding url, Default is the official embedding url"
 			case "siliconflow.credential":
 				return "The name in the crendential configuration item"
+			case "siliconflow.enable":
+				return "Whether to enable siliconflow model service"
 			case "bedrock.credential":
 				return "The name in the crendential configuration item"
+			case "bedrock.enable":
+				return "Whether to enable bedrock model service"
 			case "vertexai.url":
 				return "Your VertexAI embedding url"
 			case "vertexai.credential":
 				return "The name in the crendential configuration item"
+			case "vertexai.enable":
+				return "Whether to enable vertexai model service"
 			default:
 				return ""
 			}
@@ -95,14 +111,20 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "The name in the crendential configuration item"
 			case "siliconflow.url":
 				return "Your siliconflow rerank url, Default is the official rerank url"
+			case "siliconflow.enable":
+				return "Whether to enable siliconflow model service"
 			case "voyageai.credential":
 				return "The name in the crendential configuration item"
 			case "voyageai.url":
 				return "Your voyageai rerank url, Default is the official rerank url"
+			case "voyageai.enable":
+				return "Whether to enable voyageai model service"
 			case "cohere.credential":
 				return "The name in the crendential configuration item"
 			case "cohere.url":
 				return "Your cohere rerank url, Default is the official rerank url"
+			case "cohere.enable":
+				return "Whether to enable cohere model service"
 			default:
 				return ""
 			}

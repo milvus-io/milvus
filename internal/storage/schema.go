@@ -8,13 +8,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
-	fieldCount := len(schema.GetFields())
-	for _, structField := range schema.GetStructArrayFields() {
-		fieldCount += len(structField.GetFields())
-	}
+	fieldCount := typeutil.GetTotalFieldsNum(schema)
 	arrowFields := make([]arrow.Field, 0, fieldCount)
 	appendArrowField := func(field *schemapb.FieldSchema) error {
 		if serdeMap[field.DataType].arrowType == nil {

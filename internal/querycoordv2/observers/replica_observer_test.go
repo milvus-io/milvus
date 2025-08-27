@@ -66,6 +66,8 @@ func (suite *ReplicaObserverSuite) SetupSuite() {
 }
 
 func (suite *ReplicaObserverSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
+
 	var err error
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
@@ -212,51 +214,36 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
+	suite.observer.Stop()
+	snmanager.ResetStreamingNodeManager()
 	balancer := mock_balancer.NewMockBalancer(suite.T())
 	change := make(chan struct{})
 	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
-		versions := []typeutil.VersionInt64Pair{
-			{Global: 1, Local: 2},
-			{Global: 1, Local: 3},
-		}
-		pchans := [][]types.PChannelInfoAssigned{
-			{
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
-				},
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
-				},
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 3, Address: "localhost:1"},
-				},
-			},
-			{
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
-				},
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
-				},
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 2},
-					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
-				},
-			},
-		}
-		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
-			<-change
-		}
 		<-ctx.Done()
-		return context.Cause(ctx)
+		return ctx.Err()
+	})
+	balancer.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+		pchans := []map[int64]*types.StreamingNodeInfo{
+			{
+				1: {ServerID: 1, Address: "localhost:1"},
+				2: {ServerID: 2, Address: "localhost:2"},
+				3: {ServerID: 3, Address: "localhost:3"},
+			},
+			{
+				1: {ServerID: 1, Address: "localhost:1"},
+				2: {ServerID: 2, Address: "localhost:2"},
+			},
+		}
+		select {
+		case <-change:
+			return pchans[1], nil
+		default:
+			return pchans[0], nil
+		}
 	})
 	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
+	suite.observer.Start()
 
 	ctx := context.Background()
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
@@ -305,9 +292,12 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.Equal(nodes.Len(), 2)
 }
 
+func (suite *ReplicaObserverSuite) TearDownTest() {
+	suite.observer.Stop()
+}
+
 func (suite *ReplicaObserverSuite) TearDownSuite() {
 	suite.kv.Close()
-	suite.observer.Stop()
 	streamingutil.UnsetStreamingServiceEnabled()
 }
 

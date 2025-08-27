@@ -207,13 +207,18 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
             milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
         LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
 
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+
         if (!slice_meta_filepath
                  .empty()) {  // load with the slice meta info, then we can load batch by batch
             std::string index_file_prefix = slice_meta_filepath.substr(
                 0, slice_meta_filepath.find_last_of('/') + 1);
 
             auto result = file_manager_->LoadIndexToMemory(
-                {slice_meta_filepath}, config[milvus::LOAD_PRIORITY]);
+                {slice_meta_filepath}, load_priority);
             auto raw_slice_meta = std::move(result[INDEX_FILE_SLICE_META]);
             Config meta_data = Config::parse(std::string(
                 reinterpret_cast<const char*>(raw_slice_meta->PayloadData()),
@@ -230,8 +235,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                     batch.push_back(index_file_prefix + file_name);
                 }
 
-                auto batch_data = file_manager_->LoadIndexToMemory(
-                    batch, config[milvus::LOAD_PRIORITY]);
+                auto batch_data =
+                    file_manager_->LoadIndexToMemory(batch, load_priority);
                 int64_t payload_size = 0;
                 index_data_codecs.insert({prefix, IndexDataCodec{}});
                 auto& index_data_codec = index_data_codecs.at(prefix);
@@ -259,7 +264,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
             auto result = file_manager_->LoadIndexToMemory(
                 std::vector<std::string>(pending_index_files.begin(),
                                          pending_index_files.end()),
-                config[milvus::LOAD_PRIORITY]);
+                load_priority);
             for (auto&& index_data : result) {
                 auto prefix = index_data.first;
                 index_data_codecs.insert({prefix, IndexDataCodec{}});
@@ -338,8 +343,6 @@ VectorMemIndex<T>::Build(const Config& config) {
         for (auto data : field_datas) {
             total_size += data->Size();
             total_num_rows += data->get_num_rows();
-            AssertInfo(dim == 0 || dim == data->get_dim(),
-                       "inconsistent dim value between field datas!");
 
             // todo(SapdeA): now, vector arrays (embedding list) are serialized
             // to parquet by using binary format which does not provide dim
@@ -349,6 +352,9 @@ VectorMemIndex<T>::Build(const Config& config) {
                            "embedding list index must have elem_type");
                 dim = config[DIM_KEY].get<int64_t>();
             } else {
+                AssertInfo(dim == 0 || dim == data->get_dim(),
+                           "inconsistent dim value between field datas!");
+
                 dim = data->get_dim();
             }
         }
@@ -421,10 +427,10 @@ VectorMemIndex<T>::Build(const Config& config) {
                     field_data)
                     ->Dim());
         }
-        std::vector<knowhere::sparse::SparseRow<float>> vec(total_rows);
+        std::vector<knowhere::sparse::SparseRow<sparseValueType>> vec(total_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
-            auto ptr = static_cast<const knowhere::sparse::SparseRow<float>*>(
+            auto ptr = static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
             for (size_t i = 0; i < field_data->Length(); ++i) {
@@ -565,7 +571,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
@@ -574,13 +580,14 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     }
     // release and transfer ownership to the result unique ptr.
     res.value()->SetIsOwner(false);
-    return std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>(
-        static_cast<const knowhere::sparse::SparseRow<float>*>(
+    return std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>(
+        static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
             res.value()->GetTensor()));
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),
@@ -589,7 +596,14 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     std::filesystem::create_directories(
         std::filesystem::path(local_filepath.value()).parent_path());
 
-    auto file_writer = storage::FileWriter(local_filepath.value());
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    auto file_writer = storage::FileWriter(
+        local_filepath.value(),
+        storage::io::GetPriorityFromLoadPriority(load_priority));
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -626,8 +640,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         std::vector<std::string> batch{};
         batch.reserve(parallel_degree);
 
-        auto result = file_manager_->LoadIndexToMemory(
-            {slice_meta_filepath}, config[milvus::LOAD_PRIORITY]);
+        auto result = file_manager_->LoadIndexToMemory({slice_meta_filepath},
+                                                       load_priority);
         auto raw_slice_meta = std::move(result[INDEX_FILE_SLICE_META]);
         Config meta_data = Config::parse(std::string(
             reinterpret_cast<const char*>(raw_slice_meta->PayloadData()),
@@ -639,8 +653,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             auto HandleBatch = [&](int index) {
                 auto start_load2_mem = std::chrono::system_clock::now();
-                auto batch_data = file_manager_->LoadIndexToMemory(
-                    batch, config[milvus::LOAD_PRIORITY]);
+                auto batch_data =
+                    file_manager_->LoadIndexToMemory(batch, load_priority);
                 load_duration_sum +=
                     (std::chrono::system_clock::now() - start_load2_mem);
                 for (int j = index - batch.size() + 1; j <= index; j++) {
@@ -676,7 +690,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         auto result = file_manager_->LoadIndexToMemory(
             std::vector<std::string>(pending_index_files.begin(),
                                      pending_index_files.end()),
-            config[milvus::LOAD_PRIORITY]);
+            load_priority);
         load_duration_sum +=
             (std::chrono::system_clock::now() - start_load_files2_mem);
         //2. write data into files
@@ -739,5 +753,6 @@ template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
 template class VectorMemIndex<int8>;
+template class VectorMemIndex<sparse_u32_f32>;
 
 }  // namespace milvus::index
