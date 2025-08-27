@@ -220,7 +220,8 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		return nil, err
 	}
 
-	if resp.GetPayload() != nil {
+	defaultResult := &datapb.CompactionPlanResult{State: taskcommon.ToCompactionState(state)}
+	payloadResultF := func() (*datapb.CompactionPlanResult, error) {
 		result := &datapb.CompactionStateResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -240,10 +241,19 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		}
 		return ret, err
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &datapb.CompactionPlanResult{State: taskcommon.ToCompactionState(state)}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		panic("the compaction result payload must not be empty with Finished/Failed state")
 	default:
 		panic("should not happen")
@@ -293,7 +303,9 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 		return nil, err
 	}
 	reason := resProperties.GetTaskReason()
-	if resp.GetPayload() != nil {
+
+	defaultResult := &datapb.QueryPreImportResponse{State: taskcommon.ToImportState(state), Reason: reason}
+	payloadResultF := func() (*datapb.QueryPreImportResponse, error) {
 		result := &datapb.QueryPreImportResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -301,10 +313,19 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 		}
 		return result, nil
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &datapb.QueryPreImportResponse{State: taskcommon.ToImportState(state), Reason: reason}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		log.Warn("the preImport result payload must not be empty",
 			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
 		panic("the preImport result payload must not be empty with Finished/Failed state")
@@ -330,7 +351,8 @@ func (c *cluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*dat
 	}
 	reason := resProperties.GetTaskReason()
 
-	if resp.GetPayload() != nil {
+	defaultResult := &datapb.QueryImportResponse{State: taskcommon.ToImportState(state), Reason: reason}
+	payloadResultF := func() (*datapb.QueryImportResponse, error) {
 		result := &datapb.QueryImportResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -338,10 +360,19 @@ func (c *cluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*dat
 		}
 		return result, nil
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &datapb.QueryImportResponse{State: taskcommon.ToImportState(state), Reason: reason}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		log.Warn("the import result payload must not be empty",
 			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
 		panic("the import result payload must not be empty with Finished/Failed state")
@@ -386,7 +417,17 @@ func (c *cluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	}
 	reason := resProperties.GetTaskReason()
 
-	if resp.GetPayload() != nil {
+	defaultResult := &workerpb.IndexJobResults{
+		Results: []*workerpb.IndexTaskInfo{
+			{
+				BuildID:    in.GetTaskIDs()[0],
+				State:      commonpb.IndexState(state),
+				FailReason: reason,
+			},
+		},
+	}
+
+	payloadResultF := func() (*workerpb.IndexJobResults, error) {
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -394,18 +435,19 @@ func (c *cluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 		}
 		return result.GetIndexJobResults(), nil
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &workerpb.IndexJobResults{
-			Results: []*workerpb.IndexTaskInfo{
-				{
-					BuildID:    in.GetTaskIDs()[0],
-					State:      commonpb.IndexState(state),
-					FailReason: reason,
-				},
-			},
-		}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		log.Warn("the index result payload must not be empty",
 			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
 		panic("the index result payload must not be empty with Finished/Failed state")
@@ -451,7 +493,16 @@ func (c *cluster) QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	}
 	reason := resProperties.GetTaskReason()
 
-	if resp.GetPayload() != nil {
+	defaultResult := &workerpb.StatsResults{
+		Results: []*workerpb.StatsResult{
+			{
+				TaskID:     in.GetTaskIDs()[0],
+				State:      state,
+				FailReason: reason,
+			},
+		},
+	}
+	payloadResultF := func() (*workerpb.StatsResults, error) {
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -459,18 +510,20 @@ func (c *cluster) QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 		}
 		return result.GetStatsJobResults(), nil
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &workerpb.StatsResults{
-			Results: []*workerpb.StatsResult{
-				{
-					TaskID:     in.GetTaskIDs()[0],
-					State:      state,
-					FailReason: reason,
-				},
-			},
-		}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
+
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		log.Warn("the stats result payload must not be empty",
 			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
 		panic("the stats result payload must not be empty with Finished/Failed state")
@@ -514,7 +567,16 @@ func (c *cluster) QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*wo
 	}
 	reason := resProperties.GetTaskReason()
 
-	if resp.GetPayload() != nil {
+	defaultResult := &workerpb.AnalyzeResults{
+		Results: []*workerpb.AnalyzeResult{
+			{
+				TaskID:     in.GetTaskIDs()[0],
+				State:      state,
+				FailReason: reason,
+			},
+		},
+	}
+	payloadResultF := func() (*workerpb.AnalyzeResults, error) {
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -522,18 +584,19 @@ func (c *cluster) QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*wo
 		}
 		return result.GetAnalyzeJobResults(), nil
 	}
+
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.Retry, taskcommon.InProgress:
-		return &workerpb.AnalyzeResults{
-			Results: []*workerpb.AnalyzeResult{
-				{
-					TaskID:     in.GetTaskIDs()[0],
-					State:      state,
-					FailReason: reason,
-				},
-			},
-		}, nil
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
 		log.Warn("the analyze result payload must not be empty",
 			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
 		panic("the analyze result payload must not be empty with Finished/Failed state")
