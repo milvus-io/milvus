@@ -85,11 +85,11 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
 
-    LOG_DEBUG("Real batch size{}", real_batch_size);
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     auto exec_sub_batch =
-        [arith_op, compare_op]<FilterType filter_type = FilterType::sequential>(
+        [ arith_op,
+          compare_op ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -98,52 +98,52 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
-            absl::TimeZone utc = absl::UTCTimeZone();
-            absl::Time compare_t = absl::FromUnixMicros(compare_value);
-            for (int i = 0; i < size; ++i) {
-                auto offset = (offsets) ? offsets[i] : i;
-                const int64_t current_ts_us = data[i];
-                const int op_sign =
-                    (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
-                absl::Time t = absl::FromUnixMicros(current_ts_us);
-                // CivilSecond can handle calendar time for us
-                absl::CivilSecond cs = absl::ToCivilSecond(t, utc);
-                absl::CivilSecond new_cs(
-                    cs.year() + (interval.years() * op_sign),
-                    cs.month() + (interval.months() * op_sign),
-                    cs.day() + (interval.days() * op_sign),
-                    cs.hour() + (interval.hours() * op_sign),
-                    cs.minute() + (interval.minutes() * op_sign),
-                    cs.second() + (interval.seconds() * op_sign));
-                absl::Time final_time = absl::FromCivil(new_cs, utc);
-                bool match = false;
-                switch (compare_op) {
-                    case proto::plan::OpType::Equal:
-                        match = (final_time == compare_t);
-                        break;
-                    case proto::plan::OpType::NotEqual:
-                        match = (final_time != compare_t);
-                        break;
-                    case proto::plan::OpType::GreaterThan:
-                        match = (final_time > compare_t);
-                        break;
-                    case proto::plan::OpType::GreaterEqual:
-                        match = (final_time >= compare_t);
-                        break;
-                    case proto::plan::OpType::LessThan:
-                        match = (final_time < compare_t);
-                        break;
-                    case proto::plan::OpType::LessEqual:
-                        match = (final_time <= compare_t);
-                        break;
-                    default:  // Should not happen
-                        ThrowInfo(OpTypeInvalid,
-                                  "Unsupported compare op for "
-                                  "timestamptz_arith_compare_expr");
-                }
-                res[i] = match;
+        absl::TimeZone utc = absl::UTCTimeZone();
+        absl::Time compare_t = absl::FromUnixMicros(compare_value);
+        for (int i = 0; i < size; ++i) {
+            auto offset = (offsets) ? offsets[i] : i;
+            const int64_t current_ts_us = data[i];
+            const int op_sign =
+                (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
+            absl::Time t = absl::FromUnixMicros(current_ts_us);
+            // CivilSecond can handle calendar time for us
+            absl::CivilSecond cs = absl::ToCivilSecond(t, utc);
+            absl::CivilSecond new_cs(
+                cs.year() + (interval.years() * op_sign),
+                cs.month() + (interval.months() * op_sign),
+                cs.day() + (interval.days() * op_sign),
+                cs.hour() + (interval.hours() * op_sign),
+                cs.minute() + (interval.minutes() * op_sign),
+                cs.second() + (interval.seconds() * op_sign));
+            absl::Time final_time = absl::FromCivil(new_cs, utc);
+            bool match = false;
+            switch (compare_op) {
+                case proto::plan::OpType::Equal:
+                    match = (final_time == compare_t);
+                    break;
+                case proto::plan::OpType::NotEqual:
+                    match = (final_time != compare_t);
+                    break;
+                case proto::plan::OpType::GreaterThan:
+                    match = (final_time > compare_t);
+                    break;
+                case proto::plan::OpType::GreaterEqual:
+                    match = (final_time >= compare_t);
+                    break;
+                case proto::plan::OpType::LessThan:
+                    match = (final_time < compare_t);
+                    break;
+                case proto::plan::OpType::LessEqual:
+                    match = (final_time <= compare_t);
+                    break;
+                default:  // Should not happen
+                    ThrowInfo(OpTypeInvalid,
+                              "Unsupported compare op for "
+                              "timestamptz_arith_compare_expr");
             }
-        };
+            res[i] = match;
+        }
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(exec_sub_batch,
