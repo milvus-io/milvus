@@ -259,7 +259,6 @@ BaseEventData::Serialize() {
         std::shared_ptr<PayloadWriter> payload_writer;
 
         if (data_type == DataType::VECTOR_ARRAY) {
-            // For VectorArray, we need to get the element_type
             auto vector_array_field =
                 std::dynamic_pointer_cast<FieldData<VectorArray>>(field_data);
             AssertInfo(vector_array_field != nullptr,

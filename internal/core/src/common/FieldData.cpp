@@ -349,7 +349,6 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                                    num_floats,
                                    dim);
 
-                        // Direct construction from Arrow data (avoids protobuf overhead)
                         int num_vectors = num_floats / dim;
                         const float* data_ptr =
                             float_array->raw_values() + start_offset;
@@ -536,7 +535,8 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
-template class FieldDataImpl<knowhere::sparse::SparseRow<sparseValueType>, true>;
+template class FieldDataImpl<knowhere::sparse::SparseRow<sparseValueType>,
+                             true>;
 template class FieldDataImpl<VectorArray, true>;
 
 FieldDataPtr

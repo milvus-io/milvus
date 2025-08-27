@@ -32,7 +32,6 @@ class VectorArray : public milvus::VectorTrait {
 
     ~VectorArray() = default;
 
-    // Direct construction from raw data (avoids protobuf overhead)
     VectorArray(const void* data,
                 int num_vectors,
                 int64_t dim,
@@ -42,7 +41,6 @@ class VectorArray : public milvus::VectorTrait {
         assert(num_vectors > 0);
         assert(dim > 0);
 
-        // Calculate size based on element type
         switch (element_type) {
             case DataType::VECTOR_FLOAT:
                 size_ = num_vectors * dim * sizeof(float);

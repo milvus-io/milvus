@@ -18,6 +18,7 @@
 
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
+#include "arrow/array/builder_primitive.h"
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "common/type_c.h"
@@ -48,6 +49,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
+#include "common/Types.h"
 #include "common/VectorArray.h"
 #include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
@@ -389,7 +391,7 @@ CreateArrowBuilder(DataType data_type) {
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
-CreateArrowBuilder(DataType data_type, int dim) {
+CreateArrowBuilder(DataType data_type, DataType element_type, int dim) {
     switch (static_cast<DataType>(data_type)) {
         case DataType::VECTOR_FLOAT: {
             AssertInfo(dim > 0, "invalid dim value: {}", dim);
@@ -417,11 +419,23 @@ CreateArrowBuilder(DataType data_type, int dim) {
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
         case DataType::VECTOR_ARRAY: {
-            // VectorArray uses ListArray with Float32 values for FloatVector
-            // For now, only support FloatVector as element type
             AssertInfo(dim > 0, "invalid dim value");
-            // Create FloatBuilder for FloatVector elements
-            auto value_builder = std::make_shared<arrow::FloatBuilder>();
+            AssertInfo(element_type != DataType::NONE,
+                       "element_type must be specified for VECTOR_ARRAY");
+
+            std::shared_ptr<arrow::ArrayBuilder> value_builder;
+            switch (element_type) {
+                case DataType::VECTOR_FLOAT: {
+                    value_builder = std::make_shared<arrow::FloatBuilder>();
+                    break;
+                }
+                default: {
+                    ThrowInfo(DataTypeInvalid,
+                              "unsupported element type {} for VECTOR_ARRAY",
+                              GetDataTypeName(element_type));
+                }
+            }
+
             return std::make_shared<arrow::ListBuilder>(
                 arrow::default_memory_pool(), value_builder);
         }
@@ -596,7 +610,6 @@ CreateArrowSchema(DataType data_type,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
 
-    // Create the appropriate value type based on element type
     std::shared_ptr<arrow::DataType> value_type;
     switch (element_type) {
         case DataType::VECTOR_FLOAT:
@@ -606,7 +619,6 @@ CreateArrowSchema(DataType data_type,
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_INT8:
-            // TODO: Support other element types
             ThrowInfo(NotImplemented,
                       "Element type {} not yet implemented for VectorArray",
                       GetDataTypeName(element_type));
@@ -816,7 +828,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     // index not use valid_data, so no need to set nullable==true
     index_data->set_index_meta(index_meta);
     index_data->SetFieldDataMeta(field_meta);
-    auto serialized_index_data = index_data->serialize_to_remote_file(plugin_context);
+    auto serialized_index_data =
+        index_data->serialize_to_remote_file(plugin_context);
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
@@ -832,7 +845,9 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager, bool is_field_data, const std::string file) {
+    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager,
+                                     bool is_field_data,
+                                     const std::string file) {
         // TODO remove this Size() cost
         auto fileSize = chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
@@ -842,7 +857,8 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
+        futures.emplace_back(pool.Submit(
+            DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
     }
     return futures;
 }
@@ -1354,7 +1370,9 @@ GetFieldIDList(FieldId column_group_id,
         return field_id_list;
     }
     auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-        fs, filepath, arrow_schema,
+        fs,
+        filepath,
+        arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties());
     field_id_list =

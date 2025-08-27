@@ -52,7 +52,7 @@ PayloadWriter::PayloadWriter(const DataType column_type,
     AssertInfo(element_type != DataType::NONE,
                "element_type must be specified for VECTOR_ARRAY");
     dimension_ = dim;
-    builder_ = CreateArrowBuilder(column_type, dim);
+    builder_ = CreateArrowBuilder(column_type, element_type, dim);
     schema_ = CreateArrowSchema(column_type, dim, element_type, nullable);
 }
 
@@ -65,7 +65,7 @@ PayloadWriter::init_dimension(int dim) {
     }
 
     dimension_ = dim;
-    builder_ = CreateArrowBuilder(column_type_, dim);
+    builder_ = CreateArrowBuilder(column_type_, element_type_, dim);
     schema_ = CreateArrowSchema(column_type_, dim, nullable_);
 }
 

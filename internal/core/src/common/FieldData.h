@@ -83,7 +83,6 @@ class FieldData<Array> : public FieldDataArrayImpl {
 template <>
 class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
-    // Constructor with element type
     explicit FieldData(int64_t dim,
                        DataType element_type,
                        DataType data_type,
