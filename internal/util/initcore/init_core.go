@@ -43,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -272,6 +274,101 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")
+}
+
+func InitTieredStorage(params *paramtable.ComponentParam) error {
+	// init tiered storage
+	scalarFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	if err != nil {
+		return err
+	}
+	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
+	if deprecatedCacheWarmupPolicy == "sync" {
+		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
+	} else if deprecatedCacheWarmupPolicy == "async" {
+		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+	}
+	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	osMemBytes := hardware.GetMemoryCount()
+	osDiskBytes := params.QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+
+	memoryLowWatermarkRatio := params.QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
+	memoryHighWatermarkRatio := params.QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
+	memoryMaxRatio := params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
+	diskLowWatermarkRatio := params.QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
+	diskHighWatermarkRatio := params.QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
+	diskMaxRatio := params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
+
+	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
+		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+	}
+	if memoryHighWatermarkRatio > memoryMaxRatio {
+		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+	}
+	if memoryMaxRatio >= 1 {
+		return errors.New("memoryMaxRatio should not be greater than 1")
+	}
+
+	if diskLowWatermarkRatio > diskHighWatermarkRatio {
+		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+	}
+	if diskHighWatermarkRatio > diskMaxRatio {
+		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+	}
+	if diskMaxRatio >= 1 {
+		return errors.New("diskMaxRatio should not be greater than 1")
+	}
+
+	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
+	memoryHighWatermarkBytes := C.int64_t(memoryHighWatermarkRatio * float64(osMemBytes))
+	memoryMaxBytes := C.int64_t(memoryMaxRatio * float64(osMemBytes))
+
+	diskLowWatermarkBytes := C.int64_t(diskLowWatermarkRatio * float64(osDiskBytes))
+	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
+	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
+
+	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
+	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
+	evictionIntervalMs := C.int64_t(params.QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+	cacheCellUnaccessedSurvivalTime := C.int64_t(params.QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
+	loadingMemoryFactor := C.float(params.QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
+	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
+	maxDiskUsagePercentage := C.float(diskMaxRatio)
+	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
+	defer C.free(unsafe.Pointer(diskPath))
+
+	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
+		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
+		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
+		overloadedMemoryThresholdPercentage, loadingMemoryFactor, maxDiskUsagePercentage, diskPath)
+
+	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
+	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
+
+	log.Info("tiered storage eviction cache ratio configured",
+		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
+		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
+	)
+
+	return nil
 }
 
 func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {

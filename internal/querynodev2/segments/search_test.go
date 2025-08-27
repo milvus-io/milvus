@@ -59,6 +59,7 @@ func (suite *SearchSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	initcore.InitLocalChunkManager(suite.T().Name())
 	initcore.InitMmapManager(paramtable.Get(), 1)
+	initcore.InitTieredStorage(paramtable.Get())
 
 	suite.collectionID = 100
 	suite.partitionID = 10
