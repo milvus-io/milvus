@@ -17,13 +17,9 @@
 package metrics
 
 import (
-	"sync"
-
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 )
-
-var registerCDCOnce sync.Once
 
 var CDCNumReplications = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
@@ -38,12 +34,5 @@ var CDCNumReplications = prometheus.NewGaugeVec(
 
 // RegisterCDCMetrics registers CDC metrics
 func RegisterCDC(registry *prometheus.Registry) {
-	registerCDCOnce.Do(func() {
-		registerCDCMetricsOnce(registry)
-	})
-}
-
-// registerCDCMetricsOnce registers CDC metrics
-func registerCDCMetricsOnce(registry *prometheus.Registry) {
 	registry.MustRegister(CDCNumReplications)
 }

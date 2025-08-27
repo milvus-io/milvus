@@ -6481,11 +6481,8 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	if err != nil {
 		return nil, err
 	}
-
-	currentCluster, err := replicateutil.GetMilvusCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config)
-	if err != nil {
-		return nil, err
-	}
+	configHelper := replicateutil.NewConfigHelper(config)
+	currentCluster := configHelper.GetCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 
 	walName := message.GetWALName(streaming.WAL().WALName())
 	checkpoints := make([]*milvuspb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))

@@ -63,9 +63,9 @@ func NewClusterReplicator(targetCluster *milvuspb.MilvusCluster, configuration *
 }
 
 func (r *clusterReplicator) StartReplicateCluster() {
-	sourceCluster := replicateutil.MustGetMilvusCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), r.configuration)
+	configHelper := replicateutil.NewConfigHelper(r.configuration)
 	for _, targetChannelName := range r.targetCluster.GetPchannels() {
-		sourceChannelName := replicateutil.MustGetSourceChannelName(sourceCluster.GetClusterId(), targetChannelName, r.configuration)
+		sourceChannelName := configHelper.GetSourceChannel(targetChannelName)
 		channelReplicator := NewChannelReplicator(sourceChannelName, targetChannelName, r.targetCluster)
 		channelReplicator.StartReplicateChannel()
 		r.channelReplicators.Insert(targetChannelName, channelReplicator)

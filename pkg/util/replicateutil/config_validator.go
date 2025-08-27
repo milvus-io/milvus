@@ -43,9 +43,6 @@ func (v *ReplicateConfigValidator) Validate() error {
 	if err := v.validateClusterBasic(clusters); err != nil {
 		return err
 	}
-	if err := v.validateClusterUniqueness(); err != nil {
-		return err
-	}
 	if err := v.validateRelevance(); err != nil {
 		return err
 	}
@@ -121,18 +118,6 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.Mil
 			return fmt.Errorf("duplicate clusterID found: '%s'", clusterID)
 		}
 		v.clusterMap[clusterID] = cluster
-	}
-	return nil
-}
-
-// validateClusterUniqueness validates that clusterID values across all clusters must be globally unique
-func (v *ReplicateConfigValidator) validateClusterUniqueness() error {
-	seenIDs := make(map[string]struct{})
-	for clusterID := range v.clusterMap {
-		if _, exists := seenIDs[clusterID]; exists {
-			return fmt.Errorf("duplicate clusterID found: '%s'", clusterID)
-		}
-		seenIDs[clusterID] = struct{}{}
 	}
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/samber/lo"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.
@@ -39,11 +40,11 @@ func NewReplicateManager() *replicateManager {
 }
 
 func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
-	targetClusters := make(map[string]*milvuspb.MilvusCluster)
-	for _, topology := range config.GetCrossClusterTopology() {
-		clusterID := topology.GetTargetClusterId()
-		targetClusters[clusterID] = replicateutil.MustGetMilvusCluster(clusterID, config)
-	}
+	configHelper := replicateutil.NewConfigHelper(config)
+	targetClusters := lo.KeyBy(configHelper.GetTargetClusters(), func(cluster *milvuspb.MilvusCluster) string {
+		return cluster.GetClusterId()
+	})
+
 	// Add and start new cluster replicators that in targetClusters but not in clusterReplicators.
 	for _, targetCluster := range targetClusters {
 		if _, ok := r.clusterReplicators[targetCluster.GetClusterId()]; ok {
