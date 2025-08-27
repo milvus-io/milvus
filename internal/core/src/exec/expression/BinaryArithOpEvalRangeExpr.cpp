@@ -1422,6 +1422,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     if (real_batch_size == 0) {
         return nullptr;
     }
+    LOG_DEBUG("Real batch size {}", real_batch_size);
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),

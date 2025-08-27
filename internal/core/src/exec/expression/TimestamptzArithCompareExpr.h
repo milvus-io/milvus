@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include <memory>
 #include "common/Vector.h"
+#include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
@@ -60,14 +62,10 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecCompareVisitorImplForData(OffsetVector* input);
-
-    // NOTE: Index path is extremely complex for this operation and is omitted for now.
-    // template <typename T>
-    // VectorPtr
-    // ExecCompareVisitorImplForIndex();
+    ExecCompareVisitorImplForAll(OffsetVector* input);
 
  private:
+    std::shared_ptr<PhyBinaryArithOpEvalRangeExpr> helperPhyExpr_;
     std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr> expr_;
     bool arg_inited_{false};
     proto::plan::Interval interval_;
