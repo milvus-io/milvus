@@ -687,3 +687,9 @@ message WALCheckpoint {
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
 }
+
+message ReplicatePChannelMeta {
+    string source_channel_name          = 1;
+    string target_channel_name          = 2;
+    common.MilvusCluster target_cluster = 3;
+}

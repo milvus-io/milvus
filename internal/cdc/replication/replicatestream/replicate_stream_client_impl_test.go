@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 func TestReplicateStreamClient_Replicate(t *testing.T) {
@@ -75,6 +76,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 			mockMsg := mock_message.NewMockImmutableMessage(t)
 			tt := uint64(i + 1)
 			mockMsg.EXPECT().TimeTick().Return(tt)
+			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
 			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
 				Id: &messagespb.MessageID{
 					Id: strconv.Itoa(int(tt)), // use id as time tick in mock
@@ -184,6 +186,7 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 			tt := uint64(i + 1)
 			mockMsg := mock_message.NewMockImmutableMessage(t)
 			mockMsg.EXPECT().TimeTick().Return(tt)
+			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
 			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
 				Id: &messagespb.MessageID{
 					Id: strconv.Itoa(int(tt)), // use id as time tick in mock

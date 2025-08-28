@@ -194,6 +194,39 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 				// context canceled, return nil
 				return nil
 			}
+			if msg.MessageType() == message.MessageTypeTxn {
+				txnMsg := message.AsImmutableTxnMessage(msg)
+
+				// send txn begin message
+				beginMsg := txnMsg.Begin()
+				beginReq := r.immutableMessageToProto(beginMsg)
+				err := r.client.Send(beginReq)
+				if err != nil {
+					logger.Warn("replicate stream send txn begin message failed", zap.Error(err))
+					return err
+				}
+
+				// send txn messages
+				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+					req := r.immutableMessageToProto(msg)
+					err = r.client.Send(req)
+					return err
+				})
+				if err != nil {
+					logger.Warn("replicate stream send txn message failed", zap.Error(err))
+					return err
+				}
+
+				// send txn commit message
+				commitMsg := txnMsg.Commit()
+				commitReq := r.immutableMessageToProto(commitMsg)
+				err = r.client.Send(commitReq)
+				if err != nil {
+					logger.Warn("replicate stream send txn commit message failed", zap.Error(err))
+					return err
+				}
+				continue
+			}
 			req := r.immutableMessageToProto(msg)
 			err = r.client.Send(req)
 			if err != nil {

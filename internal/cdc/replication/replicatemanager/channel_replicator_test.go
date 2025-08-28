@@ -17,7 +17,6 @@
 package replicatemanager
 
 import (
-	"context"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -31,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -77,7 +76,12 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
 
 	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
-	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel",
+		TargetChannelName: "test-target-channel",
+		TargetCluster:     cluster,
+	}
+	replicator := NewChannelReplicator(replicateInfo)
 	replicator.(*channelReplicator).rsm = rsm
 	assert.NotNil(t, replicator)
 
@@ -86,53 +90,4 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 
 	state := replicator.GetState()
 	assert.Equal(t, typeutil.LifetimeStateStopped, state)
-}
-
-func TestChannelReplicator_ReplicateError(t *testing.T) {
-	mockMilvusClient := cluster.NewMockMilvusClient(t)
-	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
-		Return(&milvuspb.GetReplicateInfoResponse{
-			Checkpoints: []*milvuspb.ReplicateCheckpoint{
-				{
-					SourceChannelName:  "test-source-channel",
-					TargetChannelName:  "test-target-channel",
-					ReplicateMessageId: newMockPulsarMessageID(),
-				},
-			},
-		}, nil)
-	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)
-
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil)
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
-	var handlerCh adaptor.ChanMessageHandler
-	scanner := mock_streaming.NewMockScanner(t)
-	scanner.EXPECT().Close().Return()
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
-	wal.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, opts streaming.ReadOption) streaming.Scanner {
-		handlerCh = opts.MessageHandler.(adaptor.ChanMessageHandler)
-		return scanner
-	})
-	streaming.SetWALForTest(wal)
-
-	rs := replicatestream.NewMockReplicateStreamClient(t)
-	rs.EXPECT().Replicate(mock.Anything).Return(assert.AnError)
-	rs.EXPECT().Close().Return()
-	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
-	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
-
-	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
-	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
-	replicator.(*channelReplicator).rsm = rsm
-	assert.NotNil(t, replicator)
-
-	assert.Panics(t, func() {
-		handlerCh <- nil // trigger replicate
-		replicator.StartReplicateChannel()
-	})
 }

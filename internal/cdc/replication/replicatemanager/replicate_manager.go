@@ -19,53 +19,36 @@ package replicatemanager
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/samber/lo"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.
 type replicateManager struct {
 	ctx context.Context
 
-	// clusterReplicators is a map of target clusterID to ClusterReplicator.
-	clusterReplicators map[string]ClusterReplicator
+	// replicators is a map of replicate pchannel name to ChannelReplicator.
+	replicators map[string]Replicator
 }
 
 func NewReplicateManager() *replicateManager {
 	return &replicateManager{
-		ctx:                context.Background(),
-		clusterReplicators: make(map[string]ClusterReplicator),
+		ctx:         context.Background(),
+		replicators: make(map[string]Replicator),
 	}
 }
 
-func (r *replicateManager) UpdateReplications(config *commonpb.ReplicateConfiguration) {
-	configHelper := replicateutil.NewConfigHelper(config)
-	targetClusters := lo.KeyBy(configHelper.GetTargetClusters(), func(cluster *commonpb.MilvusCluster) string {
-		return cluster.GetClusterId()
-	})
-
-	// Add and start new cluster replicators that in targetClusters but not in clusterReplicators.
-	for _, targetCluster := range targetClusters {
-		if _, ok := r.clusterReplicators[targetCluster.GetClusterId()]; ok {
-			continue
-		}
-		clusterReplicator := NewClusterReplicator(targetCluster, config)
-		clusterReplicator.StartReplicateCluster()
-		r.clusterReplicators[targetCluster.GetClusterId()] = clusterReplicator
+func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
+	_, ok := r.replicators[replicateInfo.GetSourceChannelName()]
+	if ok {
+		return
 	}
-	// Stop and remove cluster replicators that are not in the candidate clusters.
-	for clusterID, clusterReplicator := range r.clusterReplicators {
-		if _, ok := targetClusters[clusterID]; !ok {
-			clusterReplicator.StopReplicateCluster()
-			delete(r.clusterReplicators, clusterID)
-		}
-	}
-}
-
-func (r *replicateManager) Close() {
-	for _, clusterReplicator := range r.clusterReplicators {
-		clusterReplicator.StopReplicateCluster()
-	}
-	r.clusterReplicators = make(map[string]ClusterReplicator)
+	replicator := NewChannelReplicator(replicateInfo)
+	r.replicators[replicateInfo.GetSourceChannelName()] = replicator
+	log.Ctx(r.ctx).Info("created replicator for replicate pchannel",
+		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", replicateInfo.GetTargetChannelName()),
+	)
 }

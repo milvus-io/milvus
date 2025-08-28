@@ -22,15 +22,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 func TestController_StartAndStop(t *testing.T) {
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
-	mockReplicateManagerClient.EXPECT().Close().Return()
 	resource.InitForTest(t,
 		resource.OptReplicateManagerClient(mockReplicateManagerClient),
 	)
@@ -46,12 +45,16 @@ func TestController_StartAndStop(t *testing.T) {
 
 func TestController_Run(t *testing.T) {
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
-	mockReplicateManagerClient.EXPECT().Close().Return()
 
-	testConfig := &commonpb.ReplicateConfiguration{}
+	replicatePChannels := []*streamingpb.ReplicatePChannelMeta{
+		{
+			SourceChannelName: "test-source-channel-1",
+			TargetChannelName: "test-target-channel-1",
+		},
+	}
 	mockReplicationCatalog := mock_metastore.NewMockReplicationCatalog(t)
-	mockReplicationCatalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(testConfig, nil)
-	mockReplicateManagerClient.EXPECT().UpdateReplications(testConfig).Return()
+	mockReplicationCatalog.EXPECT().ListReplicatePChannels(mock.Anything).Return(replicatePChannels, nil)
+	mockReplicateManagerClient.EXPECT().CreateReplicator(replicatePChannels[0]).Return()
 	resource.InitForTest(t,
 		resource.OptReplicateManagerClient(mockReplicateManagerClient),
 		resource.OptReplicationCatalog(mockReplicationCatalog),
@@ -65,10 +68,9 @@ func TestController_Run(t *testing.T) {
 
 func TestController_RunError(t *testing.T) {
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
-	mockReplicateManagerClient.EXPECT().Close().Return()
 
 	mockReplicationCatalog := mock_metastore.NewMockReplicationCatalog(t)
-	mockReplicationCatalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, assert.AnError)
+	mockReplicationCatalog.EXPECT().ListReplicatePChannels(mock.Anything).Return(nil, assert.AnError)
 	resource.InitForTest(t,
 		resource.OptReplicateManagerClient(mockReplicateManagerClient),
 		resource.OptReplicationCatalog(mockReplicationCatalog),

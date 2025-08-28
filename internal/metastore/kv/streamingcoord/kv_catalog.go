@@ -2,6 +2,7 @@ package streamingcoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -197,4 +198,45 @@ func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*commonpb.Repl
 		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
 	}
 	return config, nil
+}
+
+func (c *catalog) SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error {
+	kvs := make(map[string]string, len(infos))
+	for _, info := range infos {
+		key := buildReplicatePChannelPath(info.GetTargetCluster().GetClusterId(), info.GetSourceChannelName())
+		v, err := proto.Marshal(info)
+		if err != nil {
+			return errors.Wrapf(err, "marshal replicate pchannel meta failed")
+		}
+		kvs[key] = string(v)
+	}
+	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return c.metaKV.MultiSave(ctx, partialKvs)
+	})
+}
+
+func (c *catalog) RemoveReplicatePChannel(ctx context.Context, targetClusterID, sourceChannelName string) error {
+	key := buildReplicatePChannelPath(targetClusterID, sourceChannelName)
+	return c.metaKV.Remove(ctx, key)
+}
+
+func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error) {
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, ReplicatePChannelMetaPrefix)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]*streamingpb.ReplicatePChannelMeta, 0, len(values))
+	for k, value := range values {
+		info := &streamingpb.ReplicatePChannelMeta{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {
+	return fmt.Sprintf("%s%s-%s", ReplicatePChannelMetaPrefix, targetClusterID, sourceChannelName)
 }

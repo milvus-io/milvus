@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 const checkInterval = 10 * time.Second
@@ -65,7 +64,7 @@ func (c *controller) Start() {
 func (c *controller) Stop() {
 	c.stopOnce.Do(func() {
 		log.Ctx(c.ctx).Info("CDC controller stopping...")
-		resource.Resource().ReplicateManagerClient().Close()
+		// TODO: sheep, gracefully stop the replicators
 		close(c.stopChan)
 		c.wg.Wait()
 		log.Ctx(c.ctx).Info("CDC controller stopped")
@@ -73,12 +72,12 @@ func (c *controller) Stop() {
 }
 
 func (c *controller) run() {
-	config, err := resource.Resource().ReplicationCatalog().GetReplicateConfiguration(c.ctx)
+	replicatePChannels, err := resource.Resource().ReplicationCatalog().ListReplicatePChannels(c.ctx)
 	if err != nil {
-		log.Ctx(c.ctx).Error("failed to get replicate configuration", zap.Error(err))
+		log.Ctx(c.ctx).Error("failed to get replicate pchannels", zap.Error(err))
 		return
 	}
-	log.Ctx(c.ctx).Info("updating configuration...", replicateutil.ConfigLogFields(config)...)
-	resource.Resource().ReplicateManagerClient().UpdateReplications(config)
-	log.Ctx(c.ctx).Info("configuration updated", replicateutil.ConfigLogFields(config)...)
+	for _, replicatePChannel := range replicatePChannels {
+		resource.Resource().ReplicateManagerClient().CreateReplicator(replicatePChannel)
+	}
 }

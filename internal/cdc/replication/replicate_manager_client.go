@@ -16,13 +16,10 @@
 
 package replication
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+import "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 
 // ReplicateManagerClient is the client that manages the replicate configuration.
 type ReplicateManagerClient interface {
-	// UpdateReplications updates the replications by the configuration.
-	UpdateReplications(config *commonpb.ReplicateConfiguration)
-
-	// Close stops all replications.
-	Close()
+	// CreateReplicator creates a new replicator for the replicate pchannel.
+	CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
 }

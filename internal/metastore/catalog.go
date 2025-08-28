@@ -210,6 +210,13 @@ type QueryCoordCatalog interface {
 
 // ReplicationCatalog is the interface for replication catalog
 type ReplicationCatalog interface {
+	// SaveReplicatePChannels saves the replicate pchannels to metastore.
+	SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error
+	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
+	RemoveReplicatePChannel(ctx context.Context, sourceChannelName, targetChannelName string) error
+	// ListReplicatePChannels lists all replicate pchannels from metastore.
+	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
+
 	// SaveReplicateConfiguration saves the replicate configuration to metastore.
 	SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 	// GetReplicateConfiguration gets the replicate configuration from metastore.

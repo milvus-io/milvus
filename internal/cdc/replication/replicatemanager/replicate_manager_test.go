@@ -19,113 +19,51 @@ package replicatemanager
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/cdc/cluster"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
-func TestReplicateManager_UpdateReplications(t *testing.T) {
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).Return(nil, assert.AnError)
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
+func TestReplicateManager_CreateReplicator(t *testing.T) {
+	manager := NewReplicateManager()
 
-	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "source-cluster")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.ClusterPrefix.Key)
-
-	replicateManager := NewReplicateManager()
-
-	// S --> A
-	// S --> B
-	// S --> C
-	config := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: "source-cluster",
-				Pchannels: []string{"source-channel-1", "source-channel-2"},
-			},
-			{
-				ClusterId: "target-cluster-a",
-				Pchannels: []string{"target-channel-a-1", "target-channel-a-2"},
-			},
-			{
-				ClusterId: "target-cluster-b",
-				Pchannels: []string{"target-channel-b-1", "target-channel-b-2"},
-			},
-			{
-				ClusterId: "target-cluster-c",
-				Pchannels: []string{"target-channel-c-1", "target-channel-c-2"},
-			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{
-				SourceClusterId: "source-cluster",
-				TargetClusterId: "target-cluster-a",
-			},
-			{
-				SourceClusterId: "source-cluster",
-				TargetClusterId: "target-cluster-b",
-			},
-			{
-				SourceClusterId: "source-cluster",
-				TargetClusterId: "target-cluster-c",
-			},
+	// Test creating first replicator
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel-1",
+		TargetChannelName: "test-target-channel-1",
+		TargetCluster: &commonpb.MilvusCluster{
+			ClusterId: "test-cluster-1",
 		},
 	}
 
-	replicateManager.UpdateReplications(config)
-	assert.Equal(t, 3, len(replicateManager.clusterReplicators))
+	manager.CreateReplicator(replicateInfo)
 
-	// S --> A
-	// S --> B
-	config.CrossClusterTopology = []*commonpb.CrossClusterTopology{
-		{
-			SourceClusterId: "source-cluster",
-			TargetClusterId: "target-cluster-a",
-		},
-		{
-			SourceClusterId: "source-cluster",
-			TargetClusterId: "target-cluster-b",
+	// Verify replicator was created
+	assert.Equal(t, 1, len(manager.replicators))
+	replicator, exists := manager.replicators["test-source-channel-1"]
+	assert.True(t, exists)
+	assert.NotNil(t, replicator)
+
+	// Test creating second replicator
+	replicateInfo2 := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel-2",
+		TargetChannelName: "test-target-channel-2",
+		TargetCluster: &commonpb.MilvusCluster{
+			ClusterId: "test-cluster-2",
 		},
 	}
-	replicateManager.UpdateReplications(config)
-	assert.Equal(t, 2, len(replicateManager.clusterReplicators))
 
-	// S --> A
-	// S --> D
-	config = &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: "source-cluster",
-				Pchannels: []string{"source-channel-1", "source-channel-2"},
-			},
-			{
-				ClusterId: "target-cluster-a",
-				Pchannels: []string{"target-channel-a-1", "target-channel-a-2"},
-			},
-			{
-				ClusterId: "target-cluster-d",
-				Pchannels: []string{"target-channel-d-1", "target-channel-d-2"},
-			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{
-				SourceClusterId: "source-cluster",
-				TargetClusterId: "target-cluster-a",
-			},
-			{
-				SourceClusterId: "source-cluster",
-				TargetClusterId: "target-cluster-d",
-			},
-		},
-	}
-	replicateManager.UpdateReplications(config)
-	assert.Equal(t, 2, len(replicateManager.clusterReplicators))
+	manager.CreateReplicator(replicateInfo2)
 
-	replicateManager.Close()
-	assert.Equal(t, 0, len(replicateManager.clusterReplicators))
+	// Verify second replicator was created
+	assert.Equal(t, 2, len(manager.replicators))
+	replicator2, exists := manager.replicators["test-source-channel-2"]
+	assert.True(t, exists)
+	assert.NotNil(t, replicator2)
+
+	// Verify first replicator still exists
+	replicator1, exists := manager.replicators["test-source-channel-1"]
+	assert.True(t, exists)
+	assert.NotNil(t, replicator1)
 }

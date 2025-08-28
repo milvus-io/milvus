@@ -22,12 +22,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -35,8 +35,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// ChannelReplicator is the client that replicates the message to the channel in the target cluster.
-type ChannelReplicator interface {
+const scannerHandlerChanSize = 64
+
+// Replicator is the client that replicates the message to the channel in the target cluster.
+type Replicator interface {
 	// StartReplicateChannel starts the replicate for the channel.
 	StartReplicateChannel()
 
@@ -48,14 +50,12 @@ type ChannelReplicator interface {
 	GetState() typeutil.LifetimeState
 }
 
-var _ ChannelReplicator = (*channelReplicator)(nil)
+var _ Replicator = (*channelReplicator)(nil)
 
 // channelReplicator is the implementation of ChannelReplicator.
 type channelReplicator struct {
-	sourceChannelName string
-	targetChannelName string
-	targetCluster     *commonpb.MilvusCluster
-	rsm               replicatestream.ReplicateStreamClientManager
+	replicateInfo *streamingpb.ReplicatePChannelMeta
+	rsm           replicatestream.ReplicateStreamClientManager
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -63,24 +63,22 @@ type channelReplicator struct {
 }
 
 // NewChannelReplicator creates a new ChannelReplicator.
-func NewChannelReplicator(sourceChannelName, targetChannelName string, targetCluster *commonpb.MilvusCluster) ChannelReplicator {
+func NewChannelReplicator(replicateMeta *streamingpb.ReplicatePChannelMeta) Replicator {
 	ctx, cancel := context.WithCancel(context.Background())
 	rsm := replicatestream.NewReplicateStreamClientManager()
 	return &channelReplicator{
-		sourceChannelName: sourceChannelName,
-		targetChannelName: targetChannelName,
-		targetCluster:     targetCluster,
-		rsm:               rsm,
-		ctx:               ctx,
-		cancel:            cancel,
-		lifetime:          typeutil.NewLifetime(),
+		replicateInfo: replicateMeta,
+		rsm:           rsm,
+		ctx:           ctx,
+		cancel:        cancel,
+		lifetime:      typeutil.NewLifetime(),
 	}
 }
 
 func (r *channelReplicator) StartReplicateChannel() {
 	logger := log.With(
-		zap.String("sourceChannel", r.sourceChannelName),
-		zap.String("targetChannel", r.targetChannelName),
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
 	)
 	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
 		logger.Warn("replicate channel already started")
@@ -100,26 +98,28 @@ func (r *channelReplicator) StartReplicateChannel() {
 // replicateLoop starts the replicate loop.
 func (r *channelReplicator) replicateLoop() error {
 	logger := log.With(
-		zap.String("sourceChannel", r.sourceChannelName),
-		zap.String("targetChannel", r.targetChannelName),
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
 	)
 	startFrom, err := r.getReplicateStartMessageID()
 	if err != nil {
 		return err
 	}
-	ch := make(adaptor.ChanMessageHandler, 64)
+	ch := make(adaptor.ChanMessageHandler, scannerHandlerChanSize)
 	deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
 	deliverPolicy = options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
-		PChannel:       r.sourceChannelName,
+		PChannel:       r.replicateInfo.GetSourceChannelName(),
 		DeliverPolicy:  deliverPolicy,
 		DeliverFilters: []options.DeliverFilter{},
 		MessageHandler: ch,
 	})
 	defer scanner.Close()
 
-	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.targetCluster, r.targetChannelName)
+	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.replicateInfo.GetTargetCluster(), r.replicateInfo.GetTargetChannelName())
 	defer rsc.Close()
+
+	logger.Info("start replicate channel loop", zap.Any("startFrom", startFrom))
 
 	for {
 		select {
@@ -136,7 +136,7 @@ func (r *channelReplicator) replicateLoop() error {
 }
 
 func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, error) {
-	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.targetCluster)
+	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.replicateInfo.GetTargetCluster())
 	if err != nil {
 		return nil, err
 	}
@@ -150,13 +150,14 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 
 	var checkpoint *milvuspb.ReplicateCheckpoint
 	for _, cp := range replicateInfo.GetCheckpoints() {
-		if cp.GetSourceChannelName() == r.sourceChannelName {
+		if cp.GetSourceChannelName() == r.replicateInfo.GetSourceChannelName() {
 			checkpoint = cp
 			break
 		}
 	}
 	if checkpoint == nil {
-		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s", r.targetChannelName, r.targetCluster.GetClusterId())
+		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s",
+			r.replicateInfo.GetTargetChannelName(), r.replicateInfo.GetTargetCluster().GetClusterId())
 	}
 
 	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(
@@ -164,8 +165,8 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		[]byte(checkpoint.GetReplicateMessageId().GetId()),
 	)
 	log.Info("replicate messages from position",
-		zap.String("sourceChannel", r.sourceChannelName),
-		zap.String("targetChannel", r.targetChannelName),
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
 		zap.Any("checkpoint", checkpoint),
 		zap.Any("startFromMessageID", startFrom),
 	)

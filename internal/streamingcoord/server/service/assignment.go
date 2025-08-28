@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -73,6 +74,36 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		return nil, err
 	}
 	balancer.UpdateReplicateConfiguration(ctx, config)
+
+	// save replicate pchannels to metastore to trigger CDC starting replications.
+	// StreamingCoord won't remove the replicate pchannels from metastore.
+	existingPChannels, err := resource.Resource().StreamingCatalog().ListReplicatePChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	existingPChannelsMap := make(map[string]bool)
+	for _, pchannel := range existingPChannels {
+		existingPChannelsMap[fmt.Sprintf("%s-%s", pchannel.GetSourceChannelName(), pchannel.GetTargetChannelName())] = true
+	}
+	configHelper := replicateutil.NewConfigHelper(config)
+	replicatePChannels := make([]*streamingpb.ReplicatePChannelMeta, 0)
+	for _, sourcePChannel := range pchannels {
+		for _, targetCluster := range configHelper.GetTargetClusters() {
+			targetPChannel := configHelper.GetTargetChannel(sourcePChannel, targetCluster.GetClusterId())
+			if _, ok := existingPChannelsMap[fmt.Sprintf("%s-%s", sourcePChannel, targetPChannel)]; !ok {
+				replicatePChannels = append(replicatePChannels, &streamingpb.ReplicatePChannelMeta{
+					SourceChannelName: sourcePChannel,
+					TargetChannelName: targetPChannel,
+					TargetCluster:     targetCluster,
+				})
+			}
+		}
+	}
+	err = resource.Resource().StreamingCatalog().SaveReplicatePChannels(ctx, replicatePChannels)
+	if err != nil {
+		return nil, err
+	}
+
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(config)...)
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
