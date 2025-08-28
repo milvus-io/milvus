@@ -1080,19 +1080,20 @@ The retention policy of pulsar can set shorter to save the storage space in this
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address             ParamItem  `refreshable:"false"`
-	SaslUsername        ParamItem  `refreshable:"false"`
-	SaslPassword        ParamItem  `refreshable:"false"`
-	SaslMechanisms      ParamItem  `refreshable:"false"`
-	SecurityProtocol    ParamItem  `refreshable:"false"`
-	KafkaUseSSL         ParamItem  `refreshable:"false"`
-	KafkaTLSCert        ParamItem  `refreshable:"false"`
-	KafkaTLSKey         ParamItem  `refreshable:"false"`
-	KafkaTLSCACert      ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig ParamGroup `refreshable:"false"`
-	ProducerExtraConfig ParamGroup `refreshable:"false"`
-	ReadTimeout         ParamItem  `refreshable:"true"`
+	Address              ParamItem  `refreshable:"false"`
+	SaslUsername         ParamItem  `refreshable:"false"`
+	SaslPassword         ParamItem  `refreshable:"false"`
+	SaslMechanisms       ParamItem  `refreshable:"false"`
+	SecurityProtocol     ParamItem  `refreshable:"false"`
+	KafkaUseSSL          ParamItem  `refreshable:"false"`
+	KafkaTLSCert         ParamItem  `refreshable:"false"`
+	KafkaTLSKey          ParamItem  `refreshable:"false"`
+	KafkaTLSCACert       ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword  ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig  ParamGroup `refreshable:"false"`
+	ProducerExtraConfig  ParamGroup `refreshable:"false"`
+	ReadTimeout          ParamItem  `refreshable:"true"`
+	QueuedMessagesKbytes ParamItem  `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -1197,6 +1198,14 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	k.ReadTimeout.Init(base.mgr)
+
+	k.QueuedMessagesKbytes = ParamItem{
+		Key:          "kafka.queuedmaxkbytes",
+		DefaultValue: "100000", // 100MB in kilo bytes
+		Version:      "2.1.0",
+		Export:       true,
+	}
+	k.QueuedMessagesKbytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

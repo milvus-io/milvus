@@ -259,6 +259,7 @@ pulsar:
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
 #   readTimeout: 10
+#   queuedmaxkbytes: 100000 # Maximum amount of message data (in KB) that the Kafka consumer can buffer locally before pausing fetches
 
 rocksmq:
   # Prefix of the key to where Milvus stores data in RocksMQ.
