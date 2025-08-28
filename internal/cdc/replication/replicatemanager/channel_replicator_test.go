@@ -35,9 +35,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func newMockPulsarMessageID() *milvuspb.MessageID {
+func newMockPulsarMessageID() *commonpb.MessageID {
 	msgID := pulsar.EarliestMessageID().Serialize()
-	return &milvuspb.MessageID{
+	return &commonpb.MessageID{
 		Id:      string(msgID),
 		WALName: commonpb.WALName_Pulsar,
 	}
@@ -76,7 +76,7 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
 	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
 
-	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
+	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
 	replicator.(*channelReplicator).rsm = rsm
 	assert.NotNil(t, replicator)
@@ -126,7 +126,7 @@ func TestChannelReplicator_ReplicateError(t *testing.T) {
 	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
 	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
 
-	cluster := &milvuspb.MilvusCluster{ClusterId: "test-cluster"}
+	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicator := NewChannelReplicator("test-source-channel", "test-target-channel", cluster)
 	replicator.(*channelReplicator).rsm = rsm
 	assert.NotNil(t, replicator)

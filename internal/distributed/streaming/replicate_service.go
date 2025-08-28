@@ -3,7 +3,7 @@ package streaming
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -14,7 +14,7 @@ type replicateService struct {
 	*walAccesserImpl
 }
 
-func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return ErrWALAccesserClosed
 	}
@@ -23,7 +23,7 @@ func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, conf
 	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
 }
 
-func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrWALAccesserClosed
 	}

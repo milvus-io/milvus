@@ -21,17 +21,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // createValidValidatorConfig creates a valid ReplicateConfiguration for testing
-func createValidValidatorConfig() *milvuspb.ReplicateConfiguration {
-	return &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+func createValidValidatorConfig() *commonpb.ReplicateConfiguration {
+	return &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -39,14 +39,14 @@ func createValidValidatorConfig() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "cluster-2",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
 				Pchannels: []string{"cluster-2-channel-1", "cluster-2-channel-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "cluster-1",
 				TargetClusterId: "cluster-2",
@@ -56,12 +56,12 @@ func createValidValidatorConfig() *milvuspb.ReplicateConfiguration {
 }
 
 // createStarTopologyConfig creates a valid star topology configuration
-func createStarTopologyConfig() *milvuspb.ReplicateConfiguration {
-	return &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+func createStarTopologyConfig() *commonpb.ReplicateConfiguration {
+	return &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "center-cluster",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -69,7 +69,7 @@ func createStarTopologyConfig() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "leaf-cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
@@ -77,14 +77,14 @@ func createStarTopologyConfig() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "leaf-cluster-2",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19532",
 					Token: "test-token",
 				},
 				Pchannels: []string{"leaf-cluster-2-channel-1", "leaf-cluster-2-channel-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "center-cluster",
 				TargetClusterId: "leaf-cluster-1",
@@ -132,9 +132,9 @@ func TestReplicateConfigValidator_Validate(t *testing.T) {
 	})
 
 	t.Run("error - empty clusters", func(t *testing.T) {
-		config := &milvuspb.ReplicateConfiguration{
-			Clusters:             []*milvuspb.MilvusCluster{},
-			CrossClusterTopology: []*milvuspb.CrossClusterTopology{},
+		config := &commonpb.ReplicateConfiguration{
+			Clusters:             []*commonpb.MilvusCluster{},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
 		validator := NewReplicateConfigValidator(config, []string{})
 		err := validator.Validate()
@@ -145,10 +145,10 @@ func TestReplicateConfigValidator_Validate(t *testing.T) {
 
 func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	t.Run("success - valid clusters", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -156,7 +156,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 			},
 			{
 				ClusterId: "cluster-2",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
@@ -165,7 +165,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -176,11 +176,11 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - nil cluster", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			nil,
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -189,7 +189,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -198,10 +198,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - empty cluster ID", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -210,7 +210,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -219,10 +219,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - cluster ID with whitespace", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster 1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -231,7 +231,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -240,7 +240,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - nil connection param", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId:       "cluster-1",
 				ConnectionParam: nil,
@@ -249,7 +249,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -258,10 +258,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - empty URI", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "",
 					Token: "test-token",
 				},
@@ -270,7 +270,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -279,10 +279,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - invalid URI format", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "invalid-uri-format",
 					Token: "test-token",
 				},
@@ -291,7 +291,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -300,10 +300,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - empty pchannels", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -312,7 +312,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -321,10 +321,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - empty pchannel", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -333,7 +333,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -342,10 +342,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - duplicate pchannel within cluster", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -354,7 +354,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -363,10 +363,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - pchannel doesn't start with cluster ID", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -375,7 +375,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -384,10 +384,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - inconsistent pchannel count", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -395,7 +395,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 			},
 			{
 				ClusterId: "cluster-2",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
@@ -404,7 +404,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -413,10 +413,10 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 	})
 
 	t.Run("error - duplicate cluster ID", func(t *testing.T) {
-		clusters := []*milvuspb.MilvusCluster{
+		clusters := []*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -424,7 +424,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 			},
 			{
 				ClusterId: "cluster-1", // Duplicate cluster ID
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
@@ -433,7 +433,7 @@ func TestReplicateConfigValidator_validateClusterBasic(t *testing.T) {
 		}
 
 		validator := &ReplicateConfigValidator{
-			clusterMap: make(map[string]*milvuspb.MilvusCluster),
+			clusterMap: make(map[string]*commonpb.MilvusCluster),
 		}
 
 		err := validator.validateClusterBasic(clusters)
@@ -447,7 +447,7 @@ func TestReplicateConfigValidator_validateRelevance(t *testing.T) {
 		validator := &ReplicateConfigValidator{
 			currentClusterID: "cluster-1",
 			currentPChannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"cluster-1": {
 					ClusterId: "cluster-1",
 					Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
@@ -463,7 +463,7 @@ func TestReplicateConfigValidator_validateRelevance(t *testing.T) {
 		validator := &ReplicateConfigValidator{
 			currentClusterID: "cluster-1",
 			currentPChannels: []string{"cluster-1-channel-1"},
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"cluster-2": {
 					ClusterId: "cluster-2",
 					Pchannels: []string{"cluster-2-channel-1"},
@@ -480,7 +480,7 @@ func TestReplicateConfigValidator_validateRelevance(t *testing.T) {
 		validator := &ReplicateConfigValidator{
 			currentClusterID: "cluster-1",
 			currentPChannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"cluster-1": {
 					ClusterId: "cluster-1",
 					Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-3"}, // Different channels
@@ -496,7 +496,7 @@ func TestReplicateConfigValidator_validateRelevance(t *testing.T) {
 
 func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	validator := &ReplicateConfigValidator{
-		clusterMap: map[string]*milvuspb.MilvusCluster{
+		clusterMap: map[string]*commonpb.MilvusCluster{
 			"cluster-1": {ClusterId: "cluster-1"},
 			"cluster-2": {ClusterId: "cluster-2"},
 			"cluster-3": {ClusterId: "cluster-3"},
@@ -504,7 +504,7 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	}
 
 	t.Run("success - unique edges", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "cluster-1",
 				TargetClusterId: "cluster-2",
@@ -520,14 +520,14 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	})
 
 	t.Run("success - empty topologies", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{}
+		topologies := []*commonpb.CrossClusterTopology{}
 
 		err := validator.validateTopologyEdgeUniqueness(topologies)
 		assert.NoError(t, err)
 	})
 
 	t.Run("error - nil topology", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			nil,
 			{
 				SourceClusterId: "cluster-1",
@@ -541,7 +541,7 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	})
 
 	t.Run("error - source cluster not exists", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "non-existent-cluster",
 				TargetClusterId: "cluster-2",
@@ -554,7 +554,7 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	})
 
 	t.Run("error - target cluster not exists", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "cluster-1",
 				TargetClusterId: "non-existent-cluster",
@@ -567,7 +567,7 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 	})
 
 	t.Run("error - duplicate edge", func(t *testing.T) {
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "cluster-1",
 				TargetClusterId: "cluster-2",
@@ -587,14 +587,14 @@ func TestReplicateConfigValidator_validateTopologyEdgeUniqueness(t *testing.T) {
 func TestReplicateConfigValidator_validateTopologyTypeConstraint(t *testing.T) {
 	t.Run("success - valid star topology", func(t *testing.T) {
 		validator := &ReplicateConfigValidator{
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"center-cluster": {ClusterId: "center-cluster"},
 				"leaf-cluster-1": {ClusterId: "leaf-cluster-1"},
 				"leaf-cluster-2": {ClusterId: "leaf-cluster-2"},
 			},
 		}
 
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "center-cluster",
 				TargetClusterId: "leaf-cluster-1",
@@ -611,12 +611,12 @@ func TestReplicateConfigValidator_validateTopologyTypeConstraint(t *testing.T) {
 
 	t.Run("success - empty topologies", func(t *testing.T) {
 		validator := &ReplicateConfigValidator{
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"cluster-1": {ClusterId: "cluster-1"},
 			},
 		}
 
-		topologies := []*milvuspb.CrossClusterTopology{}
+		topologies := []*commonpb.CrossClusterTopology{}
 
 		err := validator.validateTopologyTypeConstraint(topologies)
 		assert.NoError(t, err)
@@ -624,13 +624,13 @@ func TestReplicateConfigValidator_validateTopologyTypeConstraint(t *testing.T) {
 
 	t.Run("error - no center node", func(t *testing.T) {
 		validator := &ReplicateConfigValidator{
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"cluster-1": {ClusterId: "cluster-1"},
 				"cluster-2": {ClusterId: "cluster-2"},
 			},
 		}
 
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "cluster-1",
 				TargetClusterId: "cluster-2",
@@ -648,14 +648,14 @@ func TestReplicateConfigValidator_validateTopologyTypeConstraint(t *testing.T) {
 
 	t.Run("error - leaf node with wrong degrees", func(t *testing.T) {
 		validator := &ReplicateConfigValidator{
-			clusterMap: map[string]*milvuspb.MilvusCluster{
+			clusterMap: map[string]*commonpb.MilvusCluster{
 				"center-cluster": {ClusterId: "center-cluster"},
 				"leaf-cluster-1": {ClusterId: "leaf-cluster-1"},
 				"leaf-cluster-2": {ClusterId: "leaf-cluster-2"},
 			},
 		}
 
-		topologies := []*milvuspb.CrossClusterTopology{
+		topologies := []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "center-cluster",
 				TargetClusterId: "leaf-cluster-1",

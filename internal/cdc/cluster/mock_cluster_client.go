@@ -5,7 +5,8 @@ package cluster
 import (
 	context "context"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -23,7 +24,7 @@ func (_m *MockClusterClient) EXPECT() *MockClusterClient_Expecter {
 }
 
 // CreateMilvusClient provides a mock function with given fields: ctx, _a1
-func (_m *MockClusterClient) CreateMilvusClient(ctx context.Context, _a1 *milvuspb.MilvusCluster) (MilvusClient, error) {
+func (_m *MockClusterClient) CreateMilvusClient(ctx context.Context, _a1 *commonpb.MilvusCluster) (MilvusClient, error) {
 	ret := _m.Called(ctx, _a1)
 
 	if len(ret) == 0 {
@@ -32,10 +33,10 @@ func (_m *MockClusterClient) CreateMilvusClient(ctx context.Context, _a1 *milvus
 
 	var r0 MilvusClient
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.MilvusCluster) (MilvusClient, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.MilvusCluster) (MilvusClient, error)); ok {
 		return rf(ctx, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.MilvusCluster) MilvusClient); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.MilvusCluster) MilvusClient); ok {
 		r0 = rf(ctx, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -43,7 +44,7 @@ func (_m *MockClusterClient) CreateMilvusClient(ctx context.Context, _a1 *milvus
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.MilvusCluster) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *commonpb.MilvusCluster) error); ok {
 		r1 = rf(ctx, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -59,14 +60,14 @@ type MockClusterClient_CreateMilvusClient_Call struct {
 
 // CreateMilvusClient is a helper method to define mock.On call
 //   - ctx context.Context
-//   - _a1 *milvuspb.MilvusCluster
+//   - _a1 *commonpb.MilvusCluster
 func (_e *MockClusterClient_Expecter) CreateMilvusClient(ctx interface{}, _a1 interface{}) *MockClusterClient_CreateMilvusClient_Call {
 	return &MockClusterClient_CreateMilvusClient_Call{Call: _e.mock.On("CreateMilvusClient", ctx, _a1)}
 }
 
-func (_c *MockClusterClient_CreateMilvusClient_Call) Run(run func(ctx context.Context, _a1 *milvuspb.MilvusCluster)) *MockClusterClient_CreateMilvusClient_Call {
+func (_c *MockClusterClient_CreateMilvusClient_Call) Run(run func(ctx context.Context, _a1 *commonpb.MilvusCluster)) *MockClusterClient_CreateMilvusClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.MilvusCluster))
+		run(args[0].(context.Context), args[1].(*commonpb.MilvusCluster))
 	})
 	return _c
 }
@@ -76,7 +77,7 @@ func (_c *MockClusterClient_CreateMilvusClient_Call) Return(_a0 MilvusClient, _a
 	return _c
 }
 
-func (_c *MockClusterClient_CreateMilvusClient_Call) RunAndReturn(run func(context.Context, *milvuspb.MilvusCluster) (MilvusClient, error)) *MockClusterClient_CreateMilvusClient_Call {
+func (_c *MockClusterClient_CreateMilvusClient_Call) RunAndReturn(run func(context.Context, *commonpb.MilvusCluster) (MilvusClient, error)) *MockClusterClient_CreateMilvusClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

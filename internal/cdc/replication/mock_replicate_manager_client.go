@@ -3,7 +3,7 @@
 package replication
 
 import (
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -53,7 +53,7 @@ func (_c *MockReplicateManagerClient_Close_Call) RunAndReturn(run func()) *MockR
 }
 
 // UpdateReplications provides a mock function with given fields: config
-func (_m *MockReplicateManagerClient) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
+func (_m *MockReplicateManagerClient) UpdateReplications(config *commonpb.ReplicateConfiguration) {
 	_m.Called(config)
 }
 
@@ -63,14 +63,14 @@ type MockReplicateManagerClient_UpdateReplications_Call struct {
 }
 
 // UpdateReplications is a helper method to define mock.On call
-//   - config *milvuspb.ReplicateConfiguration
+//   - config *commonpb.ReplicateConfiguration
 func (_e *MockReplicateManagerClient_Expecter) UpdateReplications(config interface{}) *MockReplicateManagerClient_UpdateReplications_Call {
 	return &MockReplicateManagerClient_UpdateReplications_Call{Call: _e.mock.On("UpdateReplications", config)}
 }
 
-func (_c *MockReplicateManagerClient_UpdateReplications_Call) Run(run func(config *milvuspb.ReplicateConfiguration)) *MockReplicateManagerClient_UpdateReplications_Call {
+func (_c *MockReplicateManagerClient_UpdateReplications_Call) Run(run func(config *commonpb.ReplicateConfiguration)) *MockReplicateManagerClient_UpdateReplications_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*milvuspb.ReplicateConfiguration))
+		run(args[0].(*commonpb.ReplicateConfiguration))
 	})
 	return _c
 }
@@ -80,7 +80,7 @@ func (_c *MockReplicateManagerClient_UpdateReplications_Call) Return() *MockRepl
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_UpdateReplications_Call) RunAndReturn(run func(*milvuspb.ReplicateConfiguration)) *MockReplicateManagerClient_UpdateReplications_Call {
+func (_c *MockReplicateManagerClient_UpdateReplications_Call) RunAndReturn(run func(*commonpb.ReplicateConfiguration)) *MockReplicateManagerClient_UpdateReplications_Call {
 	_c.Run(run)
 	return _c
 }

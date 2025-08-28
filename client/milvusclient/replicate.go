@@ -6,13 +6,14 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // UpdateReplicateConfiguration updates the replicate configuration to the Milvus cluster.
 // Use ReplicateConfigurationBuilder to build the configuration.
-func (c *Client) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration, opts ...grpc.CallOption) error {
+func (c *Client) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration, opts ...grpc.CallOption) error {
 	req := &milvuspb.UpdateReplicateConfigurationRequest{
 		ReplicateConfiguration: config,
 	}

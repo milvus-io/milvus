@@ -37,7 +37,7 @@ const pendingMessageQueueLength = 128
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
-	targetCluster *milvuspb.MilvusCluster
+	targetCluster *commonpb.MilvusCluster
 	targetChannel string
 	walName       commonpb.WALName
 
@@ -50,7 +50,7 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, targetCluster *milvuspb.MilvusCluster, targetChannel string) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, targetCluster *commonpb.MilvusCluster, targetChannel string) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
 	ctx1 = contextutil.WithClusterID(ctx1, targetCluster.GetClusterId())
 
@@ -134,8 +134,8 @@ func (r *replicateStreamClient) immutableMessageToProto(msg message.ImmutableMes
 	return &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
-				Message: &milvuspb.ImmutableMessage{
-					Id: &milvuspb.MessageID{
+				Message: &commonpb.ImmutableMessage{
+					Id: &commonpb.MessageID{
 						Id:      immutableMessage.GetId().GetId(),
 						WALName: r.walName,
 					},

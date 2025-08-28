@@ -19,7 +19,7 @@ package replicatemanager
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -42,8 +42,8 @@ func TestReplicateManager_UpdateReplications(t *testing.T) {
 	// S --> A
 	// S --> B
 	// S --> C
-	config := &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+	config := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
 				Pchannels: []string{"source-channel-1", "source-channel-2"},
@@ -61,7 +61,7 @@ func TestReplicateManager_UpdateReplications(t *testing.T) {
 				Pchannels: []string{"target-channel-c-1", "target-channel-c-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "source-cluster",
 				TargetClusterId: "target-cluster-a",
@@ -82,7 +82,7 @@ func TestReplicateManager_UpdateReplications(t *testing.T) {
 
 	// S --> A
 	// S --> B
-	config.CrossClusterTopology = []*milvuspb.CrossClusterTopology{
+	config.CrossClusterTopology = []*commonpb.CrossClusterTopology{
 		{
 			SourceClusterId: "source-cluster",
 			TargetClusterId: "target-cluster-a",
@@ -97,8 +97,8 @@ func TestReplicateManager_UpdateReplications(t *testing.T) {
 
 	// S --> A
 	// S --> D
-	config = &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+	config = &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
 				Pchannels: []string{"source-channel-1", "source-channel-2"},
@@ -112,7 +112,7 @@ func TestReplicateManager_UpdateReplications(t *testing.T) {
 				Pchannels: []string{"target-channel-d-1", "target-channel-d-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "source-cluster",
 				TargetClusterId: "target-cluster-a",

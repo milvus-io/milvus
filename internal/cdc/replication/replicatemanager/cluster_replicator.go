@@ -21,8 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -40,10 +39,10 @@ var _ ClusterReplicator = (*clusterReplicator)(nil)
 
 // clusterReplicator is the implementation of ClusterReplicator.
 type clusterReplicator struct {
-	targetCluster *milvuspb.MilvusCluster
+	targetCluster *commonpb.MilvusCluster
 	// channelReplicators is a map of target channel name to target ChannelReplicator.
 	channelReplicators *typeutil.ConcurrentMap[string, ChannelReplicator]
-	configuration      *milvuspb.ReplicateConfiguration
+	configuration      *commonpb.ReplicateConfiguration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,7 +50,7 @@ type clusterReplicator struct {
 }
 
 // NewClusterReplicator creates a new ClusterReplicator.
-func NewClusterReplicator(targetCluster *milvuspb.MilvusCluster, configuration *milvuspb.ReplicateConfiguration) ClusterReplicator {
+func NewClusterReplicator(targetCluster *commonpb.MilvusCluster, configuration *commonpb.ReplicateConfiguration) ClusterReplicator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &clusterReplicator{
 		ctx:                ctx,

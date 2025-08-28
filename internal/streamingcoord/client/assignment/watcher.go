@@ -6,7 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -21,7 +21,7 @@ func newWatcher() *watcher {
 		lastVersionedAssignment: types.VersionedStreamingNodeAssignments{
 			Version:                typeutil.VersionInt64Pair{Global: -1, Local: -1},
 			Assignments:            make(map[int64]types.StreamingNodeAssignment),
-			ReplicateConfiguration: &milvuspb.ReplicateConfiguration{},
+			ReplicateConfiguration: &commonpb.ReplicateConfiguration{},
 		},
 	}
 }
@@ -44,7 +44,7 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	return &last, nil
 }
 
-func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	w.cond.L.Lock()
 	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
 		w.lastVersionedAssignment.ReplicateConfiguration == nil {

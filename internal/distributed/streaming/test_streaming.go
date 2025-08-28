@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -199,7 +199,7 @@ func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts App
 	return AppendResponses{}
 }
 
-func (n *noopWALAccesser) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func (n *noopWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	return nil, nil
 }
 
@@ -207,7 +207,7 @@ func (n *noopWALAccesser) GetWALCheckpoint(ctx context.Context, channelName stri
 	return nil, nil
 }
 
-func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	return nil
 }
 

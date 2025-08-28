@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
@@ -53,7 +54,7 @@ var _ ChannelReplicator = (*channelReplicator)(nil)
 type channelReplicator struct {
 	sourceChannelName string
 	targetChannelName string
-	targetCluster     *milvuspb.MilvusCluster
+	targetCluster     *commonpb.MilvusCluster
 	rsm               replicatestream.ReplicateStreamClientManager
 
 	ctx      context.Context
@@ -62,7 +63,7 @@ type channelReplicator struct {
 }
 
 // NewChannelReplicator creates a new ChannelReplicator.
-func NewChannelReplicator(sourceChannelName, targetChannelName string, targetCluster *milvuspb.MilvusCluster) ChannelReplicator {
+func NewChannelReplicator(sourceChannelName, targetChannelName string, targetCluster *commonpb.MilvusCluster) ChannelReplicator {
 	ctx, cancel := context.WithCancel(context.Background())
 	rsm := replicatestream.NewReplicateStreamClientManager()
 	return &channelReplicator{

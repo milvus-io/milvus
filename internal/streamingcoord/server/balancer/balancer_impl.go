@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -112,7 +112,7 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 }
 
 // UpdateReplicateConfiguration updates the replicate configuration.
-func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) {
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}

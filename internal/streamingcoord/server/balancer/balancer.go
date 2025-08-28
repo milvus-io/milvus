@@ -5,7 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -56,7 +56,7 @@ type Balancer interface {
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
 
 	// UpdateReplicateConfiguration updates the replicate configuration.
-	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration)
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration)
 
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error

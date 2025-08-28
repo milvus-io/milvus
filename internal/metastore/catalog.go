@@ -3,6 +3,7 @@ package metastore
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -210,9 +211,9 @@ type QueryCoordCatalog interface {
 // ReplicationCatalog is the interface for replication catalog
 type ReplicationCatalog interface {
 	// SaveReplicateConfiguration saves the replicate configuration to metastore.
-	SaveReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
+	SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 	// GetReplicateConfiguration gets the replicate configuration from metastore.
-	GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error)
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
 }
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog

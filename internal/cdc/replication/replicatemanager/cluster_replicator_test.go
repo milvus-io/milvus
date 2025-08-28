@@ -19,7 +19,7 @@ package replicatemanager
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -37,8 +37,8 @@ func TestClusterReplicator_StartReplicateCluster(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "source-cluster")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.ClusterPrefix.Key)
 
-	config := &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+	config := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
 				Pchannels: []string{"source-channel-1", "source-channel-2"},

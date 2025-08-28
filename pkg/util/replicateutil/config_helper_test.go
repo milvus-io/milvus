@@ -21,16 +21,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // createValidConfig creates a valid ReplicateConfiguration for testing
-func createValidConfig() *milvuspb.ReplicateConfiguration {
-	return &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+func createValidConfig() *commonpb.ReplicateConfiguration {
+	return &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -38,7 +38,7 @@ func createValidConfig() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "target-cluster-a",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
@@ -46,14 +46,14 @@ func createValidConfig() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "target-cluster-b",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19532",
 					Token: "test-token",
 				},
 				Pchannels: []string{"target-cluster-b-channel-1", "target-cluster-b-channel-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "source-cluster",
 				TargetClusterId: "target-cluster-a",
@@ -67,12 +67,12 @@ func createValidConfig() *milvuspb.ReplicateConfiguration {
 }
 
 // createConfigWithDifferentChannelCounts creates a config with different channel counts for edge case testing
-func createConfigWithDifferentChannelCounts() *milvuspb.ReplicateConfiguration {
-	return &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+func createConfigWithDifferentChannelCounts() *commonpb.ReplicateConfiguration {
+	return &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
@@ -80,14 +80,14 @@ func createConfigWithDifferentChannelCounts() *milvuspb.ReplicateConfiguration {
 			},
 			{
 				ClusterId: "target-cluster-a",
-				ConnectionParam: &milvuspb.ConnectionParam{
+				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19531",
 					Token: "test-token",
 				},
 				Pchannels: []string{"target-channel-1", "target-channel-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "source-cluster",
 				TargetClusterId: "target-cluster-a",
@@ -99,7 +99,7 @@ func createConfigWithDifferentChannelCounts() *milvuspb.ReplicateConfiguration {
 func TestNewConfigHelper(t *testing.T) {
 	tests := []struct {
 		name   string
-		config *milvuspb.ReplicateConfiguration
+		config *commonpb.ReplicateConfiguration
 	}{
 		{
 			name:   "success - valid config",
@@ -128,7 +128,7 @@ func TestConfigHelper_GetCluster(t *testing.T) {
 		name      string
 		clusterID string
 		wantErr   bool
-		expected  *milvuspb.MilvusCluster
+		expected  *commonpb.MilvusCluster
 	}{
 		{
 			name:      "success - find source cluster",
@@ -365,18 +365,18 @@ func TestConfigHelper_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("config with single cluster", func(t *testing.T) {
-		config := &milvuspb.ReplicateConfiguration{
-			Clusters: []*milvuspb.MilvusCluster{
+		config := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
 				{
 					ClusterId: "single-cluster",
-					ConnectionParam: &milvuspb.ConnectionParam{
+					ConnectionParam: &commonpb.ConnectionParam{
 						Uri:   "localhost:19530",
 						Token: "test-token",
 					},
 					Pchannels: []string{"channel-1", "channel-2"},
 				},
 			},
-			CrossClusterTopology: []*milvuspb.CrossClusterTopology{},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
 
 		helper := NewConfigHelper(config)
@@ -389,9 +389,9 @@ func TestConfigHelper_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("config with empty clusters", func(t *testing.T) {
-		config := &milvuspb.ReplicateConfiguration{
-			Clusters:             []*milvuspb.MilvusCluster{},
-			CrossClusterTopology: []*milvuspb.CrossClusterTopology{},
+		config := &commonpb.ReplicateConfiguration{
+			Clusters:             []*commonpb.MilvusCluster{},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
 
 		helper := NewConfigHelper(config)

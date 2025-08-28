@@ -8,7 +8,7 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -25,7 +25,7 @@ type (
 		Version                typeutil.VersionInt64Pair
 		CChannelAssignment     *streamingpb.CChannelAssignment
 		Relations              []types.PChannelInfoAssigned
-		ReplicateConfiguration *milvuspb.ReplicateConfiguration
+		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
 	WatchChannelAssignmentsCallback func(param WatchChannelAssignmentsCallbackParam) error
 )
@@ -123,7 +123,7 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	return channels, metrics, nil
 }
 
-func recoverReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func recoverReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	config, err := resource.Resource().StreamingCatalog().GetReplicateConfiguration(ctx)
 	if err != nil {
 		return nil, err
@@ -144,7 +144,7 @@ type ChannelManager struct {
 	// null if no streaming service has been run.
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
-	replicateConfig          *milvuspb.ReplicateConfiguration
+	replicateConfig          *commonpb.ReplicateConfiguration
 }
 
 // GetPChannels returns all pchannels.
@@ -364,7 +364,7 @@ func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb WatchCha
 }
 
 // UpdateReplicateConfiguration updates the in-memory replicate configuration.
-func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) {
+func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
 	cm.cond.LockAndBroadcast()
 	defer cm.cond.L.Unlock()
 	cm.replicateConfig = config

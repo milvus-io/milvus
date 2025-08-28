@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
@@ -154,8 +154,8 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 
 	catalog := NewCataLog(kv)
 
-	config := &milvuspb.ReplicateConfiguration{
-		Clusters: []*milvuspb.MilvusCluster{
+	config := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: "source-cluster",
 				Pchannels: []string{"source-channel-1", "source-channel-2"},
@@ -169,7 +169,7 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 				Pchannels: []string{"target-channel-b-1", "target-channel-b-2"},
 			},
 		},
-		CrossClusterTopology: []*milvuspb.CrossClusterTopology{
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: "source-cluster",
 				TargetClusterId: "target-cluster-a",

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -14,17 +14,17 @@ import (
 type ReplicateConfigValidator struct {
 	currentClusterID string
 	currentPChannels []string
-	clusterMap       map[string]*milvuspb.MilvusCluster
-	config           *milvuspb.ReplicateConfiguration
+	clusterMap       map[string]*commonpb.MilvusCluster
+	config           *commonpb.ReplicateConfiguration
 	balancer         *balancer.Balancer
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
-func NewReplicateConfigValidator(config *milvuspb.ReplicateConfiguration, currentPChannels []string) *ReplicateConfigValidator {
+func NewReplicateConfigValidator(config *commonpb.ReplicateConfiguration, currentPChannels []string) *ReplicateConfigValidator {
 	validator := &ReplicateConfigValidator{
 		currentClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		currentPChannels: currentPChannels,
-		clusterMap:       make(map[string]*milvuspb.MilvusCluster),
+		clusterMap:       make(map[string]*commonpb.MilvusCluster),
 		config:           config,
 	}
 	return validator
@@ -57,7 +57,7 @@ func (v *ReplicateConfigValidator) Validate() error {
 }
 
 // validateClusterBasic validates basic format requirements for each MilvusCluster
-func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*milvuspb.MilvusCluster) error {
+func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.MilvusCluster) error {
 	var expectedPchannelCount int
 	var firstClusterID string
 	for i, cluster := range clusters {
@@ -135,7 +135,7 @@ func (v *ReplicateConfigValidator) validateRelevance() error {
 }
 
 // validateTopologyEdgeUniqueness validates that a given source_clusterID -> target_clusterID pair appears only once
-func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*milvuspb.CrossClusterTopology) error {
+func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*commonpb.CrossClusterTopology) error {
 	if len(topologies) == 0 {
 		return nil
 	}
@@ -164,7 +164,7 @@ func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*
 }
 
 // validateTopologyTypeConstraint validates that currently only STAR topology is supported
-func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*milvuspb.CrossClusterTopology) error {
+func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*commonpb.CrossClusterTopology) error {
 	if len(topologies) == 0 {
 		return nil
 	}

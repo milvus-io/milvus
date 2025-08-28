@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
@@ -48,7 +48,7 @@ func TestController_Run(t *testing.T) {
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
 	mockReplicateManagerClient.EXPECT().Close().Return()
 
-	testConfig := &milvuspb.ReplicateConfiguration{}
+	testConfig := &commonpb.ReplicateConfiguration{}
 	mockReplicationCatalog := mock_metastore.NewMockReplicationCatalog(t)
 	mockReplicationCatalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(testConfig, nil)
 	mockReplicateManagerClient.EXPECT().UpdateReplications(testConfig).Return()

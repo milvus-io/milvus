@@ -3,14 +3,14 @@ package replicateutil
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 type ConfigHelper interface {
 	// Cluster related
-	GetCluster(clusterID string) *milvuspb.MilvusCluster
-	GetSourceCluster() *milvuspb.MilvusCluster
-	GetTargetClusters() []*milvuspb.MilvusCluster
+	GetCluster(clusterID string) *commonpb.MilvusCluster
+	GetSourceCluster() *commonpb.MilvusCluster
+	GetTargetClusters() []*commonpb.MilvusCluster
 
 	// PChannel related
 	GetSourceChannel(targetChannelName string) string
@@ -25,27 +25,27 @@ type (
 )
 
 type configHelper struct {
-	sourceCluster  *milvuspb.MilvusCluster
-	targetClusters []*milvuspb.MilvusCluster
-	clusterMap     map[string]*milvuspb.MilvusCluster
+	sourceCluster  *commonpb.MilvusCluster
+	targetClusters []*commonpb.MilvusCluster
+	clusterMap     map[string]*commonpb.MilvusCluster
 
 	sourceToTargetChannelMap map[string]sourceToTargetChannelMap // targetClusterID -> sourceToTargetChannelMap
 	targetToSourceChannelMap targetToSourceChannelMap
 }
 
-func NewConfigHelper(config *milvuspb.ReplicateConfiguration) ConfigHelper {
+func NewConfigHelper(config *commonpb.ReplicateConfiguration) ConfigHelper {
 	helper := &configHelper{}
 	helper.build(config)
 	return helper
 }
 
-func (h *configHelper) build(config *milvuspb.ReplicateConfiguration) {
-	h.clusterMap = make(map[string]*milvuspb.MilvusCluster, len(config.GetClusters()))
+func (h *configHelper) build(config *commonpb.ReplicateConfiguration) {
+	h.clusterMap = make(map[string]*commonpb.MilvusCluster, len(config.GetClusters()))
 	for _, cluster := range config.GetClusters() {
 		h.clusterMap[cluster.GetClusterId()] = cluster
 	}
 
-	h.targetClusters = make([]*milvuspb.MilvusCluster, 0, len(config.GetClusters()))
+	h.targetClusters = make([]*commonpb.MilvusCluster, 0, len(config.GetClusters()))
 	for _, topology := range config.GetCrossClusterTopology() {
 		if h.sourceCluster == nil {
 			sourceClusterID := topology.GetSourceClusterId()
@@ -73,7 +73,7 @@ func (h *configHelper) build(config *milvuspb.ReplicateConfiguration) {
 	}
 }
 
-func (h *configHelper) GetCluster(clusterID string) *milvuspb.MilvusCluster {
+func (h *configHelper) GetCluster(clusterID string) *commonpb.MilvusCluster {
 	cluster, ok := h.clusterMap[clusterID]
 	if !ok {
 		panic(fmt.Sprintf("cluster %s not found", clusterID))
@@ -81,11 +81,11 @@ func (h *configHelper) GetCluster(clusterID string) *milvuspb.MilvusCluster {
 	return cluster
 }
 
-func (h *configHelper) GetSourceCluster() *milvuspb.MilvusCluster {
+func (h *configHelper) GetSourceCluster() *commonpb.MilvusCluster {
 	return h.sourceCluster
 }
 
-func (h *configHelper) GetTargetClusters() []*milvuspb.MilvusCluster {
+func (h *configHelper) GetTargetClusters() []*commonpb.MilvusCluster {
 	return h.targetClusters
 }
 

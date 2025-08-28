@@ -118,5 +118,5 @@ require (
 )
 
 replace (
-	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/bigsheeper/milvus-proto/go-api/v2 v2.0.0-20250822062622-088366369c3a
+	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/bigsheeper/milvus-proto/go-api/v2 v2.0.0-20250828030113-bcc562cf1dd5
 )

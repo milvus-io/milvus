@@ -7,7 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -67,7 +67,7 @@ func NewImmutableMesasge(
 }
 
 // NewReplicateMessage creates a new replicate message.
-func NewReplicateMessage(clustrID string, im *milvuspb.ImmutableMessage) MutableMessage {
+func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) MutableMessage {
 	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
 	pmsg := msg.IntoImmutableMessageProto()
@@ -88,16 +88,16 @@ func NewReplicateMessage(clustrID string, im *milvuspb.ImmutableMessage) Mutable
 	return m
 }
 
-func MilvusMessageToImmutableMessage(im *milvuspb.ImmutableMessage) ImmutableMessage {
+func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
 	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
 	return msg
 }
 
-func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *milvuspb.ImmutableMessage {
+func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
 	msg := im.IntoImmutableMessageProto()
-	return &milvuspb.ImmutableMessage{
-		Id: &milvuspb.MessageID{
+	return &commonpb.ImmutableMessage{
+		Id: &commonpb.MessageID{
 			Id:      msg.GetId().GetId(),
 			WALName: GetWALName(walName),
 		},

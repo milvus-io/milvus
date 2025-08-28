@@ -19,7 +19,7 @@ package replicatemanager
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/samber/lo"
 )
@@ -39,9 +39,9 @@ func NewReplicateManager() *replicateManager {
 	}
 }
 
-func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
+func (r *replicateManager) UpdateReplications(config *commonpb.ReplicateConfiguration) {
 	configHelper := replicateutil.NewConfigHelper(config)
-	targetClusters := lo.KeyBy(configHelper.GetTargetClusters(), func(cluster *milvuspb.MilvusCluster) string {
+	targetClusters := lo.KeyBy(configHelper.GetTargetClusters(), func(cluster *commonpb.MilvusCluster) string {
 		return cluster.GetClusterId()
 	})
 

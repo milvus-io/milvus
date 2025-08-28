@@ -6,7 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -39,7 +39,7 @@ type VersionedStreamingNodeAssignments struct {
 	Version                typeutil.VersionInt64Pair
 	Assignments            map[int64]StreamingNodeAssignment
 	CChannel               *streamingpb.CChannelAssignment
-	ReplicateConfiguration *milvuspb.ReplicateConfiguration
+	ReplicateConfiguration *commonpb.ReplicateConfiguration
 }
 
 // PChannelOfCChannel returns the pchannel of the cchannel.

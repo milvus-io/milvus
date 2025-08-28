@@ -39,9 +39,9 @@ import (
 
 func TestReplicateStreamClient_Replicate(t *testing.T) {
 	ctx := context.Background()
-	targetCluster := &milvuspb.MilvusCluster{
+	targetCluster := &commonpb.MilvusCluster{
 		ClusterId: "test-cluster",
-		ConnectionParam: &milvuspb.ConnectionParam{
+		ConnectionParam: &commonpb.ConnectionParam{
 			Uri:   "localhost:19530",
 			Token: "test-token",
 		},
@@ -99,9 +99,9 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 
 func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	targetCluster := &milvuspb.MilvusCluster{
+	targetCluster := &commonpb.MilvusCluster{
 		ClusterId: "test-cluster",
-		ConnectionParam: &milvuspb.ConnectionParam{
+		ConnectionParam: &commonpb.ConnectionParam{
 			Uri:   "localhost:19530",
 			Token: "test-token",
 		},
@@ -140,9 +140,9 @@ func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 
 func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	ctx := context.Background()
-	targetCluster := &milvuspb.MilvusCluster{
+	targetCluster := &commonpb.MilvusCluster{
 		ClusterId: "test-cluster",
-		ConnectionParam: &milvuspb.ConnectionParam{
+		ConnectionParam: &commonpb.ConnectionParam{
 			Uri:   "localhost:19530",
 			Token: "test-token",
 		},

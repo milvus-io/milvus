@@ -21,13 +21,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type ClusterClient interface {
-	CreateMilvusClient(ctx context.Context, cluster *milvuspb.MilvusCluster) (MilvusClient, error)
+	CreateMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error)
 }
 
 var _ ClusterClient = (*clusterClient)(nil)
@@ -38,7 +38,7 @@ func NewClusterClient() ClusterClient {
 	return &clusterClient{}
 }
 
-func (c *clusterClient) CreateMilvusClient(ctx context.Context, cluster *milvuspb.MilvusCluster) (MilvusClient, error) {
+func (c *clusterClient) CreateMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error) {
 	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
 		Address: cluster.GetConnectionParam().GetUri(),
 		APIKey:  cluster.GetConnectionParam().GetToken(),

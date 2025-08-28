@@ -16,14 +16,12 @@
 
 package replication
 
-import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-)
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 // ReplicateManagerClient is the client that manages the replicate configuration.
 type ReplicateManagerClient interface {
 	// UpdateReplications updates the replications by the configuration.
-	UpdateReplications(config *milvuspb.ReplicateConfiguration)
+	UpdateReplications(config *commonpb.ReplicateConfiguration)
 
 	// Close stops all replications.
 	Close()

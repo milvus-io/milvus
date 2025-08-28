@@ -3,11 +3,10 @@
 package mock_balancer
 
 import (
-	context "context"
-
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	balancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	context "context"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -411,7 +410,7 @@ func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.C
 }
 
 // UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) {
+func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
 	_m.Called(ctx, config)
 }
 
@@ -422,14 +421,14 @@ type MockBalancer_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - config *milvuspb.ReplicateConfiguration
+//   - config *commonpb.ReplicateConfiguration
 func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
 	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *milvuspb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateConfiguration))
+		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
 	})
 	return _c
 }
@@ -439,7 +438,7 @@ func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Return() *MockBalancer
 	return _c
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Run(run)
 	return _c
 }
@@ -496,8 +495,7 @@ func (_c *MockBalancer_WatchChannelAssignments_Call) RunAndReturn(run func(conte
 func NewMockBalancer(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockBalancer {
+}) *MockBalancer {
 	mock := &MockBalancer{}
 	mock.Mock.Test(t)
 

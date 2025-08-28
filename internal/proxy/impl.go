@@ -6494,7 +6494,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		checkpoints = append(checkpoints, &milvuspb.ReplicateCheckpoint{
 			SourceChannelName: checkpoint.GetSourceChannelName(),
 			TargetChannelName: checkpoint.GetTargetChannelName(),
-			ReplicateMessageId: &milvuspb.MessageID{
+			ReplicateMessageId: &commonpb.MessageID{
 				Id:      checkpoint.GetReplicateMessageID().GetId(),
 				WALName: walName,
 			},

@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -98,7 +99,7 @@ func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchan
 }
 
 // UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("assignment service client is closing")
 	}
@@ -114,7 +115,7 @@ func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	return err
 }
 
-func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("assignment service client is closing")
 	}

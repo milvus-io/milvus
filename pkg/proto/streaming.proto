@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "data_coord.proto";
 import "messages.proto";
+import "common.proto";
 import "milvus.proto";
 import "schema.proto";
 import "google/protobuf/empty.proto";
@@ -233,7 +234,7 @@ message FullStreamingNodeAssignmentWithVersion {
     VersionPair version                                   = 1;
     repeated StreamingNodeAssignment assignments          = 2;
     CChannelAssignment cchannel                           = 3; // Where the control channel located.
-    milvus.ReplicateConfiguration replicate_configuration = 4;
+    common.ReplicateConfiguration replicate_configuration = 4;
 }
 
 // CChannelAssignment is the assignment info of a control channel.

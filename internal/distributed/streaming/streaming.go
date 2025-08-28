@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -86,10 +86,10 @@ type Scanner interface {
 // ReplicateService is the interface for the replicate service.
 type ReplicateService interface {
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 
 	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
-	GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error)
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
 
 	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.

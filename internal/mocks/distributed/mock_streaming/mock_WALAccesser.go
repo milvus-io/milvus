@@ -5,7 +5,8 @@ package mock_streaming
 import (
 	context "context"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
@@ -248,23 +249,23 @@ func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broa
 }
 
 // GetReplicateConfiguration provides a mock function with given fields: ctx
-func (_m *MockWALAccesser) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+func (_m *MockWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReplicateConfiguration")
 	}
 
-	var r0 *milvuspb.ReplicateConfiguration
+	var r0 *commonpb.ReplicateConfiguration
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*milvuspb.ReplicateConfiguration, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ReplicateConfiguration); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.ReplicateConfiguration)
+			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
 		}
 	}
 
@@ -295,12 +296,12 @@ func (_c *MockWALAccesser_GetReplicateConfiguration_Call) Run(run func(ctx conte
 	return _c
 }
 
-func (_c *MockWALAccesser_GetReplicateConfiguration_Call) Return(_a0 *milvuspb.ReplicateConfiguration, _a1 error) *MockWALAccesser_GetReplicateConfiguration_Call {
+func (_c *MockWALAccesser_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockWALAccesser_GetReplicateConfiguration_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockWALAccesser_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*milvuspb.ReplicateConfiguration, error)) *MockWALAccesser_GetReplicateConfiguration_Call {
+func (_c *MockWALAccesser_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockWALAccesser_GetReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -594,7 +595,7 @@ func (_c *MockWALAccesser_Txn_Call) RunAndReturn(run func(context.Context, strea
 }
 
 // UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+func (_m *MockWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	ret := _m.Called(ctx, config)
 
 	if len(ret) == 0 {
@@ -602,7 +603,7 @@ func (_m *MockWALAccesser) UpdateReplicateConfiguration(ctx context.Context, con
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateConfiguration) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
 		r0 = rf(ctx, config)
 	} else {
 		r0 = ret.Error(0)
@@ -618,14 +619,14 @@ type MockWALAccesser_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - config *milvuspb.ReplicateConfiguration
+//   - config *commonpb.ReplicateConfiguration
 func (_e *MockWALAccesser_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockWALAccesser_UpdateReplicateConfiguration_Call {
 	return &MockWALAccesser_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
 }
 
-func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *milvuspb.ReplicateConfiguration)) *MockWALAccesser_UpdateReplicateConfiguration_Call {
+func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockWALAccesser_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateConfiguration))
+		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
 	})
 	return _c
 }
@@ -635,7 +636,7 @@ func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) Return(_a0 error) *
 	return _c
 }
 
-func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateConfiguration) error) *MockWALAccesser_UpdateReplicateConfiguration_Call {
+func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockWALAccesser_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

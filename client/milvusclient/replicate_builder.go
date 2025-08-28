@@ -1,8 +1,6 @@
 package milvusclient
 
-import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-)
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 // MilvusClusterBuilder defines the interface for building Milvus cluster configuration
 type MilvusClusterBuilder interface {
@@ -16,19 +14,19 @@ type MilvusClusterBuilder interface {
 	WithURI(uri string) MilvusClusterBuilder
 
 	// Build constructs and returns the MilvusCluster object
-	Build() *milvuspb.MilvusCluster
+	Build() *commonpb.MilvusCluster
 }
 
 // ReplicateConfigurationBuilder defines the interface for building replicate configuration
 type ReplicateConfigurationBuilder interface {
 	// WithCluster adds a cluster configuration, you can use MilvusClusterBuilder to create a cluster
-	WithCluster(cluster *milvuspb.MilvusCluster) ReplicateConfigurationBuilder
+	WithCluster(cluster *commonpb.MilvusCluster) ReplicateConfigurationBuilder
 
 	// WithTopology adds a cross-cluster topology configuration
 	WithTopology(sourceClusterID, targetClusterID string) ReplicateConfigurationBuilder
 
 	// Build constructs and returns the configuration object
-	Build() *milvuspb.ReplicateConfiguration
+	Build() *commonpb.ReplicateConfiguration
 }
 
 // NewMilvusClusterBuilder creates a new Milvus cluster builder
@@ -72,10 +70,10 @@ func (b *milvusClusterBuilder) WithURI(uri string) MilvusClusterBuilder {
 	return b
 }
 
-func (b *milvusClusterBuilder) Build() *milvuspb.MilvusCluster {
-	return &milvuspb.MilvusCluster{
+func (b *milvusClusterBuilder) Build() *commonpb.MilvusCluster {
+	return &commonpb.MilvusCluster{
 		ClusterId: b.clusterID,
-		ConnectionParam: &milvuspb.ConnectionParam{
+		ConnectionParam: &commonpb.ConnectionParam{
 			Uri:   b.uri,
 			Token: b.token,
 		},
@@ -84,25 +82,25 @@ func (b *milvusClusterBuilder) Build() *milvuspb.MilvusCluster {
 }
 
 type replicateConfigurationBuilder struct {
-	config *milvuspb.ReplicateConfiguration
+	config *commonpb.ReplicateConfiguration
 }
 
 func newReplicateConfigurationBuilder() ReplicateConfigurationBuilder {
 	return &replicateConfigurationBuilder{
-		config: &milvuspb.ReplicateConfiguration{
-			Clusters:             []*milvuspb.MilvusCluster{},
-			CrossClusterTopology: []*milvuspb.CrossClusterTopology{},
+		config: &commonpb.ReplicateConfiguration{
+			Clusters:             []*commonpb.MilvusCluster{},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		},
 	}
 }
 
-func (b *replicateConfigurationBuilder) WithCluster(cluster *milvuspb.MilvusCluster) ReplicateConfigurationBuilder {
+func (b *replicateConfigurationBuilder) WithCluster(cluster *commonpb.MilvusCluster) ReplicateConfigurationBuilder {
 	b.config.Clusters = append(b.config.Clusters, cluster)
 	return b
 }
 
 func (b *replicateConfigurationBuilder) WithTopology(sourceClusterID, targetClusterID string) ReplicateConfigurationBuilder {
-	topology := &milvuspb.CrossClusterTopology{
+	topology := &commonpb.CrossClusterTopology{
 		SourceClusterId: sourceClusterID,
 		TargetClusterId: targetClusterID,
 	}
@@ -110,6 +108,6 @@ func (b *replicateConfigurationBuilder) WithTopology(sourceClusterID, targetClus
 	return b
 }
 
-func (b *replicateConfigurationBuilder) Build() *milvuspb.ReplicateConfiguration {
+func (b *replicateConfigurationBuilder) Build() *commonpb.ReplicateConfiguration {
 	return b.config
 }
