@@ -309,18 +309,13 @@ func initCipher() error {
 	storeCipher(nil)
 
 	pathGo := paramtable.GetCipherParams().SoPathGo.GetValue()
-	if pathGo == "" {
-		log.Info("empty so path for go plugin, skip to load cipher plugin")
-		return nil
-	}
-
 	pathCpp := paramtable.GetCipherParams().SoPathCpp.GetValue()
-	if pathCpp == "" {
-		log.Info("empty so path for cpp plugin, skip to load cipher plugin")
+	if pathGo == "" || pathCpp == "" {
+		log.Info("empty so path for cipher plugin, skip to load plugin")
 		return nil
 	}
 
-	log.Info("start to load cipher plugin", zap.String("path", pathGo))
+	log.Info("start to load cipher go plugin", zap.String("path", pathGo))
 	p, err := plugin.Open(pathGo)
 	if err != nil {
 		return fmt.Errorf("fail to open the cipher plugin, error: %s", err.Error())
@@ -332,14 +327,12 @@ func initCipher() error {
 		return fmt.Errorf("fail to the 'CipherPlugin' object in the plugin, error: %s", err.Error())
 	}
 
-	var cipherVal hook.Cipher
-	var ok bool
-	cipherVal, ok = h.(hook.Cipher)
+	cipherVal, ok := h.(hook.Cipher)
 	if !ok {
 		return fmt.Errorf("fail to convert the `CipherPlugin` interface")
 	}
 
-	initConfigs := paramtable.Get().EtcdCfg.GetAll()
+	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
 	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
 	if err = cipherVal.Init(initConfigs); err != nil {
 		return fmt.Errorf("fail to init configs for the cipher plugin, error: %s", err.Error())
