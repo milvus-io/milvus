@@ -556,8 +556,8 @@ TEST(storage, InsertDataDoubleNullable) {
 TEST(storage, InsertDataTimestamptz) {
     FixedVector<int64_t> data = {
         1000000000, 2000000000, 3000000000, 400000, 5000};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ, false);
+    auto field_data = milvus::storage::CreateFieldData(
+        DataType::TIMESTAMPTZ, DataType::NONE, false);
     field_data->FillFieldData(data.data(), data.size());
 
     auto payload_reader =
@@ -587,8 +587,8 @@ TEST(storage, InsertDataTimestamptz) {
 TEST(storage, InsertDataTimestamptzNullable) {
     FixedVector<int64_t> data = {
         1000000000, 2000000000, 3000000000, 400000, 5000};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ, true);
+    auto field_data = milvus::storage::CreateFieldData(
+        DataType::TIMESTAMPTZ, DataType::NONE, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
