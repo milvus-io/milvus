@@ -138,9 +138,9 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             row_group_metadata_vector.Get(row_group_idx).memory_size());
         auto usage = translator->estimated_byte_size_of_cell(i).first;
         if (use_mmap) {
-            EXPECT_EQ(usage.memory_bytes, expected_size);
-        } else {
             EXPECT_EQ(usage.file_bytes, expected_size);
+        } else {
+            EXPECT_EQ(usage.memory_bytes, expected_size);
         }
     }
 
@@ -298,9 +298,9 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         AssertInfo(status.ok(), "failed to close file reader");
 
         if (use_mmap) {
-            EXPECT_EQ(usage.memory_bytes, expected_size);
-        } else {
             EXPECT_EQ(usage.file_bytes, expected_size);
+        } else {
+            EXPECT_EQ(usage.memory_bytes, expected_size);
         }
     }
 
