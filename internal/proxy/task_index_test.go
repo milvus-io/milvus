@@ -175,64 +175,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("show collection error", func(t *testing.T) {
-		qc := getMockQueryCoord()
-		qc.ExpectedCalls = nil
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-			Status: merr.Success(),
-			Shards: []*querypb.ShardLeadersList{
-				{
-					ChannelName: "channel-1",
-					NodeIds:     []int64{1, 2, 3},
-					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-					Serviceable: []bool{true, true, true},
-				},
-			},
-		}, nil)
-		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:        merr.Success(),
-			CollectionIDs: []int64{collectionID},
-		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-		dit.mixCoord = qc
-
-		err := dit.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("show collection fail", func(t *testing.T) {
-		qc := getMockQueryCoord()
-		qc.ExpectedCalls = nil
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-			Status: merr.Success(),
-			Shards: []*querypb.ShardLeadersList{
-				{
-					ChannelName: "channel-1",
-					NodeIds:     []int64{1, 2, 3},
-					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-					Serviceable: []bool{true, true, true},
-				},
-			},
-		}, nil)
-		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status:        merr.Success(),
-			CollectionIDs: []int64{collectionID},
-		}, nil)
-		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "fail reason",
-			},
-		}, nil)
-		dit.mixCoord = qc
-
-		err := dit.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 

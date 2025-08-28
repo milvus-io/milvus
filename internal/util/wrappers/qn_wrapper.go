@@ -160,6 +160,10 @@ func (qn *qnServerWrapper) RunAnalyzer(ctx context.Context, in *querypb.RunAnaly
 	return qn.QueryNode.RunAnalyzer(ctx, in)
 }
 
+func (qn *qnServerWrapper) DropIndex(ctx context.Context, in *querypb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.DropIndex(ctx, in)
+}
+
 func WrapQueryNodeServerAsClient(qn types.QueryNode) types.QueryNodeClient {
 	return &qnServerWrapper{
 		QueryNode: qn,

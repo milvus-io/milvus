@@ -91,6 +91,7 @@ type ShardDelegator interface {
 	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
 	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
+	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)

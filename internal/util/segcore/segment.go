@@ -101,6 +101,12 @@ func (s *cSegmentImpl) HasRawData(fieldID int64) bool {
 	return bool(ret)
 }
 
+// HasFieldData checks if the segment has field data.
+func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
+	ret := C.HasFieldData(s.ptr, C.int64_t(fieldID))
+	return bool(ret)
+}
+
 // Search requests a search on the segment.
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	traceCtx := ParseCTraceContext(ctx)
@@ -287,6 +293,22 @@ func (s *cSegmentImpl) FinishLoad() error {
 	status := C.FinishLoad(s.ptr)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return errors.Wrap(err, "failed to finish load segment")
+	}
+	return nil
+}
+
+func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
+	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "failed to drop index")
+	}
+	return nil
+}
+
+func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
+	status := C.DropSealedSegmentJSONIndex(s.ptr, C.int64_t(fieldID), C.CString(nestedPath))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "failed to drop json index")
 	}
 	return nil
 }

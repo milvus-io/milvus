@@ -50,6 +50,7 @@ const (
 	TaskTypeMove
 	TaskTypeUpdate
 	TaskTypeStatsUpdate
+	TaskTypeDropIndex
 )
 
 var TaskTypeName = map[Type]string{
@@ -82,6 +83,14 @@ func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
 }
 
 func NewReplicaLeaderIndex(task *LeaderTask) replicaSegmentIndex {
+	return replicaSegmentIndex{
+		ReplicaID: task.ReplicaID(),
+		SegmentID: task.SegmentID(),
+		IsGrowing: false,
+	}
+}
+
+func NewReplicaDropIndex(task *DropIndexTask) replicaSegmentIndex {
 	return replicaSegmentIndex{
 		ReplicaID: task.ReplicaID(),
 		SegmentID: task.SegmentID(),
@@ -543,6 +552,23 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
+		if old, ok := scheduler.segmentTasks.Get(index); ok {
+			if task.Priority() > old.Priority() {
+				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
+					zap.Int64("oldID", old.ID()),
+					zap.String("oldPriority", old.Priority().String()),
+					zap.Int64("newID", task.ID()),
+					zap.String("newPriority", task.Priority().String()),
+				)
+				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
+				scheduler.remove(old)
+				return nil
+			}
+
+			return merr.WrapErrServiceInternal("task with the same segment exists")
+		}
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
 			if task.Priority() > old.Priority() {
 				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
@@ -1071,6 +1097,10 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 			return err
 		}
 
+	case *DropIndexTask:
+		if err := scheduler.checkDropIndexTaskStale(task); err != nil {
+			return err
+		}
 	default:
 		panic(fmt.Sprintf("checkStale: forget to check task type: %+v", task))
 	}
@@ -1174,6 +1204,16 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
+		}
+	}
+	return nil
+}
+
+func (scheduler *taskScheduler) checkDropIndexTaskStale(task *DropIndexTask) error {
+	for _, action := range task.Actions() {
+		if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+			log.Ctx(task.Context()).Warn("task stale due to node offline", WrapTaskLog(task, zap.String("channel", task.Shard()))...)
+			return merr.WrapErrNodeOffline(action.Node())
 		}
 	}
 	return nil

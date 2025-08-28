@@ -201,9 +201,9 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
+
         # 2. drop index
-        error = {ct.err_code: 65535, ct.err_msg: f"index cannot be dropped, collection is loaded, "
-                                                 f"please release it first"}
+        error = {ct.err_code: 1100, ct.err_msg: f"vector index cannot be dropped on loaded collection"}
         await async_client.drop_index(collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)

@@ -37,6 +37,11 @@ type SealedSegment interface {
 
 	// AddFieldDataInfo adds field data info into the segment.
 	AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error)
+
+	// DropIndex drops the index of the segment.
+	DropIndex(ctx context.Context, fieldID int64) error
+
+	DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error
 }
 
 // basicSegmentMethodSet is the basic method set of a segment.
@@ -56,6 +61,9 @@ type basicSegmentMethodSet interface {
 
 	// HasRawData checks if the segment has raw data.
 	HasRawData(fieldID int64) bool
+
+	// HasFieldData checks if the segment has field data.
+	HasFieldData(fieldID int64) bool
 
 	// Search requests a search on the segment.
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
