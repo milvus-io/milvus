@@ -79,10 +79,11 @@ GroupChunkTranslator::GroupChunkTranslator(
 
     // Get row group metadata from files
     for (const auto& file : insert_files_) {
-        auto reader =
-            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties());
+        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs,
+            file,
+            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+            storage::GetReaderProperties());
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();

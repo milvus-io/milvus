@@ -80,7 +80,7 @@ TEST(chunk, test_timestmamptz_field) {
     FixedVector<int64_t> data = {
         1, 2, 3, 4, 5};  // Timestamptz is stored as int64
     auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ);
+        milvus::storage::CreateFieldData(DataType::TIMESTAMPTZ, DataType::NONE);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertEventData event_data;
     auto payload_reader =
@@ -610,12 +610,12 @@ TEST(chunk, test_sparse_float) {
     auto n_rows = 100;
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
-    auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_U32_F32,
-        DataType::NONE,
-        false,
-        kTestSparseDim,
-        n_rows);
+    auto field_data =
+        milvus::storage::CreateFieldData(DataType::VECTOR_SPARSE_U32_F32,
+                                         DataType::NONE,
+                                         false,
+                                         kTestSparseDim,
+                                         n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;

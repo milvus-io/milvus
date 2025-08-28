@@ -656,12 +656,12 @@ TEST(storage, InsertDataSparseFloat) {
     auto n_rows = 100;
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
-    auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_U32_F32,
-        DataType::NONE,
-        false,
-        kTestSparseDim,
-        n_rows);
+    auto field_data =
+        milvus::storage::CreateFieldData(DataType::VECTOR_SPARSE_U32_F32,
+                                         DataType::NONE,
+                                         false,
+                                         kTestSparseDim,
+                                         n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     auto payload_reader =

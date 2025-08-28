@@ -195,7 +195,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                "[StorageV2] file system is nullptr");
                     auto row_group_reader =
                         std::make_shared<milvus_storage::FileRowGroupReader>(
-                            fs, file, schema, reader_memory_limit,
+                            fs,
+                            file,
+                            schema,
+                            reader_memory_limit,
                             milvus::storage::GetReaderProperties());
                     AssertInfo(row_group_reader != nullptr,
                                "[StorageV2] row group reader is nullptr");
