@@ -362,7 +362,7 @@ test-mixcoord:
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
 
 test-cdc:
-	@echo "Running go unittests..."
+	@echo "Running cdc unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t cdc)
 
 test-go: build-cpp-with-unittest
