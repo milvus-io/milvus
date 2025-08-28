@@ -71,6 +71,7 @@ class MilvusConan(ConanFile):
         "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_s3": True,
+        "arrow:with_azure": True,
         "arrow:encryption": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
