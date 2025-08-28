@@ -36,8 +36,9 @@ constexpr bool IsScalar =
     std::is_same_v<T, proto::plan::Array>;
 
 template <typename T>
-constexpr bool IsSparse = std::is_same_v<T, SparseFloatVector> ||
-                          std::is_same_v<T, knowhere::sparse::SparseRow<SparseValueType>>;
+constexpr bool IsSparse =
+    std::is_same_v<T, SparseFloatVector> ||
+    std::is_same_v<T, knowhere::sparse::SparseRow<SparseValueType>>;
 
 template <typename T>
 constexpr bool IsVariableType =

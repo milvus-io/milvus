@@ -422,7 +422,8 @@ TEST_P(RetrieveTest, LargeTimestamp) {
                 Assert(field_data.vectors().float_vector().data_size() ==
                        target_num * DIM);
             }
-            if (DataType(field_data.type()) == DataType::VECTOR_SPARSE_U32_F32) {
+            if (DataType(field_data.type()) ==
+                DataType::VECTOR_SPARSE_U32_F32) {
                 Assert(field_data.vectors()
                            .sparse_float_vector()
                            .contents_size() == target_num);

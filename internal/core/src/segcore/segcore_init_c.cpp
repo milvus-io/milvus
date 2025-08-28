@@ -108,7 +108,7 @@ SegcoreSetRefineRatio(const float value) {
 
 extern "C" void
 SegcoreSetIndexBuildRatio(const float value) {
-    milvus::segcore::SegcoreConfig& config = 
+    milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_build_ratio(value);
 }

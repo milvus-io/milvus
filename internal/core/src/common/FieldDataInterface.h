@@ -765,7 +765,8 @@ class FieldDataSparseVectorImpl
             resize_field_data(length_ + element_count);
         }
         auto ptr =
-            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(source);
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+                source);
         for (int64_t i = 0; i < element_count; ++i) {
             auto& row = ptr[i];
             vec_dim_ = std::max(vec_dim_, row.dim());

@@ -427,10 +427,12 @@ VectorMemIndex<T>::Build(const Config& config) {
                     field_data)
                     ->Dim());
         }
-        std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(total_rows);
+        std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
+            total_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
-            auto ptr = static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+            auto ptr = static_cast<
+                const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
             for (size_t i = 0; i < field_data->Length(); ++i) {
@@ -580,14 +582,14 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     }
     // release and transfer ownership to the result unique ptr.
     res.value()->SetIsOwner(false);
-    return std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>(
+    return std::unique_ptr<
+        const knowhere::sparse::SparseRow<SparseValueType>[]>(
         static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
             res.value()->GetTensor()));
 }
 
 template <typename T>
-void
-VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),

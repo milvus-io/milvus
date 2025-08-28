@@ -157,8 +157,8 @@ VariableLengthChunk<knowhere::sparse::SparseRow<SparseValueType>>::set(
         auto data_size = src[i].data_byte_size();
         uint8_t* data_ptr = buf + offset;
         std::memcpy(data_ptr, (uint8_t*)src[i].data(), data_size);
-        data_[i + begin] =
-            knowhere::sparse::SparseRow<SparseValueType>(src[i].size(), data_ptr, false);
+        data_[i + begin] = knowhere::sparse::SparseRow<SparseValueType>(
+            src[i].size(), data_ptr, false);
         offset += data_size;
     }
 }

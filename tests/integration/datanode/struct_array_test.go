@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/stretchr/testify/suite"
 )
 
 type ArrayStructDataNodeSuite struct {

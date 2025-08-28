@@ -409,15 +409,18 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         }
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (is_sparse) {
-        auto index = std::make_unique<milvus::index::VectorMemIndex<sparse_u32_f32>>(
-            DataType::NONE,
-            index_type,
-            metric_type,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false,
-            milvus::storage::FileManagerContext());
+        auto index =
+            std::make_unique<milvus::index::VectorMemIndex<sparse_u32_f32>>(
+                DataType::NONE,
+                index_type,
+                metric_type,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false,
+                milvus::storage::FileManagerContext());
         auto sparse_data =
-            dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    vec);
         index->BuildWithDataset(
             knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
         for (int i = 0; i < add_cont; i++) {
@@ -566,8 +569,8 @@ TEST_P(GrowingIndexTest, GetVector) {
         int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
-            auto fakevec =
-                dataset.get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
+            auto fakevec = dataset.get_col<
+                knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
             auto offset = segment->PreInsert(per_batch);
             segment->Insert(offset,
                             per_batch,

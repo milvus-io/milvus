@@ -163,9 +163,9 @@ struct GeneratedData {
 
                     return std::move(ret);
                 }
-                if constexpr (std::is_same_v<
-                                  T,
-                                  knowhere::sparse::SparseRow<milvus::SparseValueType>>) {
+                if constexpr (std::is_same_v<T,
+                                             knowhere::sparse::SparseRow<
+                                                 milvus::SparseValueType>>) {
                     auto sparse_float_array =
                         target_field_data.vectors().sparse_float_vector();
                     auto rows =
@@ -350,13 +350,15 @@ GenerateRandomSparseFloatVector(size_t rows,
         data[row][col] = val;
     }
 
-    auto tensor = std::make_unique<knowhere::sparse::SparseRow<milvus::SparseValueType>[]>(rows);
+    auto tensor = std::make_unique<
+        knowhere::sparse::SparseRow<milvus::SparseValueType>[]>(rows);
 
     for (int32_t i = 0; i < rows; ++i) {
         if (data[i].size() == 0) {
             continue;
         }
-        knowhere::sparse::SparseRow<milvus::SparseValueType> row(data[i].size());
+        knowhere::sparse::SparseRow<milvus::SparseValueType> row(
+            data[i].size());
         size_t j = 0;
         for (auto& [idx, val] : data[i]) {
             row.set_at(j++, idx, val);
@@ -366,8 +368,7 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr
-CreateTestSchema() {
+inline SchemaPtr CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     auto bool_field =
         schema->AddDebugField("bool", milvus::DataType::BOOL, true);

@@ -81,7 +81,8 @@ struct Placeholder {
     // only one of blob_ and sparse_matrix_ should be set. blob_ is used for
     // dense vector search and sparse_matrix_ is for sparse vector search.
     aligned_vector<char> blob_;
-    std::unique_ptr<knowhere::sparse::SparseRow<SparseValueType>[]> sparse_matrix_;
+    std::unique_ptr<knowhere::sparse::SparseRow<SparseValueType>[]>
+        sparse_matrix_;
     // offsets for embedding list
     aligned_vector<size_t> lims_;
 

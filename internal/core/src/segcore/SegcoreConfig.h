@@ -93,7 +93,7 @@ class SegcoreConfig {
         build_ratio_ = build_ratio;
     }
 
-    float 
+    float
     get_build_ratio() const {
         return build_ratio_;
     }
@@ -159,7 +159,7 @@ class SegcoreConfig {
     inline static int64_t nprobe_ = 4;
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
-    inline static float build_ratio_  = 0.1;
+    inline static float build_ratio_ = 0.1;
     inline static std::string dense_index_type_ =
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     inline static knowhere::RefineType refine_type_ =

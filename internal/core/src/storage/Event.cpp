@@ -314,9 +314,9 @@ BaseEventData::Serialize() {
             case DataType::VECTOR_SPARSE_U32_F32: {
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
-                    auto row =
-                        static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
-                            field_data->RawValue(offset));
+                    auto row = static_cast<
+                        const knowhere::sparse::SparseRow<SparseValueType>*>(
+                        field_data->RawValue(offset));
                     payload_writer->add_one_binary_payload(
                         static_cast<const uint8_t*>(row->data()),
                         row->data_byte_size());
@@ -403,7 +403,7 @@ DescriptorEvent::DescriptorEvent(BinlogReaderPtr reader) {
 }
 
 std::string
-DescriptorEvent::GetEdekFromExtra(){
+DescriptorEvent::GetEdekFromExtra() {
     auto it = event_data.extras.find(EDEK);
     if (it != event_data.extras.end()) {
         return std::any_cast<std::string>(it->second);
@@ -412,7 +412,7 @@ DescriptorEvent::GetEdekFromExtra(){
 }
 
 int64_t
-DescriptorEvent::GetEZFromExtra(){
+DescriptorEvent::GetEZFromExtra() {
     auto it = event_data.extras.find(EZID);
     if (it != event_data.extras.end()) {
         return std::any_cast<int64_t>(it->second);
@@ -420,19 +420,24 @@ DescriptorEvent::GetEZFromExtra(){
     return -1;
 }
 
-
 std::vector<uint8_t>
 DescriptorEvent::Serialize() {
     auto data_bytes = event_data.Serialize();
 
     event_header.event_type_ = EventType::DescriptorEvent;
-    event_header.event_length_ = GetEventHeaderSize(event_header) + data_bytes.size();
-    event_header.next_position_ = event_header.event_length_ + sizeof(MAGIC_NUM);
+    event_header.event_length_ =
+        GetEventHeaderSize(event_header) + data_bytes.size();
+    event_header.next_position_ =
+        event_header.event_length_ + sizeof(MAGIC_NUM);
     auto header_bytes = event_header.Serialize();
 
-    LOG_INFO("DescriptorEvent next position:{}, magic size:{}, header_size:{}, data_size:{}",
-            event_header.next_position_,
-            sizeof(MAGIC_NUM), header_bytes.size(), data_bytes.size());
+    LOG_INFO(
+        "DescriptorEvent next position:{}, magic size:{}, header_size:{}, "
+        "data_size:{}",
+        event_header.next_position_,
+        sizeof(MAGIC_NUM),
+        header_bytes.size(),
+        data_bytes.size());
 
     std::vector<uint8_t> res(event_header.next_position_, 0);
     int32_t offset = 0;

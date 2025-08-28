@@ -1071,7 +1071,6 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
     reader.join();
 }
 
-
 TEST(TextMatch, ExprResCacheSealed) {
     using milvus::exec::ExprResCacheManager;
     auto& mgr = ExprResCacheManager::Instance();
@@ -1121,4 +1120,3 @@ TEST(TextMatch, ExprResCacheSealed) {
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
 }
-

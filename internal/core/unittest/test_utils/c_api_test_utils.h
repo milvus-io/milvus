@@ -42,13 +42,13 @@ using namespace milvus::segcore;
 // Test utility function for AppendFieldInfoForTest
 inline CStatus
 AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
-                int64_t collection_id,
-                int64_t partition_id,
-                int64_t segment_id,
-                int64_t field_id,
-                enum CDataType field_type,
-                bool enable_mmap,
-                const char* mmap_dir_path) {
+                       int64_t collection_id,
+                       int64_t partition_id,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       enum CDataType field_type,
+                       bool enable_mmap,
+                       const char* mmap_dir_path) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;

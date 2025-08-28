@@ -51,7 +51,7 @@ NewSegment(CCollection collection,
 
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
-        
+
         std::unique_ptr<milvus::segcore::SegmentInterface> segment;
         switch (seg_type) {
             case Growing: {

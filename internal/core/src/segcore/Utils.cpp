@@ -566,9 +566,8 @@ CreateVectorDataArrayFrom(const void* data_raw,
         case DataType::VECTOR_SPARSE_U32_F32: {
             SparseRowsToProto(
                 [&](size_t i) {
-                    return reinterpret_cast<
-                               const knowhere::sparse::SparseRow<SparseValueType>*>(
-                               data_raw) +
+                    return reinterpret_cast<const knowhere::sparse::SparseRow<
+                               SparseValueType>*>(data_raw) +
                            i;
                 },
                 count,

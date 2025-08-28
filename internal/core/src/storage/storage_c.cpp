@@ -180,21 +180,28 @@ InitPluginLoader(const char* plugin_path) {
 }
 
 CStatus
-PutOrRefPluginContext(CPluginContext c_plugin_context){
-    auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+PutOrRefPluginContext(CPluginContext c_plugin_context) {
+    auto cipherPluginPtr =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
     if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, "cipher plugin not loaded");
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "cipher plugin not loaded");
     }
-    cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, std::string(c_plugin_context.key));
+    cipherPluginPtr->Update(c_plugin_context.ez_id,
+                            c_plugin_context.collection_id,
+                            std::string(c_plugin_context.key));
     return milvus::SuccessCStatus();
 }
 
 CStatus
-UnRefPluginContext(CPluginContext c_plugin_context){
-    auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+UnRefPluginContext(CPluginContext c_plugin_context) {
+    auto cipherPluginPtr =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
     if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, "cipher plugin not loaded");
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "cipher plugin not loaded");
     }
-    cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+    cipherPluginPtr->Update(
+        c_plugin_context.ez_id, c_plugin_context.collection_id, "");
     return milvus::SuccessCStatus();
 }

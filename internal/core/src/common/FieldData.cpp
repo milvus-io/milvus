@@ -483,7 +483,8 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
-template class FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>, true>;
+template class FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>,
+                             true>;
 template class FieldDataImpl<VectorArray, true>;
 
 FieldDataPtr

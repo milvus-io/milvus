@@ -83,8 +83,10 @@ IndexData::serialize_to_remote_file(std::shared_ptr<CPluginContext> context) {
 
     std::shared_ptr<milvus::storage::plugin::IEncryptor> encryptor;
     if (context) {
-        auto cipherPlugin = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        auto pair = cipherPlugin->GetEncryptor(context->ez_id, context->collection_id);
+        auto cipherPlugin =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        auto pair =
+            cipherPlugin->GetEncryptor(context->ez_id, context->collection_id);
         encryptor = pair.first;
         des_event_data.extras[EDEK] = pair.second;
         des_event_data.extras[EZID] = context->ez_id;
@@ -109,13 +111,17 @@ IndexData::serialize_to_remote_file(std::shared_ptr<CPluginContext> context) {
     // serialize insert event
     auto index_event_bytes = index_event.Serialize();
     if (encryptor) {
-        std::string plain_text(index_event_bytes.begin(), index_event_bytes.end());
+        std::string plain_text(index_event_bytes.begin(),
+                               index_event_bytes.end());
         auto cipher_text = encryptor->Encrypt(plain_text);
-        des_event_bytes.insert(des_event_bytes.end(),
-                               cipher_text.begin(),
-                               cipher_text.end());
-        LOG_INFO("Cipher plugin encrypts index, ez {}, plain text length {}, cipher text length {}",
-                context->ez_id, plain_text.size(), cipher_text.size());
+        des_event_bytes.insert(
+            des_event_bytes.end(), cipher_text.begin(), cipher_text.end());
+        LOG_INFO(
+            "Cipher plugin encrypts index, ez {}, plain text length {}, cipher "
+            "text length {}",
+            context->ez_id,
+            plain_text.size(),
+            cipher_text.size());
     } else {
         des_event_bytes.insert(des_event_bytes.end(),
                                index_event_bytes.begin(),
