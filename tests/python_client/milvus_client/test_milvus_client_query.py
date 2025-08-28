@@ -7,6 +7,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 import pandas as pd
 import numpy as np
+import random
 
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
@@ -152,7 +153,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_expr_not_existed_field(self):
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_query_expr_not_existed_field(self, enable_dynamic_field):
         """
         target: test query with not existed field
         method: query by term expr with fake field
@@ -165,17 +167,22 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=False)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 3. query with non-existent field
         term_expr = 'invalid_field in [1, 2]'
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"cannot parse expression: {term_expr}, error: field invalid_field not exist"}
-        self.query(client, collection_name, filter=term_expr,
-                   check_task=CheckTasks.err_res, check_items=error)
+        if enable_dynamic_field :
+            self.query(client, collection_name, filter=term_expr, 
+                  check_task=CheckTasks.check_query_results,
+                  check_items={exp_res: [], "pk_name": ct.default_int64_field_name})
+        else :
+            error = {ct.err_code: 65535,
+                     ct.err_msg: f"cannot parse expression: {term_expr}, error: field invalid_field not exist"}
+            self.query(client, collection_name, filter=term_expr,
+                       check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -257,7 +264,76 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_expr_inconsistent_mix_term_array(self):
+        """
+        target: test query with term expr that field and array are inconsistent or mix type
+        method: 1.query with int field and float values
+                2.query with term expr that has int and float type value
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=False, auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. test inconsistent mix term array
+        values = [1., 2.]
+        term_expr = f'{default_primary_key_field_name} in {values}'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
+                             "error: value 'float_val:1' in list cannot be casted to Int64"}
+        self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
 
+        values = [1, 2.]
+        term_expr = f'{default_primary_key_field_name} in {values}'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
+                             "error: value 'float_val:2' in list cannot be casted to Int64"}
+        self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
+        # 4. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
+                                             "json_contains_all", "JSON_CONTAINS_ALL"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("not_list", ["str", {1, 2, 3}, (1, 2, 3), 10])
+    def test_milvus_client_query_expr_json_contains_invalid_type(self, expr_prefix, enable_dynamic_field, not_list):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        nb = 10
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        for i in range(nb):
+            rows[i][ct.default_json_field_name] = {"number": i,
+                                                   "list": [m for m in range(i, i + 10)]}
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid type
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {not_list})"
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
+        self.query(client, collection_name, filter=expression, check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):
@@ -1070,6 +1146,698 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS",
+                                             "array_contains", "ARRAY_CONTAINS"])
+    def test_milvus_client_query_expr_json_contains(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        limit = 99
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {"number": i,
+                                                   "list": [m for m in range(i, i + limit)]}
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], 1000)"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_milvus_client_query_expr_list_json_contains(self, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        limit = default_nb // 4
+        rows = []
+        for i in range(default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_json_field_name: [str(m) for m in range(i, i + limit)],
+                ct.default_vector_field_name: cf.gen_vectors(1, default_dim)[0]
+            }
+            rows.append(data)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query
+        expression = f"{expr_prefix}({ct.default_json_field_name}, '1000')"
+        res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == limit
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_milvus_client_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        limit = default_nb // 3
+        tar = 1000
+        for i in range(default_nb):
+            # Set float field values to ensure some records satisfy the query condition
+            rows[i][ct.default_json_field_name] = {"number": i, "list": [m for m in range(i, i + limit)]}
+            if i % 2 == 0:
+                rows[i][ct.default_float_field_name] = tar - limit
+            else:
+                rows[i][ct.default_float_field_name] = tar
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with combined expression
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {tar}) && {ct.default_float_field_name} > {tar - limit // 2}"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit // 2
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL",
+                                             "array_contains_all", "ARRAY_CONTAINS_ALL"])
+    def test_milvus_client_query_expr_all_datatype_json_contains_all(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        limit = 10
+        for i in range(default_nb):
+            content = {
+                "listInt": [m for m in range(i, i + limit)],
+                "listStr": [str(m) for m in range(i, i + limit)],
+                "listFlt": [m * 1.0 for m in range(i, i + limit)],
+                "listBool": [bool(i % 2)],
+                "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
+                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]
+            }
+            rows[i][ct.default_json_field_name] = content
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with different data types
+        _id = random.randint(limit, default_nb - limit)
+        # test for int
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit - len(ids) + 1
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == default_nb // 2
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # test for mixed data
+        ids = [[_id, str(_id)], bool(_id % 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL"])
+    def test_milvus_client_query_expr_list_all_datatype_json_contains_all(self, expr_prefix):
+        """
+        target: test query with expression using json_contains_all
+        method: query with expression using json_contains_all
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[ct.default_json_field_name])
+        limit = 10
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {
+                "listInt": [m for m in range(i, i + limit)],
+                "listStr": [str(m) for m in range(i, i + limit)],
+                "listFlt": [m * 1.0 for m in range(i, i + limit)],
+                "listBool": [bool(i % 2)],
+                "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
+                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+            }
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with different data types
+        _id = random.randint(limit, default_nb - limit)
+        # test for int
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit - len(ids) + 1
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+        res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == limit
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == default_nb // 2
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # test for mixed data
+        ids = [[_id, str(_id)], bool(_id % 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY"])
+    def test_milvus_client_query_expr_all_datatype_json_contains_any(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        limit = 10
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {
+                "listInt": [m for m in range(i, i + limit)],
+                "listStr": [str(m) for m in range(i, i + limit)],
+                "listFlt": [m * 1.0 for m in range(i, i + limit)],
+                "listBool": [bool(i % 2)],
+                "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
+                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]
+            }
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with different data types
+        _id = random.randint(limit, default_nb - limit)
+        # test for int
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 2 * limit - 1
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit + len(ids) - 1
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == limit
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == default_nb // 2
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+        # test for mixed data
+        ids = [_id, bool(_id % 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == default_nb // 2
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("limit", [10, 100, 1000])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_query_expr_empty(self, auto_id, limit):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=auto_id)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with empty expression and limit
+        res = self.query(client, collection_name, filter="", limit=limit)[0]
+        # 5. verify results are ordered by primary key
+        if not auto_id:
+            primary_keys = [entity[default_primary_key_field_name] for entity in res]
+            assert primary_keys == sorted(primary_keys)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_expr_empty_pk_string(self):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=10, is_primary=True)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with limit - string field is sorted by lexicographical order
+        exp_ids = ['0', '1', '10', '100', '1000', '1001', '1002', '1003', '1004', '1005']
+        res = self.query(client, collection_name, filter="", limit=ct.default_limit)[0]
+        # verify results are in lexicographical order
+        primary_keys = [entity[ct.default_string_field_name] for entity in res]
+        assert primary_keys == exp_ids
+        # 5. query with limit + offset
+        res = self.query(client, collection_name, filter="", limit=5, offset=5)[0]
+        primary_keys = [entity[ct.default_string_field_name] for entity in res]
+        assert primary_keys == exp_ids[5:]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("offset", [100, 1000])
+    @pytest.mark.parametrize("limit", [100, 1000])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_query_expr_empty_with_pagination(self, auto_id, limit, offset):
+        """
+        target: test query with empty expression
+        method: query empty expression with a limit
+        expected: return topK results by order
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=auto_id)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with limit and offset
+        res = self.query(client, collection_name, filter="", limit=limit, offset=offset)[0]
+        # 5. verify results are ordered by primary key
+        if not auto_id:
+            primary_keys = [entity[default_primary_key_field_name] for entity in res]
+            expected_ids = list(range(offset, offset + limit))
+            assert primary_keys == expected_ids
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [100, 1000])
+    @pytest.mark.parametrize("limit", [100, 1000])
+    def test_milvus_client_query_expr_empty_with_random_pk(self, limit, offset):
+        """
+        target: test query with empty expression
+        method: create a collection using random pk, query empty expression with a limit
+        expected: return topK results by order
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=10)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. generate unordered pk array and insert
+        unordered_ids = [i for i in range(default_nb)]
+        random.shuffle(unordered_ids)
+        rows = []
+        for i in range(default_nb):
+            row = {
+                ct.default_int64_field_name: unordered_ids[i],
+                ct.default_float_field_name: np.float32(unordered_ids[i]),
+                ct.default_string_field_name: str(unordered_ids[i]),
+                ct.default_vector_field_name: cf.gen_vectors(nb=1, dim=default_dim)[0]
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with empty expr and check the result
+        exp_ids, res = sorted(unordered_ids)[:limit], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+        res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        # verify results are ordered by primary key
+        primary_keys = [entity[ct.default_int64_field_name] for entity in res]
+        assert primary_keys == exp_ids
+        # 5. query with pagination
+        exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
+        for ids in exp_ids:
+            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+        res = self.query(client, collection_name, filter="", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        # verify results are ordered by primary key
+        primary_keys = [entity[ct.default_int64_field_name] for entity in res]
+        assert primary_keys == exp_ids
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
+                                             "array_contains_any", "ARRAY_CONTAINS_ANY"])
+    def test_milvus_client_query_expr_list_all_datatype_json_contains_any(self, expr_prefix):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[ct.default_json_field_name])
+        limit = random.randint(10, 20)
+        int_data = [[m for m in range(i, i + limit)] for i in range(default_nb)]
+        str_data = [[str(m) for m in range(i, i + limit)] for i in range(default_nb)]
+        flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(default_nb)]
+        bool_data = [[bool(i % 2)] for i in range(default_nb)]
+        list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(default_nb)]
+        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
+
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {
+                "listInt": int_data[i],
+                "listStr": str_data[i],
+                "listFlt": flt_data[i],
+                "listBool": bool_data[i],
+                "listList": list_data[i],
+                "listMix": mix_data[i]
+            }
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with different data types
+        _id = random.randint(limit, default_nb - limit)
+        # test for int
+        ids = [i for i in range(_id, _id + limit)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert [entity[ct.default_int64_field_name] for entity in res] == cf.assert_json_contains(expression, int_data)
+        # test for string
+        ids = [str(_id), str(_id + 1), str(_id + 2)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert [entity[ct.default_int64_field_name] for entity in res] == cf.assert_json_contains(expression, str_data)
+        # test for float
+        ids = [_id * 1.0]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert [entity[ct.default_int64_field_name] for entity in res] == cf.assert_json_contains(expression, flt_data)
+        # test for bool
+        ids = [True]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert [entity[ct.default_int64_field_name] for entity in res] == cf.assert_json_contains(expression, bool_data)
+        # test for list
+        ids = [[_id, str(_id + 1)]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+        res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == 1
+        # test for mixed data
+        ids = [str(_id)]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+        res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == 1
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "json_contains_all"])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_query_expr_json_contains_list_in_list(self, expr_prefix, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains_any
+        method: query with expression using json_contains_any
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[ct.default_json_field_name])
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {"list": [[i, i + 1], [i, i + 2], [i, i + 3]]}
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with list in list
+        _id = random.randint(3, default_nb - 3)
+        ids = [[_id, _id + 1]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {ids})"
+        res = self.query(client, collection_name, filter=expression)[0]
+        assert len(res) == 1
+
+        ids = [[_id + 4, _id], [_id]]
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {ids})"
+        self.query(client, collection_name, filter=expression, check_task=CheckTasks.check_query_empty)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
+    def test_milvus_client_query_expr_json_contains_pagination(self, enable_dynamic_field, expr_prefix):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        limit = default_nb // 3
+        for i in range(default_nb):
+            rows[i][ct.default_json_field_name] = {"number": i,
+                                                   "list": [m for m in range(i, i + limit)]}
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with pagination
+        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], 1000)"
+        offset = random.randint(1, limit)
+        res = self.query(client, collection_name, filter=expression, limit=limit, offset=offset)[0]
+        assert len(res) == limit - offset
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("array_length", ["ARRAY_LENGTH", "array_length"])
+    @pytest.mark.parametrize("op", ["==", "!=", ">", "<="])
+    def test_milvus_client_query_expr_array_length(self, array_length, op, enable_dynamic_field):
+        """
+        target: test query with expression using array_length
+        method: query with expression using array_length
+                array_length only support == , !=
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=1024)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[ct.default_float_array_field_name] )
+        length = []
+        for i in range(default_nb):
+            ran_int = random.randint(50, 53)
+            length.append(ran_int)
+            rows[i][ct.default_float_array_field_name] = [np.float32(j) for j in range(ran_int)]
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query
+        expression = f"{array_length}({ct.default_float_array_field_name}) {op} 51"
+        res = self.query(client, collection_name, filter=expression)[0]
+        # 5. check with local filter
+        expression = expression.replace(f"{array_length}({ct.default_float_array_field_name})", "array_length")
+        filter_ids = []
+        for i in range(default_nb):
+            array_length = length[i]
+            if eval(expression):
+                filter_ids.append(i)
+        assert len(res) == len(filter_ids)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
 
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
