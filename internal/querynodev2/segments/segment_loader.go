@@ -1533,16 +1533,18 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	logicalDiskUsageLimit := uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()) * paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 	if predictLogicalMemUsage > logicalMemUsageLimit {
-		return 0, 0, fmt.Errorf("Logical memory usage checking for segment loading failed, predictLogicalMemUsage = %v MB, LogicalMemUsageLimit = %v MB",
+		return 0, 0, fmt.Errorf("Logical memory usage checking for segment loading failed, predictLogicalMemUsage = %v MB, LogicalMemUsageLimit = %v MB, decrease the evictableMemoryCacheRatio (current: %v) if you want to load more segments",
 			logutil.ToMB(float64(predictLogicalMemUsage)),
 			logutil.ToMB(float64(logicalMemUsageLimit)),
+			paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		)
 	}
 
 	if predictLogicalDiskUsage > logicalDiskUsageLimit {
-		return 0, 0, fmt.Errorf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB",
+		return 0, 0, fmt.Errorf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB, decrease the evictableDiskCacheRatio (current: %v) if you want to load more segments",
 			logutil.ToMB(float64(predictLogicalDiskUsage)),
 			logutil.ToMB(float64(logicalDiskUsageLimit)),
+			paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
 		)
 	}
 
