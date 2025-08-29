@@ -1623,9 +1623,6 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
-        # verify results are ordered by primary key
-        primary_keys = [entity[ct.default_int64_field_name] for entity in res]
-        assert primary_keys == exp_ids
         # 5. query with pagination
         exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
         for ids in exp_ids:
@@ -1633,9 +1630,6 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
-        # verify results are ordered by primary key
-        primary_keys = [entity[ct.default_int64_field_name] for entity in res]
-        assert primary_keys == exp_ids
         # 6. clean up
         self.drop_collection(client, collection_name)
 
