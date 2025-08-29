@@ -13,8 +13,11 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
 }
 
 pub fn index_exist(path: &str) -> bool {
-    let dir = MmapDirectory::open(path).unwrap();
-    Index::exists(&dir).unwrap()
+    let dir = MmapDirectory::open(path);
+    if dir.is_err(){
+        return false
+    }
+    Index::exists(&dir.unwrap()).unwrap()
 }
 
 pub fn make_bounds<T>(bound: T, inclusive: bool) -> Bound<T> {
