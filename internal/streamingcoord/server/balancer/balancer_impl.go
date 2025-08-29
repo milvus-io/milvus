@@ -2,12 +2,14 @@ package balancer
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -31,6 +33,8 @@ func RecoverBalancer(
 	incomingNewChannel ...string, // Concurrent incoming new channel directly from the configuration.
 	// we should add a rpc interface for creating new incoming new channel.
 ) (Balancer, error) {
+	sort.Strings(incomingNewChannel)
+
 	policyBuilder := mustGetPolicy(paramtable.Get().StreamingCfg.WALBalancerPolicyName.GetValue())
 	policy := policyBuilder.Build()
 	logger := resource.Resource().Logger().With(log.FieldComponent("balancer"), zap.String("policy", policyBuilder.Name()))
@@ -75,6 +79,11 @@ type balancerImpl struct {
 	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 }
 
+// GetPChannels returns all pchannels.
+func (b *balancerImpl) GetPChannels() []string {
+	return b.channelMetaManager.GetPChannels()
+}
+
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
@@ -91,7 +100,7 @@ func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string)
 }
 
 // WatchChannelAssignments watches the balance result.
-func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error {
+func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChannelAssignmentsCallback) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}
@@ -100,6 +109,18 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
+}
+
+// UpdateReplicateConfiguration updates the replicate configuration.
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+	b.channelMetaManager.UpdateReplicateConfiguration(ctx, config)
 }
 
 // UpdateBalancePolicy update the balance policy.

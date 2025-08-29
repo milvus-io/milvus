@@ -6,6 +6,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
@@ -23,6 +24,7 @@ func init() {
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
 	message.RegisterMessageIDUnmsarshaler(walName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(commonpb.WALName_Pulsar.String(), UnmarshalMessageID)
 }
 
 // builderImpl is the builder for pulsar wal.

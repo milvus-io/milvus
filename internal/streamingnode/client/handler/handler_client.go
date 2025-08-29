@@ -70,6 +70,9 @@ type HandlerClient interface {
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
 
+	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner.
+	GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.WALCheckpoint, error)
+
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.
 	GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error)

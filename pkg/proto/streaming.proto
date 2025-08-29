@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "data_coord.proto";
 import "messages.proto";
+import "common.proto";
 import "milvus.proto";
 import "schema.proto";
 import "google/protobuf/empty.proto";
@@ -64,6 +65,11 @@ message PChannelMeta {
     repeated PChannelAssignmentLog histories =
         4;  // keep the meta info assignment log that used to be assigned to.
     uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
+}
+
+// CChannelMeta is the meta information of a control channel.
+message CChannelMeta {
+    string pchannel = 1; // the pchannel that control channel locate on.
 }
 
 // StreamingVersion is the version of the streaming service.
@@ -129,8 +135,9 @@ message BroadcastResponse {
 }
 
 message BroadcastAckRequest {
-    uint64 broadcast_id = 1;                  // broadcast id.
-    string vchannel = 2;                     // the vchannel that acked the message.
+    uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
+    string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
+    messages.ImmutableMessage message = 3;       // the message that to be acked.
 }
 
 message BroadcastAckResponse {
@@ -144,6 +151,19 @@ message BroadcastAckResponse {
 // Server: log coord. Running on every log node.
 // Client: all log publish/consuming node.
 service StreamingCoordAssignmentService {
+    // UpdateReplicateConfiguration applies a full replacement of the current
+    // replication configuration across Milvus clusters.
+    //
+    // Semantics:
+    //   - The provided ReplicateConfiguration completely replaces any existing
+    //     configuration persisted in the metadata store.
+    //   - Passing an empty ReplicateConfiguration is treated as a "clear"
+    //     operation, effectively removing all replication configuration.
+    //   - The RPC is expected to be idempotent: submitting the same configuration
+    //     multiple times must not cause side effects.
+    rpc UpdateReplicateConfiguration(milvus.UpdateReplicateConfigurationRequest)
+        returns (UpdateReplicateConfigurationResponse) {}
+
     // UpdateWALBalancePolicy is used to update the WAL balance policy.
     // The policy is used to control the balance of the WAL.
     rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {};
@@ -154,6 +174,9 @@ service StreamingCoordAssignmentService {
     rpc AssignmentDiscover(stream AssignmentDiscoverRequest)
         returns (stream AssignmentDiscoverResponse) {}
 }
+
+// UpdateReplicateConfigurationResponse is the response of UpdateReplicateConfiguration service
+message UpdateReplicateConfigurationResponse {}
 
 // UpdateWALBalancePolicyRequest is the request to update the WAL balance policy.
 message UpdateWALBalancePolicyRequest {
@@ -208,8 +231,15 @@ message AssignmentDiscoverResponse {
 // FullStreamingNodeAssignmentWithVersion is the full assignment info of a log
 // node with version.
 message FullStreamingNodeAssignmentWithVersion {
-    VersionPair version                          = 1;
-    repeated StreamingNodeAssignment assignments = 2;
+    VersionPair version                                   = 1;
+    repeated StreamingNodeAssignment assignments          = 2;
+    CChannelAssignment cchannel                           = 3; // Where the control channel located.
+    common.ReplicateConfiguration replicate_configuration = 4;
+}
+
+// CChannelAssignment is the assignment info of a control channel.
+message CChannelAssignment {
+    CChannelMeta meta = 1;
 }
 
 message CloseAssignmentDiscoverResponse {}
@@ -299,6 +329,10 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    // GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+    // from the correct position, ensuring no duplicate or missing messages.
+    rpc GetWALCheckpoint(GetWALCheckpointRequest) returns (GetWALCheckpointResponse) {}
+
     // Produce is a bi-directional streaming RPC to send messages to a channel.
     // All messages sent to a channel will be assigned a unique messageID.
     // The messageID is used to identify the message in the channel.
@@ -315,6 +349,24 @@ service StreamingNodeHandlerService {
     // log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
     // moving away to other log node, the RPC will return error CHANNEL_FENCED.
     rpc Consume(stream ConsumeRequest) returns (stream ConsumeResponse) {};
+}
+
+// GetWALCheckpointRequest is the request of GetWALCheckpoint service.
+message GetWALCheckpointRequest {
+  string channel_name = 1;
+}
+
+// GetWALCheckpointResponse is the response of GetWALCheckpoint service.
+message GetWALCheckpointResponse {
+  WALCheckpoint WAL_checkpoint                    = 1;
+  ReplicateWALCheckpoint replicate_WAL_checkpoint = 2;
+}
+
+// ReplicateWALCheckpoint is the replicate WAL checkpoint in the target cluster.
+message ReplicateWALCheckpoint {
+  string source_channel_name             = 1;
+  string target_channel_name             = 2;
+  messages.MessageID replicate_messageID = 3;
 }
 
 // ProduceRequest is the request of the Produce RPC.
@@ -634,4 +686,10 @@ message WALCheckpoint {
     uint64 time_tick = 2; // The timetick of checkpoint, keep consistecy with message_id.
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
+}
+
+message ReplicatePChannelMeta {
+    string source_channel_name          = 1;
+    string target_channel_name          = 2;
+    common.MilvusCluster target_cluster = 3;
 }

@@ -33,10 +33,12 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -214,36 +216,55 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
-	suite.observer.Stop()
-	snmanager.ResetStreamingNodeManager()
-	balancer := mock_balancer.NewMockBalancer(suite.T())
+	b := mock_balancer.NewMockBalancer(suite.T())
 	change := make(chan struct{})
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		versions := []typeutil.VersionInt64Pair{
+			{Global: 1, Local: 2},
+			{Global: 1, Local: 3},
+		}
+		pchans := [][]types.PChannelInfoAssigned{
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 3, Address: "localhost:1"},
+				},
+			},
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 2},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+			},
+		}
+		for i := 0; i < len(versions); i++ {
+			cb(balancer.WatchChannelAssignmentsCallbackParam{
+				Version:            versions[i],
+				CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+				Relations:          pchans[i],
+			})
+			<-change
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	balancer.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
-		pchans := []map[int64]*types.StreamingNodeInfo{
-			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
-				3: {ServerID: 3, Address: "localhost:3"},
-			},
-			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
-			},
-		}
-		select {
-		case <-change:
-			return pchans[1], nil
-		default:
-			return pchans[0], nil
-		}
-	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
-	suite.observer.Start()
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 
 	ctx := context.Background()
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))

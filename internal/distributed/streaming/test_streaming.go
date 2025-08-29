@@ -24,8 +24,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -109,7 +111,7 @@ func (n *noopBroadcast) Append(ctx context.Context, msg message.BroadcastMutable
 	}, nil
 }
 
-func (n *noopBroadcast) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+func (n *noopBroadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error {
 	return nil
 }
 
@@ -195,6 +197,18 @@ func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.Mu
 
 func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
 	return AppendResponses{}
+}
+
+func (n *noopWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	return nil, nil
+}
+
+func (n *noopWALAccesser) GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.ReplicateWALCheckpoint, error) {
+	return nil, nil
+}
+
+func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+	return nil
 }
 
 type noopScanner struct{}

@@ -9,9 +9,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
+// routePChannel routes the pchannel of the vchannel.
+// If the vchannel is control channel, it will return the pchannel of the cchannel.
+// Otherwise, it will return the pchannel of the vchannel.
+// TODO: support cross-cluster replication, so the remote vchannel should be mapping to the pchannel of the local cluster.
+func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (string, error) {
+	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return "", err
+	}
+	if vchannel == message.ControlChannel {
+		return assignments.PChannelOfCChannel(), nil
+	}
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	repConfigHelper := assignments.ReplicateConfigHelper
+	if repConfigHelper != nil {
+		// Route the pchannel to the target cluster if the message is replicated.
+		pchannel = repConfigHelper.GetTargetChannel(pchannel, w.clusterID)
+	}
+	return pchannel, nil
+}
+
 // appendToWAL appends the message to the wal.
 func (w *walAccesserImpl) appendToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
-	pchannel := funcutil.ToPhysicalChannel(msg.VChannel())
+	pchannel, err := w.routePChannel(ctx, msg.VChannel())
+	if err != nil {
+		return nil, err
+	}
 	// get producer of pchannel.
 	p := w.getProducer(pchannel)
 	return p.Produce(ctx, msg)

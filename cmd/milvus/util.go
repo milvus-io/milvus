@@ -164,6 +164,9 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 			role.EnableQueryNode = true
 			streamingutil.EnableEmbededQueryNode()
 		}
+
+	case typeutil.CDCRole:
+		role.EnableCDC = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", serverType, getHelp())
 		os.Exit(-1)

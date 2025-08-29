@@ -114,3 +114,7 @@ require (
 	k8s.io/apimachinery v0.28.6 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace (
+	github.com/milvus-io/milvus-proto/go-api/v2 =>  github.com/bigsheeper/milvus-proto/go-api/v2 v2.0.0-20250828030113-bcc562cf1dd5
+)

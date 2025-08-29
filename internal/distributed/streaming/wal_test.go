@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -149,7 +150,12 @@ func TestWAL(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, r.AppendResults, 3)
 
-	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
+	err = w.Broadcast().Ack(ctx, message.NewDropCollectionMessageBuilderV1().
+		WithVChannel(vChannel1).
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 
 	cnt := atomic.NewInt32(0)
@@ -192,7 +198,12 @@ func TestWAL(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, r)
 
-	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
+	err = w.Broadcast().Ack(ctx, message.NewDropCollectionMessageBuilderV1().
+		WithVChannel(vChannel1).
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.Error(t, err)
 }
 

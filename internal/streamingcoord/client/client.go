@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
@@ -33,6 +34,12 @@ type AssignmentService interface {
 	// AssignmentDiscover is used to watches the assignment discovery.
 	types.AssignmentDiscoverWatcher
 
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+
+	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
 
@@ -47,7 +54,7 @@ type BroadcastService interface {
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Ack sends a broadcast ack to the streaming service.
-	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }
 
 // Client is the interface of log service client.

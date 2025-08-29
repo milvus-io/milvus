@@ -40,8 +40,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -53,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -62,6 +65,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil/confighelperimpl"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -6443,4 +6448,86 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 
 	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
 	return resp, nil
+}
+
+// UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
+func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateReplicateConfiguration")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	err := streaming.WAL().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
+	if err != nil {
+		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	return merr.Status(nil), nil
+}
+
+// GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
+func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateInfo")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info("GetReplicateInfo received", zap.String("sourceClusterID", req.GetSourceClusterId()))
+	config, err := streaming.WAL().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	configHelper := confighelperimpl.NewConfigHelper(config)
+	currentCluster := configHelper.GetCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+
+	walName := message.GetWALName(streaming.WAL().WALName())
+	checkpoints := make([]*milvuspb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
+	for _, pchannel := range currentCluster.GetPchannels() {
+		checkpoint, err := streaming.WAL().GetWALCheckpoint(ctx, pchannel)
+		if err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, &milvuspb.ReplicateCheckpoint{
+			SourceChannelName: checkpoint.GetSourceChannelName(),
+			TargetChannelName: checkpoint.GetTargetChannelName(),
+			ReplicateMessageId: &commonpb.MessageID{
+				Id:      checkpoint.GetReplicateMessageID().GetId(),
+				WALName: walName,
+			},
+		})
+	}
+	return &milvuspb.GetReplicateInfoResponse{
+		Checkpoints: checkpoints,
+	}, nil
+}
+
+// CreateReplicateStream establishes a replication stream on the target Milvus cluster.
+func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+	ctx := stream.Context()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateReplicateStream")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("replicate stream created")
+	defer func() {
+		if err != nil {
+			log.Ctx(ctx).Warn("replicate stream closed with error", zap.Error(err))
+		} else {
+			log.Ctx(ctx).Info("replicate stream closed")
+		}
+	}()
+
+	s, err := replicate.CreateReplicateServer(stream)
+	if err != nil {
+		return err
+	}
+	return s.Execute()
 }

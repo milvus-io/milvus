@@ -361,6 +361,10 @@ test-mixcoord:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
 
+test-cdc:
+	@echo "Running cdc unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t cdc)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -535,6 +539,9 @@ generate-mockery-pkg:
 
 generate-mockery-internal: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/.mockery.yaml
+
+generate-mockery-cdc: getdeps
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
 
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
 

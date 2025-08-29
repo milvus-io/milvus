@@ -8,6 +8,8 @@ import (
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	mock "github.com/stretchr/testify/mock"
 
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -227,6 +229,65 @@ func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) Return(_a0 uint6
 }
 
 func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) RunAndReturn(run func(context.Context, string) (uint64, error)) *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetWALCheckpoint provides a mock function with given fields: ctx, channelName
+func (_m *MockHandlerClient) GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.WALCheckpoint, error) {
+	ret := _m.Called(ctx, channelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetWALCheckpoint")
+	}
+
+	var r0 *streamingpb.WALCheckpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*streamingpb.WALCheckpoint, error)); ok {
+		return rf(ctx, channelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *streamingpb.WALCheckpoint); ok {
+		r0 = rf(ctx, channelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.WALCheckpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, channelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_GetWALCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWALCheckpoint'
+type MockHandlerClient_GetWALCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetWALCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channelName string
+func (_e *MockHandlerClient_Expecter) GetWALCheckpoint(ctx interface{}, channelName interface{}) *MockHandlerClient_GetWALCheckpoint_Call {
+	return &MockHandlerClient_GetWALCheckpoint_Call{Call: _e.mock.On("GetWALCheckpoint", ctx, channelName)}
+}
+
+func (_c *MockHandlerClient_GetWALCheckpoint_Call) Run(run func(ctx context.Context, channelName string)) *MockHandlerClient_GetWALCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_GetWALCheckpoint_Call) Return(_a0 *streamingpb.WALCheckpoint, _a1 error) *MockHandlerClient_GetWALCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_GetWALCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*streamingpb.WALCheckpoint, error)) *MockHandlerClient_GetWALCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

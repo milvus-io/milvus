@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -81,6 +83,19 @@ type Scanner interface {
 	Close()
 }
 
+// ReplicateService is the interface for the replicate service.
+type ReplicateService interface {
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+
+	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+
+	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.ReplicateWALCheckpoint, error)
+}
+
 // Balancer is the interface for managing the balancer of the wal.
 type Balancer interface {
 	// ListStreamingNode lists the streaming node.
@@ -108,6 +123,8 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	ReplicateService
+
 	// Balancer returns the balancer management of the wal.
 	Balancer() Balancer
 
@@ -169,7 +186,7 @@ type Broadcast interface {
 	// Ack acknowledges a broadcast message at the specified vchannel.
 	// It must be called after the message is comsumed by the unique-consumer.
 	// It will only return error when the ctx is canceled.
-	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }
 
 // Txn is the interface for writing transaction into the wal.

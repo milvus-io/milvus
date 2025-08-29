@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -62,6 +63,46 @@ func NewImmutableMesasge(
 			payload:    payload,
 			properties: properties,
 		},
+	}
+}
+
+// NewReplicateMessage creates a new replicate message.
+func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) MutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
+	pmsg := msg.IntoImmutableMessageProto()
+	m := &messageImpl{
+		payload:    pmsg.GetPayload(),
+		properties: pmsg.GetProperties(),
+	}
+	rh, err := EncodeProto(&messagespb.ReplicateHeader{
+		ClusterId: clustrID,
+		MessageId: pmsg.GetId(),
+		TimeTick:  msg.TimeTick(),
+		Vchannel:  msg.VChannel(),
+	})
+	if err != nil {
+		panic("failed to encode replicate header")
+	}
+	m.properties.Set(messageReplicateMesssageHeader, rh)
+	return m
+}
+
+func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
+	return msg
+}
+
+func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
+	msg := im.IntoImmutableMessageProto()
+	return &commonpb.ImmutableMessage{
+		Id: &commonpb.MessageID{
+			Id:      msg.GetId().GetId(),
+			WALName: GetWALName(walName),
+		},
+		Payload:    msg.GetPayload(),
+		Properties: msg.GetProperties(),
 	}
 }
 

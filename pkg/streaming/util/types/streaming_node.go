@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -35,8 +36,15 @@ type AssignmentRebalanceTrigger interface {
 
 // VersionedStreamingNodeAssignments is the relation between server and channels with version.
 type VersionedStreamingNodeAssignments struct {
-	Version     typeutil.VersionInt64Pair
-	Assignments map[int64]StreamingNodeAssignment
+	Version               typeutil.VersionInt64Pair
+	Assignments           map[int64]StreamingNodeAssignment
+	CChannel              *streamingpb.CChannelAssignment
+	ReplicateConfigHelper replicateutil.ConfigHelper
+}
+
+// PChannelOfCChannel returns the pchannel of the cchannel.
+func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
+	return v.CChannel.Meta.Pchannel
 }
 
 // StreamingNodeAssignment is the relation between server and channels.
