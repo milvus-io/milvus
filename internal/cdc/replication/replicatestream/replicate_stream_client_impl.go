@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -37,8 +38,7 @@ const pendingMessageQueueLength = 128
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
-	targetCluster *commonpb.MilvusCluster
-	targetChannel string
+	replicateInfo *streamingpb.ReplicatePChannelMeta
 	walName       commonpb.WALName
 
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
@@ -50,16 +50,15 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, targetCluster *commonpb.MilvusCluster, targetChannel string) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
-	ctx1 = contextutil.WithClusterID(ctx1, targetCluster.GetClusterId())
+	ctx1 = contextutil.WithClusterID(ctx1, replicateInfo.GetTargetCluster().GetClusterId())
 
 	walNameStr := streaming.WAL().WALName()
 	walName := message.GetWALName(walNameStr)
 
 	rs := &replicateStreamClient{
-		targetCluster:   targetCluster,
-		targetChannel:   targetChannel,
+		replicateInfo:   replicateInfo,
 		walName:         walName,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
 		ctx:             ctx1,
@@ -71,7 +70,10 @@ func NewReplicateStreamClient(ctx context.Context, targetCluster *commonpb.Milvu
 }
 
 func (r *replicateStreamClient) startInternal() {
-	logger := log.With(zap.String("targetChannel", r.targetChannel))
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
 
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -85,7 +87,7 @@ func (r *replicateStreamClient) startInternal() {
 			logger.Info("replicate stream client closed by ctx done")
 			return
 		default:
-			milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.targetCluster)
+			milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.replicateInfo.GetTargetCluster())
 			if err != nil {
 				logger.Warn("create milvus client failed, retry...", zap.Error(err))
 				time.Sleep(backoff.NextBackOff())
@@ -129,7 +131,7 @@ func (r *replicateStreamClient) startInternal() {
 	}
 }
 
-func (r *replicateStreamClient) immutableMessageToProto(msg message.ImmutableMessage) *milvuspb.ReplicateRequest {
+func (r *replicateStreamClient) immutableMessageToReplicateRequest(msg message.ImmutableMessage) *milvuspb.ReplicateRequest {
 	immutableMessage := msg.IntoImmutableMessageProto()
 	return &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
@@ -179,7 +181,10 @@ func (r *replicateStreamClient) startRecvLoop(stopCh <-chan struct{}) <-chan err
 }
 
 func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("targetChannel", r.targetChannel))
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -199,7 +204,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 
 				// send txn begin message
 				beginMsg := txnMsg.Begin()
-				beginReq := r.immutableMessageToProto(beginMsg)
+				beginReq := r.immutableMessageToReplicateRequest(beginMsg)
 				err := r.client.Send(beginReq)
 				if err != nil {
 					logger.Warn("replicate stream send txn begin message failed", zap.Error(err))
@@ -208,7 +213,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 
 				// send txn messages
 				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-					req := r.immutableMessageToProto(msg)
+					req := r.immutableMessageToReplicateRequest(msg)
 					err = r.client.Send(req)
 					return err
 				})
@@ -219,7 +224,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 
 				// send txn commit message
 				commitMsg := txnMsg.Commit()
-				commitReq := r.immutableMessageToProto(commitMsg)
+				commitReq := r.immutableMessageToReplicateRequest(commitMsg)
 				err = r.client.Send(commitReq)
 				if err != nil {
 					logger.Warn("replicate stream send txn commit message failed", zap.Error(err))
@@ -227,7 +232,7 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 				}
 				continue
 			}
-			req := r.immutableMessageToProto(msg)
+			req := r.immutableMessageToReplicateRequest(msg)
 			err = r.client.Send(req)
 			if err != nil {
 				logger.Warn("replicate stream send failed", zap.Error(err))
@@ -238,7 +243,10 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 }
 
 func (r *replicateStreamClient) recvLoop(stopCh <-chan struct{}) error {
-	logger := log.With(zap.String("targetChannel", r.targetChannel))
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
 	for {
 		select {
 		case <-r.ctx.Done():

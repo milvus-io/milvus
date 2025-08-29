@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil/confighelperimpl"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil/configvalidatorimpl"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -64,7 +66,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	}
 	pchannels := balancer.GetPChannels()
 
-	validator := replicateutil.NewReplicateConfigValidator(config, pchannels)
+	validator := configvalidatorimpl.NewReplicateConfigValidator(config, pchannels)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err
@@ -85,7 +87,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	for _, pchannel := range existingPChannels {
 		existingPChannelsMap[fmt.Sprintf("%s-%s", pchannel.GetSourceChannelName(), pchannel.GetTargetChannelName())] = true
 	}
-	configHelper := replicateutil.NewConfigHelper(config)
+	configHelper := confighelperimpl.NewConfigHelper(config)
 	replicatePChannels := make([]*streamingpb.ReplicatePChannelMeta, 0)
 	for _, sourcePChannel := range pchannels {
 		for _, targetCluster := range configHelper.GetTargetClusters() {

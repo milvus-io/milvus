@@ -73,7 +73,7 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	rs := replicatestream.NewMockReplicateStreamClient(t)
 	rs.EXPECT().Close().Return()
 	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
-	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything, mock.Anything).Return(rs)
+	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything).Return(rs)
 
 	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
@@ -85,8 +85,8 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	replicator.(*channelReplicator).rsm = rsm
 	assert.NotNil(t, replicator)
 
-	replicator.StartReplicateChannel()
-	replicator.StopReplicateChannel()
+	replicator.StartReplicate()
+	replicator.StopReplicate()
 
 	state := replicator.GetState()
 	assert.Equal(t, typeutil.LifetimeStateStopped, state)

@@ -16,7 +16,12 @@
 
 package replicatestream
 
-import "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+import (
+	context "context"
+
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+)
 
 // ReplicateStreamClient is the client that replicates the message to the given cluster.
 type ReplicateStreamClient interface {
@@ -28,4 +33,21 @@ type ReplicateStreamClient interface {
 
 	// Stop stops the replicate operation.
 	Close()
+}
+
+// ReplicateStreamClientManager is the manager to create.
+type ReplicateStreamClientManager interface {
+	// CreateReplicateStreamClient creates a new ReplicateStreamClient.
+	CreateReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient
+}
+
+type replicateStreamClientManager struct{}
+
+func NewReplicateStreamClientManager() ReplicateStreamClientManager {
+	return &replicateStreamClientManager{}
+}
+
+func (m *replicateStreamClientManager) CreateReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient {
+	rsc := NewReplicateStreamClient(ctx, replicateInfo)
+	return rsc
 }

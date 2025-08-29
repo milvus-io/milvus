@@ -28,6 +28,13 @@ import (
 //
 //	├── pchannel-1
 //	└── pchannel-2
+//
+// └── replicate-configuration
+// └── replicating-pchannel
+// │   ├── cluster-1-pchannel-1
+// │   └── cluster-1-pchannel-2
+// │   ├── cluster-2-pchannel-1
+// │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
 		metaKV: metaKV,

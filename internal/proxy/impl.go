@@ -66,6 +66,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil/confighelperimpl"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -6473,7 +6474,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	defer sp.End()
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return nil, err // TODO: sheep, is it ok to return err here?
+		return nil, err
 	}
 
 	log.Ctx(ctx).Info("GetReplicateInfo received", zap.String("sourceClusterID", req.GetSourceClusterId()))
@@ -6481,7 +6482,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	if err != nil {
 		return nil, err
 	}
-	configHelper := replicateutil.NewConfigHelper(config)
+	configHelper := confighelperimpl.NewConfigHelper(config)
 	currentCluster := configHelper.GetCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 
 	walName := message.GetWALName(streaming.WAL().WALName())

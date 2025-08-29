@@ -19,6 +19,7 @@ package replicatemanager
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -39,12 +40,12 @@ const scannerHandlerChanSize = 64
 
 // Replicator is the client that replicates the message to the channel in the target cluster.
 type Replicator interface {
-	// StartReplicateChannel starts the replicate for the channel.
-	StartReplicateChannel()
+	// StartReplicate starts the replicate for the channel.
+	StartReplicate()
 
-	// StopReplicateChannel stops the replicate loop
+	// StopReplicate stops the replicate loop
 	// and wait for the loop to exit.
-	StopReplicateChannel()
+	StopReplicate()
 
 	// GetState returns the current state of the replicator.
 	GetState() typeutil.LifetimeState
@@ -75,7 +76,7 @@ func NewChannelReplicator(replicateMeta *streamingpb.ReplicatePChannelMeta) Repl
 	}
 }
 
-func (r *channelReplicator) StartReplicateChannel() {
+func (r *channelReplicator) StartReplicate() {
 	logger := log.With(
 		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
 		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
@@ -87,10 +88,14 @@ func (r *channelReplicator) StartReplicateChannel() {
 	logger.Info("start replicate channel")
 	go func() {
 		defer r.lifetime.Done()
-		err := r.replicateLoop()
-		if err != nil {
-			logger.Warn("replicate channel failed", zap.Error(err))
-			r.lifetime.SetState(typeutil.LifetimeStateStopped)
+		for {
+			err := r.replicateLoop()
+			if err != nil {
+				logger.Warn("replicate channel failed", zap.Error(err))
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
 		}
 	}()
 }
@@ -116,7 +121,7 @@ func (r *channelReplicator) replicateLoop() error {
 	})
 	defer scanner.Close()
 
-	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.replicateInfo.GetTargetCluster(), r.replicateInfo.GetTargetChannelName())
+	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.replicateInfo)
 	defer rsc.Close()
 
 	logger.Info("start replicate channel loop", zap.Any("startFrom", startFrom))
@@ -173,7 +178,7 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 	return startFrom, nil
 }
 
-func (r *channelReplicator) StopReplicateChannel() {
+func (r *channelReplicator) StopReplicate() {
 	r.lifetime.SetState(typeutil.LifetimeStateStopped)
 	r.cancel()
 	r.lifetime.Wait()

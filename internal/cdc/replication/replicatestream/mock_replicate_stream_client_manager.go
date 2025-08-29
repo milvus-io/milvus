@@ -5,8 +5,7 @@ package replicatestream
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -23,17 +22,17 @@ func (_m *MockReplicateStreamClientManager) EXPECT() *MockReplicateStreamClientM
 	return &MockReplicateStreamClientManager_Expecter{mock: &_m.Mock}
 }
 
-// CreateReplicateStreamClient provides a mock function with given fields: ctx, targetCluster, targetChannel
-func (_m *MockReplicateStreamClientManager) CreateReplicateStreamClient(ctx context.Context, targetCluster *commonpb.MilvusCluster, targetChannel string) ReplicateStreamClient {
-	ret := _m.Called(ctx, targetCluster, targetChannel)
+// CreateReplicateStreamClient provides a mock function with given fields: ctx, replicateInfo
+func (_m *MockReplicateStreamClientManager) CreateReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient {
+	ret := _m.Called(ctx, replicateInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateReplicateStreamClient")
 	}
 
 	var r0 ReplicateStreamClient
-	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.MilvusCluster, string) ReplicateStreamClient); ok {
-		r0 = rf(ctx, targetCluster, targetChannel)
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient); ok {
+		r0 = rf(ctx, replicateInfo)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(ReplicateStreamClient)
@@ -50,15 +49,14 @@ type MockReplicateStreamClientManager_CreateReplicateStreamClient_Call struct {
 
 // CreateReplicateStreamClient is a helper method to define mock.On call
 //   - ctx context.Context
-//   - targetCluster *commonpb.MilvusCluster
-//   - targetChannel string
-func (_e *MockReplicateStreamClientManager_Expecter) CreateReplicateStreamClient(ctx interface{}, targetCluster interface{}, targetChannel interface{}) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
-	return &MockReplicateStreamClientManager_CreateReplicateStreamClient_Call{Call: _e.mock.On("CreateReplicateStreamClient", ctx, targetCluster, targetChannel)}
+//   - replicateInfo *streamingpb.ReplicatePChannelMeta
+func (_e *MockReplicateStreamClientManager_Expecter) CreateReplicateStreamClient(ctx interface{}, replicateInfo interface{}) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
+	return &MockReplicateStreamClientManager_CreateReplicateStreamClient_Call{Call: _e.mock.On("CreateReplicateStreamClient", ctx, replicateInfo)}
 }
 
-func (_c *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call) Run(run func(ctx context.Context, targetCluster *commonpb.MilvusCluster, targetChannel string)) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
+func (_c *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call) Run(run func(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta)) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*commonpb.MilvusCluster), args[2].(string))
+		run(args[0].(context.Context), args[1].(*streamingpb.ReplicatePChannelMeta))
 	})
 	return _c
 }
@@ -68,7 +66,7 @@ func (_c *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call) Ret
 	return _c
 }
 
-func (_c *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call) RunAndReturn(run func(context.Context, *commonpb.MilvusCluster, string) ReplicateStreamClient) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
+func (_c *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call) RunAndReturn(run func(context.Context, *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient) *MockReplicateStreamClientManager_CreateReplicateStreamClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 // routePChannel routes the pchannel of the vchannel.
@@ -23,11 +22,10 @@ func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (s
 		return assignments.PChannelOfCChannel(), nil
 	}
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	repConfig := assignments.ReplicateConfiguration
-	if repConfig != nil {
-		// TODO: sheep, cache configHelper instead of constructing it every time.
-		configHelper := replicateutil.NewConfigHelper(repConfig)
-		pchannel = configHelper.GetTargetChannel(pchannel, w.clusterID)
+	repConfigHelper := assignments.ReplicateConfigHelper
+	if repConfigHelper != nil {
+		// Route the pchannel to the target cluster if the message is replicated.
+		pchannel = repConfigHelper.GetTargetChannel(pchannel, w.clusterID)
 	}
 	return pchannel, nil
 }

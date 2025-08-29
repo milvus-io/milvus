@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -47,7 +48,6 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 			Token: "test-token",
 		},
 	}
-	targetChannel := "test-channel"
 
 	// Setup mocks
 	mockStreamClient := newMockReplicateStreamClient(t)
@@ -67,7 +67,12 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	streaming.SetWALForTest(wal)
 
-	replicateClient := NewReplicateStreamClient(ctx, targetCluster, targetChannel)
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel",
+		TargetChannelName: "test-target-channel",
+		TargetCluster:     targetCluster,
+	}
+	replicateClient := NewReplicateStreamClient(ctx, replicateInfo)
 
 	// Test Replicate method
 	const msgCount = pendingMessageQueueLength * 10
@@ -108,7 +113,6 @@ func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 			Token: "test-token",
 		},
 	}
-	targetChannel := "test-channel"
 
 	// Setup mocks
 	mockStreamClient := newMockReplicateStreamClient(t)
@@ -128,7 +132,12 @@ func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	streaming.SetWALForTest(wal)
 
-	client := NewReplicateStreamClient(ctx, targetCluster, targetChannel)
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel",
+		TargetChannelName: "test-target-channel",
+		TargetCluster:     targetCluster,
+	}
+	client := NewReplicateStreamClient(ctx, replicateInfo)
 	defer client.Close()
 
 	// Cancel context
@@ -149,7 +158,6 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 			Token: "test-token",
 		},
 	}
-	targetChannel := "test-channel"
 
 	const reconnectTimes = 3
 	reconnectCount := 0
@@ -177,7 +185,12 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	streaming.SetWALForTest(wal)
 
 	// Create client which will start internal retry loop
-	replicateClient := NewReplicateStreamClient(ctx, targetCluster, targetChannel)
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel",
+		TargetChannelName: "test-target-channel",
+		TargetCluster:     targetCluster,
+	}
+	replicateClient := NewReplicateStreamClient(ctx, replicateInfo)
 
 	// Replicate after reconnected
 	const msgCount = 100

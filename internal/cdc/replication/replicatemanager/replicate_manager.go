@@ -46,6 +46,7 @@ func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.Replicate
 		return
 	}
 	replicator := NewChannelReplicator(replicateInfo)
+	replicator.StartReplicate()
 	r.replicators[replicateInfo.GetSourceChannelName()] = replicator
 	log.Ctx(r.ctx).Info("created replicator for replicate pchannel",
 		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),

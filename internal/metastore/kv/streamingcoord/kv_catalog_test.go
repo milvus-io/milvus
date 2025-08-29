@@ -2,6 +2,7 @@ package streamingcoord
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
@@ -151,9 +152,31 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 		kvStorage[key] = value
 		return nil
 	})
+	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
+		keys := make([]string, 0, len(kvStorage))
+		vals := make([]string, 0, len(kvStorage))
+		for k, v := range kvStorage {
+			if strings.HasPrefix(k, s) {
+				keys = append(keys, k)
+				vals = append(vals, v)
+			}
+		}
+		return keys, vals, nil
+	})
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
+		for k, v := range kvs {
+			kvStorage[k] = v
+		}
+		return nil
+	})
+	kv.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) error {
+		delete(kvStorage, key)
+		return nil
+	})
 
 	catalog := NewCataLog(kv)
 
+	// ReplicateConfiguration test
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
@@ -192,4 +215,42 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	assert.Equal(t, cfg.GetCrossClusterTopology()[0].GetTargetClusterId(), "target-cluster-a")
 	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetSourceClusterId(), "source-cluster")
 	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetTargetClusterId(), "target-cluster-b")
+
+	// ReplicatePChannel test
+	err = catalog.SaveReplicatePChannels(context.Background(), []*streamingpb.ReplicatePChannelMeta{
+		{
+			SourceChannelName: "source-channel-1",
+			TargetChannelName: "target-channel-1",
+			TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+		},
+		{
+			SourceChannelName: "source-channel-2",
+			TargetChannelName: "target-channel-2",
+			TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+		},
+	})
+	assert.NoError(t, err)
+
+	infos, err := catalog.ListReplicatePChannels(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, infos, 2)
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].GetTargetChannelName() < infos[j].GetTargetChannelName()
+	})
+	assert.Equal(t, infos[0].GetSourceChannelName(), "source-channel-1")
+	assert.Equal(t, infos[0].GetTargetChannelName(), "target-channel-1")
+	assert.Equal(t, infos[0].GetTargetCluster().GetClusterId(), "target-cluster")
+	assert.Equal(t, infos[1].GetSourceChannelName(), "source-channel-2")
+	assert.Equal(t, infos[1].GetTargetChannelName(), "target-channel-2")
+	assert.Equal(t, infos[1].GetTargetCluster().GetClusterId(), "target-cluster")
+
+	err = catalog.RemoveReplicatePChannel(context.Background(), "target-cluster", "source-channel-1")
+	assert.NoError(t, err)
+
+	infos, err = catalog.ListReplicatePChannels(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, infos, 1)
+	assert.Equal(t, infos[0].GetSourceChannelName(), "source-channel-2")
+	assert.Equal(t, infos[0].GetTargetChannelName(), "target-channel-2")
+	assert.Equal(t, infos[0].GetTargetCluster().GetClusterId(), "target-cluster")
 }
