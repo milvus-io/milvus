@@ -52,7 +52,8 @@ class GroupChunkTranslator
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
-    milvus::cachinglayer::ResourceUsage
+    std::pair<milvus::cachinglayer::ResourceUsage,
+              milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
 
     const std::string&

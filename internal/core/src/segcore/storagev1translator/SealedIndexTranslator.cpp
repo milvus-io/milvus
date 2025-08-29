@@ -49,7 +49,8 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     LoadResourceRequest request =
@@ -60,10 +61,13 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.index_size,
             index_load_info_.index_params,
             index_load_info_.enable_mmap);
-    // TODO(tiered storage 1), this is an estimation, error could be up to 20%.
-    int64_t memory_cost = request.final_memory_cost * 1024 * 1024 * 1024;
-    int64_t disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
-    return milvus::cachinglayer::ResourceUsage{memory_cost, disk_cost};
+    // this is an estimation, error could be up to 20%.
+    int64_t final_memory_cost = request.final_memory_cost * 1024 * 1024 * 1024;
+    int64_t final_disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
+    int64_t max_memory_cost = request.max_memory_cost * 1024 * 1024 * 1024;
+    int64_t max_disk_cost = request.max_disk_cost * 1024 * 1024 * 1024;
+    return {{final_memory_cost, final_disk_cost},
+            {max_memory_cost, max_disk_cost}};
 }
 
 const std::string&
@@ -77,7 +81,16 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
     std::unique_ptr<milvus::index::IndexBase> index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info_, file_manager_context_);
-    index->SetCellSize(index_load_info_.index_size);
+    LoadResourceRequest request =
+        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap);
+    index->SetCellSize({request.final_memory_cost * 1024 * 1024 * 1024,
+                        request.final_disk_cost * 1024 * 1024 * 1024});
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");

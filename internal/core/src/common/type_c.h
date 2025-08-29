@@ -149,6 +149,12 @@ typedef struct CPluginContext {
     int64_t collection_id;
     const char* key;
 } CPluginContext;
+
+typedef struct CResourceUsage {
+    int64_t memory_bytes;
+    int64_t disk_bytes;
+} CResourceUsage;
+
 #ifdef __cplusplus
 }
 

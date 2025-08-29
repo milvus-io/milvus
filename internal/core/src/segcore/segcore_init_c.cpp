@@ -200,7 +200,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const int64_t eviction_interval_ms,
                        const int64_t cache_cell_unaccessed_survival_time,
                        const float overloaded_memory_threshold_percentage,
-                       const float loading_memory_factor,
+                       const float loading_resource_factor,
                        const float max_disk_usage_percentage,
                        const char* disk_path) {
     std::string disk_path_str(disk_path);
@@ -222,7 +222,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
          disk_path_str,
-         loading_memory_factor});
+         loading_resource_factor});
 }
 
 }  // namespace milvus::segcore

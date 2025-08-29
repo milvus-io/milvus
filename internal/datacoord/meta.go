@@ -538,11 +538,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	return info
 }
 
-// SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
-func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
-	return m.indexMeta.SetStoredIndexFileSizeMetric(m.collections)
-}
-
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()

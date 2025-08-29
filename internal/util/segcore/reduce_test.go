@@ -65,6 +65,8 @@ func (suite *ReduceSuite) SetupTest() {
 	initcore.InitLocalChunkManager(localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get(), 1)
 	suite.NoError(err)
+	err = initcore.InitTieredStorage(paramtable.Get())
+	suite.NoError(err)
 	ctx := context.Background()
 	msgLength := 100
 

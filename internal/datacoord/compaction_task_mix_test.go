@@ -2,7 +2,9 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -113,4 +115,26 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 			s.Equal(tc.processResult, res)
 		}
 	})
+}
+
+func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
+	cluster := session.NewMockCluster(s.T())
+
+	t1 := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_MixCompaction,
+		TimeoutInSeconds: 10086,
+		StartTime:        time.Now().Unix(),
+		Channel:          "ch-1",
+		State:            datapb.CompactionTaskState_executing,
+		NodeID:           111,
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(
+		&datapb.CompactionPlanResult{PlanID: 1, State: datapb.CompactionTaskState_timeout}, nil).Once()
+
+	t1.QueryTaskOnWorker(cluster)
+
+	s.Equal(taskcommon.Retry, t1.GetTaskState())
 }
