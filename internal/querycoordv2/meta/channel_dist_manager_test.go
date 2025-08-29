@@ -17,14 +17,12 @@
 package meta
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+<<<<<<< HEAD
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -32,6 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+=======
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+>>>>>>> 7b0410786316af020fd4db4695b889010e931f9a
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
 
@@ -87,8 +91,7 @@ func (suite *ChannelDistManagerSuite) SetupSuite() {
 }
 
 func (suite *ChannelDistManagerSuite) SetupTest() {
-	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
-	suite.dist = NewChannelDistManager()
+	suite.dist = NewChannelDistManager(session.NewNodeManager())
 	// Distribution:
 	// node 0 contains channel dmc0
 	// node 1 contains channel dmc0, dmc1
@@ -249,7 +252,7 @@ func TestDmChannelIsServiceable(t *testing.T) {
 }
 
 func (suite *ChannelDistManagerSuite) TestUpdateReturnsNewServiceableChannels() {
-	dist := NewChannelDistManager()
+	dist := NewChannelDistManager(session.NewNodeManager())
 
 	// Create a non-serviceable channel
 	nonServiceableChannel := suite.channels["dmc0"].Clone()
@@ -281,7 +284,8 @@ func (suite *ChannelDistManagerSuite) TestUpdateReturnsNewServiceableChannels() 
 }
 
 func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
-	dist := NewChannelDistManager()
+	nodeManager := session.NewNodeManager()
+	dist := NewChannelDistManager(nodeManager)
 
 	// Create a replica
 	replicaPB := &querypb.Replica{
@@ -386,6 +390,12 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 		return nodeIDs.Contain(4)
 	}, 10*time.Second, 100*time.Millisecond)
 
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   4,
+		Address:  "localhost:1",
+		Hostname: "localhost",
+		Labels:   map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"},
+	}))
 	channel1Node4 := suite.channels["dmc0"].Clone()
 	channel1Node4.Node = 4
 	channel1Node4.Version = 3
@@ -400,7 +410,7 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 }
 
 func TestGetChannelDistJSON(t *testing.T) {
-	manager := NewChannelDistManager()
+	manager := NewChannelDistManager(session.NewNodeManager())
 	channel1 := &DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
 			CollectionID: 100,

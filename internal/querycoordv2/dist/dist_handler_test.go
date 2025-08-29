@@ -64,7 +64,7 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.client = session.NewMockCluster(suite.T())
 	suite.nodeManager = session.NewNodeManager()
 	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.dist = meta.NewDistributionManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeManager)
 
 	suite.target = meta.NewMockTargetManager(suite.T())
 	suite.ctx = context.Background()
@@ -298,7 +298,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 	handler := &distHandler{
 		nodeID:      nodeID,
 		nodeManager: nodeManager,
-		dist:        meta.NewDistributionManager(),
+		dist:        meta.NewDistributionManager(nodeManager),
 		target:      meta.NewTargetManager(nil, nil),
 		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
 	}

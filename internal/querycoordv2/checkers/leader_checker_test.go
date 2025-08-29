@@ -73,7 +73,7 @@ func (suite *LeaderCheckerTestSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 
-	distManager := meta.NewDistributionManager()
+	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, suite.nodeMgr)
 }

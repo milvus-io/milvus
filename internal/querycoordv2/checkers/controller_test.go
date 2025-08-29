@@ -77,7 +77,7 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
-	suite.dist = meta.NewDistributionManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta)
 

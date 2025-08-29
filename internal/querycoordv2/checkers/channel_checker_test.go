@@ -78,7 +78,7 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
-	distManager := meta.NewDistributionManager()
+	distManager := meta.NewDistributionManager(suite.nodeMgr)
 
 	balancer := suite.createMockBalancer()
 	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })

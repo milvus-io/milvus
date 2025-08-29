@@ -142,7 +142,7 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 	req := &milvuspb.GetMetricsRequest{}
 	mockCluster.EXPECT().GetMetrics(mock.Anything, mock.Anything, req).Return(resp, nil)
 
-	server.dist = meta.NewDistributionManager()
+	server.dist = meta.NewDistributionManager(nodeManager)
 	server.dist.SegmentDistManager.Update(1, meta.SegmentFromInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  1,

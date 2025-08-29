@@ -1074,7 +1074,6 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	// return
 	//   1. doRegistered: if registered the active_key by this session or by other session
 	//   2. revision: revision of the active_key
-	//   3. err: etcd error, should retry
 
 	oldRoles := []string{
 		typeutil.RootCoordRole,
@@ -1132,8 +1131,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	for {
 		registered, revision, err := registerActiveFn()
 		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
+			// Some error such as ErrLeaseNotFound, is not retryable.
+			// Just return error to stop the standby process and wait for retry.
+			return err
 		}
 		if registered {
 			break

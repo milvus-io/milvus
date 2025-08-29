@@ -831,7 +831,7 @@ func TestHandleNodeDownMetricsCleanup(t *testing.T) {
 	server := &Server{
 		ctx:                 ctx,
 		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
-		dist:                meta.NewDistributionManager(),
+		dist:                meta.NewDistributionManager(session.NewNodeManager()),
 		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		meta: &meta.Meta{

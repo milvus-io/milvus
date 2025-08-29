@@ -22,7 +22,7 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -242,12 +242,15 @@ type ChannelDistManager struct {
 
 	// CollectionID -> Channels
 	collectionIndex map[int64][]*DmChannel
+
+	nodeManager *session.NodeManager
 }
 
-func NewChannelDistManager() *ChannelDistManager {
+func NewChannelDistManager(nodeManager *session.NodeManager) *ChannelDistManager {
 	return &ChannelDistManager{
 		channels:        make(map[typeutil.UniqueID]nodeChannels),
 		collectionIndex: make(map[int64][]*DmChannel),
+		nodeManager:     nodeManager,
 	}
 }
 
@@ -354,10 +357,9 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 				// Prioritize serviceability first, then version number
 				candidatesServiceable := candidates.IsServiceable()
 				channelServiceable := channel.IsServiceable()
-				streamingNodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-				candidateIsStreamingNode := streamingNodes.Contain(candidates.Node)
-				channelIsStreamingNode := streamingNodes.Contain(channel.Node)
 
+				candidateIsStreamingNode := m.checkIfStreamingNode(candidates.Node)
+				channelIsStreamingNode := m.checkIfStreamingNode(channel.Node)
 				if channelIsStreamingNode && !candidateIsStreamingNode {
 					// When upgrading from 2.5 to 2.6, the delegator leader may not locate at streaming node.
 					// We always use the streaming node as the delegator leader to avoid the delete data lost when loading segment.
@@ -386,6 +388,17 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 	}
 
 	return candidates
+}
+
+// checkIfStreamingNode checks if the node is a streaming node.
+// Because the session of streaming node and embedded query node are different,
+// So we need to check if the node is a streaming node from the query node session but not streaming node session to avoid the wrong check result.
+func (m *ChannelDistManager) checkIfStreamingNode(nodeID int64) bool {
+	node := m.nodeManager.Get(nodeID)
+	if node == nil {
+		return false
+	}
+	return node.IsEmbeddedQueryNodeInStreamingNode()
 }
 
 func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.DmChannel {

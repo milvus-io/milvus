@@ -160,10 +160,10 @@ func (suite *TaskSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
-	suite.dist = meta.NewDistributionManager()
+	suite.nodeMgr = session.NewNodeManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.target = meta.NewTargetManager(suite.broker, suite.meta)
-	suite.nodeMgr = session.NewNodeManager()
 	suite.cluster = session.NewMockCluster(suite.T())
 
 	suite.scheduler = suite.newScheduler()

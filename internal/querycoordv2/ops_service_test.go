@@ -98,7 +98,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	suite.store = querycoord.NewCatalog(suite.kv)
-	suite.dist = meta.NewDistributionManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
@@ -126,7 +126,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.targetMgr,
 	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
-	suite.distMgr = meta.NewDistributionManager()
+	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
 
 	suite.checkerController = checkers.NewCheckerController(suite.meta, suite.distMgr,
