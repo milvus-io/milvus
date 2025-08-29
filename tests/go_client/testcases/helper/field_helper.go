@@ -78,8 +78,8 @@ func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string
 			return common.DefaultDynamicFieldName
 		}
 		return common.DefaultJSONFieldName
-	// case entity.FieldTypeGeometry:
-	// 	return common.DefaultGeometryName
+	case entity.FieldTypeGeometry:
+		return common.DefaultGeometryFieldName
 	case entity.FieldTypeArray:
 		return GetFieldNameByElementType(opt.elementType)
 	case entity.FieldTypeBinaryVector:
@@ -101,15 +101,16 @@ type CollectionFieldsType int32
 
 const (
 	// FieldTypeNone zero value place holder
-	Int64Vec              CollectionFieldsType = 1 // int64 + floatVec
-	VarcharBinary         CollectionFieldsType = 2 // varchar + binaryVec
-	Int64VecJSON          CollectionFieldsType = 3 // int64 + floatVec + json
-	Int64VecArray         CollectionFieldsType = 4 // int64 + floatVec + array
-	Int64VarcharSparseVec CollectionFieldsType = 5 // int64 + varchar + sparse vector
-	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
-	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
-	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
-	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
+	Int64Vec              CollectionFieldsType = 1  // int64 + floatVec
+	VarcharBinary         CollectionFieldsType = 2  // varchar + binaryVec
+	Int64VecJSON          CollectionFieldsType = 3  // int64 + floatVec + json
+	Int64VecArray         CollectionFieldsType = 4  // int64 + floatVec + array
+	Int64VarcharSparseVec CollectionFieldsType = 5  // int64 + varchar + sparse vector
+	Int64MultiVec         CollectionFieldsType = 6  // int64 + floatVec + binaryVec + fp16Vec + bf16vec
+	AllFields             CollectionFieldsType = 7  // all fields excepted sparse
+	Int64VecAllScalar     CollectionFieldsType = 8  // int64 + floatVec + all scalar fields
+	FullTextSearch        CollectionFieldsType = 9  // int64 + varchar + sparse vector + analyzer + function
+	Int64VecGeometry      CollectionFieldsType = 10 // int64 + floatVec + geometry
 )
 
 type GenFieldsOption struct {
@@ -375,6 +376,18 @@ func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field
 	return fields
 }
 
+type FieldsInt64VecGeometry struct{}
+
+func (cf FieldsInt64VecGeometry) GenFields(option GenFieldsOption) []*entity.Field {
+	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
+	geometryField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeGeometry)).WithDataType(entity.FieldTypeGeometry)
+	if option.AutoID {
+		pkField.WithIsAutoID(option.AutoID)
+	}
+	return []*entity.Field{pkField, vecField, geometryField}
+}
+
 func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, option *GenFieldsOption) []*entity.Field {
 	log.Info("GenFieldsForCollection", zap.Any("GenFieldsOption", option))
 	switch collectionFieldsType {
@@ -396,6 +409,8 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return FieldsInt64VecAllScalar{}.GenFields(*option)
 	case FullTextSearch:
 		return FieldsFullTextSearch{}.GenFields(*option)
+	case Int64VecGeometry:
+		return FieldsInt64VecGeometry{}.GenFields(*option)
 	default:
 		return FieldsInt64Vec{}.GenFields(*option)
 	}

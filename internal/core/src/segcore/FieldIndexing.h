@@ -66,6 +66,20 @@ class FieldIndexing {
                              const VectorBase* vec_base,
                              const void* data_source) = 0;
 
+    // For scalar fields (including geometry), append data incrementally
+    virtual void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const DataArray* stream_data) = 0;
+
+    // For scalar fields (including geometry), append data incrementally (FieldDataPtr version)
+    virtual void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const FieldDataPtr& field_data) = 0;
+
     virtual void
     GetDataFromIndex(const int64_t* seg_offsets,
                      int64_t count,
@@ -110,6 +124,12 @@ class ScalarFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
 
+    explicit ScalarFieldIndexing(const FieldMeta& field_meta,
+                                 const FieldIndexMeta& field_index_meta,
+                                 int64_t segment_max_row_count,
+                                 const SegcoreConfig& segcore_config,
+                                 const VectorBase* field_raw_data);
+
     void
     BuildIndexRange(int64_t ack_beg,
                     int64_t ack_end,
@@ -135,6 +155,18 @@ class ScalarFieldIndexing : public FieldIndexing {
     }
 
     void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const DataArray* stream_data) override;
+
+    void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const FieldDataPtr& field_data) override;
+
+    void
     GetDataFromIndex(const int64_t* seg_offsets,
                      int64_t count,
                      int64_t element_size,
@@ -143,13 +175,39 @@ class ScalarFieldIndexing : public FieldIndexing {
                   "scalar index don't support get data from index");
     }
 
+    bool
+    has_raw_data() const override {
+        return index_->HasRawData();
+    }
+
     int64_t
     get_build_threshold() const override {
-        return 0;
+        // For geometry fields, build immediately (no threshold)
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+                return 0;  // Build immediately for geometry fields
+            }
+        }
+        // For other scalar indexes, use a default threshold
+        return 1000;  // Default threshold for other scalar index building
     }
 
     bool
     sync_data_with_index() const override {
+        // For geometry fields, check if index is built and synchronized
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+                bool is_built = built_.load();
+                bool is_synced = sync_with_index_.load();
+                LOG_DEBUG(
+                    "ScalarFieldIndexing::sync_data_with_index for geometry "
+                    "field: built={}, synced={}",
+                    is_built,
+                    is_synced);
+                return is_built && is_synced;
+            }
+        }
+        // For other scalar fields, not supported yet
         return false;
     }
 
@@ -157,15 +215,49 @@ class ScalarFieldIndexing : public FieldIndexing {
     index::ScalarIndex<T>*
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
-        return data_.at(chunk_id).get();
+        // For geometry fields with incremental indexing, return the single index regardless of chunk_id
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (field_meta_.get_data_type() == DataType::GEOMETRY && index_) {
+                return dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+            }
+        }
+        // Fallback to chunk-based indexing for compatibility
+        if (chunk_id < data_.size()) {
+            return data_.at(chunk_id).get();
+        }
+        return nullptr;
     }
 
     index::IndexBase*
     get_segment_indexing() const override {
+        // For geometry fields, return the single index
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+                return index_.get();
+            }
+        }
+        // For other scalar fields, not supported yet
         return nullptr;
     }
 
  private:
+    void
+    recreate_index(DataType data_type, const VectorBase* field_raw_data);
+
+    // current number of rows in index.
+    std::atomic<idx_t> index_cur_ = 0;
+    // whether the growing index has been built.
+    std::atomic<bool> built_ = false;
+    // whether all inserted data has been added to growing index and can be searched.
+    std::atomic<bool> sync_with_index_ = false;
+
+    // Configuration for scalar index building
+    std::unique_ptr<FieldIndexMeta> config_;
+
+    // Single scalar index for incremental indexing (new approach)
+    std::unique_ptr<index::ScalarIndex<T>> index_;
+
+    // Chunk-based indexes for compatibility (old approach)
     tbb::concurrent_vector<index::ScalarIndexPtr<T>> data_;
 };
 
@@ -196,6 +288,24 @@ class VectorFieldIndexing : public FieldIndexing {
                              int64_t new_data_dim,
                              const VectorBase* field_raw_data,
                              const void* data_source) override;
+
+    void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const DataArray* stream_data) override {
+        PanicInfo(Unsupported,
+                  "vector index should use AppendSegmentIndexDense/Sparse");
+    }
+
+    void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const FieldDataPtr& field_data) override {
+        PanicInfo(Unsupported,
+                  "vector index should use AppendSegmentIndexDense/Sparse");
+    }
 
     // for sparse float vector:
     //   * element_size is not used
@@ -306,6 +416,26 @@ class IndexingRecord {
                                         field_raw_data));
                     }
                 }
+            } else if (field_meta.get_data_type() == DataType::GEOMETRY) {
+                if (index_meta_ == nullptr) {
+                    LOG_INFO("miss index meta for growing interim index");
+                    continue;
+                }
+
+                if (index_meta_->GetIndexMaxRowCount() > 0 &&
+                    index_meta_->HasFiled(field_id)) {
+                    auto geo_field_meta =
+                        index_meta_->GetFieldIndexMeta(field_id);
+                    auto field_raw_data =
+                        insert_record->get_data_base(field_id);
+                    field_indexings_.try_emplace(
+                        field_id,
+                        CreateIndex(field_meta,
+                                    geo_field_meta,
+                                    index_meta_->GetIndexMaxRowCount(),
+                                    segcore_config_,
+                                    field_raw_data));
+                }
             }
         }
         assert(offset_id == schema_.size());
@@ -355,6 +485,10 @@ class IndexingRecord {
                 stream_data->vectors().sparse_float_vector().dim(),
                 field_raw_data,
                 data.get());
+        } else if (type == DataType::GEOMETRY) {
+            // For geometry fields, append data incrementally to RTree index
+            indexing->AppendSegmentIndex(
+                reserved_offset, size, field_raw_data, stream_data);
         }
     }
 
@@ -390,6 +524,10 @@ class IndexingRecord {
                     ->Dim(),
                 vec_base,
                 p);
+        } else if (type == DataType::GEOMETRY) {
+            // For geometry fields, append data incrementally to RTree index
+            auto vec_base = record.get_data_base(fieldId);
+            indexing->AppendSegmentIndex(reserved_offset, size, vec_base, data);
         }
     }
 
