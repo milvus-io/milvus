@@ -101,7 +101,15 @@ class DeletedRecord {
 
         bool can_dump = timestamps[0] >= max_load_timestamp_;
         if (can_dump) {
+            auto start_time = std::chrono::steady_clock::now();
             DumpSnapshot();
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    end_time - start_time);
+            LOG_INFO("dump delete record snapshot cost: {}ms for segment: {}",
+                     duration.count() / 1000,
+                     segment_id_);
         }
     }
 
@@ -210,11 +218,11 @@ class DeletedRecord {
 
     void
     DumpSnapshot() {
+        std::unique_lock<std::shared_mutex> lock(snap_lock_);
         SortedDeleteList::Accessor accessor(deleted_lists_);
         int total_size = accessor.size();
-        int dumped_size = dumped_entry_count_.load();
 
-        while (total_size - dumped_size > DUMP_BATCH_SIZE) {
+        while (total_size - dumped_entry_count_.load() > DUMP_BATCH_SIZE) {
             int32_t bitsize = 0;
             if constexpr (is_sealed) {
                 bitsize = sealed_row_count_;
@@ -232,7 +240,7 @@ class DeletedRecord {
                                              snapshots_.back().second.size());
             }
 
-            while (total_size - dumped_size > DUMP_BATCH_SIZE &&
+            while (total_size - dumped_entry_count_.load() > DUMP_BATCH_SIZE &&
                    it != accessor.end()) {
                 Timestamp dump_ts = 0;
 
@@ -243,34 +251,29 @@ class DeletedRecord {
                     }
                 }
 
-                {
-                    std::unique_lock<std::shared_mutex> lock(snap_lock_);
-                    if (dump_ts == last_dump_ts) {
-                        // only update
-                        snapshots_.back().second = std::move(bitmap.clone());
-                        snap_next_iter_.back() = it;
-                    } else {
-                        // add new snapshot
-                        snapshots_.push_back(
-                            std::make_pair(dump_ts, bitmap.clone()));
-                        Assert(it != accessor.end() && it.good());
-                        snap_next_iter_.push_back(it);
-                    }
-
-                    dumped_entry_count_.store(dumped_size + DUMP_BATCH_SIZE);
-                    LOG_INFO(
-                        "dump delete record snapshot at ts: {}, cursor: {}, "
-                        "total size:{} "
-                        "current snapshot size: {} for segment: {}",
-                        dump_ts,
-                        dumped_size + DUMP_BATCH_SIZE,
-                        total_size,
-                        snapshots_.size(),
-                        segment_id_);
-                    last_dump_ts = dump_ts;
+                if (dump_ts == last_dump_ts) {
+                    // only update
+                    snapshots_.back().second = std::move(bitmap.clone());
+                    snap_next_iter_.back() = it;
+                } else {
+                    // add new snapshot
+                    snapshots_.push_back(
+                        std::make_pair(dump_ts, bitmap.clone()));
+                    Assert(it != accessor.end() && it.good());
+                    snap_next_iter_.push_back(it);
                 }
 
-                dumped_size += DUMP_BATCH_SIZE;
+                dumped_entry_count_.fetch_add(DUMP_BATCH_SIZE);
+                LOG_INFO(
+                    "dump delete record snapshot at ts: {}, cursor: {}, "
+                    "total size:{} "
+                    "current snapshot size: {} for segment: {}",
+                    dump_ts,
+                    dumped_entry_count_.load(),
+                    total_size,
+                    snapshots_.size(),
+                    segment_id_);
+                last_dump_ts = dump_ts;
             }
         }
     }
