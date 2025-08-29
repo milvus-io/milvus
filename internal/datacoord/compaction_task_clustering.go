@@ -200,7 +200,7 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if err != nil {
 			log.Warn("processMetaSaved failed", zap.Error(err))
 		}
-	case datapb.CompactionTaskState_executing:
+	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
 			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err != nil {
@@ -210,6 +210,12 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 	case datapb.CompactionTaskState_failed:
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		if err != nil {
+			log.Warn("update clustering compaction task meta failed", zap.Error(err))
+			return
+		}
+	case datapb.CompactionTaskState_timeout:
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		if err != nil {
 			log.Warn("update clustering compaction task meta failed", zap.Error(err))
 			return
