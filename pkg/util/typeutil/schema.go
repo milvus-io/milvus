@@ -1085,15 +1085,25 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			continue
 		}
 
+		updateFieldIdx := updateIdx
 		// Update ValidData if present
 		if len(updateFieldData.GetValidData()) != 0 {
 			if len(baseFieldData.GetValidData()) != 0 {
-				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateIdx]
+				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateFieldIdx]
 			}
 
 			// update field data to null,only modify valid data
-			if !updateFieldData.ValidData[updateIdx] {
+			if !updateFieldData.ValidData[updateFieldIdx] {
 				continue
+			}
+
+			// for nullable field data, such as data=[1,1], valid_data=[true, false, true]
+			// should update the updateFieldIdx to the expected valid index
+			updateFieldIdx = 0
+			for _, validData := range updateFieldData.GetValidData()[:updateIdx] {
+				if validData {
+					updateFieldIdx += 1
+				}
 			}
 		}
 
@@ -1107,43 +1117,43 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			switch baseScalar.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				updateData := updateScalar.GetBoolData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetBoolData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetBoolData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_IntData:
 				updateData := updateScalar.GetIntData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetIntData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetIntData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_LongData:
 				updateData := updateScalar.GetLongData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetLongData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetLongData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_FloatData:
 				updateData := updateScalar.GetFloatData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetFloatData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetFloatData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_DoubleData:
 				updateData := updateScalar.GetDoubleData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetDoubleData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetDoubleData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_StringData:
 				updateData := updateScalar.GetStringData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetStringData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetStringData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_ArrayData:
 				updateData := updateScalar.GetArrayData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
-					baseScalar.GetArrayData().Data[baseIdx] = updateData.Data[updateIdx]
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+					baseScalar.GetArrayData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 				}
 			case *schemapb.ScalarField_JsonData:
 				updateData := updateScalar.GetJsonData()
 				baseData := baseScalar.GetJsonData()
-				if updateData != nil && int(updateIdx) < len(updateData.Data) {
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
@@ -1153,7 +1163,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
 							return fmt.Errorf("failed to unmarshal base json: %v", err)
 						}
-						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
+						if err := json.Unmarshal(updateData.Data[updateFieldIdx], &updateMap); err != nil {
 							return fmt.Errorf("failed to unmarshal update json: %v", err)
 						}
 						// merge
@@ -1167,7 +1177,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 						}
 						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					} else {
-						baseScalar.GetJsonData().Data[baseIdx] = updateData.Data[updateIdx]
+						baseScalar.GetJsonData().Data[baseIdx] = updateData.Data[updateFieldIdx]
 					}
 				}
 			default:
@@ -1186,10 +1196,10 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				updateData := updateVector.GetBinaryVector()
 				if updateData != nil {
 					baseData := baseVector.GetBinaryVector()
-					baseStartIdx := updateIdx * (dim / 8)
-					baseEndIdx := (updateIdx + 1) * (dim / 8)
-					updateStartIdx := updateIdx * (dim / 8)
-					updateEndIdx := (updateIdx + 1) * (dim / 8)
+					baseStartIdx := updateFieldIdx * (dim / 8)
+					baseEndIdx := (updateFieldIdx + 1) * (dim / 8)
+					updateStartIdx := updateFieldIdx * (dim / 8)
+					updateEndIdx := (updateFieldIdx + 1) * (dim / 8)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
@@ -1198,10 +1208,10 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				updateData := updateVector.GetFloatVector()
 				if updateData != nil {
 					baseData := baseVector.GetFloatVector()
-					baseStartIdx := updateIdx * dim
-					baseEndIdx := (updateIdx + 1) * dim
-					updateStartIdx := updateIdx * dim
-					updateEndIdx := (updateIdx + 1) * dim
+					baseStartIdx := updateFieldIdx * dim
+					baseEndIdx := (updateFieldIdx + 1) * dim
+					updateStartIdx := updateFieldIdx * dim
+					updateEndIdx := (updateFieldIdx + 1) * dim
 					if int(updateEndIdx) <= len(updateData.Data) && int(baseEndIdx) <= len(baseData.Data) {
 						copy(baseData.Data[baseStartIdx:baseEndIdx], updateData.Data[updateStartIdx:updateEndIdx])
 					}
@@ -1210,10 +1220,10 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				updateData := updateVector.GetFloat16Vector()
 				if updateData != nil {
 					baseData := baseVector.GetFloat16Vector()
-					baseStartIdx := updateIdx * (dim * 2)
-					baseEndIdx := (updateIdx + 1) * (dim * 2)
-					updateStartIdx := updateIdx * (dim * 2)
-					updateEndIdx := (updateIdx + 1) * (dim * 2)
+					baseStartIdx := updateFieldIdx * (dim * 2)
+					baseEndIdx := (updateFieldIdx + 1) * (dim * 2)
+					updateStartIdx := updateFieldIdx * (dim * 2)
+					updateEndIdx := (updateFieldIdx + 1) * (dim * 2)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
@@ -1222,20 +1232,20 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				updateData := updateVector.GetBfloat16Vector()
 				if updateData != nil {
 					baseData := baseVector.GetBfloat16Vector()
-					baseStartIdx := updateIdx * (dim * 2)
-					baseEndIdx := (updateIdx + 1) * (dim * 2)
-					updateStartIdx := updateIdx * (dim * 2)
-					updateEndIdx := (updateIdx + 1) * (dim * 2)
+					baseStartIdx := updateFieldIdx * (dim * 2)
+					baseEndIdx := (updateFieldIdx + 1) * (dim * 2)
+					updateStartIdx := updateFieldIdx * (dim * 2)
+					updateEndIdx := (updateFieldIdx + 1) * (dim * 2)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
 				}
 			case *schemapb.VectorField_SparseFloatVector:
 				updateData := updateVector.GetSparseFloatVector()
-				if updateData != nil && int(updateIdx) < len(updateData.Contents) {
+				if updateData != nil && int(updateFieldIdx) < len(updateData.Contents) {
 					baseData := baseVector.GetSparseFloatVector()
-					if int(updateIdx) < len(baseData.Contents) {
-						baseData.Contents[updateIdx] = updateData.Contents[updateIdx]
+					if int(updateFieldIdx) < len(baseData.Contents) {
+						baseData.Contents[updateFieldIdx] = updateData.Contents[updateFieldIdx]
 						// Update dimension if necessary
 						if updateData.Dim > baseData.Dim {
 							baseData.Dim = updateData.Dim
@@ -1246,10 +1256,10 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				updateData := updateVector.GetInt8Vector()
 				if updateData != nil {
 					baseData := baseVector.GetInt8Vector()
-					baseStartIdx := updateIdx * dim
-					baseEndIdx := (updateIdx + 1) * dim
-					updateStartIdx := updateIdx * dim
-					updateEndIdx := (updateIdx + 1) * dim
+					baseStartIdx := updateFieldIdx * dim
+					baseEndIdx := (updateFieldIdx + 1) * dim
+					updateStartIdx := updateFieldIdx * dim
+					updateEndIdx := (updateFieldIdx + 1) * dim
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}

@@ -401,9 +401,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 						return err
 					}
 					insertWithNullField = append(insertWithNullField, fieldData)
-				} else {
-					// unreachable code
-					return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %s is not nullable and has no default value", fieldSchema.Name))
 				}
 			} else {
 				insertWithNullField = append(insertWithNullField, fieldData)
