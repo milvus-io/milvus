@@ -13,6 +13,7 @@
 
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_vector.h>
+#include <folly/Synchronized.h>
 
 #include <memory>
 #include <string>
@@ -148,7 +149,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const override {
-        auto column = fields_.at(field_id);
+        auto column = fields_.rlock()->at(field_id);
         column->BulkRawJsonAt(fn, offsets, count);
     }
 
@@ -464,6 +465,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column);
 
+    std::shared_ptr<ChunkedColumnInterface>
+    get_column(FieldId field_id) const {
+        std::shared_ptr<ChunkedColumnInterface> res;
+        fields_.withRLock([&](auto& fields) {
+            auto it = fields.find(field_id);
+            if (it != fields.end()) {
+                res = it->second;
+            }
+        });
+        return res;
+    }
+
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -507,7 +520,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    mutable std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
+    mutable folly::Synchronized<
+        std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
         fields_;
     std::unordered_set<FieldId> mmap_fields_;
 
