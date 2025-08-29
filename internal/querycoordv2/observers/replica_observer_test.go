@@ -88,7 +88,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 
-	suite.distMgr = meta.NewDistributionManager()
+	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
 	suite.observer.Start()
 	suite.collectionID = int64(1000)
