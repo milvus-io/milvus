@@ -32,6 +32,7 @@ const (
 	SUBSTRUCTURE   MetricType = "SUBSTRUCTURE"
 	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
 	BM25           MetricType = "BM25"
+	MHJACCARD      MetricType = "MHJACCARD"
 )
 
 // CompactionState enum type for compaction state
