@@ -67,6 +67,10 @@ class DeletedRecord {
     }
 
     ~DeletedRecord() {
+        if constexpr (is_sealed) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {estimated_memory_size_, 0});
+        }
     }
 
     DeletedRecord(DeletedRecord<is_sealed>&& delete_record) = delete;
@@ -147,6 +151,25 @@ class DeletedRecord {
 
         n_.fetch_add(removed_num);
         mem_size_.fetch_add(mem_add);
+
+        if constexpr (is_sealed) {
+            // update estimated memory size to caching layer only when the delta is large enough (64KB)
+            constexpr int64_t MIN_DELTA_SIZE = 64 * 1024;
+            auto new_estimated_size = size();
+            if (std::abs(new_estimated_size - estimated_memory_size_) >
+                MIN_DELTA_SIZE) {
+                auto delta_size = new_estimated_size - estimated_memory_size_;
+                if (delta_size >= 0) {
+                    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+                        {delta_size, 0});
+                } else {
+                    cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                        {-delta_size, 0});
+                }
+                estimated_memory_size_ = new_estimated_size;
+            }
+        }
+
         return max_timestamp;
     }
 
@@ -305,7 +328,8 @@ class DeletedRecord {
  public:
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
-    InsertRecord<is_sealed>* insert_record_;
+    std::conditional_t<is_sealed, InsertRecordSealed, InsertRecordGrowing>*
+        insert_record_;
     std::function<void(const std::vector<PkType>& pks,
                        const Timestamp* timestamps,
                        std::function<void(SegOffset offset, Timestamp ts)>)>
@@ -325,6 +349,8 @@ class DeletedRecord {
     std::vector<SortedDeleteList::iterator> snap_next_iter_;
     // total number of delete entries that have been incorporated into snapshots
     std::atomic<int64_t> dumped_entry_count_{0};
+    // estimated memory size of DeletedRecord, only used for sealed segment
+    int64_t estimated_memory_size_{0};
 };
 
 }  // namespace milvus::segcore

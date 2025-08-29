@@ -2920,7 +2920,7 @@ type queryNodeConfig struct {
 	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
-	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
+	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
@@ -3273,21 +3273,21 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.TieredEvictionIntervalMs.Init(base.mgr)
 
-	p.TieredLoadingMemoryFactor = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.loadingMemoryFactor",
+	p.TieredLoadingResourceFactor = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
 		Version:      "2.6.0",
-		DefaultValue: "3.5",
+		DefaultValue: "1.0",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
-				return "3.5"
+				return "1.0"
 			}
 			return fmt.Sprintf("%.2f", factor)
 		},
-		Doc:    "Loading memory factor for estimating memory during loading.",
+		Doc:    "Loading resource factor for estimating resource during loading.",
 		Export: false,
 	}
-	p.TieredLoadingMemoryFactor.Init(base.mgr)
+	p.TieredLoadingResourceFactor.Init(base.mgr)
 
 	p.CacheCellUnaccessedSurvivalTime = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.cacheTtl",

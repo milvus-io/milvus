@@ -143,7 +143,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
 
-    // TODO(tiered storage 1): should return a PinWrapper
     void
     BulkGetJsonData(FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,
@@ -507,6 +506,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
+
     // vector field index
     SealedIndexingRecord vector_indexings_;
 
@@ -523,7 +523,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable folly::Synchronized<
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
         fields_;
-    std::unordered_set<FieldId> mmap_fields_;
+    std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;

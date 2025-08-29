@@ -45,6 +45,13 @@ class TimestampIndex {
                       Timestamp expire_ts,
                       std::pair<int64_t, int64_t> active_range);
 
+    size_t
+    size() const {
+        return sizeof(*this) + lengths_.size() * sizeof(int64_t) +
+               start_locs_.size() * sizeof(int64_t) +
+               timestamp_barriers_.size() * sizeof(Timestamp);
+    }
+
  private:
     // numSlice
     std::vector<int64_t> lengths_;

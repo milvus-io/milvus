@@ -81,13 +81,13 @@ class IndexBase {
     }
 
     // TODO: how to get the cell byte size?
-    virtual size_t
+    virtual cachinglayer::ResourceUsage
     CellByteSize() const {
         return cell_size_;
     }
 
     virtual void
-    SetCellSize(size_t cell_size) {
+    SetCellSize(cachinglayer::ResourceUsage cell_size) {
         cell_size_ = cell_size;
     }
 
@@ -97,7 +97,7 @@ class IndexBase {
     }
 
     IndexType index_type_ = "";
-    size_t cell_size_ = 0;
+    cachinglayer::ResourceUsage cell_size_ = {0, 0};
 
     std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };

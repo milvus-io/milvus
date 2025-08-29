@@ -80,7 +80,7 @@ class CollectionIndexMeta {
     GetIndexMaxRowCount() const;
 
     bool
-    HasFiled(FieldId fieldId) const;
+    HasField(FieldId fieldId) const;
 
     const FieldIndexMeta&
     GetFieldIndexMeta(FieldId fieldId) const;

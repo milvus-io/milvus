@@ -289,7 +289,7 @@ class IndexingRecord {
                 }
                 //Small-Index enabled, create index for vector field only
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
-                    index_meta_->HasFiled(field_id)) {
+                    index_meta_->HasField(field_id)) {
                     auto vec_field_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
                     //Disable growing index for flat and embedding list
