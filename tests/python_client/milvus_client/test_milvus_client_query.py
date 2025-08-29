@@ -186,6 +186,43 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("output_fields", [["int"], [default_primary_key_field_name, "int"]])
+    def test_milvus_client_query_output_not_existed_field(self, enable_dynamic_field, output_fields):
+        """
+        target: test query output not existed field
+        method: query with not existed output field
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. test query with non-existent fields
+        if enable_dynamic_field :
+            exp_res = [{default_primary_key_field_name: i} for i in range(default_nb)]
+            self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
+              check_task=CheckTasks.check_query_results,
+              check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name})
+        else :
+            error = {ct.err_code: 65535, ct.err_msg: 'field int not exist'}
+            self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_query_expr_wrong_term_keyword(self):
         """
         target: test query with wrong term expr keyword
@@ -335,6 +372,41 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 5. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_query_expr_with_limit_offset_out_of_range(self):
+        """
+        target: test query with empty expression
+        method: query empty expression with limit and offset out of range
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with limit > 16384
+        error = {ct.err_code: 1,
+                 ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
+        self.query(client, collection_name, filter="", limit=16385, check_task=CheckTasks.err_res, check_items=error)
+        # 5. query with offset + limit > 16384
+        self.query(client, collection_name, filter="", limit=1, offset=16384, check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter="", limit=16384, offset=1, check_task=CheckTasks.err_res, check_items=error)
+        # 6. query with offset < 0
+        error = {ct.err_code: 1,
+                 ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
+        self.query(client, collection_name, filter="", limit=2, offset=-1, check_task=CheckTasks.err_res, check_items=error)
+        # 7. clean up
+        self.drop_collection(client, collection_name)
 
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -465,7 +537,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_output_fields_all(self):
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("vector_field, vector_type", [
+    (ct.default_float_vec_field_name, DataType.FLOAT_VECTOR),
+    (ct.default_float16_vec_field_name, DataType.FLOAT16_VECTOR),
+    (ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR)])
+    def test_milvus_client_query_output_fields_all(self, enable_dynamic_field, vector_field, vector_type):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
@@ -474,27 +551,109 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_int32_field_name, DataType.INT32)
+        schema.add_field(ct.default_int16_field_name, DataType.INT16)
+        schema.add_field(ct.default_int8_field_name, DataType.INT8)
+        schema.add_field(ct.default_bool_field_name, DataType.BOOL)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_double_field_name, DataType.DOUBLE)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=10)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(vector_field, vector_type, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = cf.gen_row_data_by_schema(nb=10, schema=schema, skip_field_names=[ct.default_json_field_name])
+        for i in range(10):
+            rows[i][ct.default_json_field_name] = {"key": i}
         self.insert(client, collection_name, rows)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        all_fields = [default_primary_key_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
+                      ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
+                      ct.default_double_field_name, ct.default_string_field_name, ct.default_json_field_name,
+                      vector_field]
         # 3. query using ids
         self.query(client, collection_name, ids=[i for i in range(default_nb)],
+                   output_fields=["*"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name,
+                                "vector_field": vector_field,
+                                "vector_type": vector_type})
         # 4. query using filter
         res = self.query(client, collection_name, filter=default_search_exp,
                          output_fields=["*"],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: rows,
                                       "with_vec": True,
-                                      "pk_name": default_primary_key_field_name})[0]
-        assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name,
-                                      default_float_field_name, default_string_field_name}
+                                      "pk_name": default_primary_key_field_name,
+                                      "vector_field": vector_field,
+                                      "vector_type": vector_type})[0]
+        assert set(res[0].keys()) == set(all_fields)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("fields", [None, [], ""])
+    def test_milvus_client_query_output_field_none_or_empty(self, enable_dynamic_field, fields):
+        """
+        target: test query with none and empty output field
+        method: query with output field=None, field=[]
+        expected: return primary field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with None and empty output fields
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=fields)[0]
+        assert res[0].keys() == {default_primary_key_field_name, default_vector_field_name}
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_query_output_one_field(self, enable_dynamic_field):
+        """
+        target: test query with output one field
+        method: query with output one field
+        expected: return one field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema = schema, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with one output field
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_float_field_name])[0]
+        # verify primary field and specified field are returned
+        assert set(res[0].keys()) == {default_primary_key_field_name, default_float_field_name}
+        # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1634,6 +1793,59 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expression", cf.gen_integer_overflow_expressions())
+    def test_milvus_client_query_expr_out_of_range(self, expression):
+        """
+        target: test query with integer overflow in boolean expressions
+        method: create a collection with various integer fields, insert data, 
+                execute query using expressions with out-of-range integer constants,
+                and compare the number of results with local Python evaluation.
+        expected: query executes successfully and the result count matches local evaluation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with all data types
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_int32_field_name, DataType.INT32)
+        schema.add_field(ct.default_int16_field_name, DataType.INT16)
+        schema.add_field(ct.default_int8_field_name, DataType.INT8)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data with overflow values
+        start = default_nb // 2
+        rows = []
+        for i in range(default_nb):
+            row = {
+                ct.default_int64_field_name: start + i,
+                ct.default_int32_field_name: np.int32((start + i) * 2200000),
+                ct.default_int16_field_name: np.int16((start + i) * 40),
+                ct.default_int8_field_name: np.int8((start + i) % 128),
+                ct.default_float_vec_field_name: cf.gen_vectors(nb=1, dim=default_dim)[0],
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. filter result with expression in collection
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i in range(default_nb):
+            int8 = np.int8((start + i) % 128)
+            int16 = np.int16((start + i) * 40)
+            int32 = np.int32((start + i) * 2200000)
+            if not expression or eval(expression):
+                filter_ids.append(start + i)
+        # 5. query and verify result
+        res = self.query(client, collection_name, filter=expression, output_fields=["int8"])[0]
+        assert len(res) == len(filter_ids)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
                                              "array_contains_any", "ARRAY_CONTAINS_ANY"])
     def test_milvus_client_query_expr_list_all_datatype_json_contains_any(self, expr_prefix):
@@ -1832,6 +2044,101 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 6. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
+                                                        ["*", ct.default_int64_field_name]])
+    def test_milvus_client_query_output_field_wildcard(self, wildcard_output_fields):
+        """
+        target: test query with output fields using wildcard
+        method: query with one output_field (wildcard)
+        expected: query success
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. get wildcard output field names
+        schema_info = self.describe_collection(client, collection_name)[0]
+        output_fields = cf.get_wildcard_output_field_names(schema_info, wildcard_output_fields)
+        # 5. query with wildcard output fields
+        actual_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
+        # 6. verify output fields
+        assert set(actual_res[0].keys()) == set(output_fields)
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_output_binary_vec_field(self):
+        """
+        target: test query with binary vec output field
+        method: specify binary vec field as output field
+        expected: return primary field and binary vec field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with binary vector
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. test different output field combinations
+        fields = [[ct.default_binary_vec_field_name],
+                  [default_primary_key_field_name, ct.default_binary_vec_field_name]]
+        for output_fields in fields:
+            res = self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields)[0]
+            assert set(res[0].keys()) == set(fields[-1])
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_output_primary_field(self):
+        """
+        target: test query with output field only primary field
+        method: specify int64 primary field as output field
+        expected: return int64 field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with only primary field as output
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_primary_key_field_name])[0]
+        # 5. verify only primary field is returned
+        assert set(res[0].keys()) == {default_primary_key_field_name}
+        # 6. clean up
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
