@@ -396,7 +396,8 @@ PrepareOptionalField(const std::shared_ptr<DiskFileManagerImpl>& file_manager,
     OptFieldT opt_field;
     std::vector<std::string> insert_files;
     insert_files.emplace_back(insert_file_path);
-    opt_field[kOptFieldId] = {kOptFieldName, DT, insert_files};
+    opt_field[kOptFieldId] = {
+        kOptFieldName, DT, DataType::NONE, insert_files};  // 添加element_type
     return opt_field;
 }
 
@@ -454,8 +455,10 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
     OptFieldT opt_fields =
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
-    opt_fields[kOptFieldId + 1] = {
-        kOptFieldName + "second", DataType::INT64, {insert_file_path}};
+    opt_fields[kOptFieldId + 1] = {kOptFieldName + "second",
+                                   DataType::INT64,
+                                   DataType::NONE,
+                                   {insert_file_path}};  // 添加element_type
     milvus::Config config;
     config[VEC_OPT_FIELDS] = opt_fields;
     EXPECT_THROW(file_manager->CacheOptFieldToDisk(config), SegcoreError);

@@ -114,8 +114,12 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		if w.elementType == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("ArrayOfVector requires elementType, use WithElementType option")
 		}
-		w.arrowType = VectorArrayToArrowType(*w.elementType)
-		w.builder = array.NewListBuilder(memory.DefaultAllocator, w.arrowType)
+		arrowType, err := VectorArrayToArrowType(*w.elementType)
+		if err != nil {
+			return nil, err
+		}
+		w.arrowType = arrowType
+		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrowType)
 	} else {
 		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
@@ -896,25 +900,25 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 }
 
 // VectorArrayToArrowType converts VectorArray type with elementType to Arrow ListArray type
-func VectorArrayToArrowType(elementType schemapb.DataType) arrow.DataType {
+func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
 	var childType arrow.DataType
 
 	switch elementType {
 	case schemapb.DataType_FloatVector:
 		childType = arrow.PrimitiveTypes.Float32
 	case schemapb.DataType_BinaryVector:
-		panic("BinaryVector in VectorArray not implemented yet")
+		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
 	case schemapb.DataType_Float16Vector:
-		panic("Float16Vector in VectorArray not implemented yet")
+		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
 	case schemapb.DataType_BFloat16Vector:
-		panic("BFloat16Vector in VectorArray not implemented yet")
+		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
 	case schemapb.DataType_Int8Vector:
-		panic("Int8Vector in VectorArray not implemented yet")
+		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
 	default:
-		panic(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
 	}
 
-	return arrow.ListOf(childType)
+	return arrow.ListOf(childType), nil
 }
 
 // AddVectorArrayFieldDataToPayload adds VectorArrayFieldData to payload using Arrow ListArray
@@ -936,13 +940,13 @@ func (w *NativePayloadWriter) AddVectorArrayFieldDataToPayload(data *VectorArray
 	case schemapb.DataType_FloatVector:
 		return w.addFloatVectorArrayToPayload(builder, data)
 	case schemapb.DataType_BinaryVector:
-		panic("BinaryVector in VectorArray not implemented yet")
+		return merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
 	case schemapb.DataType_Float16Vector:
-		panic("Float16Vector in VectorArray not implemented yet")
+		return merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
 	case schemapb.DataType_BFloat16Vector:
-		panic("BFloat16Vector in VectorArray not implemented yet")
+		return merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
 	case schemapb.DataType_Int8Vector:
-		panic("Int8Vector in VectorArray not implemented yet")
+		return merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", data.ElementType.String()))
 	}

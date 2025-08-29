@@ -181,6 +181,7 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
+                           DataType element_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
 

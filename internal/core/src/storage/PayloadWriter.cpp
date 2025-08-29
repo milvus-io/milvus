@@ -112,12 +112,14 @@ PayloadWriter::finish() {
     output_ = std::make_shared<storage::PayloadOutputStream>();
     auto mem_pool = arrow::default_memory_pool();
 
-    // For VectorArray, we need to store schema metadata
-    parquet::ArrowWriterProperties::Builder arrow_props_builder;
+    std::shared_ptr<parquet::ArrowWriterProperties> arrow_properties =
+        parquet::default_arrow_writer_properties();
     if (column_type_ == DataType::VECTOR_ARRAY) {
+        // For VectorArray, we need to store schema metadata
+        parquet::ArrowWriterProperties::Builder arrow_props_builder;
         arrow_props_builder.store_schema();
+        arrow_properties = arrow_props_builder.build();
     }
-    auto arrow_props = arrow_props_builder.build();
 
     ast = parquet::arrow::WriteTable(*table,
                                      mem_pool,
@@ -127,7 +129,7 @@ PayloadWriter::finish() {
                                          .compression(arrow::Compression::ZSTD)
                                          ->compression_level(3)
                                          ->build(),
-                                     arrow_props);
+                                     arrow_properties);
     AssertInfo(ast.ok(), ast.ToString());
 }
 

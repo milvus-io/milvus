@@ -610,29 +610,11 @@ CreateArrowSchema(DataType data_type,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
 
-    std::shared_ptr<arrow::DataType> value_type;
-    switch (element_type) {
-        case DataType::VECTOR_FLOAT:
-            value_type = arrow::float32();
-            break;
-        case DataType::VECTOR_BINARY:
-        case DataType::VECTOR_FLOAT16:
-        case DataType::VECTOR_BFLOAT16:
-        case DataType::VECTOR_INT8:
-            ThrowInfo(NotImplemented,
-                      "Element type {} not yet implemented for VectorArray",
-                      GetDataTypeName(element_type));
-            break;
-        default:
-            ThrowInfo(DataTypeInvalid,
-                      "Invalid element type {} for VectorArray",
-                      GetDataTypeName(element_type));
-    }
-
+    auto value_type = GetArrowDataTypeForVectorArray(element_type);
     auto list_type = arrow::list(value_type);
 
     auto metadata = arrow::KeyValueMetadata::Make(
-        {ELEMENT_TYPE_KEY, DIM_KEY},
+        {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
     auto field =
@@ -1197,6 +1179,7 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
+                           DataType element_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
@@ -1302,7 +1285,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 chunked_arrays.push_back(table_info.table->column(col_offset));
             }
             auto field_data = storage::CreateFieldData(data_type,
-                                                       DataType::NONE,
+                                                       element_type,
                                                        field_schema->nullable(),
                                                        dim,
                                                        num_rows);

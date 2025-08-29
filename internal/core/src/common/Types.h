@@ -194,12 +194,24 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::binary();
         case DataType::VECTOR_INT8:
             return arrow::fixed_size_binary(dim);
-        case DataType::VECTOR_ARRAY:
-            return arrow::binary();
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("failed to get data type, invalid type {}",
                                   data_type));
+        }
+    }
+}
+
+inline std::shared_ptr<arrow::DataType>
+GetArrowDataTypeForVectorArray(DataType elem_type) {
+    switch (elem_type) {
+        case DataType::VECTOR_FLOAT:
+            return arrow::list(arrow::float32());
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      fmt::format("failed to get arrow type for vector array, "
+                                  "invalid type {}",
+                                  elem_type));
         }
     }
 }
@@ -455,10 +467,12 @@ using FieldName = fluent::NamedType<std::string,
                                     fluent::Comparable,
                                     fluent::Hashable>;
 
-// field id -> (field name, field type, binlog paths)
-using OptFieldT = std::unordered_map<
-    int64_t,
-    std::tuple<std::string, milvus::DataType, std::vector<std::string>>>;
+// field id -> (field name, field type, element type, binlog paths)
+using OptFieldT = std::unordered_map<int64_t,
+                                     std::tuple<std::string,
+                                                milvus::DataType,
+                                                milvus::DataType,
+                                                std::vector<std::string>>>;
 
 using SegmentInsertFiles = std::vector<std::vector<std::string>>;
 

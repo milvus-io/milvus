@@ -98,10 +98,10 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
 
             // Get element type
             AssertInfo(
-                metadata->Contains(ELEMENT_TYPE_KEY),
+                metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW),
                 "VectorArray metadata missing required 'elementType' field");
             auto element_type_str =
-                metadata->Get(ELEMENT_TYPE_KEY).ValueOrDie();
+                metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
             auto element_type_int = std::stoi(element_type_str);
             element_type = static_cast<DataType>(element_type_int);
 

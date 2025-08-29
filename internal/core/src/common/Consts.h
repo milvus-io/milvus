@@ -94,6 +94,7 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
@@ -105,4 +106,4 @@ const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
 const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
 
 // VectorArray related, used for fetch metadata from Arrow schema
-const std::string ELEMENT_TYPE_KEY = "elementType";
+const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
