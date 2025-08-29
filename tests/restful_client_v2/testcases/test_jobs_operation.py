@@ -1690,7 +1690,6 @@ class TestCreateImportJob(TestBase):
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
 
-    @pytest.mark.xfail(reason="issue https://github.com/milvus-io/milvus/issues/43819")
     def test_import_parquet_array_float_nan_validation(self):
         """Test Parquet import with Array<Float> containing NaN - should fail"""
         name = gen_collection_name()
