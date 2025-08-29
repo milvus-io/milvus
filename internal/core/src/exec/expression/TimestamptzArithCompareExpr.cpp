@@ -9,7 +9,6 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "log/Log.h"
 #include "pb/plan.pb.h"
 #include "BinaryArithOpEvalRangeExpr.h"
 

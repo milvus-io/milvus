@@ -325,7 +325,6 @@ class SegmentExpr : public Expr {
                                      : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
-            ;
             current_rows =
                 SegmentExpr::CanUseIndex() && use_index_ &&
                         segment_->type() == SegmentType::Sealed
