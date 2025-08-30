@@ -114,3 +114,6 @@ pkg/streaming/proto/**/*.pb.go
 
 #AI rules
 WARP.md
+
+# Antlr
+.antlr
