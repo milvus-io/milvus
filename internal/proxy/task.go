@@ -110,7 +110,7 @@ const (
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
 	RunAnalyzerTaskName           = "RunAnalyzer"
 
-	CreateDatabaseTaskName   = "CreateCollectionTask"
+	CreateDatabaseTaskName   = "CreateDatabaseTaskName"
 	DropDatabaseTaskName     = "DropDatabaseTaskName"
 	ListDatabaseTaskName     = "ListDatabaseTaskName"
 	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
@@ -1300,7 +1300,7 @@ func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
 }
 
 func (t *alterCollectionFieldTask) Name() string {
-	return AlterCollectionTaskName
+	return AlterCollectionFieldTaskName
 }
 
 func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
