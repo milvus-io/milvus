@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -6218,40 +6217,6 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) runAnalyzer(req *milvuspb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	analyzer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
-	if err != nil {
-		return nil, err
-	}
-
-	defer analyzer.Destroy()
-
-	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
-	for i, text := range req.GetPlaceholder() {
-		stream := analyzer.NewTokenStream(string(text))
-		defer stream.Destroy()
-
-		results[i] = &milvuspb.AnalyzerResult{
-			Tokens: make([]*milvuspb.AnalyzerToken, 0),
-		}
-
-		for stream.Advance() {
-			var token *milvuspb.AnalyzerToken
-			if req.GetWithDetail() {
-				token = stream.DetailedToken()
-			} else {
-				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
-			}
-
-			if req.GetWithHash() {
-				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
-			}
-			results[i].Tokens = append(results[i].Tokens, token)
-		}
-	}
-	return results, nil
-}
-
 func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RunAnalyzer")
 	defer sp.End()
@@ -6269,20 +6234,19 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	// build and run analyzer at any streaming node/query node
+	// if collection and field not set
 	if req.GetCollectionName() == "" {
-		results, err := node.runAnalyzer(req)
-		if err != nil {
-			return &milvuspb.RunAnalyzerResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status:  merr.Status(nil),
-			Results: results,
-		}, nil
+		return node.mixCoord.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			AnalyzerParams: req.GetAnalyzerParams(),
+			Placeholder:    req.GetPlaceholder(),
+			WithDetail:     req.GetWithDetail(),
+			WithHash:       req.GetWithHash(),
+		})
 	}
 
+	// run builded analyzer by delegator
+	// collection must loaded
 	if err := validateRunAnalyzer(req); err != nil {
 		return &milvuspb.RunAnalyzerResponse{
 			Status: merr.Status(merr.WrapErrAsInputError(err)),
