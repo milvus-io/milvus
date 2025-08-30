@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -330,13 +331,15 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		EndLogID:        end,
 		NumRows:         segment.GetNumOfRows(),
 		// update version after check
-		TaskVersion:               st.GetVersion(),
-		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
-		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
-		JsonKeyStatsDataFormat:    1,
-		TaskSlot:                  st.taskSlot,
-		StorageVersion:            segment.StorageVersion,
-		CurrentScalarIndexVersion: st.ievm.GetCurrentScalarIndexEngineVersion(),
+		TaskVersion:                      st.GetVersion(),
+		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
+		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
+		TaskSlot:                         st.taskSlot,
+		StorageVersion:                   segment.StorageVersion,
+		CurrentScalarIndexVersion:        st.ievm.GetCurrentScalarIndexEngineVersion(),
+		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),
+		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
+		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 	}
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 

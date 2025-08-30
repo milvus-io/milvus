@@ -307,7 +307,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
-        this->CreateJSONIndexes();
     }
 
     ~SegmentGrowingImpl() {
@@ -478,19 +477,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndexes();
-
-    void
-    AddJSONDatas(FieldId field_id,
-                 const std::string* jsondatas,
-                 const bool* jsondatas_valid_data,
-                 size_t n,
-                 int64_t offset_begin);
-
-    void
-    CreateJSONIndexes();
-
-    void
-    CreateJSONIndex(FieldId field_id);
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;

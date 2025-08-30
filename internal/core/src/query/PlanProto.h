@@ -101,6 +101,10 @@ class ProtoParser {
     expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
+    void
+    PlanOptionsFromProto(const proto::plan::PlanOption& plan_option_proto,
+                         PlanOptions& plan_options);
+
  private:
     const SchemaPtr schema;
 };

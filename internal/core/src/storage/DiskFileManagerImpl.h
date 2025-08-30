@@ -63,7 +63,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     AddTextLog(const std::string& filename) noexcept;
 
     bool
-    AddJsonKeyIndexLog(const std::string& filename) noexcept;
+    AddJsonSharedIndexLog(const std::string& filename) noexcept;
 
  public:
     std::string
@@ -87,16 +87,20 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalTempTextIndexPrefix();
 
-    // Used for loading index, using this index prefix dir to store index.
     std::string
-    GetLocalJsonKeyIndexPrefix();
+    GetLocalJsonStatsPrefix();
 
     std::string
-    GetLocalTempJsonKeyIndexPrefix();
+    GetLocalTempJsonStatsPrefix();
 
-    // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
-    GetRemoteJsonKeyLogPrefix();
+    GetLocalJsonStatsShreddingPrefix();
+
+    std::string
+    GetLocalJsonStatsSharedIndexPrefix();
+
+    std::string
+    GetLocalJsonStatsShreddingPath(const std::string& file_name);
 
     // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
@@ -105,6 +109,16 @@ class DiskFileManagerImpl : public FileManagerImpl {
     // Used for loading index, using this index prefix dir to store index.
     std::string
     GetLocalTempNgramIndexPrefix();
+
+    std::string
+    GetRemoteJsonStatsLogPrefix();
+
+    std::string
+    GetRemoteJsonStatsShreddingPrefix();
+
+    std::string
+    GetRemoteJsonStatsSharedIndexPath(const std::string& file_name,
+                                      int64_t slice_num);
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -128,10 +142,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
                        milvus::proto::common::LoadPriority priority);
 
     void
-    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files,
-                            milvus::proto::common::LoadPriority priority);
-
-    void
     CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
                           milvus::proto::common::LoadPriority priority);
 
@@ -142,7 +152,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveTextLogFiles();
 
     void
-    RemoveJsonKeyIndexFiles();
+    RemoveJsonStatsFiles();
+
+    void
+    CacheJsonStatsSharedIndexToDisk(
+        const std::vector<std::string>& remote_files,
+        milvus::proto::common::LoadPriority priority);
 
     void
     RemoveNgramIndexFiles();
@@ -195,9 +210,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
-
-    std::string
-    GetRemoteJsonKeyIndexPath(const std::string& file_name, int64_t slice_num);
 
     bool
     AddFileInternal(const std::string& file_name,

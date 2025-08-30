@@ -125,24 +125,31 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t field_id,
                        bool is_temp);
 
-// is_temp: true for temporary path used during index building,
-// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                          int64_t build_id,
-                          int64_t index_version,
-                          int64_t segment_id,
-                          int64_t field_id,
-                          bool is_temp);
+GenJsonStatsPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       bool is_temp);
 
 std::string
-GenRemoteJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                                int64_t build_id,
-                                int64_t index_version,
-                                int64_t collection_id,
-                                int64_t partition_id,
-                                int64_t segment_id,
-                                int64_t field_id);
+GenJsonStatsPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t collection_id,
+                           int64_t partition_id,
+                           int64_t segment_id,
+                           int64_t field_id);
+
+std::string
+GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
+                             int64_t build_id,
+                             int64_t index_version,
+                             int64_t collection_id,
+                             int64_t partition_id,
+                             int64_t segment_id,
+                             int64_t field_id);
+
 std::string
 GenNgramIndexPrefix(ChunkManagerPtr cm,
                     int64_t build_id,

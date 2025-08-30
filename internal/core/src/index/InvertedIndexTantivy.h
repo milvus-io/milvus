@@ -320,7 +320,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // Therefore, we should provide a way to allow higher version of milvus to build tantivy index with low version.
     uint32_t tantivy_index_version_{0};
 
-    // for now, only TextMatchIndex and JsonKeyStatsInvertedIndex can be built for growing segment,
+    // for now, only TextMatchIndex  can be built for growing segment,
     // and can read and insert concurrently.
     bool is_growing_{false};
 };

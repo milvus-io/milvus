@@ -72,10 +72,6 @@ func UpdateExprResCacheCapacityBytes(capacity int) {
 	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
 }
 
-func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
-	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
-}
-
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

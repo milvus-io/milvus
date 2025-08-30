@@ -40,10 +40,10 @@
 #include "pb/segcore.pb.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/JsonKeyStatsInvertedIndex.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -145,8 +145,6 @@ class SegmentInterface {
     GetJsonIndex(FieldId field_id, std::string path) const {
         return nullptr;
     }
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const = 0;
 
     virtual void
     BulkGetJsonData(FieldId field_id,
@@ -167,6 +165,9 @@ class SegmentInterface {
     virtual bool
     HasNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const = 0;
+
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -379,9 +380,6 @@ class SegmentInternalInterface : public SegmentInterface {
     index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const override;
 
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const override;
-
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
 
@@ -395,6 +393,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
+
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override;
 
  public:
     // `query_lims` is not null only for vector array (embedding list) search
@@ -618,9 +619,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
 
-    std::unordered_map<FieldId,
-                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
-        json_indexes_;
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+        json_stats_;
 };
 
 }  // namespace milvus::segcore

@@ -431,8 +431,7 @@ class CountNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("VectorSearchNode:\n\t[source node:{}]",
-                           SourceToString());
+        return fmt::format("CountNode:\n\t[source node:{}]", SourceToString());
     }
 
  private:

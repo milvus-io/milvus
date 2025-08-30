@@ -27,7 +27,6 @@ namespace milvus {
 
 extern std::atomic<int64_t> FILE_SLICE_SIZE;
 extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
-extern std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
@@ -40,9 +39,6 @@ SetDefaultExecEvalExprBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);
-
-void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val);
 
 void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);

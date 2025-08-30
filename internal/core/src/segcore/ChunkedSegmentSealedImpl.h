@@ -102,20 +102,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+
     void
-    LoadJsonKeyIndex(
-        FieldId field_id,
-        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override {
+    RemoveJsonStats(FieldId field_id) override {
         std::unique_lock lck(mutex_);
-        const auto& field_meta = schema_->operator[](field_id);
-        json_key_indexes_[field_id] = std::move(index);
+        json_stats_.erase(field_id);
     }
 
-    index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const override {
+    void
+    LoadJsonStats(FieldId field_id,
+                  std::shared_ptr<index::JsonKeyStats> stats) override {
+        std::unique_lock lck(mutex_);
+        json_stats_[field_id] = stats;
+    }
+
+    index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
-        auto iter = json_key_indexes_.find(field_id);
-        if (iter == json_key_indexes_.end()) {
+        auto iter = json_stats_.find(field_id);
+        if (iter == json_stats_.end()) {
             return nullptr;
         }
         return iter->second.get();
@@ -536,10 +541,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
-    // used for json expr optimization
-    std::unordered_map<FieldId,
-                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
-        json_key_indexes_;
 };
 
 inline SegmentSealedUPtr

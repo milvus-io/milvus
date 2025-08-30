@@ -24,7 +24,6 @@
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include <folly/FBVector.h>
-#include <arrow/type.h>
 
 #include <limits>
 #include <memory>
