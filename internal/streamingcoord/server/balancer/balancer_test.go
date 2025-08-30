@@ -242,7 +242,6 @@ func TestBalancer(t *testing.T) {
 
 func TestBalancer_WithRecoveryLag(t *testing.T) {
 	paramtable.Init()
-
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
