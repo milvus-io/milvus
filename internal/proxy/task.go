@@ -344,6 +344,42 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
+func (t *createCollectionTask) handleNamespaceProperty() error {
+	exists := hasNamespaceField(t.schema)
+	if exists {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"namespace field name is reserved and cannot be user-defined")
+	}
+
+	hasIsolation := hasIsolationProperty(t.GetProperties()...)
+	hasPartitionKey := hasPartitionKeyModeField(t.schema)
+	enabled, has, err := parseNamespaceProp(t.GetProperties()...)
+	if err != nil {
+		return err
+	}
+
+	if !has || !enabled {
+		return nil
+	}
+
+	if hasIsolation {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"isolation property is not supported with namespace enabled")
+	}
+
+	if hasPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+	}
+
+	addNamespaceField(t.schema)
+	addIsolationProperty(t.schema)
+	log.Ctx(t.TraceCtx()).Info("added namespace field",
+		zap.String("collectionName", t.schema.Name),
+		zap.String("fieldName", common.NamespaceFieldName))
+
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -404,6 +440,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate field type definition
 	if err := validateFieldType(t.schema); err != nil {
+		return err
+	}
+
+	if err := t.handleNamespaceProperty(); err != nil {
 		return err
 	}
 
@@ -1097,6 +1137,84 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
+}
+
+func hasNamespaceField(schema *schemapb.CollectionSchema) bool {
+	for _, f := range schema.Fields {
+		if f.Name == common.NamespaceFieldName {
+			return true
+		}
+	}
+	for _, f := range schema.StructArrayFields {
+		if f.Name == common.NamespaceFieldName {
+			return true
+		}
+		for _, inner := range f.Fields {
+			if inner.Name == common.NamespaceFieldName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasIsolationProperty(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.PartitionKeyIsolationKey {
+			return true
+		}
+	}
+	return false
+}
+
+func addNamespaceField(schema *schemapb.CollectionSchema) {
+	fid := int64(-1)
+	for _, f := range schema.Fields {
+		if f.FieldID > fid {
+			fid = f.FieldID
+		}
+	}
+
+	for _, f := range schema.StructArrayFields {
+		if f.FieldID > fid {
+			fid = f.FieldID
+		}
+		for _, inner := range f.Fields {
+			if inner.FieldID > fid {
+				fid = inner.FieldID
+			}
+		}
+	}
+
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:        fid + 1,
+		Name:           common.NamespaceFieldName,
+		IsPartitionKey: true,
+		DataType:       schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
+		},
+	})
+}
+
+func addIsolationProperty(schema *schemapb.CollectionSchema) {
+	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.PartitionKeyIsolationKey,
+		Value: "true",
+	})
+}
+
+func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
+	for _, p := range props {
+		if p.GetKey() == common.NamespaceEnabledKey {
+			value, err := strconv.ParseBool(p.GetValue())
+			if err != nil {
+				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
+			}
+			return value, true, nil
+		}
+	}
+	return false, false, nil
 }
 
 func hasMmapProp(props ...*commonpb.KeyValuePair) bool {

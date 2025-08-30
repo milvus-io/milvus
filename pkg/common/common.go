@@ -56,6 +56,9 @@ const (
 	// TimeStampFieldName defines the name of the Timestamp field
 	TimeStampFieldName = "Timestamp"
 
+	// NamespaceFieldName defines the name of the Namespace field
+	NamespaceFieldName = "__namespace_id"
+
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
 
@@ -217,6 +220,7 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
+	NamespaceEnabledKey        = "namespace.enabled"
 )
 
 const (
