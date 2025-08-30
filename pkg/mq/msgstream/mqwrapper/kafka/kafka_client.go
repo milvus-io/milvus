@@ -86,6 +86,10 @@ func GetBasicConfig(config *paramtable.KafkaConfig) kafka.ConfigMap {
 		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol.GetValue())
 	}
 
+	if config.QueuedMessagesKbytes.GetValue() != "" {
+		kafkaConfig.SetKey("queued.max.messages.kbytes", config.QueuedMessagesKbytes.GetValue())
+	}
+
 	if config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() != "" {
 		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms.GetValue())
 		kafkaConfig.SetKey("sasl.username", config.SaslUsername.GetValue())
