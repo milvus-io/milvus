@@ -102,8 +102,8 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
         lcm->Read(file, buf.get(), file_size);
 
-        auto index =
-            milvus::storage::CreateFieldData(storage::DataType::INT8, false);
+        auto index = milvus::storage::CreateFieldData(
+            storage::DataType::INT8, DataType::NONE, false);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
         auto rawData = (uint8_t*)(index->Data());
@@ -370,7 +370,8 @@ auto
 PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     std::vector<NativeType> data =
         PrepareRawFieldData<NativeType>(opt_field_data_range);
-    auto field_data = storage::CreateFieldData(DT, false, 1, kEntityCnt);
+    auto field_data =
+        storage::CreateFieldData(DT, DataType::NONE, false, 1, kEntityCnt);
     field_data->FillFieldData(data.data(), kEntityCnt);
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -395,7 +396,8 @@ PrepareOptionalField(const std::shared_ptr<DiskFileManagerImpl>& file_manager,
     OptFieldT opt_field;
     std::vector<std::string> insert_files;
     insert_files.emplace_back(insert_file_path);
-    opt_field[kOptFieldId] = {kOptFieldName, DT, insert_files};
+    opt_field[kOptFieldId] = {
+        kOptFieldName, DT, DataType::NONE, insert_files};  // 添加element_type
     return opt_field;
 }
 
@@ -453,8 +455,10 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
     OptFieldT opt_fields =
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
-    opt_fields[kOptFieldId + 1] = {
-        kOptFieldName + "second", DataType::INT64, {insert_file_path}};
+    opt_fields[kOptFieldId + 1] = {kOptFieldName + "second",
+                                   DataType::INT64,
+                                   DataType::NONE,
+                                   {insert_file_path}};  // 添加element_type
     milvus::Config config;
     config[VEC_OPT_FIELDS] = opt_fields;
     EXPECT_THROW(file_manager->CacheOptFieldToDisk(config), SegcoreError);

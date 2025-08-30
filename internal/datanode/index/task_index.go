@@ -268,10 +268,11 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
 	for _, optField := range it.req.GetOptionalScalarFields() {
 		optFields = append(optFields, &indexcgopb.OptionalFieldInfo{
-			FieldID:   optField.GetFieldID(),
-			FieldName: optField.GetFieldName(),
-			FieldType: optField.GetFieldType(),
-			DataPaths: optField.GetDataPaths(),
+			FieldID:     optField.GetFieldID(),
+			FieldName:   optField.GetFieldName(),
+			FieldType:   optField.GetFieldType(),
+			ElementType: optField.GetElementType(),
+			DataPaths:   optField.GetDataPaths(),
 		})
 	}
 

@@ -125,10 +125,11 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
             opt_fields_map[field_id] = {
                 field_info.field_name(),
                 static_cast<milvus::DataType>(field_info.field_type()),
+                static_cast<milvus::DataType>(field_info.element_type()),
                 {}};
         }
         for (const auto& str : field_info.data_paths()) {
-            std::get<2>(opt_fields_map[field_id]).emplace_back(str);
+            std::get<3>(opt_fields_map[field_id]).emplace_back(str);
         }
     }
 
@@ -179,6 +180,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     }
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
+    config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
 
     return config;
 }

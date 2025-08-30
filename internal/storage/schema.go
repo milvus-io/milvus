@@ -30,7 +30,24 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		default:
 			dim = 0
 		}
-		arrowFields = append(arrowFields, ConvertToArrowField(field, serdeMap[field.DataType].arrowType(dim)))
+
+		elementType := schemapb.DataType_None
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = field.GetElementType()
+		}
+
+		arrowType := serdeMap[field.DataType].arrowType(dim, elementType)
+		arrowField := ConvertToArrowField(field, arrowType)
+
+		// Add extra metadata for ArrayOfVector
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			arrowField.Metadata = arrow.NewMetadata(
+				[]string{packed.ArrowFieldIdMetadataKey, "elementType", "dim"},
+				[]string{strconv.Itoa(int(field.GetFieldID())), strconv.Itoa(int(elementType)), strconv.Itoa(dim)},
+			)
+		}
+
+		arrowFields = append(arrowFields, arrowField)
 		return nil
 	}
 	for _, field := range schema.GetFields() {

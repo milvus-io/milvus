@@ -320,7 +320,18 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					m[j] = nil
 				}
 			} else {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i, shouldCopy)
+				// Get element type and dim for ArrayOfVector, otherwise use defaults
+				elementType := schemapb.DataType_None
+				dim := 0
+				if typeutil.IsVectorType(dt) {
+					dimValue, _ := typeutil.GetDim(f)
+					dim = int(dimValue)
+				}
+				if dt == schemapb.DataType_ArrayOfVector {
+					elementType = f.GetElementType()
+				}
+
+				d, ok := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
 				if ok {
 					m[j] = d // TODO: avoid memory copy here.
 				} else {
@@ -577,9 +588,18 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
 	for _, f := range allFieldsSchema {
 		dim, _ := typeutil.GetDim(f)
-		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
+
+		elementType := schemapb.DataType_None
+		if f.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = f.GetElementType()
+			elementTypes[f.FieldID] = elementType
+		}
+
+		arrowType := serdeMap[f.DataType].arrowType(int(dim), elementType)
+		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
 		types[f.FieldID] = f.DataType
 	}
@@ -592,7 +612,14 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 			if !ok {
 				panic("unknown type")
 			}
-			ok = typeEntry.serialize(builders[fid], e)
+
+			// Get element type for ArrayOfVector, otherwise use None
+			elementType := schemapb.DataType_None
+			if types[fid] == schemapb.DataType_ArrayOfVector {
+				elementType = elementTypes[fid]
+			}
+
+			ok = typeEntry.serialize(builders[fid], e, elementType)
 			if !ok {
 				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
 			}
@@ -1252,7 +1279,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
-			Type:     serdeMap[dsw.pkType].arrowType(0),
+			Type:     serdeMap[dsw.pkType].arrowType(0, schemapb.DataType_None),
 			Nullable: false,
 		},
 		{
@@ -1329,7 +1356,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 		fields := []arrow.Field{
 			{
 				Name:     "pk",
-				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0),
+				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0, schemapb.DataType_None),
 				Nullable: false,
 			},
 			{

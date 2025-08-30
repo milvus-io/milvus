@@ -118,7 +118,7 @@ test_run() {
         data.push_back(x);
     }
 
-    auto field_data = storage::CreateFieldData(dtype, nullable);
+    auto field_data = storage::CreateFieldData(dtype, DataType::NONE, nullable);
     if (nullable) {
         int byteSize = (nb + 7) / 8;
         uint8_t* valid_data_ = new uint8_t[byteSize];
@@ -512,7 +512,7 @@ test_string() {
         }
     }
 
-    auto field_data = storage::CreateFieldData(dtype, nullable);
+    auto field_data = storage::CreateFieldData(dtype, DataType::NONE, nullable);
     if (nullable) {
         int byteSize = (nb + 7) / 8;
         uint8_t* valid_data_ = new uint8_t[byteSize];

@@ -194,7 +194,8 @@ test_run() {
     for (int64_t i = 0; i < nb * dim; ++i) {
         data_gen[i] = rand();
     }
-    auto field_data = storage::CreateFieldData(dtype, false, dim);
+    auto field_data =
+        storage::CreateFieldData(dtype, DataType::NONE, false, dim);
     field_data->FillFieldData(data_gen.data(), data_gen.size() / dim);
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);

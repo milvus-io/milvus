@@ -234,6 +234,7 @@ message OptionalFieldInfo {
     int32 field_type = 3;
     repeated string data_paths = 4;
     repeated int64 data_ids = 5;
+    int32 element_type = 6;
 }
 
 message JobInfo {
