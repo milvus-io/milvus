@@ -12,16 +12,21 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
+#include "common/Consts.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "milvus-storage/common/metadata.h"
+#include "common/ChunkWriter.h"
 
 namespace milvus {
 
@@ -66,6 +71,17 @@ struct FieldChunkMetrics {
     CellByteSize() const {
         return {0, 0};
     }
+};
+
+enum class StatisticType {
+    MINMAX,           // 最小最大值统计
+    SET,              // 唯一值集合统计（低基数）
+    BLOOM_FILTER,     // 布隆过滤器（高基数存在性检查）
+    NGRAM_FILTER,     // N-gram 布隆过滤器（文本搜索）
+    TOKEN_FILTER,     // 分词布隆过滤器（全文检索）
+    COUNT_DISTINCT,   // 唯一值计数
+    NULL_COUNT,       // 空值统计
+    SIZE_STATS        // 大小统计（变长类型）
 };
 
 class FieldChunkMetricsTranslator
@@ -207,6 +223,240 @@ class FieldChunkMetricsTranslator
     std::shared_ptr<ChunkedColumnInterface> column_;
 };
 
+class ChunkSkipIndex : public milvus_storage::Metadata {
+   public:
+    ChunkSkipIndex() = default;
+
+    ChunkSkipIndex(const std::shared_ptr<arrow::Table>& table, const std::unordered_map<FieldId, FieldMeta>& field_metas) {
+        field_list_.reserve(field_metas.size());
+        field_chunk_metrics_.reserve(field_metas.size());
+
+        std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+        std::vector<FieldId> field_list;
+        std::vector<std::unique_ptr<FieldChunkMetrics>> field_chunk_metrics;
+        for (int i = 0; i < table->schema()->num_fields(); ++i) {
+            auto field_id = std::stoll(table->schema()
+                                           ->field(i)
+                                           ->metadata()
+                                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                           ->data());
+            auto fid = milvus::FieldId(field_id);
+            if (fid == RowFieldID) {
+                // ignore row id field
+                continue;
+            }
+            auto it = field_metas.find(fid);
+            const auto& field_meta = it->second;
+            auto data_type = field_meta.get_data_type();
+
+            const arrow::ArrayVector& array_vec = table->column(i)->chunks();
+            std::unique_ptr<Chunk> chunk;
+            chunk = create_chunk(field_meta, array_vec);
+            
+            auto field_metrics = std::make_unique<FieldChunkMetrics>();
+            int num_rows;
+            if (data_type == DataType::VARCHAR) {
+                auto string_chunk = static_cast<StringChunk*>(chunk.get());
+                num_rows = chunk->RowNums();
+                if (num_rows > 0) {
+                    auto info = ProcessStringFieldMetrics(string_chunk);
+                    field_metrics->min_ = Metrics(info.min_);
+                    field_metrics->max_ = Metrics(info.max_);
+                    field_metrics->null_count_ = info.null_count_;
+                }
+                field_metrics->hasValue_ = field_metrics->null_count_ != num_rows;
+            } else {
+                auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+                auto span = fixed_chunk->Span();
+
+                const void* chunk_data = span.data();
+                const bool* valid_data = span.valid_data();
+                num_rows = span.row_count();
+
+                switch(data_type) {
+                    case DataType::INT8: {
+                        const int8_t* typeData = static_cast<const int8_t*>(chunk_data);
+                        auto info = ProcessFieldMetrics<int8_t>(typeData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                    case DataType::INT16: {
+                        const int16_t* typedData =
+                            static_cast<const int16_t*>(chunk_data);
+                        auto info = ProcessFieldMetrics<int16_t>(
+                            typedData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                    case DataType::INT32: {
+                        const int32_t* typedData =
+                            static_cast<const int32_t*>(chunk_data);
+                        auto info = ProcessFieldMetrics<int32_t>(
+                            typedData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                    case DataType::INT64: {
+                        const int64_t* typedData =
+                            static_cast<const int64_t*>(chunk_data);
+                        auto info = ProcessFieldMetrics<int64_t>(
+                            typedData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                    case DataType::FLOAT: {
+                        const float* typedData =
+                            static_cast<const float*>(chunk_data);
+                        auto info = ProcessFieldMetrics<float>(
+                            typedData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                    case DataType::DOUBLE: {
+                        const double* typedData =
+                            static_cast<const double*>(chunk_data);
+                        auto info = ProcessFieldMetrics<double>(
+                            typedData, valid_data, num_rows);
+                        field_metrics->min_ = Metrics(info.min_);
+                        field_metrics->max_ = Metrics(info.max_);
+                        field_metrics->null_count_ = info.null_count_;
+                        break;
+                    }
+                }
+            }
+            field_metrics->hasValue_ = field_metrics->null_count_ != num_rows;
+
+            field_list_.push_back(fid);
+            field_chunk_metrics_.push_back(std::move(field_metrics));
+        }
+    }
+
+    explicit ChunkSkipIndex(std::vector<FieldId> field_list, std::vector<std::shared_ptr<FieldChunkMetrics>> field_chunk_metrics)
+        : field_list_(std::move(field_list)), field_chunk_metrics_(std::move(field_chunk_metrics)) {}
+
+    std::vector<FieldId> GetFieldList() const {
+        return field_list_;
+    }
+
+    std::vector<std::shared_ptr<FieldChunkMetrics>> GetFieldChunkMetrics() const {
+        return field_chunk_metrics_;
+    }
+
+    std::string Serialize() const override {
+        return "";
+    };
+
+    void Deserialize(const std::string &data) override {
+        // Implement deserialization logic here
+    };
+
+ private:
+    template <typename T>
+    struct metricInfo {
+        T min_;
+        T max_;
+        int64_t null_count_;
+    };
+
+    metricInfo<std::string>
+    ProcessStringFieldMetrics(const StringChunk* chunk) {
+        // all captured by reference
+        bool has_first_valid = false;
+        std::string_view min_string;
+        std::string_view max_string;
+        int64_t null_count = 0;
+
+        auto row_count = chunk->RowNums();
+
+        for (int64_t i = 0; i < row_count; ++i) {
+            bool is_valid = chunk->isValid(i);
+            if (!is_valid) {
+                null_count++;
+                continue;
+            }
+            auto value = chunk->operator[](i);
+            if (!has_first_valid) {
+                min_string = value;
+                max_string = value;
+                has_first_valid = true;
+            } else {
+                if (value < min_string) {
+                    min_string = value;
+                }
+                if (value > max_string) {
+                    max_string = value;
+                }
+            }
+        }
+        // The field data may later be released, so we need to copy the string to avoid invalid memory access.
+        return {std::string(min_string), std::string(max_string), null_count};
+    }
+
+    template <typename T>
+    metricInfo<T>
+    ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
+        //double check to avoid crash
+        if (data == nullptr || count == 0) {
+            return {T(), T()};
+        }
+        // find first not null value
+        int64_t start = 0;
+        for (int64_t i = start; i < count; i++) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                start++;
+                continue;
+            }
+            break;
+        }
+        if (start > count - 1) {
+            return {T(), T(), count};
+        }
+        T minValue = data[start];
+        T maxValue = data[start];
+        int64_t null_count = start;
+        for (int64_t i = start; i < count; i++) {
+            T value = data[i];
+            if (valid_data != nullptr && !valid_data[i]) {
+                null_count++;
+                continue;
+            }
+            if (value < minValue) {
+                minValue = value;
+            }
+            if (value > maxValue) {
+                maxValue = value;
+            }
+        }
+        return {minValue, maxValue, null_count};
+    }
+    std::vector<FieldId> field_list_;
+    std::vector<std::shared_ptr<FieldChunkMetrics>> field_chunk_metrics_;
+};
+
+class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder<ChunkSkipIndexBuilder, ChunkSkipIndex> {
+ public:
+    ChunkSkipIndexBuilder() = default;
+    ChunkSkipIndexBuilder(const std::unordered_map<FieldId, FieldMeta>& field_metas)
+        : field_metas_(field_metas) {}
+ protected:
+    std::shared_ptr<ChunkSkipIndex> BuildImpl(const std::shared_ptr<arrow::Table>& table) override {
+        return std::make_shared<ChunkSkipIndex>(table, field_metas_);
+    }
+
+ private:
+    std::unordered_map<FieldId, FieldMeta> field_metas_;
+};
+
 class SkipIndex {
  public:
     template <typename T>
@@ -215,8 +465,9 @@ class SkipIndex {
                       int64_t chunk_id,
                       OpType op_type,
                       const T& val) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
-        auto field_chunk_metrics = pw.get();
+        // auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        // auto field_chunk_metrics = pw.get();
+        auto field_chunk_metrics = GetFieldChunkMetrics(field_id, chunk_id);
         if (MinMaxUnaryFilter<T>(field_chunk_metrics, op_type, val)) {
             return true;
         }
@@ -232,8 +483,9 @@ class SkipIndex {
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
-        auto field_chunk_metrics = pw.get();
+        // auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        // auto field_chunk_metrics = pw.get();
+        auto field_chunk_metrics = GetFieldChunkMetrics(field_id, chunk_id);
         if (MinMaxBinaryFilter<T>(field_chunk_metrics,
                                   lower_val,
                                   upper_val,
@@ -244,24 +496,52 @@ class SkipIndex {
         return false;
     }
 
-    void
-    LoadSkip(int64_t segment_id,
-             milvus::FieldId field_id,
-             milvus::DataType data_type,
-             std::shared_ptr<ChunkedColumnInterface> column) {
-        auto translator = std::make_unique<FieldChunkMetricsTranslator>(
-            segment_id, field_id, data_type, column);
-        auto cache_slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<FieldChunkMetrics>(std::move(translator));
+    // void
+    // LoadSkip(int64_t segment_id,
+    //          milvus::FieldId field_id,
+    //          milvus::DataType data_type,
+    //          std::shared_ptr<ChunkedColumnInterface> column) {
+    //     auto translator = std::make_unique<FieldChunkMetricsTranslator>(
+    //         segment_id, field_id, data_type, column);
+    //     auto cache_slot =
+    //         cachinglayer::Manager::GetInstance()
+    //             .CreateCacheSlot<FieldChunkMetrics>(std::move(translator));
 
-        std::unique_lock lck(mutex_);
-        fieldChunkMetrics_[field_id] = std::move(cache_slot);
+    //     std::unique_lock lck(mutex_);
+    //     fieldChunkMetrics_[field_id] = std::move(cache_slot);
+    // }
+
+    void
+    LoadSkip(std::vector<std::shared_ptr<ChunkSkipIndex>> chunk_skipindex) {
+        if (chunk_skipindex.empty()) {
+            return;
+        }
+        
+        const auto& field_list = chunk_skipindex[0]->GetFieldList();
+        
+        for (const auto& field_id : field_list) {
+            if (fieldChunkMetrics_.find(field_id) == fieldChunkMetrics_.end()) {
+                fieldChunkMetrics_[field_id] = std::vector<std::shared_ptr<FieldChunkMetrics>>{};
+                fieldChunkMetrics_[field_id].reserve(chunk_skipindex.size());
+            }
+        }
+        
+        for (auto& skip_index : chunk_skipindex) {
+            auto field_chunk_metrics = skip_index->GetFieldChunkMetrics();
+            for (size_t i = 0; i < field_list.size(); ++i) {
+                fieldChunkMetrics_[field_list[i]].emplace_back(std::move(field_chunk_metrics[i]));
+            }
+        }
     }
 
  private:
-    const cachinglayer::PinWrapper<const FieldChunkMetrics*>
-    GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
+    // const cachinglayer::PinWrapper<const FieldChunkMetrics*>
+    // GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
+
+    const FieldChunkMetrics* GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
+        return fieldChunkMetrics_.at(field_id).at(chunk_id).get();
+    }
+
 
     template <typename T>
     struct IsAllowedType {
@@ -377,10 +657,11 @@ class SkipIndex {
     }
 
  private:
-    std::unordered_map<
-        FieldId,
-        std::shared_ptr<cachinglayer::CacheSlot<FieldChunkMetrics>>>
-        fieldChunkMetrics_;
+    // std::unordered_map<
+    //     FieldId,
+    //     std::shared_ptr<cachinglayer::CacheSlot<FieldChunkMetrics>>>
+    //     fieldChunkMetrics_;
+    std::unordered_map<FieldId, std::vector<std::shared_ptr<FieldChunkMetrics>>> fieldChunkMetrics_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus

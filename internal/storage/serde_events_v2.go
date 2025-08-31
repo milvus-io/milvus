@@ -317,6 +317,7 @@ type PackedBinlogRecordWriter struct {
 	columnGroups         []storagecommon.ColumnGroup
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
+	enableSkipIndex 	 bool
 
 	// writer and stats generated at runtime
 	writer              *packedRecordWriter
@@ -400,6 +401,11 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 			logIdStart++
 		}
 		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
+		for _, columnGroup := range pw.columnGroups {
+			if columnGroup.enableSkipIndex {
+				pw.writer.enableSkipIndex(columnGroup.GroupID, pw.schema, columnGroup.Columns)
+			}
+		}
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}
@@ -582,6 +588,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	enableSkipIndex bool,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
@@ -623,6 +630,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		bm25Stats:            bm25Stats,
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
+		enableSkipIndex: 	 enableSkipIndex,
 
 		tsFrom: typeutil.MaxTimestamp,
 		tsTo:   0,

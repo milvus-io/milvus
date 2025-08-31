@@ -356,6 +356,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             }
         }
 
+        auto chunk_skipindex = chunked_column_group->GetSkipIndex(
+            insert_files, arrow_schema, fs);
+        skip_index_.LoadSkip(chunk_skipindex);
+
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += chunked_column_group->memory_size();
         }

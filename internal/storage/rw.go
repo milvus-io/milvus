@@ -67,6 +67,7 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
+	enableSkipIndex     bool
 }
 
 func (o *rwOptions) validate() error {
@@ -160,6 +161,12 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithEnableSkipIndex(enable bool) RwOption {
+	return func(options *rwOptions) {
+		options.enableSkipIndex = enable
 	}
 }
 
@@ -357,6 +364,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 			pluginContext,
+			rwOptions.enableSkipIndex,
 		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
