@@ -52,7 +52,7 @@ template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
     bool res;
-    if (!is_index_mode_) {
+    if (!SegmentExpr::CanUseIndex()) {
         use_index_ = res = false;
         return res;
     }
@@ -1689,8 +1689,8 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
             }
             auto valid =
                 (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-                    : ProcessChunksForValid<T>(is_index_mode_);
+                    ? ProcessChunksForValidByOffsets<T>(SegmentExpr::CanUseIndex(), *input)
+                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1948,10 +1948,7 @@ template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
     use_index_ =
-        is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
-        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
-        // TODO: if multiple indexes are supported, this logic should be changed
-        !segment_->HasNgramIndex(field_id_);
+        SegmentExpr::CanUseIndex() && SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
     return use_index_;
 }
 

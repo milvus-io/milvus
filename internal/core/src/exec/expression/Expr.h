@@ -280,7 +280,8 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         // when we specify input, do not maintain states
         if (!has_offset_input_) {
-            if (is_index_mode_) {
+            // todo(SpadeA): how about ngram?
+            if (SegmentExpr::CanUseIndex()) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
@@ -307,15 +308,15 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
+        auto current_chunk = SegmentExpr::CanUseIndex() && use_index_ ? current_index_chunk_
                                                           : current_data_chunk_;
-        auto current_chunk_pos = is_index_mode_ && use_index_
+        auto current_chunk_pos = SegmentExpr::CanUseIndex() && use_index_
                                      ? current_index_chunk_pos_
                                      : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
             current_rows =
-                is_index_mode_ && use_index_ &&
+            SegmentExpr::CanUseIndex() && use_index_ &&
                         segment_->type() == SegmentType::Sealed
                     ? current_chunk_pos
                     : segment_->num_rows_until_chunk(field_id_, current_chunk) +
@@ -486,7 +487,7 @@ class SegmentExpr : public Expr {
         int64_t processed_size = 0;
 
         // index reverse lookup
-        if (is_index_mode_ && num_data_chunk_ == 0) {
+        if (SegmentExpr::CanUseIndex() && num_data_chunk_ == 0) {
             return ProcessIndexLookupByOffsets<T>(
                 func, skip_func, input, res, valid_res, values...);
         }
@@ -1222,9 +1223,16 @@ class SegmentExpr : public Expr {
         }
     }
 
+    bool
+    CanUseIndex() const {
+        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
+        // TODO: if multiple indexes are supported, this logic should be changed
+        return is_index_mode_ && !segment_->HasNgramIndex(field_id_);
+    }
+
     template <typename T>
     bool
-    CanUseIndex(OpType op) const {
+    CanUseIndexForOp(OpType op) const {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
