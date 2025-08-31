@@ -18,8 +18,10 @@
 #include "parquet/types.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
+#include "segcore/Collection.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
@@ -31,8 +33,11 @@
 #include <arrow/record_batch.h>
 #include <arrow/memory_pool.h>
 #include <arrow/device.h>
+#include <cstdint>
+#include <cstring>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "index/SkipIndex.h"
 #include "monitor/scope_metric.h"
 
 CStatus
@@ -236,6 +241,38 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
                                           status.ToString());
         }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+EnableSkipIndex(int64_t group_id,
+                const int64_t* field_ids,
+                const int64_t length,
+                CCollection c_collection,
+                CPackedWriter c_packed_writer) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto packed_writer =
+            static_cast<milvus_storage::PackedRecordBatchWriter*>(
+                c_packed_writer);
+        auto col = static_cast<milvus::segcore::Collection*>(c_collection);
+
+        auto field_id_list = std::vector<int64_t>(field_ids, field_ids + length);
+        std::vector<milvus::FieldId> milvus_field_ids;
+        for (int i = 0; i < field_id_list.size(); ++i) {
+            milvus_field_ids.push_back(milvus::FieldId(field_id_list[i]));
+        }
+        auto schema = col->get_schema();
+        auto field_meta = schema->get_field_metas(milvus_field_ids);
+
+        auto builder = std::make_unique<milvus::ChunkSkipIndexBuilder>(field_meta);
+        auto builder_wrapper = std::make_unique<milvus_storage::MetadataBuilderWrapper>(std::move(builder));
+
+        packed_writer->AddMetadataBuilder(group_id, "skip_index", std::move(builder_wrapper));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
