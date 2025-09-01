@@ -110,13 +110,14 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 }
 
 // FailTxnAtVChannel fails all transactions at the specified vchannel.
+// If the vchannel is empty, it will fail all transactions.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
-		if session.VChannel() == vchannel {
+		if vchannel == "" || session.VChannel() == vchannel {
 			session.Cleanup()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
