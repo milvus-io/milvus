@@ -1264,7 +1264,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
-			FieldJsonIndexStats: s.GetFieldJSONIndexStats(),
+			JsonStatsInfo: s.GetFieldJSONIndexStats(),
 		})
 	}
 

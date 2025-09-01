@@ -557,6 +557,37 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const override {
+        if (data_type_ != DataType::STRING) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "BulkRawBsonAt only supported for ProxyChunkColumn of "
+                      "Bson type");
+        }
+        if (count == 0) {
+            return;
+        }
+
+        AssertInfo(row_offsets != nullptr, "row_offsets is nullptr");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto str_view = static_cast<StringChunk*>(chunk.get())
+                                ->
+                                operator[](offsets_in_chunk[i]);
+            fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size()),
+               row_offsets[i],
+               value_offsets[i]);
+        }
+    }
+
+    void
     BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {

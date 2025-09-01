@@ -554,6 +554,30 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }
+
+    void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const override {
+        if (count == 0) {
+            return;
+        }
+        AssertInfo(row_offsets != nullptr && value_offsets != nullptr,
+                   "row_offsets and value_offsets must be provided");
+
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(cids));
+        for (int64_t i = 0; i < count; i++) {
+            auto chunk = ca->get_cell_of(cids[i]);
+            auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                offsets_in_chunk[i]);
+            fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size()),
+               row_offsets[i],
+               value_offsets[i]);
+        }
+    }
 };
 
 class ChunkedArrayColumn : public ChunkedColumnBase {

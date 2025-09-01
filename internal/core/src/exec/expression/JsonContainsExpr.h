@@ -24,9 +24,425 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
+#include "common/bson_view.h"
+#include "exec/expression/Utils.h"
 
 namespace milvus {
 namespace exec {
+
+class ShreddingArrayBsonContainsArrayExecutor {
+ public:
+    explicit ShreddingArrayBsonContainsArrayExecutor(
+        const std::vector<proto::plan::Array>& elems)
+        : elements_(elems) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array_view = bson.ParseAsArrayAtOffset(0);
+            if (!array_view.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            bool matched = false;
+            for (const auto& sub_value : array_view.value()) {
+                auto sub_array = milvus::BsonView::GetValueFromBsonView<
+                    bsoncxx::array::view>(sub_value.get_value());
+                if (!sub_array.has_value())
+                    continue;
+                for (const auto& element : elements_) {
+                    if (CompareTwoJsonArray(sub_array.value(), element)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (matched)
+                    break;
+            }
+            res[i] = matched;
+        }
+    }
+
+ private:
+    const std::vector<proto::plan::Array> elements_;
+};
+
+class ShreddingArrayBsonContainsAllArrayExecutor {
+ public:
+    explicit ShreddingArrayBsonContainsAllArrayExecutor(
+        const std::vector<proto::plan::Array>& elems)
+        : elements_(elems) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array_view = bson.ParseAsArrayAtOffset(0);
+            if (!array_view.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            std::set<int> exist_elements_index;
+            for (const auto& sub_value : array_view.value()) {
+                auto sub_array = milvus::BsonView::GetValueFromBsonView<
+                    bsoncxx::array::view>(sub_value.get_value());
+                if (!sub_array.has_value())
+                    continue;
+
+                for (int idx = 0; idx < static_cast<int>(elements_.size());
+                     ++idx) {
+                    if (CompareTwoJsonArray(sub_array.value(),
+                                            elements_[idx])) {
+                        exist_elements_index.insert(idx);
+                    }
+                }
+                if (exist_elements_index.size() == elements_.size()) {
+                    break;
+                }
+            }
+            res[i] = exist_elements_index.size() == elements_.size();
+        }
+    }
+
+ private:
+    const std::vector<proto::plan::Array> elements_;
+};
+
+template <typename GetType>
+class ShreddingArrayBsonContainsAnyExecutor {
+ public:
+    ShreddingArrayBsonContainsAnyExecutor(
+        std::shared_ptr<MultiElement> arg_set,
+        std::shared_ptr<MultiElement> arg_set_double)
+        : arg_set_(std::move(arg_set)),
+          arg_set_double_(std::move(arg_set_double)) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array_view = bson.ParseAsArrayAtOffset(0);
+            if (!array_view.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            bool matched = false;
+            for (const auto& element : array_view.value()) {
+                if constexpr (std::is_same_v<GetType, int64_t> ||
+                              std::is_same_v<GetType, double>) {
+                    auto value = milvus::BsonView::GetValueFromBsonView<double>(
+                        element.get_value());
+                    if (value.has_value() &&
+                        arg_set_double_->In(value.value())) {
+                        matched = true;
+                        break;
+                    }
+                } else {
+                    auto value =
+                        milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    if (value.has_value() && arg_set_->In(value.value())) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            res[i] = matched;
+        }
+    }
+
+ private:
+    std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<MultiElement> arg_set_double_;
+};
+
+template <typename GetType>
+class ShreddingArrayBsonContainsAllExecutor {
+ public:
+    explicit ShreddingArrayBsonContainsAllExecutor(
+        const std::set<GetType>& elements)
+        : elements_(elements) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array_view = bson.ParseAsArrayAtOffset(0);
+            if (!array_view.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            std::set<GetType> tmp_elements(elements_);
+            for (const auto& element : array_view.value()) {
+                auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
+                    element.get_value());
+                if (!value.has_value()) {
+                    continue;
+                }
+                tmp_elements.erase(value.value());
+                if (tmp_elements.empty()) {
+                    break;
+                }
+            }
+            res[i] = tmp_elements.empty();
+        }
+    }
+
+ private:
+    std::set<GetType> elements_;
+};
+
+class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
+ public:
+    ShreddingArrayBsonContainsAllWithDiffTypeExecutor(
+        std::vector<proto::plan::GenericValue> elements,
+        std::set<int> elements_index)
+        : elements_(std::move(elements)),
+          elements_index_(std::move(elements_index)) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array = bson.ParseAsArrayAtOffset(0);
+            if (!array.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            std::set<int> tmp_elements_index(elements_index_);
+            for (const auto& sub_value : array.value()) {
+                int idx = -1;
+                for (auto& element : elements_) {
+                    idx++;
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<bool>(
+                                    sub_value.get_value());
+                            if (!val.has_value()) {
+                                continue;
+                            }
+                            if (val.value() == element.bool_val()) {
+                                tmp_elements_index.erase(idx);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                    sub_value.get_value());
+                            if (!val.has_value()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                tmp_elements_index.erase(idx);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    sub_value.get_value());
+                            if (!val.has_value()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                tmp_elements_index.erase(idx);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = milvus::BsonView::GetValueFromBsonView<
+                                std::string>(sub_value.get_value());
+                            if (!val.has_value()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                tmp_elements_index.erase(idx);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = milvus::BsonView::GetValueFromBsonView<
+                                bsoncxx::array::view>(sub_value.get_value());
+                            if (!val.has_value()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val.value(),
+                                                    element.array_val())) {
+                                tmp_elements_index.erase(idx);
+                            }
+                            break;
+                        }
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
+                    }
+                    if (tmp_elements_index.size() == 0) {
+                        break;
+                    }
+                }
+                if (tmp_elements_index.size() == 0) {
+                    break;
+                }
+            }
+            res[i] = tmp_elements_index.size() == 0;
+        }
+    }
+
+ private:
+    std::vector<proto::plan::GenericValue> elements_;
+    std::set<int> elements_index_;
+};
+
+class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
+ public:
+    explicit ShreddingArrayBsonContainsAnyWithDiffTypeExecutor(
+        std::vector<proto::plan::GenericValue> elements)
+        : elements_(std::move(elements)) {
+    }
+
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array = bson.ParseAsArrayAtOffset(0);
+            if (!array.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            bool matched = false;
+            for (const auto& sub_value : array.value()) {
+                for (auto const& element : elements_) {
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<bool>(
+                                    sub_value.get_value());
+                            if (val.has_value() &&
+                                val.value() == element.bool_val()) {
+                                matched = true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                    sub_value.get_value());
+                            if (val.has_value() &&
+                                val.value() == element.int64_val()) {
+                                matched = true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    sub_value.get_value());
+                            if (val.has_value() &&
+                                val.value() == element.float_val()) {
+                                matched = true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = milvus::BsonView::GetValueFromBsonView<
+                                std::string>(sub_value.get_value());
+                            if (val.has_value() &&
+                                val.value() == element.string_val()) {
+                                matched = true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = milvus::BsonView::GetValueFromBsonView<
+                                bsoncxx::array::view>(sub_value.get_value());
+                            if (val.has_value() &&
+                                CompareTwoJsonArray(val.value(),
+                                                    element.array_val())) {
+                                matched = true;
+                            }
+                            break;
+                        }
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
+                    }
+                    if (matched)
+                        break;
+                }
+                if (matched)
+                    break;
+            }
+            res[i] = matched;
+        }
+    }
+
+ private:
+    std::vector<proto::plan::GenericValue> elements_;
+};
 
 class PhyJsonContainsFilterExpr : public SegmentExpr {
  public:
@@ -82,7 +498,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsByKeyIndex();
+    ExecJsonContainsByStats();
 
     template <typename ExprValueType>
     VectorPtr
@@ -94,7 +510,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsAllByKeyIndex();
+    ExecJsonContainsAllByStats();
 
     template <typename ExprValueType>
     VectorPtr
@@ -104,25 +520,25 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     ExecJsonContainsArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsArrayByKeyIndex();
+    ExecJsonContainsArrayByStats();
 
     VectorPtr
     ExecJsonContainsAllArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllArrayByKeyIndex();
+    ExecJsonContainsAllArrayByStats();
 
     VectorPtr
     ExecJsonContainsAllWithDiffType(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllWithDiffTypeByKeyIndex();
+    ExecJsonContainsAllWithDiffTypeByStats();
 
     VectorPtr
     ExecJsonContainsWithDiffType(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsWithDiffTypeByKeyIndex();
+    ExecJsonContainsWithDiffTypeByStats();
 
     VectorPtr
     EvalArrayContainsForIndexSegment(DataType data_type);
@@ -135,6 +551,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<MultiElement> arg_set_double_;
 };
 }  //namespace exec
 }  // namespace milvus
