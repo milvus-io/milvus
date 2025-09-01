@@ -50,6 +50,10 @@ func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel 
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
 }
 
+func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
+	panic("we cannot get replicate checkpoint from a read only wal")
+}
+
 // Append writes a record to the log.
 func (w *roWALAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	panic("we cannot append message into a read only wal")

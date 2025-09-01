@@ -21,6 +21,13 @@ type WAL interface {
 	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
 	GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error)
 
+	// GetReplicateCheckpoint returns the replicate checkpoint of the wal.
+	// If the wal is not on replicating mode, it will return a nil checkpoint without error.
+	// If the wal is on replicating mode, it will return the replicate checkpoint of the wal.
+	// If the wal is initialized into replica mode, not replicate any message,
+	// the message id of the replicate checkpoint will be 0.
+	GetReplicateCheckpoint() (*ReplicateCheckpoint, error)
+
 	// Append writes a record to the log.
 	Append(ctx context.Context, msg message.MutableMessage) (*AppendResult, error)
 

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -49,7 +50,7 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 		&streamingpb.WALCheckpoint{
 			MessageId:     rmq.NewRmqID(1).IntoProto(),
 			TimeTick:      1,
-			RecoveryMagic: RecoveryMagicStreamingInitialized,
+			RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
 		}, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
 	channel := types.PChannelInfo{Name: "test_channel"}
@@ -60,7 +61,7 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 	assert.NotNil(t, rs.checkpoint)
-	assert.Equal(t, RecoveryMagicStreamingInitialized, rs.checkpoint.Magic)
+	assert.Equal(t, utility.RecoveryMagicStreamingInitialized, rs.checkpoint.Magic)
 	assert.True(t, rs.checkpoint.MessageID.EQ(rmq.NewRmqID(1)))
 }
 
