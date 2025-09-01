@@ -30,8 +30,7 @@ class PayloadWriter {
     // Constructor for VectorArray with element_type
     explicit PayloadWriter(const DataType column_type,
                            int dim,
-                           DataType element_type,
-                           bool nullable);
+                           DataType element_type);
     ~PayloadWriter() = default;
 
     void

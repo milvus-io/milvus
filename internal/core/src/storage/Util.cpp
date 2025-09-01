@@ -602,10 +602,7 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type,
-                  int dim,
-                  DataType element_type,
-                  bool nullable) {
+CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
     AssertInfo(data_type == DataType::VECTOR_ARRAY,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
@@ -615,8 +612,8 @@ CreateArrowSchema(DataType data_type,
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
-    auto field =
-        arrow::field("val", value_type, nullable)->WithMetadata(metadata);
+    // VECTOR_ARRAY is not nullable
+    auto field = arrow::field("val", value_type, false)->WithMetadata(metadata);
     return arrow::schema({field});
 }
 

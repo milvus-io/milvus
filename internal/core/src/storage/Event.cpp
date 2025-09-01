@@ -264,11 +264,8 @@ BaseEventData::Serialize() {
             AssertInfo(vector_array_field != nullptr,
                        "Failed to cast to FieldData<VectorArray>");
             auto element_type = vector_array_field->get_element_type();
-            payload_writer =
-                std::make_unique<PayloadWriter>(data_type,
-                                                field_data->get_dim(),
-                                                element_type,
-                                                field_data->IsNullable());
+            payload_writer = std::make_unique<PayloadWriter>(
+                data_type, field_data->get_dim(), element_type);
         } else if (IsVectorDataType(data_type) &&
                    !IsSparseFloatVectorDataType(data_type)) {
             payload_writer = std::make_unique<PayloadWriter>(

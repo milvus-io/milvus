@@ -119,7 +119,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 			return nil, err
 		}
 		w.arrowType = arrowType
-		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrowType)
+		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrowType.(*arrow.ListType).Elem())
 	} else {
 		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
