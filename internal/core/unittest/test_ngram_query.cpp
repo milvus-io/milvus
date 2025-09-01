@@ -342,18 +342,16 @@ TEST(NgramIndex, TestNgramSimple) {
 // and NOT for other operations (Equal, NotEqual, In, NotIn, etc.)
 // Issue: https://github.com/milvus-io/milvus/issues/44020
 TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
-    boost::container::vector<std::string> data = {
-        "apple",
-        "banana",
-        "cherry",
-        "date",
-        "elderberry",
-        "fig",
-        "grape",
-        "honeydew",
-        "kiwi",
-        "lemon"
-    };
+    boost::container::vector<std::string> data = {"apple",
+                                                  "banana",
+                                                  "cherry",
+                                                  "date",
+                                                  "elderberry",
+                                                  "fig",
+                                                  "grape",
+                                                  "honeydew",
+                                                  "kiwi",
+                                                  "lemon"};
 
     int64_t collection_id = 1;
     int64_t partition_id = 2;
@@ -489,12 +487,12 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             values.push_back(val3);
 
             auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
-                milvus::expr::ColumnInfo(field_id, DataType::VARCHAR),
-                values);
+                milvus::expr::ColumnInfo(field_id, DataType::VARCHAR), values);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, term_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // Only apple, banana, cherry should match
             for (size_t i = 0; i < nb; i++) {
                 if (i < 3) {
@@ -505,10 +503,10 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             }
         }
 
-        // Test: UnaryRangeExpr with Equal operator 
+        // Test: UnaryRangeExpr with Equal operator
         {
-            auto unary_range_expr = test::GenUnaryRangeExpr(
-                proto::plan::OpType::Equal, "apple");
+            auto unary_range_expr =
+                test::GenUnaryRangeExpr(proto::plan::OpType::Equal, "apple");
             auto column_info = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr->set_allocated_column_info(column_info);
@@ -518,7 +516,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             auto typed_expr = parser.ParseExprs(*expr);
             auto parsed = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, typed_expr);
-            BitsetType final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
+            BitsetType final =
+                ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
             // Only apple should match (exact match)
             for (size_t i = 0; i < nb; i++) {
                 if (i == 0) {
@@ -535,14 +534,19 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             lower_val.set_string_val("cherry");
             proto::plan::GenericValue upper_val;
             upper_val.set_string_val("grape");
-            
-            auto binary_range_expr = std::make_shared<milvus::expr::BinaryRangeFilterExpr>(
-                milvus::expr::ColumnInfo(field_id, DataType::VARCHAR),
-                lower_val, upper_val, true, true);
+
+            auto binary_range_expr =
+                std::make_shared<milvus::expr::BinaryRangeFilterExpr>(
+                    milvus::expr::ColumnInfo(field_id, DataType::VARCHAR),
+                    lower_val,
+                    upper_val,
+                    true,
+                    true);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, binary_range_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // Strings between "cherry" and "grape" inclusive: cherry, date, elderberry, fig, grape
             for (size_t i = 0; i < nb; i++) {
                 if (i >= 2 && i <= 6) {
@@ -556,8 +560,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         // Test: LogicalBinaryExpr with AND
         {
             // Create Equal expression
-            auto unary_range_expr1 = test::GenUnaryRangeExpr(
-                proto::plan::OpType::Equal, "apple");
+            auto unary_range_expr1 =
+                test::GenUnaryRangeExpr(proto::plan::OpType::Equal, "apple");
             auto column_info1 = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr1->set_allocated_column_info(column_info1);
@@ -578,13 +582,16 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             auto typed_expr2 = parser2.ParseExprs(*expr2);
 
             // Create LogicalBinaryExpr with AND
-            auto logical_and_expr = std::make_shared<milvus::expr::LogicalBinaryExpr>(
-                milvus::expr::LogicalBinaryExpr::OpType::And,
-                typed_expr1, typed_expr2);
+            auto logical_and_expr =
+                std::make_shared<milvus::expr::LogicalBinaryExpr>(
+                    milvus::expr::LogicalBinaryExpr::OpType::And,
+                    typed_expr1,
+                    typed_expr2);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, logical_and_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // Only apple should match (apple == "apple" AND apple != "banana")
             for (size_t i = 0; i < nb; i++) {
                 if (i == 0) {
@@ -598,8 +605,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         // Test: LogicalUnaryExpr with NOT
         {
             // Create Equal expression
-            auto unary_range_expr = test::GenUnaryRangeExpr(
-                proto::plan::OpType::Equal, "apple");
+            auto unary_range_expr =
+                test::GenUnaryRangeExpr(proto::plan::OpType::Equal, "apple");
             auto column_info = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr->set_allocated_column_info(column_info);
@@ -609,13 +616,15 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             auto typed_expr = parser.ParseExprs(*expr);
 
             // Create LogicalUnaryExpr with NOT
-            auto logical_not_expr = std::make_shared<milvus::expr::LogicalUnaryExpr>(
-                milvus::expr::LogicalUnaryExpr::OpType::LogicalNot,
-                typed_expr);
+            auto logical_not_expr =
+                std::make_shared<milvus::expr::LogicalUnaryExpr>(
+                    milvus::expr::LogicalUnaryExpr::OpType::LogicalNot,
+                    typed_expr);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, logical_not_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // All except apple should match (NOT (field == "apple"))
             for (size_t i = 0; i < nb; i++) {
                 if (i != 0) {
@@ -629,8 +638,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         // Test: LogicalBinaryExpr with OR
         {
             // Create Equal expression
-            auto unary_range_expr1 = test::GenUnaryRangeExpr(
-                proto::plan::OpType::Equal, "apple");
+            auto unary_range_expr1 =
+                test::GenUnaryRangeExpr(proto::plan::OpType::Equal, "apple");
             auto column_info1 = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr1->set_allocated_column_info(column_info1);
@@ -640,8 +649,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             auto typed_expr1 = parser1.ParseExprs(*expr1);
 
             // Create Equal expression for "banana"
-            auto unary_range_expr2 = test::GenUnaryRangeExpr(
-                proto::plan::OpType::Equal, "banana");
+            auto unary_range_expr2 =
+                test::GenUnaryRangeExpr(proto::plan::OpType::Equal, "banana");
             auto column_info2 = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr2->set_allocated_column_info(column_info2);
@@ -651,13 +660,16 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             auto typed_expr2 = parser2.ParseExprs(*expr2);
 
             // Create LogicalBinaryExpr with OR
-            auto logical_or_expr = std::make_shared<milvus::expr::LogicalBinaryExpr>(
-                milvus::expr::LogicalBinaryExpr::OpType::Or,
-                typed_expr1, typed_expr2);
+            auto logical_or_expr =
+                std::make_shared<milvus::expr::LogicalBinaryExpr>(
+                    milvus::expr::LogicalBinaryExpr::OpType::Or,
+                    typed_expr1,
+                    typed_expr2);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, logical_or_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // Apple and banana should match (apple == "apple" OR field == "banana")
             for (size_t i = 0; i < nb; i++) {
                 if (i == 0 || i == 1) {
@@ -675,8 +687,9 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
                 proto::plan::NullExpr_NullOp_IsNull);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, null_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // None should match since we have no null values
             for (size_t i = 0; i < nb; i++) {
                 ASSERT_FALSE(final[i]) << "Expected false at index " << i;
@@ -690,8 +703,9 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
                 proto::plan::NullExpr_NullOp_IsNotNull);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, null_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // All should match since we have no null values
             for (size_t i = 0; i < nb; i++) {
                 ASSERT_TRUE(final[i]) << "Expected true at index " << i;
@@ -704,7 +718,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         //         milvus::expr::ColumnInfo(field_id, DataType::VARCHAR));
         //     auto plan = std::make_shared<plan::FilterBitsNode>(
         //         DEFAULT_PLANNODE_ID, exists_expr);
-            
+
         //     BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
         //     // All should match since the field exists for all rows
         //     for (size_t i = 0; i < nb; i++) {
@@ -714,11 +728,13 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
 
         // Test: AlwaysTrueExpr
         {
-            auto always_true_expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
+            auto always_true_expr =
+                std::make_shared<milvus::expr::AlwaysTrueExpr>();
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, always_true_expr);
-            
-            BitsetType final = ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
+
+            BitsetType final =
+                ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
             // All should match
             for (size_t i = 0; i < nb; i++) {
                 ASSERT_TRUE(final[i]) << "Expected true at index " << i;
@@ -868,18 +884,16 @@ TEST(NgramIndex, TestNgramJson) {
 // Test that ngram index should only be used for like operations on JSON fields
 // and NOT for other operations (Equal, NotEqual, In, etc.)
 TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
-    std::vector<std::string> json_raw_data = {
-        R"({"name": "apple"})",
-        R"({"name": "banana"})",
-        R"({"name": "cherry"})",
-        R"({"name": "date"})",
-        R"({"name": "elderberry"})",
-        R"({"name": "fig"})",
-        R"({"name": "grape"})",
-        R"({"name": "honeydew"})",
-        R"({"name": "kiwi"})",
-        R"({"name": "lemon"})"
-    };
+    std::vector<std::string> json_raw_data = {R"({"name": "apple"})",
+                                              R"({"name": "banana"})",
+                                              R"({"name": "cherry"})",
+                                              R"({"name": "date"})",
+                                              R"({"name": "elderberry"})",
+                                              R"({"name": "fig"})",
+                                              R"({"name": "grape"})",
+                                              R"({"name": "honeydew"})",
+                                              R"({"name": "kiwi"})",
+                                              R"({"name": "lemon"})"};
 
     auto json_path = "/name";
     auto schema = std::make_shared<Schema>();
@@ -955,10 +969,11 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             value,
             std::vector<proto::plan::GenericValue>{});
 
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Only first record should match (exact match for "apple")
         EXPECT_EQ(result.count(), 1);
         EXPECT_TRUE(result[0]);
@@ -974,10 +989,11 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             value,
             std::vector<proto::plan::GenericValue>{});
 
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // All except first record should match
         EXPECT_EQ(result.count(), 9);
         EXPECT_FALSE(result[0]);
@@ -996,10 +1012,11 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             value,
             std::vector<proto::plan::GenericValue>{});
 
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Records with names > "fig": grape, honeydew, kiwi, lemon
         EXPECT_EQ(result.count(), 4);
         for (size_t i = 6; i < nb; i++) {
@@ -1017,10 +1034,11 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             value,
             std::vector<proto::plan::GenericValue>{});
 
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Records with names < "date": apple, banana, cherry
         EXPECT_EQ(result.count(), 3);
         for (size_t i = 0; i < 3; i++) {
@@ -1042,12 +1060,12 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
             milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"name"}, true),
             values);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, term_expr);
-        
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           term_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Only apple, cherry, grape should match
         EXPECT_EQ(result.count(), 3);
         EXPECT_TRUE(result[0]);  // apple
@@ -1061,16 +1079,21 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         lower_val.set_string_val("cherry");
         proto::plan::GenericValue upper_val;
         upper_val.set_string_val("grape");
-        
-        auto binary_range_expr = std::make_shared<milvus::expr::BinaryRangeFilterExpr>(
-            milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"name"}, true),
-            lower_val, upper_val, true, true);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, binary_range_expr);
-        
+
+        auto binary_range_expr =
+            std::make_shared<milvus::expr::BinaryRangeFilterExpr>(
+                milvus::expr::ColumnInfo(
+                    json_fid, DataType::JSON, {"name"}, true),
+                lower_val,
+                upper_val,
+                true,
+                true);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           binary_range_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Strings between "cherry" and "grape" inclusive: cherry, date, elderberry, fig, grape
         EXPECT_EQ(result.count(), 5);
         for (size_t i = 2; i <= 6; i++) {
@@ -1083,12 +1106,12 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         auto null_expr = std::make_shared<milvus::expr::NullExpr>(
             milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"name"}, true),
             proto::plan::NullExpr_NullOp_IsNull);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, null_expr);
-        
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           null_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // None should match since all have non-null names
         EXPECT_EQ(result.count(), 0);
     }
@@ -1098,12 +1121,12 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         auto null_expr = std::make_shared<milvus::expr::NullExpr>(
             milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"name"}, true),
             proto::plan::NullExpr_NullOp_IsNotNull);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, null_expr);
-        
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           null_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // All should match since all have non-null names
         EXPECT_EQ(result.count(), 10);
         for (size_t i = 0; i < nb; i++) {
@@ -1115,12 +1138,12 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
     {
         auto exists_expr = std::make_shared<milvus::expr::ExistsExpr>(
             milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"name"}, true));
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, exists_expr);
-        
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           exists_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // All should match since all have the "name" field
         EXPECT_EQ(result.count(), 10);
         for (size_t i = 0; i < nb; i++) {
@@ -1149,15 +1172,15 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             std::vector<proto::plan::GenericValue>{});
 
         // Create LogicalBinaryExpr with AND
-        auto logical_and_expr = std::make_shared<milvus::expr::LogicalBinaryExpr>(
-            milvus::expr::LogicalBinaryExpr::OpType::And,
-            expr1, expr2);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, logical_and_expr);
-        
+        auto logical_and_expr =
+            std::make_shared<milvus::expr::LogicalBinaryExpr>(
+                milvus::expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_and_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // Only apple should match (name == "apple" AND name != "banana")
         EXPECT_EQ(result.count(), 1);
         EXPECT_TRUE(result[0]);
@@ -1174,15 +1197,15 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
             std::vector<proto::plan::GenericValue>{});
 
         // Create LogicalUnaryExpr with NOT
-        auto logical_not_expr = std::make_shared<milvus::expr::LogicalUnaryExpr>(
-            milvus::expr::LogicalUnaryExpr::OpType::LogicalNot,
-            equal_expr);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, logical_not_expr);
-        
+        auto logical_not_expr =
+            std::make_shared<milvus::expr::LogicalUnaryExpr>(
+                milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, equal_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_not_expr);
+
         auto result = milvus::query::ExecuteQueryExpr(
             plan, segment.get(), nb, MAX_TIMESTAMP);
-        
+
         // All except apple should match (NOT (name == "apple"))
         EXPECT_EQ(result.count(), 9);
         EXPECT_FALSE(result[0]);

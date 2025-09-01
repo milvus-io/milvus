@@ -23,7 +23,7 @@
 
 namespace milvus::test {
 
-template<typename T>
+template <typename T>
 inline constexpr bool always_false = false;
 
 inline auto
@@ -56,9 +56,11 @@ GenGenericValue(T value) {
         generic->set_float_val(static_cast<float>(value));
     } else if constexpr (std::is_same_v<T, std::string>) {
         generic->set_string_val(static_cast<std::string>(value));
-    } else if constexpr (std::is_same_v<T, const char*> || 
+    } else if constexpr (std::is_same_v<T, const char*> ||
                          std::is_same_v<std::decay_t<T>, const char*> ||
-                         (std::is_array_v<T> && std::is_same_v<std::remove_extent_t<T>, const char>)) {
+                         (std::is_array_v<T> &&
+                          std::is_same_v<std::remove_extent_t<T>,
+                                         const char>)) {
         generic->set_string_val(std::string(value));
     } else {
         static_assert(always_false<T>);
