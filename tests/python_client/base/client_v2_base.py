@@ -1,7 +1,7 @@
 import sys
 from typing import Optional
 from pymilvus import MilvusClient
-
+import time
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
@@ -518,6 +518,16 @@ class TestMilvusClientV2Base(Base):
                                        index_name=index_name,
                                        **kwargs).run()
         return res, check_result
+
+    def wait_for_index_ready(self, client, collection_name, index_name, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        start_time = time.time()
+        while start_time + timeout > time.time():
+            index_info, _ = self.describe_index(client, collection_name, index_name, **kwargs)
+            if index_info.get("pending_index_rows", 1) == 0:
+                return True
+            time.sleep(2)
+        return False
 
     @trace()
     def list_indexes(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):

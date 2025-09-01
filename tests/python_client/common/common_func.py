@@ -27,6 +27,7 @@ import re
 import inspect
 
 from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
+from shapely.wkt import loads as wkt_loads
 
 from bm25s.tokenization import Tokenizer
 
@@ -2083,6 +2084,20 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             if nb is None:
                 return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
             return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
+    if data_type == DataType.GEOMETRY:
+        # Check if advanced generation is requested via field params
+        use_advanced = field.params.get("use_advanced_geometry", False) if hasattr(field, 'params') and field.params else False
+        geometry_type = field.params.get("geometry_type", None) if hasattr(field, 'params') and field.params else None
+        coord_range = field.params.get("coord_range", (-1000, 1000)) if hasattr(field, 'params') and field.params else (-1000, 1000)
+        
+        if use_advanced:
+            if nb is None:
+                return gen_random_geometry_wkt_advanced(geometry_type=geometry_type, coord_range=coord_range)
+            return [gen_random_geometry_wkt_advanced(geometry_type=geometry_type, coord_range=coord_range) for _ in range(nb)]
+        else:
+            if nb is None:
+                return gen_random_geometry_wkt()
+            return [gen_random_geometry_wkt() for _ in range(nb)]
     return None
 
 
@@ -2102,6 +2117,355 @@ def gen_data_by_collection_schema(schema, nb, r=0):
 def gen_varchar_values(nb: int, length: int = 0):
     return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
+
+def gen_random_geometry_wkt():
+    """
+    Generate random geometry WKT (Well-Known Text) data for testing
+    Returns:
+        str: Random WKT string representing a geometry object
+    """
+    # Randomly select a geometry type
+    geometry_types = list(ct.geometry_wkt_samples.keys())
+    selected_type = random.choice(geometry_types)
+    
+    # Get samples for the selected type
+    samples = ct.geometry_wkt_samples[selected_type]
+    
+    # Return a random sample from the selected type
+    return random.choice(samples)
+
+
+def gen_random_geometry_wkt_advanced(geometry_type=None, coord_range=(-1000, 1000), 
+                                   min_points=3, max_points=10, precision=2):
+    """
+    Generate truly random geometry WKT with customizable parameters
+    
+    Args:
+        geometry_type: str - Specific geometry type to generate. If None, randomly choose from:
+                            ['POINT', 'LINESTRING', 'POLYGON', 'MULTIPOINT', 'MULTILINESTRING', 'MULTIPOLYGON']
+        coord_range: tuple - (min, max) range for coordinate values
+        min_points: int - Minimum number of points for complex geometries
+        max_points: int - Maximum number of points for complex geometries  
+        precision: int - Decimal places for coordinate values
+    
+    Returns:
+        str: Random WKT string with generated coordinates
+    """
+    
+    def _gen_coordinate():
+        """Generate a random coordinate pair"""
+        x = round(random.uniform(coord_range[0], coord_range[1]), precision)
+        y = round(random.uniform(coord_range[0], coord_range[1]), precision)
+        return f"{x} {y}"
+    
+    def _gen_point_list(num_points, closed=False):
+        """Generate a list of coordinate points"""
+        points = [_gen_coordinate() for _ in range(num_points)]
+        if closed and num_points > 2:
+            points.append(points[0])  # Close the ring
+        return points
+    
+    # Available geometry types
+    available_types = ['POINT', 'LINESTRING', 'POLYGON', 'MULTIPOINT', 'MULTILINESTRING', 'MULTIPOLYGON']
+    
+    # Select geometry type
+    if geometry_type is None:
+        geometry_type = random.choice(available_types)
+    elif geometry_type not in available_types:
+        raise ValueError(f"Unsupported geometry type: {geometry_type}. Available: {available_types}")
+    
+    try:
+        if geometry_type == 'POINT':
+            coord = _gen_coordinate()
+            return f"POINT ({coord})"
+            
+        elif geometry_type == 'LINESTRING':
+            num_points = random.randint(max(2, min_points), max_points)
+            points = _gen_point_list(num_points)
+            return f"LINESTRING ({', '.join(points)})"
+            
+        elif geometry_type == 'POLYGON':
+            # Outer ring
+            num_outer_points = random.randint(max(3, min_points), max_points)
+            outer_ring = _gen_point_list(num_outer_points, closed=True)
+            
+            # Randomly decide if we want inner rings (holes)
+            rings = [f"({', '.join(outer_ring)})"]
+            
+            # 20% chance to have 1-2 inner rings
+            if random.random() < 0.2:
+                num_inner_rings = random.randint(1, 2)
+                for _ in range(num_inner_rings):
+                    num_inner_points = random.randint(3, max(3, min_points))
+                    # Inner rings should be smaller and inside outer ring
+                    inner_range = (coord_range[0] * 0.5, coord_range[1] * 0.5)
+                    inner_coord_range = coord_range
+                    inner_ring = []
+                    for _ in range(num_inner_points):
+                        x = round(random.uniform(inner_range[0], inner_range[1]), precision)
+                        y = round(random.uniform(inner_range[0], inner_range[1]), precision)
+                        inner_ring.append(f"{x} {y}")
+                    inner_ring.append(inner_ring[0])  # Close the ring
+                    rings.append(f"({', '.join(inner_ring)})")
+            
+            return f"POLYGON ({', '.join(rings)})"
+            
+        elif geometry_type == 'MULTIPOINT':
+            num_points = random.randint(max(2, min_points), max_points)
+            points = [f"({_gen_coordinate()})" for _ in range(num_points)]
+            return f"MULTIPOINT ({', '.join(points)})"
+            
+        elif geometry_type == 'MULTILINESTRING':
+            num_linestrings = random.randint(2, min(4, max_points // 2))
+            linestrings = []
+            for _ in range(num_linestrings):
+                num_points = random.randint(2, max(2, max_points // 2))
+                points = _gen_point_list(num_points)
+                linestrings.append(f"({', '.join(points)})")
+            return f"MULTILINESTRING ({', '.join(linestrings)})"
+            
+        elif geometry_type == 'MULTIPOLYGON':
+            num_polygons = random.randint(2, min(3, max_points // 3))
+            polygons = []
+            for _ in range(num_polygons):
+                num_points = random.randint(max(3, min_points), max(3, max_points // 2))
+                points = _gen_point_list(num_points, closed=True)
+                polygons.append(f"(({', '.join(points)}))")
+            return f"MULTIPOLYGON ({', '.join(polygons)})"
+            
+        elif geometry_type == 'GEOMETRYCOLLECTION':
+            # Generate 2-4 different geometry objects
+            num_geometries = random.randint(2, 4)
+            geometries = []
+            sub_types = random.sample(['POINT', 'LINESTRING', 'POLYGON'], min(3, num_geometries))
+            
+            for sub_type in sub_types:
+                # Recursively generate sub-geometries
+                sub_geom = gen_random_geometry_wkt_advanced(
+                    geometry_type=sub_type, coord_range=coord_range, 
+                    min_points=min_points, max_points=max_points // 2, precision=precision
+                )
+                geometries.append(sub_geom)
+            
+            return f"GEOMETRYCOLLECTION ({', '.join(geometries)})"
+            
+    except Exception as e:
+        # Fallback to simple geometry if generation fails
+        log.warning(f"Failed to generate {geometry_type}: {e}, falling back to POINT")
+        coord = _gen_coordinate()
+        return f"POINT ({coord})"
+
+
+def gen_geometry_test_data(geometry_type, num_items=1, coord_range=(-100, 100), **kwargs):
+    """
+    Generate geometry test data for specific use cases
+    
+    Args:
+        geometry_type: str - Type of geometry to generate
+        num_items: int - Number of geometry objects to generate
+        coord_range: tuple - Coordinate range for generated points
+        **kwargs: Additional parameters for gen_random_geometry_wkt_advanced
+    
+    Returns:
+        list or str: Generated WKT strings
+    """
+    if num_items == 1:
+        return gen_random_geometry_wkt_advanced(geometry_type=geometry_type, coord_range=coord_range, **kwargs)
+    else:
+        return [gen_random_geometry_wkt_advanced(geometry_type=geometry_type, coord_range=coord_range, **kwargs) 
+                for _ in range(num_items)]
+
+
+def gen_spatial_test_region(region_type="square", center=(0, 0), size=100):
+    """
+    Generate standard spatial test regions for spatial queries
+    
+    Args:
+        region_type: str - Type of region ('square', 'circle_approx', 'triangle', 'line')
+        center: tuple - Center coordinates (x, y)
+        size: float - Size of the region
+    
+    Returns:
+        str: WKT string representing the test region
+    """
+    x, y = center
+    half_size = size / 2
+    
+    if region_type == "square":
+        return f"POLYGON (({x-half_size} {y-half_size}, {x+half_size} {y-half_size}, {x+half_size} {y+half_size}, {x-half_size} {y+half_size}, {x-half_size} {y-half_size}))"
+    
+    elif region_type == "triangle":
+        return f"POLYGON (({x} {y+half_size}, {x-half_size} {y-half_size}, {x+half_size} {y-half_size}, {x} {y+half_size}))"
+    
+    elif region_type == "circle_approx":
+        # Approximate circle with octagon
+        import math
+        points = []
+        for i in range(8):
+            angle = 2 * math.pi * i / 8
+            px = x + half_size * math.cos(angle)
+            py = y + half_size * math.sin(angle)
+            points.append(f"{px:.2f} {py:.2f}")
+        points.append(points[0])  # Close the polygon
+        return f"POLYGON (({', '.join(points)}))"
+    
+    elif region_type == "line":
+        return f"LINESTRING ({x-half_size} {y}, {x+half_size} {y})"
+    
+    else:
+        raise ValueError(f"Unsupported region type: {region_type}")
+
+
+def gen_geometry_for_spatial_test(spatial_function, test_region_wkt, num_items=10, coord_range=(-1000, 1000)):
+    """
+    Generate geometry data optimized for testing specific spatial functions
+    
+    Args:
+        spatial_function: str - Target spatial function (e.g., 'ST_CONTAINS', 'ST_WITHIN')
+        test_region_wkt: str - WKT of the test region for spatial queries
+        num_items: int - Number of geometry objects to generate
+        coord_range: tuple - Overall coordinate range
+    
+    Returns:
+        list: List of WKT strings optimized for the spatial function
+    """
+    geometries = []
+    func_upper = spatial_function.upper()
+    
+    # Generate a mix of geometries that should and shouldn't match the spatial function
+    for i in range(num_items):
+        if i < num_items // 3:
+            # Generate geometries that are likely to match
+            if func_upper in ['ST_CONTAINS', 'ST_WITHIN']:
+                # Generate smaller geometries within the test region
+                geometry_type = random.choice(['POINT', 'LINESTRING', 'POLYGON'])
+                small_range = (coord_range[0] * 0.1, coord_range[1] * 0.1)
+                geometries.append(gen_random_geometry_wkt_advanced(
+                    geometry_type=geometry_type, coord_range=small_range, max_points=5
+                ))
+            elif func_upper in ['ST_INTERSECTS', 'ST_OVERLAPS']:
+                # Generate geometries that might intersect
+                geometry_type = random.choice(['LINESTRING', 'POLYGON'])
+                geometries.append(gen_random_geometry_wkt_advanced(
+                    geometry_type=geometry_type, coord_range=coord_range, max_points=6
+                ))
+            else:
+                # For other functions, generate diverse geometries
+                geometries.append(gen_random_geometry_wkt_advanced(coord_range=coord_range))
+        else:
+            # Generate random geometries (may or may not match)
+            geometries.append(gen_random_geometry_wkt_advanced(coord_range=coord_range))
+    
+    return geometries
+
+
+def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, 
+                      is_primary=False, nullable=False, default_value=None, **kwargs):
+    """
+    Generate a geometry field schema
+    """
+    field_kwargs = {
+        'name': name,
+        'dtype': DataType.GEOMETRY,
+        'description': description,
+        'is_primary': is_primary,
+        'nullable': nullable,
+        **kwargs
+    }
+    
+    if default_value is not None:
+        field_kwargs['default_value'] = default_value
+        
+    field, _ = ApiFieldSchemaWrapper().init_field_schema(**field_kwargs)
+    return field
+
+
+def validate_geometry_query_with_shapely(test_data, spatial_func, test_geom_wkt, 
+                                         geometry_field_name="geometry", pk_field_name="id"):
+    """
+    Validate spatial query correctness using Shapely library to calculate ground truth
+    
+    Args:
+        test_data: Test data supporting two formats:
+                  1. List of (pk, geometry_wkt) tuples
+                  2. List of dict (original inserted rows data)
+        spatial_func: str - Spatial function name (e.g., 'ST_CONTAINS', 'ST_WITHIN') 
+        test_geom_wkt: str - Test geometry object in WKT format
+        geometry_field_name: str - Geometry field name (default "geometry")
+        pk_field_name: str - Primary key field name (default "id")
+    
+    Returns:
+        set: Expected matching PK set (ground truth)
+    """
+    if not test_data:
+        log.warning("No test data provided for Shapely validation")
+        return set()
+    
+    try:
+        # Parse test geometry
+        test_geom = wkt_loads(test_geom_wkt)
+        expected_pks = set()
+        
+        log.info(f"Computing ground truth for {spatial_func} with test geometry: {test_geom_wkt}")
+        log.info(f"Validating against {len(test_data)} data records")
+        
+        # Determine data format and process
+        data_tuples = []
+        if test_data and isinstance(test_data[0], tuple):
+            # Format 1: List of (pk, geometry_wkt) tuples
+            data_tuples = test_data
+            log.debug("Input data format: (pk, geometry_wkt) tuples")
+        elif test_data and isinstance(test_data[0], dict):
+            # Format 2: List of dict (original rows data)
+            log.debug(f"Input data format: dict rows with pk_field='{pk_field_name}', geo_field='{geometry_field_name}'")
+            for row in test_data:
+                pk = row.get(pk_field_name)
+                geom_wkt = row.get(geometry_field_name)
+                data_tuples.append((pk, geom_wkt))
+        else:
+            log.warning(f"Unsupported test data format: {type(test_data[0]) if test_data else 'empty'}")
+            return None
+                
+        # Process each data record
+        for pk, geom_wkt in data_tuples:
+            if geom_wkt is None:
+                result = False
+                continue  # always return False for None geometry
+                
+            geom = wkt_loads(geom_wkt)
+            result = False
+            
+            # Apply spatial function using Shapely
+            func_upper = spatial_func.upper()
+            if func_upper == 'ST_CONTAINS':
+                result = test_geom.contains(geom)
+            elif func_upper == 'ST_WITHIN':
+                result = geom.within(test_geom)
+            elif func_upper == 'ST_INTERSECTS':
+                result = test_geom.intersects(geom)
+            elif func_upper == 'ST_TOUCHES':
+                result = test_geom.touches(geom)
+            elif func_upper == 'ST_CROSSES':
+                result = test_geom.crosses(geom)
+            elif func_upper == 'ST_OVERLAPS':
+                result = test_geom.overlaps(geom)
+            elif func_upper == 'ST_EQUALS':
+                result = test_geom.equals(geom)
+            # elif func_upper == 'ST_DISJOINT':
+            #     result = test_geom.disjoint(geom)
+            else:
+                log.warning(f"Unsupported spatial function: {spatial_func}")
+                return None
+            
+            if result:
+                expected_pks.add(pk)
+                
+        return expected_pks
+        
+    except Exception as e:
+        log.error(f"Error in Shapely validation: {e}")
+        return None
+    
 
 def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}):
     """

@@ -255,6 +255,87 @@ binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 
+# Geometry data type constants
+default_geometry_field_name = "geometry"
+geometry_wkt_samples = {
+    "POINT": [
+        "POINT (30.123 -10.456)",
+        "POINT (0 0)",
+        "POINT (-180 90)",
+        "POINT (180 -90)",
+        "POINT (123.456 -78.901)"
+    ],
+    "LINESTRING": [
+        "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)",
+        "LINESTRING (0 0, 1 1, 2 2)",
+        "LINESTRING (-1 -1, 0 0, 1 1, 2 2, 3 3)",
+        "LINESTRING (10 10, 20 20, 30 10)"
+    ],
+    "POLYGON": [
+        "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))",
+        "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+        "POLYGON ((-5 -5, 5 -5, 5 5, -5 5, -5 -5))",
+        "POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0))"
+    ],
+    "MULTIPOINT": [
+        "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))",
+        "MULTIPOINT ((0 0), (1 1), (2 2))",
+        "MULTIPOINT ((-1 -1), (0 0), (1 1))"
+    ],
+    "MULTILINESTRING": [
+        "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))",
+        "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+        "MULTILINESTRING ((0 0, 10 10), (20 20, 30 30), (40 40, 50 50))"
+    ],
+    "MULTIPOLYGON": [
+        "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))",
+        "MULTIPOLYGON (((0 0, 10 0, 10 10, 0 10, 0 0)), ((20 20, 30 20, 30 30, 20 30, 20 20)))",
+        "MULTIPOLYGON (((0 0, 5 0, 5 5, 0 5, 0 0)), ((10 10, 15 10, 15 15, 10 15, 10 10)))"
+    ],
+    "GEOMETRYCOLLECTION": [
+        "GEOMETRYCOLLECTION (POINT (0 0), LINESTRING (0 0, 1 1))",
+        "GEOMETRYCOLLECTION (POINT (10 10), LINESTRING (0 0, 10 10), POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0)))",
+        "GEOMETRYCOLLECTION (MULTIPOINT ((0 0), (1 1)), POINT (3 4), LINESTRING (2 3, 3 4))"
+    ]
+}
+
+# Spatial functions for testing
+spatial_functions = [
+    "ST_CONTAINS",
+    "ST_WITHIN", 
+    "ST_INTERSECTS",
+    "ST_TOUCHES",
+    "ST_CROSSES",
+    "ST_OVERLAPS",
+    "ST_EQUALS"
+    # "ST_DISJOINT"
+]
+
+# Test regions for spatial queries
+geometry_test_regions = {
+    "small_square": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+    "large_square": "POLYGON ((-10 -10, 20 -10, 20 20, -10 20, -10 -10))",
+    "triangle": "POLYGON ((0 0, 10 0, 5 10, 0 0))",
+    "complex_polygon": "POLYGON ((0 0, 10 0, 15 5, 10 10, 0 10, -5 5, 0 0))"
+}
+
+# Invalid WKT strings for error testing
+invalid_wkt_samples = [
+    "INVALID WKT FORMAT",
+    "POINT ()",
+    "POINT (1)",
+    "POINT (1 2 3 4)",  # Too many coordinates
+    "LINESTRING (0 0)",  # Insufficient points
+    "POLYGON ((0 0, 10 0, 10 10))",  # Unclosed polygon
+    "UNKNOWN GEOMETRY TYPE (0 0)",
+    "",  # Empty string
+    "NULL",
+    "POINT (abc def)"  # Non-numeric coordinates
+]
+
+# Default geometry value for testing
+default_geometry_value = "POINT (0 0)"
+
 
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default_L0_metric}
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
