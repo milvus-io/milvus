@@ -162,7 +162,7 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
-	exec, err := NewFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema, nil)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	exec.ProcessInsert(context.Background(), msg)
@@ -197,7 +197,7 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	}))
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
-	exec, err := NewFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema, nil)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	err = exec.ProcessInsert(context.Background(), msg)
@@ -207,7 +207,7 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 func (s *FunctionExecutorSuite) TestErrorSchema() {
 	schema := s.creataSchema("http://localhost")
 	schema.Functions[0].Type = schemapb.FunctionType_Unknown
-	_, err := NewFunctionExecutor(schema)
+	_, err := NewFunctionExecutor(schema, nil)
 	s.Error(err)
 }
 
@@ -215,7 +215,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
-	exec, err := NewFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema, nil)
 	s.NoError(err)
 
 	{
@@ -309,7 +309,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearchFailed() {
 	defer ts.Close()
 
 	schema := s.creataSchema(ts.URL)
-	exec, err := NewFunctionExecutor(schema)
+	exec, err := NewFunctionExecutor(schema, nil)
 	s.NoError(err)
 	f := &schemapb.FieldData{
 		Type:      schemapb.DataType_VarChar,
