@@ -28,7 +28,9 @@ SealedIndexTranslator::SealedIndexTranslator(
                         load_index_info->index_engine_version,
                         std::to_string(load_index_info->index_id),
                         std::to_string(load_index_info->segment_id),
-                        std::to_string(load_index_info->field_id)}),
+                        std::to_string(load_index_info->field_id),
+                        load_index_info->num_rows,
+                        load_index_info->dim}),
       meta_(load_index_info->enable_mmap
                 ? milvus::cachinglayer::StorageType::DISK
                 : milvus::cachinglayer::StorageType::MEMORY,
@@ -60,7 +62,9 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.index_engine_version,
             index_load_info_.index_size,
             index_load_info_.index_params,
-            index_load_info_.enable_mmap);
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim);
     // this is an estimation, error could be up to 20%.
     int64_t final_memory_cost = request.final_memory_cost * 1024 * 1024 * 1024;
     int64_t final_disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
@@ -88,7 +92,9 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
             index_load_info_.index_engine_version,
             index_load_info_.index_size,
             index_load_info_.index_params,
-            index_load_info_.enable_mmap);
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_info_.dim);
     index->SetCellSize({request.final_memory_cost * 1024 * 1024 * 1024,
                         request.final_disk_cost * 1024 * 1024 * 1024});
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {

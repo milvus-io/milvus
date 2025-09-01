@@ -127,7 +127,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.index_engine_version,
             info.index_size,
             info.index_params,
-            info.enable_mmap);
+            info.enable_mmap,
+            info.num_rows,
+            info.dim);
 
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
         fields_.rlock()->at(field_id)->ManualEvictCache();
@@ -215,7 +217,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             info.index_engine_version,
             info.index_size,
             info.index_params,
-            info.enable_mmap);
+            info.enable_mmap,
+            info.num_rows,
+            info.dim);
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;

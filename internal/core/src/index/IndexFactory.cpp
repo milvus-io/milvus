@@ -102,17 +102,26 @@ IndexFactory::IndexLoadResource(
     IndexVersion index_version,
     float index_size,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
                                     index_version,
                                     index_size,
                                     index_params,
-                                    mmap_enable);
+                                    mmap_enable,
+                                    num_rows,
+                                    dim);
     } else {
-        return ScalarIndexLoadResource(
-            field_type, index_version, index_size, index_params, mmap_enable);
+        return ScalarIndexLoadResource(field_type,
+                                       index_version,
+                                       index_size,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       dim);
     }
 }
 
@@ -123,7 +132,9 @@ IndexFactory::VecIndexLoadResource(
     IndexVersion index_version,
     float index_size,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -255,7 +266,9 @@ IndexFactory::ScalarIndexLoadResource(
     IndexVersion index_version,
     float index_size,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     AssertInfo(index_params.find("index_type") != index_params.end(),
