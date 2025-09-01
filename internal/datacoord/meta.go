@@ -745,7 +745,9 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 
 	var updated bool
 	for _, operator := range operators {
-		updated = updated || operator(cloned)
+		if operator(cloned) {
+			updated = true
+		}
 	}
 
 	if !updated {
