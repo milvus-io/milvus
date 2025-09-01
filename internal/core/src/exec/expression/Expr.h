@@ -280,7 +280,8 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         // when we specify input, do not maintain states
         if (!has_offset_input_) {
-            // todo(SpadeA): how about ngram?
+            // CanUseIndex excludes ngram index and this is true even ngram index is used as ExecNgramMatch
+            // uses data cursor.
             if (SegmentExpr::CanUseIndex()) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
