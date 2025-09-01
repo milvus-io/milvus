@@ -5,12 +5,11 @@ go 1.24.4
 require (
 	github.com/milvus-io/milvus/client/v2 v2.5.4
 	github.com/milvus-io/milvus/pkg/v2 v2.5.7
-
 	github.com/peterstace/simplefeatures v0.54.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
 	github.com/stretchr/testify v1.10.0
-	github.com/twpayne/go-geom v1.5.2
+	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.65.0
