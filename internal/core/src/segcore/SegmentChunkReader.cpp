@@ -93,7 +93,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             dynamic_cast<const index::ScalarIndex<std::string>*>(index);
         if (index_ptr->HasRawData()) {
             return [&, index_ptr = std::move(index_ptr)]() mutable
-                       -> const data_access_type {
+                   -> const data_access_type {
                 if (current_chunk_pos >= active_count_) {
                     return std::nullopt;
                 }
