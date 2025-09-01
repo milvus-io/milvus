@@ -408,6 +408,154 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 7. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
+    def test_milvus_client_query_invalid_wildcard(self, output_fields):
+        """
+        target: test query with invalid output wildcard
+        method: output_fields is invalid output wildcard
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. query with invalid output_fields wildcard
+        error = {ct.err_code: 65535, ct.err_msg: f"parse output field name failed"}
+        self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 4. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_partition_without_loading(self):
+        """
+        target: test query on partition without loading
+        method: query on partition and no loading
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        # 3. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_name=partition_name)
+        # 4. verify partition has data
+        self.flush(client, collection_name)
+        partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
+        assert partition_info['row_count'] == default_nb, f"Expected {default_nb} entities in partition, got {partition_info['row_count']}"
+        # 5. query on partition without loading (should raise exception)
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_name],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_empty_partition_names(self):
+        """
+        target: test query with empty partition_names
+        method: query with partition_names=[]
+        expected: query from all partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert [0, half) into partition_w, [half, nb) into _default
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        # Insert first half into custom partition
+        rows_partition = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition, partition_name=partition_name)
+        # Insert second half into default partition
+        rows_default = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_default)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name, ct.default_partition_name])
+        # 4. query from empty partition_names (should query all partitions)
+        term_expr = f'{default_primary_key_field_name} in [0, {half}, {default_nb-1}]'
+        # Prepare expected results by combining data from both partitions
+        all_rows = rows_partition + rows_default
+        exp_res = [all_rows[0], all_rows[half], all_rows[default_nb-1]]
+        self.query(client, collection_name, filter=term_expr, partition_names=[],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "with_vec": True, "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_empty_partition(self):
+        """
+        target: test query on empty partition
+        method: query on an empty partition
+        expected: empty query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        # 2. verify partition is empty
+        partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
+        assert partition_info['row_count'] == 0
+        # 3. create index and load partition
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 4. query on empty partition
+        res = self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name])[0]
+        assert len(res) == 0
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_not_existed_partition(self):
+        """
+        target: test query on a not existed partition
+        method: query on not existed partition
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. query on non-existent partition
+        partition_names = cf.gen_unique_str()
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_names} not found'}
+        self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_names],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 4. clean up
+        self.drop_collection(client, collection_name)
+
+
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
@@ -2137,6 +2285,272 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_primary_key_field_name])[0]
         # 5. verify only primary field is returned
         assert set(res[0].keys()) == {default_primary_key_field_name}
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_output_multi_float_vec_field(self):
+        """
+        target: test query and output multi float vec fields
+        method: a.specify multi vec field as output
+                b.specify output_fields with wildcard %
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with two float vector fields
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("float_vector1", DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name="float_vector1", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with multi vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name, "float_vector1"]
+        exp_res = []
+        for i in range(2):
+            result_item = {}
+            for field_name in output_fields:
+                result_item[field_name] = rows[i][field_name]
+            exp_res.append(result_item)
+        # Query and verify
+        self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "with_vec": True, "pk_name": ct.default_int64_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vec_fields", [["binary_vector"], ["binary_vector", "binary_vec1"]])
+    def test_milvus_client_query_output_mix_float_binary_field(self, vec_fields):
+        """
+        target:  test query and output mix float and binary vec fields
+        method: a.specify mix vec field as output
+                b.specify output_fields with wildcard %
+        expected: output binary vector and float vec
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with float and binary vector fields
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        for vec_field_name in vec_fields:
+            schema.add_field(vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        for vec_field_name in vec_fields:
+            index_params.add_index(field_name=vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with mix vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        for vec_field_name in vec_fields:
+            output_fields.append(vec_field_name)
+        
+        res = self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields)[0]
+        assert len(res) == 2
+        for result_item in res:
+            assert set(result_item.keys()) == set(output_fields)
+        # Query and verify with wildcard
+        res_wildcard = self.query(client, collection_name, filter=default_term_expr, output_fields=["*"])[0]
+        assert len(res_wildcard) == 2
+        for result_item in res_wildcard:
+            assert set(result_item.keys()) == set(output_fields)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_fields", ["12-s", 1, [1, "2", 3], (1,), {1: 1}])
+    def test_milvus_client_query_invalid_output_fields(self, invalid_fields):
+        """
+        target: test query with invalid output fields
+        method: query with invalid field fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. test invalid output_fields type
+        if invalid_fields == [1, "2", 3]:
+            error = {ct.err_code: 1, ct.err_msg: "Unexpected error, message=<bad argument type for built-in operation>"}
+        else:
+            error = {ct.err_code: 1, ct.err_msg: "Invalid query format. 'output_fields' must be a list"}
+        self.query(client, collection_name, filter=default_term_expr, output_fields=invalid_fields,
+                  check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_query_partition(self):
+        """
+        target: test query on partition
+        method: create a partition and query
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. create partition
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 3. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_name=partition_name)
+        # 4. create index and load partition
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 5. query on partition and verify results
+        self.query(client, collection_name, filter=default_search_exp, 
+                   partition_names=[partition_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_default_partition(self):
+        """
+        target: test query on default partition
+        method: query on default partition
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data (will go to default partition by default)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query on default partition and verify results
+        self.query(client, collection_name, filter=default_search_exp, 
+                   partition_names=[ct.default_partition_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows, "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("ignore_growing", [True, False])
+    def test_milvus_client_query_ignore_growing(self, ignore_growing):
+        """
+        target: test search ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. query with param ignore_growing
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", auto_id=False)
+        # 2. insert initial data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. insert data again
+        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=10000)
+        self.insert(client, collection_name, new_rows)
+        self.flush(client, collection_name)
+        # 5. query with param ignore_growing
+        if ignore_growing:
+            res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
+            assert len(res) == default_nb
+            # verify that only original data (id < 10000) is returned
+            for item in res:
+                assert item[default_primary_key_field_name] < 10000
+        else:
+            res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
+            assert len(res) == default_nb * 2
+            for item in res:
+                assert item[default_primary_key_field_name] < 10000 or item[default_primary_key_field_name] >= 10000
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ignore_growing", [True, False])
+    def test_milvus_client_query_ignore_growing_after_upsert(self, ignore_growing):
+        """
+        target: test query ignoring growing segment after upsert
+        method: 1. create a collection, insert data, create index and load
+                2. upsert the inserted data
+                3. query with param ignore_growing
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", auto_id=False)
+        # 2. insert initial data and flush
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. upsert data (which creates growing segment data)
+        upsert_data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+        # 5. query with param ignore_growing
+        if ignore_growing:
+            exp_len = 0
+        else:
+            exp_len = default_nb
+        res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
+        assert len(res) == exp_len
         # 6. clean up
         self.drop_collection(client, collection_name)
 
