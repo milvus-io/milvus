@@ -8,8 +8,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
 func TestMessageCallbackRegistration(t *testing.T) {
@@ -18,22 +18,26 @@ func TestMessageCallbackRegistration(t *testing.T) {
 
 	// Test registering a callback
 	called := false
-	callback := func(ctx context.Context, msg message.MutableMessage) error {
+	callback := func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
 		called = true
 		return nil
 	}
 
-	// Register callback for DropPartition message type
-	RegisterMessageAckCallback(message.MessageTypeDropPartition, callback)
+	RegisterDropPartitionMessageV1AckCallback(callback)
 
 	// Verify callback was registered
-	callbackFuture, ok := messageAckCallbacks[message.MessageTypeDropPartition]
+	callbackFuture, ok := messageAckCallbacks[message.MessageTypeDropPartitionV1]
 	assert.True(t, ok)
 	assert.NotNil(t, callbackFuture)
 
 	// Create a mock message
-	msg := mock_message.NewMockMutableMessage(t)
-	msg.EXPECT().MessageType().Return(message.MessageTypeDropPartition)
+	msg := message.NewDropPartitionMessageBuilderV1().
+		WithHeader(&message.DropPartitionMessageHeader{}).
+		WithBody(&message.DropPartitionRequest{}).
+		WithVChannel("v1").
+		MustBuildMutable().
+		WithTimeTick(1).
+		IntoImmutableMessage(rmq.NewRmqID(1))
 
 	// Call the callback
 	err := CallMessageAckCallback(context.Background(), msg)

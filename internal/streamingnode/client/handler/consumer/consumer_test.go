@@ -11,7 +11,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
@@ -182,17 +181,11 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *streamingpb.ConsumeResponse {
 	msg.WithTimeTick(tsoutil.GetCurrentTime())
 	msg.WithLastConfirmed(walimplstest.NewTestMessageID(0))
-	pb := msg.IntoMessageProto()
+	immutableMsg := msg.IntoImmutableMessage(id)
 	return &streamingpb.ConsumeResponse{
 		Response: &streamingpb.ConsumeResponse_Consume{
 			Consume: &streamingpb.ConsumeMessageReponse{
-				Message: &messagespb.ImmutableMessage{
-					Id: &messagespb.MessageID{
-						Id: id.Marshal(),
-					},
-					Payload:    pb.Payload,
-					Properties: pb.Properties,
-				},
+				Message: immutableMsg.IntoImmutableMessageProto(),
 			},
 		},
 	}

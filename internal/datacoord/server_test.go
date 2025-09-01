@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -2880,7 +2881,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		BuildMutable()
 	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, dropPartitionMsg)
+	err = registry.CallMessageAckCallback(ctx, dropPartitionMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.Error(t, err) // server not healthy
 
 	// Test Import message check callback
@@ -2908,6 +2909,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		BuildMutable()
 	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, importMsg)
+	err = registry.CallMessageAckCallback(ctx, importMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.Error(t, err) // server not healthy
 }
