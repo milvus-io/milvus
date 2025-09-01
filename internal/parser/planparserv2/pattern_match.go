@@ -95,11 +95,11 @@ func escapeStringWithWildcards(str string) (op planpb.OpType, operand string, er
 		for end > start && str[end-1] == '%' {
 			end--
 		}
-		escapse := 0
+		escapeCnt := 0
 		for i := end - 1; i >= start && str[i] == '\\'; i-- {
-			escapse++
+			escapeCnt++
 		}
-		if escapse%2 == 1 {
+		if escapeCnt%2 == 1 {
 			end++
 		}
 	}
