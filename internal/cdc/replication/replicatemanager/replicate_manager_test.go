@@ -60,7 +60,7 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 
 	// Verify replicator was created
 	assert.Equal(t, 1, len(manager.replicators))
-	replicator, exists := manager.replicators["test-source-channel-1"]
+	replicator, exists := manager.replicators["test-source-channel-1_test-target-channel-1"]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator)
 
@@ -77,12 +77,12 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 
 	// Verify second replicator was created
 	assert.Equal(t, 2, len(manager.replicators))
-	replicator2, exists := manager.replicators["test-source-channel-2"]
+	replicator2, exists := manager.replicators["test-source-channel-2_test-target-channel-2"]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator2)
 
 	// Verify first replicator still exists
-	replicator1, exists := manager.replicators["test-source-channel-1"]
+	replicator1, exists := manager.replicators["test-source-channel-1_test-target-channel-1"]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator1)
 }

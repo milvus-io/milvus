@@ -212,7 +212,7 @@ type QueryCoordCatalog interface {
 type ReplicationCatalog interface {
 	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
 	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
-	RemoveReplicatePChannel(ctx context.Context, sourceChannelName, targetChannelName string) error
+	RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error
 
 	// ListReplicatePChannels lists all replicate pchannels from metastore.
 	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.

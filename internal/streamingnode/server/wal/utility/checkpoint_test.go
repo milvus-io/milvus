@@ -11,6 +11,9 @@ import (
 )
 
 func TestNewWALCheckpointFromProto(t *testing.T) {
+	assert.Nil(t, NewWALCheckpointFromProto(nil))
+	assert.Nil(t, NewWALCheckpointFromProto(nil).IntoProto())
+
 	messageID := rmq.NewRmqID(1)
 	timeTick := uint64(12345)
 	recoveryMagic := int64(1)
@@ -59,4 +62,25 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 	assert.Equal(t, uint64(123456), newCheckpoint.ReplicateCheckpoint.TimeTick)
 	assert.True(t, rmq.NewRmqID(2).EQ(newCheckpoint.ReplicateCheckpoint.MessageID))
 	assert.NotNil(t, newCheckpoint.ReplicateConfig)
+
+	proto = newCheckpoint.IntoProto()
+	checkpoint2 = NewWALCheckpointFromProto(proto)
+	assert.True(t, messageID.EQ(checkpoint2.MessageID))
+	assert.Equal(t, timeTick, checkpoint2.TimeTick)
+	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
+	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
+	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
+	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
+	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
+	assert.NotNil(t, checkpoint2.ReplicateConfig)
+
+	checkpoint2 = newCheckpoint.Clone()
+	assert.True(t, messageID.EQ(checkpoint2.MessageID))
+	assert.Equal(t, timeTick, checkpoint2.TimeTick)
+	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
+	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
+	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
+	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
+	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
+	assert.NotNil(t, checkpoint2.ReplicateConfig)
 }

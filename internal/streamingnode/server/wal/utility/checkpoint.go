@@ -13,30 +13,21 @@ const (
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
 func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
-	wcp := &WALCheckpoint{
-		MessageID:       message.MustUnmarshalMessageID(cp.MessageId),
-		TimeTick:        cp.TimeTick,
-		Magic:           cp.RecoveryMagic,
-		ReplicateConfig: cp.ReplicateConfig,
+	if cp == nil {
+		return nil
 	}
-	if cp.ReplicateCheckpoint != nil {
-		var messageID message.MessageID
-		if cp.ReplicateCheckpoint.MessageId != nil {
-			messageID = message.MustUnmarshalMessageID(cp.ReplicateCheckpoint.MessageId)
-		}
-		wcp.ReplicateCheckpoint = &ReplicateCheckpoint{
-			ClusterID: cp.ReplicateCheckpoint.ClusterId,
-			PChannel:  cp.ReplicateCheckpoint.Pchannel,
-			MessageID: messageID,
-			TimeTick:  cp.ReplicateCheckpoint.TimeTick,
-		}
+	return &WALCheckpoint{
+		MessageID:           message.MustUnmarshalMessageID(cp.MessageId),
+		TimeTick:            cp.TimeTick,
+		Magic:               cp.RecoveryMagic,
+		ReplicateConfig:     cp.ReplicateConfig,
+		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
 	}
-	return wcp
 }
 
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
-	MessageID           message.MessageID
+	MessageID           message.MessageID // should always be not nil.
 	TimeTick            uint64
 	Magic               int64
 	ReplicateCheckpoint *ReplicateCheckpoint
@@ -45,15 +36,16 @@ type WALCheckpoint struct {
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
 func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
-	cp := &streamingpb.WALCheckpoint{
-		MessageId:     c.MessageID.IntoProto(),
-		TimeTick:      c.TimeTick,
-		RecoveryMagic: c.Magic,
+	if c == nil {
+		return nil
 	}
-	if c.ReplicateCheckpoint != nil {
-		cp.ReplicateCheckpoint = c.ReplicateCheckpoint.IntoProto()
+	return &streamingpb.WALCheckpoint{
+		MessageId:           message.MustMarshalMessageID(c.MessageID),
+		TimeTick:            c.TimeTick,
+		RecoveryMagic:       c.Magic,
+		ReplicateConfig:     c.ReplicateConfig,
+		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
 	}
-	return cp
 }
 
 // Clone creates a new WALCheckpoint with the same values as the original.
@@ -62,16 +54,20 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		MessageID:           c.MessageID,
 		TimeTick:            c.TimeTick,
 		Magic:               c.Magic,
+		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
 	}
 }
 
 // NewReplicateCheckpointFromProto creates a new ReplicateCheckpoint from a protobuf message.
 func NewReplicateCheckpointFromProto(cp *commonpb.ReplicateCheckpoint) *ReplicateCheckpoint {
+	if cp == nil {
+		return nil
+	}
 	return &ReplicateCheckpoint{
+		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
 		ClusterID: cp.ClusterId,
 		PChannel:  cp.Pchannel,
-		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
 		TimeTick:  cp.TimeTick,
 	}
 }
@@ -81,7 +77,7 @@ func NewReplicateCheckpointFromProto(cp *commonpb.ReplicateCheckpoint) *Replicat
 type ReplicateCheckpoint struct {
 	ClusterID string            // the cluster id of the source cluster.
 	PChannel  string            // the pchannel of the source cluster.
-	MessageID message.MessageID // the last confirmed message id of the last replicated message.
+	MessageID message.MessageID // the last confirmed message id of the last replicated message, may be nil when initializing.
 	TimeTick  uint64            // the time tick of the last replicated message.
 }
 
@@ -90,14 +86,10 @@ func (c *ReplicateCheckpoint) IntoProto() *commonpb.ReplicateCheckpoint {
 	if c == nil {
 		return nil
 	}
-	var messageID *commonpb.MessageID
-	if c.MessageID != nil {
-		messageID = c.MessageID.IntoProto()
-	}
 	return &commonpb.ReplicateCheckpoint{
 		ClusterId: c.ClusterID,
 		Pchannel:  c.PChannel,
-		MessageId: messageID,
+		MessageId: message.MustMarshalMessageID(c.MessageID),
 		TimeTick:  c.TimeTick,
 	}
 }

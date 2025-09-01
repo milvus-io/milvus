@@ -22,4 +22,10 @@ import "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 type ReplicateManagerClient interface {
 	// CreateReplicator creates a new replicator for the replicate pchannel.
 	CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
+
+	// RemoveOutOfTargetReplicators removes replicators that are not in the target replicate pchannels.
+	RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta)
+
+	// Close closes the replicate manager client.
+	Close()
 }
