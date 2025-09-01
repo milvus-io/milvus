@@ -57,7 +57,7 @@ const (
 	TimeStampFieldName = "Timestamp"
 
 	// NamespaceFieldName defines the name of the Namespace field
-	NamespaceFieldName = "__namespace_id"
+	NamespaceFieldName = "$namespace_id"
 
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"

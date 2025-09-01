@@ -363,8 +363,14 @@ func (t *createCollectionTask) handleNamespaceProperty() error {
 	}
 
 	if hasIsolation {
-		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
-			"isolation property is not supported with namespace enabled")
+		iso, err := common.IsPartitionKeyIsolationKvEnabled(t.GetProperties()...)
+		if err != nil {
+			return err
+		}
+		if !iso {
+			return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+				"isolation property is false when namespace enabled")
+		}
 	}
 
 	if hasPartitionKey {
