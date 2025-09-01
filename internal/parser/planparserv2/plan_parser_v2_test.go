@@ -225,7 +225,7 @@ func TestExpr_Like(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	expr := `A like "8\\_0%"`
+	expr := `A like "8\_0%"`
 	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
@@ -238,7 +238,7 @@ func TestExpr_Like(t *testing.T) {
 	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, "8_0", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	expr = `A like "8_\\_0%"`
+	expr = `A like "8_\_0%"`
 	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
@@ -249,9 +249,9 @@ func TestExpr_Like(t *testing.T) {
 	assert.NotNil(t, plan)
 	fmt.Println(plan)
 	assert.Equal(t, planpb.OpType_Match, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
-	assert.Equal(t, `8_\_0%`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+	assert.Equal(t, `8[\s\S]_0[\s\S]*`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	expr = `A like "8\\%-0%"`
+	expr = `A like "8\%-0%"`
 	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",

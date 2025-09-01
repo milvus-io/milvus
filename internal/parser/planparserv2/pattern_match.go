@@ -2,121 +2,32 @@ package planparserv2
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
-var wildcards = map[byte]struct{}{
-	'_': {},
-	'%': {},
-}
-
-var escapeCharacter byte = '\\'
-
-func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
-	if len(pattern) == 0 {
-		return planpb.OpType_Equal, "", true
-	}
-
-	if pattern == "%" || pattern == "%%" {
-		return planpb.OpType_PrefixMatch, "", true
-	}
-
-	process := func(s string) (string, bool) {
-		var buf strings.Builder
-		for i := 0; i < len(s); i++ {
-			c := s[i]
-			if c == escapeCharacter && i+1 < len(s) {
-				next := s[i+1]
-				if _, ok := wildcards[next]; ok {
-					buf.WriteByte(next)
-					i++
-					continue
-				}
-			}
-			if _, ok := wildcards[c]; ok {
-				return "", false
-			}
-			buf.WriteByte(c)
-		}
-		return buf.String(), true
-	}
-
-	leading := pattern[0] == '%'
-	// trailing percent must not be escaped: number of consecutive '\\' before it must be even
-	isUnescapedTrailingPercent := func(s string) bool {
-		if s[len(s)-1] != '%' {
-			return false
-		}
-		cnt := 0
-		for i := len(s) - 2; i >= 0 && s[i] == '\\'; i-- {
-			cnt++
-		}
-		return cnt%2 == 0
-	}
-	trailing := isUnescapedTrailingPercent(pattern)
-
-	trimRight := func(s string) string {
-		if s == "" || s[len(s)-1] != '%' {
-			return s
-		}
-		for i := len(s) - 2; i >= 0; i-- {
-			if s[i] != '%' {
-				if isUnescapedTrailingPercent(s[:i+2]) {
-					return s[:i+1]
-				}
-				return s[:i+2]
-			}
-		}
-		return ""
-	}
-
-	switch {
-	case leading && trailing:
-		inner := pattern[1 : len(pattern)-1]
-		trimmed := strings.TrimLeft(inner, "%")
-		trimmed = trimRight(trimmed)
-		if subStr, valid := process(trimmed); valid {
-			// if subStr is empty, it means the pattern is all %,
-			// return prefix match and empty operand, means all match
-			if len(subStr) == 0 {
-				return planpb.OpType_PrefixMatch, "", true
-			}
-			return planpb.OpType_InnerMatch, subStr, true
-		}
-	case leading:
-		trimmed := strings.TrimLeft(pattern[1:], "%")
-		if subStr, valid := process(trimmed); valid {
-			return planpb.OpType_PostfixMatch, subStr, true
-		}
-	case trailing:
-		trimmed := trimRight(pattern[:len(pattern)-1])
-		if subStr, valid := process(trimmed); valid {
-			return planpb.OpType_PrefixMatch, subStr, true
-		}
-	default:
-		if subStr, valid := process(pattern); valid {
-			return planpb.OpType_Equal, subStr, true
-		}
-	}
-	return planpb.OpType_Invalid, "", false
-}
-
-// translatePatternMatch translates pattern to related op type and operand.
-func translatePatternMatch(pattern string) (op planpb.OpType, operand string, err error) {
-	op, operand, ok := optimizeLikePattern(pattern)
-	if ok {
-		return op, operand, nil
-	}
-
-	return planpb.OpType_Match, pattern, nil
-}
-
 func escapeStringWithWildcards(str string) (op planpb.OpType, operand string, err error) {
-	// 1. Check and remove quotes
+	// 1. Check and remove quotes, handle encoding prefixes
 	if len(str) < 2 {
 		return planpb.OpType_Invalid, "", fmt.Errorf("invalid string: too short")
+	}
+
+	// Handle encoding prefixes: u8, u, U, L
+	originalStr := str
+	if len(str) >= 3 {
+		if str[:2] == "u8" || str[:1] == "u" || str[:1] == "U" || str[:1] == "L" {
+			if str[:2] == "u8" {
+				str = str[2:]
+			} else {
+				str = str[1:]
+			}
+		}
+	}
+
+	if len(str) < 2 {
+		return planpb.OpType_Invalid, "", fmt.Errorf("invalid string: too short after prefix")
 	}
 
 	if str[0] == '"' && str[len(str)-1] == '"' {
@@ -124,7 +35,7 @@ func escapeStringWithWildcards(str string) (op planpb.OpType, operand string, er
 	} else if str[0] == '\'' && str[len(str)-1] == '\'' {
 		str = str[1 : len(str)-1]
 	} else {
-		return planpb.OpType_Invalid, "", fmt.Errorf("invalid string: missing or mismatched quotes")
+		return planpb.OpType_Invalid, "", fmt.Errorf("invalid string: missing or mismatched quotes in %s", originalStr)
 	}
 
 	// Handle empty string case
@@ -132,137 +43,242 @@ func escapeStringWithWildcards(str string) (op planpb.OpType, operand string, er
 		return planpb.OpType_Equal, "", nil
 	}
 
-	// 2. Process escape characters and build intermediate representation
-	var processed strings.Builder // Processed string with escape chars resolved
-
+	// Handle pure wildcard patterns (one or more consecutive %)
+	allPercent := true
 	for i := 0; i < len(str); i++ {
-		c := str[i]
-		if c == '\\' && i+1 < len(str) {
-			next := str[i+1]
-			switch next {
-			case 'n':
-				processed.WriteByte('\n')
-				i++
-			case 't':
-				processed.WriteByte('\t')
-				i++
-			case 'r':
-				processed.WriteByte('\r')
-				i++
-			case '\\':
-				processed.WriteByte('\\')
-				i++
-			case '"':
-				processed.WriteByte('"')
-				i++
-			case '\'':
-				processed.WriteByte('\'')
-				i++
-			case '_', '%':
-				// Escaped wildcards: mark them as literal by using a special prefix
-				processed.WriteByte('\x00') // Use null byte as escape marker
-				processed.WriteByte(next)
-				i++
-			default:
-				// Other escape characters, keep backslash
-				processed.WriteByte(c)
-			}
-		} else {
-			processed.WriteByte(c)
+		if str[i] != '%' {
+			allPercent = false
+			break
 		}
 	}
-
-	pattern := processed.String()
-
-	// 3. Analyze pattern and build outputs based on optimizeLikePattern logic
-	if len(pattern) == 0 {
-		return planpb.OpType_Equal, "", nil
-	}
-
-	// Check for pure wildcard patterns
-	if pattern == "%" || pattern == "%%" {
+	if allPercent && len(str) > 0 {
 		return planpb.OpType_PrefixMatch, "", nil
 	}
 
-	// Analyze pattern structure
-	leading := len(pattern) > 0 && pattern[0] == '%'
-	trailing := len(pattern) > 0 && pattern[len(pattern)-1] == '%'
+	// Single pass processing: handle escape sequences and determine pattern type
+	var resultBuf strings.Builder  // Final result string with wildcards converted to regex
+	var literalBuf strings.Builder // Clean literal string for optimization cases
+	hasLeadingPercent := false
+	hasTrailingPercent := false
+	hasMiddleWildcards := false
 
-	// Count consecutive trailing percents (unescaped)
-	trailingPercentEnd := len(pattern)
-	if trailing {
-		for i := len(pattern) - 1; i >= 0 && pattern[i] == '%'; i-- {
-			trailingPercentEnd = i
+	// Check for leading percent and skip consecutive ones
+	if len(str) > 0 && str[0] == '%' {
+		hasLeadingPercent = true
+	}
+
+	// Check for unescaped trailing percent - scan backwards to handle consecutive %
+	if len(str) > 0 && str[len(str)-1] == '%' {
+		// Count consecutive backslashes before the last %
+		escapeCount := 0
+		for i := len(str) - 2; i >= 0 && str[i] == '\\'; i-- {
+			escapeCount++
+		}
+		// If even number of backslashes (including 0), the % is not escaped
+		if escapeCount%2 == 0 {
+			hasTrailingPercent = true
 		}
 	}
 
-	// Extract and process middle part
+	// Determine the range to process (exclude leading/trailing %)
 	start := 0
-	if leading {
-		// Skip leading percents
-		for start < len(pattern) && pattern[start] == '%' {
+	if hasLeadingPercent {
+		// Skip all consecutive leading % characters
+		for start < len(str) && str[start] == '%' {
 			start++
 		}
 	}
 
-	end := trailingPercentEnd
-	middle := pattern[start:end]
-
-	// Process middle part: check for internal wildcards and build operand/regex
-	var cleanOperand strings.Builder
-	var regexBuf strings.Builder
-	hasInternalWildcards := false
-
-	for i := 0; i < len(middle); i++ {
-		c := middle[i]
-		if c == '\x00' && i+1 < len(middle) {
-			// Escaped wildcard - treat as literal
-			next := middle[i+1]
-			cleanOperand.WriteByte(next)
-			regexBuf.WriteByte(next)
-			i++
-		} else if c == '_' {
-			// Unescaped underscore wildcard
-			regexBuf.WriteString("[\\s\\S]")
-			hasInternalWildcards = true
-		} else if c == '%' {
-			// Internal percent wildcard
-			regexBuf.WriteString("[\\s\\S]*")
-			hasInternalWildcards = true
-		} else {
-			cleanOperand.WriteByte(c)
-			regexBuf.WriteByte(c)
+	end := len(str)
+	if hasTrailingPercent {
+		// Skip all consecutive trailing % characters
+		for end > start && str[end-1] == '%' {
+			end--
+		}
+		escapse := 0
+		for i := end - 1; i >= start && str[i] == '\\'; i-- {
+			escapse++
+		}
+		if escapse%2 == 1 {
+			end++
 		}
 	}
 
-	// 4. Determine operation type
-	operandStr := cleanOperand.String()
+	// Process the middle part
+	for i := start; i < end; i++ {
+		c := str[i]
+		switch c {
+		case '\\':
+			if i+1 >= end {
+				// Backslash at the end of string - this is an error
+				return planpb.OpType_Invalid, "", fmt.Errorf("invalid escape sequence: backslash at end of string")
+			}
+			next := str[i+1]
+			switch next {
+			case 'a':
+				resultBuf.WriteByte('\a') // Bell/alert
+				literalBuf.WriteByte('\a')
+				i++
+			case 'b':
+				resultBuf.WriteByte('\b') // Backspace
+				literalBuf.WriteByte('\b')
+				i++
+			case 'f':
+				resultBuf.WriteByte('\f') // Form feed
+				literalBuf.WriteByte('\f')
+				i++
+			case 'n':
+				resultBuf.WriteByte('\n')
+				literalBuf.WriteByte('\n')
+				i++
+			case 'r':
+				resultBuf.WriteByte('\r')
+				literalBuf.WriteByte('\r')
+				i++
+			case 't':
+				resultBuf.WriteByte('\t')
+				literalBuf.WriteByte('\t')
+				i++
+			case 'v':
+				resultBuf.WriteByte('\v') // Vertical tab
+				literalBuf.WriteByte('\v')
+				i++
+			case '\\':
+				resultBuf.WriteByte('\\')
+				literalBuf.WriteByte('\\')
+				i++
+			case '"':
+				resultBuf.WriteByte('"')
+				literalBuf.WriteByte('"')
+				i++
+			case '\'':
+				resultBuf.WriteByte('\'')
+				literalBuf.WriteByte('\'')
+				i++
+			case '?':
+				resultBuf.WriteByte('?')
+				literalBuf.WriteByte('?')
+				i++
+			case '_', '%':
+				// Escaped wildcards - treat as literal characters
+				resultBuf.WriteByte(next)
+				literalBuf.WriteByte(next)
+				i++
+			case 'x':
+				// Hexadecimal escape sequence \xHH
+				if i+4 > end {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid hexadecimal escape sequence: incomplete")
+				}
+				hexStr := str[i+2 : i+4]
+				codePoint, err := strconv.ParseUint(hexStr, 16, 8)
+				if err != nil {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid hexadecimal escape sequence: %s", hexStr)
+				}
+				resultBuf.WriteByte(byte(codePoint))
+				literalBuf.WriteByte(byte(codePoint))
+				i += 3
+			case 'u':
+				// Unicode escape sequence \uXXXX
+				if i+6 > end {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid Unicode escape sequence: incomplete")
+				}
+				hexStr := str[i+2 : i+6]
+				codePoint, err := strconv.ParseUint(hexStr, 16, 16)
+				if err != nil {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid Unicode escape sequence: %s", hexStr)
+				}
+				r := rune(codePoint)
+				resultBuf.WriteRune(r)
+				literalBuf.WriteRune(r)
+				i += 5
+			case 'U':
+				// Extended Unicode escape sequence \UXXXXXXXX
+				if i+10 > end {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid extended Unicode escape sequence: incomplete")
+				}
+				hexStr := str[i+2 : i+10]
+				codePoint, err := strconv.ParseUint(hexStr, 16, 32)
+				if err != nil {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid extended Unicode escape sequence: %s", hexStr)
+				}
+				r := rune(codePoint)
+				resultBuf.WriteRune(r)
+				literalBuf.WriteRune(r)
+				i += 9
+			case '0', '1', '2', '3', '4', '5', '6', '7':
+				// Octal escape sequence \ooo (1-3 octal digits)
+				octalStr := string(next)
+				consumed := 1
+				// Check for additional octal digits (up to 3 total)
+				for consumed < 3 && i+1+consumed < end {
+					nextChar := str[i+1+consumed]
+					if nextChar >= '0' && nextChar <= '7' {
+						octalStr += string(nextChar)
+						consumed++
+					} else {
+						break
+					}
+				}
+				codePoint, err := strconv.ParseUint(octalStr, 8, 8)
+				if err != nil {
+					return planpb.OpType_Invalid, "", fmt.Errorf("invalid octal escape sequence: %s", octalStr)
+				}
+				resultBuf.WriteByte(byte(codePoint))
+				literalBuf.WriteByte(byte(codePoint))
+				i += consumed
+			default:
+				// Keep backslash for unknown escape sequences
+				resultBuf.WriteByte(c)
+				literalBuf.WriteByte(c)
+			}
+		case '_':
+			// Unescaped underscore wildcard
+			resultBuf.WriteString("[\\s\\S]")
+			hasMiddleWildcards = true
+		case '%':
+			// Unescaped percent wildcard - collapse consecutive ones
+			resultBuf.WriteString("[\\s\\S]*")
+			hasMiddleWildcards = true
+			// Skip additional consecutive % characters for optimization
+			for i+1 < end && str[i+1] == '%' {
+				i++
+			}
+		default:
+			// Regular character
+			resultBuf.WriteByte(c)
+			literalBuf.WriteByte(c)
+		}
+	}
 
-	// If has internal wildcards, return regex
-	if hasInternalWildcards {
-		var fullRegex strings.Builder
-		if leading {
-			fullRegex.WriteString("[\\s\\S]*")
+	// Determine operation type and build final result
+	literalStr := literalBuf.String()
+
+	if hasMiddleWildcards {
+		// Has internal wildcards - must use regex match
+		var finalResult strings.Builder
+		if hasLeadingPercent {
+			finalResult.WriteString("[\\s\\S]*")
 		}
-		fullRegex.WriteString(regexBuf.String())
-		if trailing {
-			fullRegex.WriteString("[\\s\\S]*")
+		finalResult.WriteString(resultBuf.String())
+		if hasTrailingPercent {
+			finalResult.WriteString("[\\s\\S]*")
 		}
-		return planpb.OpType_Match, fullRegex.String(), nil
+		return planpb.OpType_Match, finalResult.String(), nil
 	}
 
 	// No internal wildcards - can optimize
 	switch {
-	case leading && trailing:
-		if len(operandStr) == 0 {
+	case hasLeadingPercent && hasTrailingPercent:
+		if len(literalStr) == 0 {
+			// Pure % pattern
 			return planpb.OpType_PrefixMatch, "", nil
 		}
-		return planpb.OpType_InnerMatch, operandStr, nil
-	case leading:
-		return planpb.OpType_PostfixMatch, operandStr, nil
-	case trailing:
-		return planpb.OpType_PrefixMatch, operandStr, nil
+		return planpb.OpType_InnerMatch, literalStr, nil
+	case hasLeadingPercent:
+		return planpb.OpType_PostfixMatch, literalStr, nil
+	case hasTrailingPercent:
+		return planpb.OpType_PrefixMatch, literalStr, nil
 	default:
-		return planpb.OpType_Equal, operandStr, nil
+		return planpb.OpType_Equal, literalStr, nil
 	}
 }
