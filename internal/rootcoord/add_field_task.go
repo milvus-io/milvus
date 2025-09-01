@@ -66,6 +66,7 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
 	ts := t.GetTs()
+	t.Req.CollectionID = oldColl.CollectionID
 	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
 }
 
@@ -88,17 +89,26 @@ func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
 	)
 }
 
+type collInfoProvider interface {
+	GetDbName() string
+	GetCollectionName() string
+	GetCollectionID() int64
+}
+
 func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
 	newField *model.Field,
-	req *milvuspb.AddCollectionFieldRequest,
+	req collInfoProvider,
 	ts Timestamp,
 ) error {
 	redoTask := newBaseRedoTask(core.stepExecutor)
 
 	updatedCollection := col.Clone()
 	updatedCollection.Fields = append(updatedCollection.Fields, newField)
+	if newField.IsDynamic {
+		updatedCollection.EnableDynamicField = true
+	}
 	redoTask.AddSyncStep(&WriteSchemaChangeWALStep{
 		baseStep:   baseStep{core: core},
 		collection: updatedCollection,
@@ -112,7 +122,6 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 		newField:          newField,
 	})
 
-	req.CollectionID = oldColl.CollectionID
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
 		baseStep: baseStep{core: core},
 		req: &milvuspb.AlterCollectionRequest{
