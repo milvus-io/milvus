@@ -86,7 +86,8 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
-	initcore.InitMmapManager(paramtable.Get())
+	initcore.InitMmapManager(paramtable.Get(), 1)
+	initcore.InitTieredStorage(paramtable.Get())
 
 	s.collectionID = 1000
 	s.replicaID = 65535

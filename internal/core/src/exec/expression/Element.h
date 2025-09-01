@@ -150,7 +150,21 @@ class SortVectorElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         AssertInfo(sorted_, "In() should be sorted before");
-        if (std::holds_alternative<T>(value)) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (std::holds_alternative<std::string>(value)) {
+                return std::binary_search(values_.begin(),
+                                          values_.end(),
+                                          std::get<std::string>(value));
+            } else if (std::holds_alternative<std::string_view>(value)) {
+                return std::binary_search(
+                    values_.begin(),
+                    values_.end(),
+                    std::string(std::get<std::string_view>(value)),
+                    [](const std::string& a, std::string_view b) {
+                        return a < b;
+                    });
+            }
+        } else if (std::holds_alternative<T>(value)) {
             return std::binary_search(
                 values_.begin(), values_.end(), std::get<T>(value));
         }
@@ -166,6 +180,11 @@ class SortVectorElement : public MultiElement {
     void
     AddElement(const T& value) {
         values_.push_back(value);
+    }
+
+    std::vector<T>
+    GetElements() const {
+        return values_;
     }
 
  public:
@@ -257,6 +276,11 @@ class SetElement : public MultiElement {
         return values_.size();
     }
 
+    std::vector<T>
+    GetElements() const {
+        return std::vector<T>(values_.begin(), values_.end());
+    }
+
  public:
     ankerl::unordered_dense::set<T> values_;
 };
@@ -311,6 +335,11 @@ class SetElement<bool> : public MultiElement {
     size_t
     Size() const override {
         return (contains_true ? 1 : 0) + (contains_false ? 1 : 0);
+    }
+
+    std::vector<bool>
+    GetElements() const {
+        return {contains_true, contains_false};
     }
 
  private:

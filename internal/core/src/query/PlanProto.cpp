@@ -29,6 +29,15 @@
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
 
+void
+ProtoParser::PlanOptionsFromProto(
+    const proto::plan::PlanOption& plan_option_proto,
+    PlanOptions& plan_options) {
+    plan_options.expr_use_json_stats = plan_option_proto.expr_use_json_stats();
+    LOG_INFO("plan_options.expr_use_json_stats: {}",
+             plan_options.expr_use_json_stats);
+}
+
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
@@ -211,18 +220,21 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }
 
     // if has score function, run filter and scorer at last
-    if (plan_node_proto.scorers_size() > 0){
+    if (plan_node_proto.scorers_size() > 0) {
         std::vector<std::shared_ptr<rescores::Scorer>> scorers;
-        for (const auto& function: plan_node_proto.scorers()){
+        for (const auto& function : plan_node_proto.scorers()) {
             scorers.push_back(ParseScorer(function));
         }
-        
+
         plannode = std::make_shared<milvus::plan::RescoresNode>(
             milvus::plan::GetNextPlanNodeId(), std::move(scorers), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
     plan_node->plannodes_ = plannode;
+
+    PlanOptionsFromProto(plan_node_proto.plan_options(),
+                         plan_node->plan_options_);
 
     return plan_node;
 }
@@ -305,6 +317,9 @@ ProtoParser::RetrievePlanNodeFromProto(
         }
         return node;
     }();
+
+    PlanOptionsFromProto(plan_node_proto.plan_options(),
+                         plan_node->plan_options_);
 
     return plan_node;
 }
@@ -604,9 +619,14 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         ExprInvalid, "expr type check failed, actual type: {}", result->type());
 }
 
-std::shared_ptr<rescores::Scorer> ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function){
-    auto expr = ParseExprs(function.filter());
-    return std::make_shared<rescores::WeightScorer>(expr, function.weight());
+std::shared_ptr<rescores::Scorer>
+ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
+    if (function.has_filter()) {
+        auto expr = ParseExprs(function.filter());
+        return std::make_shared<rescores::WeightScorer>(expr,
+                                                        function.weight());
+    }
+    return std::make_shared<rescores::WeightScorer>(nullptr, function.weight());
 }
 
 }  // namespace milvus::query

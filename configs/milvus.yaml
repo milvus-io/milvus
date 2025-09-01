@@ -233,7 +233,7 @@ pulsar:
   tenant: public
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
-  enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
+  enableClientMetrics: true # Whether to register pulsar client metrics into milvus metrics path.
   # Perform a backlog cleanup every time the data of given bytes is written.
   # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
   # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
@@ -501,7 +501,6 @@ queryNode:
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
-    jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -513,6 +512,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
+    jsonStats: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -732,7 +732,9 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
+  jsonStatsMaxShreddingColumns: 1024 # the max number of columns to shred
+  jsonStatsShreddingRatioThreshold: 0.3 # the ratio threshold to shred
+  jsonStatsWriteBatchSize: 819200 # the batch size to write
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -1016,6 +1018,8 @@ common:
   enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
+  enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
+  UsingJSONStatsForQuery: true # Indicates whether to use json stats when query
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

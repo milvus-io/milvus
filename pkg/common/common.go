@@ -121,6 +121,13 @@ const (
 
 	// JSONIndexPath storage path const for json index
 	JSONIndexPath = "json_key_index_log"
+
+	// JSONStatsPath storage path const for json stats
+	JSONStatsPath = "json_stats"
+)
+
+const (
+	JSONStatsDataFormatVersion = 2
 )
 
 // Search, Index parameter keys
@@ -154,6 +161,11 @@ const (
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+)
+
+// expr query params
+const (
+	ExprUseJSONStatsKey = "expr_use_json_stats"
 )
 
 // Doc-in-doc-out
@@ -220,8 +232,9 @@ const (
 )
 
 const (
-	PropertiesKey string = "properties"
-	TraceIDKey    string = "uber-trace-id"
+	PropertiesKey        string = "properties"
+	TraceIDKey           string = "uber-trace-id"
+	ClientRequestMsecKey string = "client-request-unixmsec"
 )
 
 func IsSystemField(fieldID int64) bool {

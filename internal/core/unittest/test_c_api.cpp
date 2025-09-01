@@ -51,6 +51,7 @@
 #include "test_utils/DataGen.h"
 #include "segcore/vector_index_c.h"
 #include "common/jsmn.h"
+#include "exec/expression/Element.h"
 
 using namespace milvus;
 using namespace milvus::test;
@@ -202,6 +203,11 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema2->set_name("doubleField");
     other_field_schema2->set_fieldid(102);
     other_field_schema2->set_data_type(schema::DataType::Double);
+
+    auto other_field_schema3 = collection_schema.add_fields();
+    other_field_schema3->set_name("timestamptzField");
+    other_field_schema3->set_fieldid(103);
+    other_field_schema3->set_data_type(schema::DataType::Timestamptz);
 
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(
@@ -945,7 +951,7 @@ TEST(CApiTest, SearchTestWhenNullable) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, 111, &segment, false);
+    auto status = NewSegment(collection, Growing, 112, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1043,6 +1049,40 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, TestMultiElement) {
+    std::vector<std::string> params;
+    for (int i = 0; i < 100; i++) {
+        params.push_back(std::to_string(i));
+    }
+    auto multi_element =
+        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
+    std::string target = "50";
+    auto res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "30";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "40";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "100";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+    target = "1000";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+
+    std::string_view target_view = "30";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "40";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "50";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
@@ -1891,7 +1931,7 @@ TEST(CApiTest, LoadIndexInfo) {
         c_load_index_info, index_param_key2.data(), index_param_value2.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
-    status = AppendFieldInfo(
+    status = AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, false, "");
     ASSERT_EQ(status.error_code, Success);
     AppendIndexEngineVersionToLoadInfo(
@@ -2069,7 +2109,7 @@ Test_Indexing_Without_Predicate() {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, TraitType::c_data_type, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2225,7 +2265,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2403,7 +2443,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2583,7 +2623,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2755,7 +2795,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2928,7 +2968,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3109,7 +3149,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3290,7 +3330,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3465,7 +3505,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3663,7 +3703,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3818,7 +3858,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -4049,7 +4089,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,

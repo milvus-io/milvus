@@ -552,42 +552,51 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:           1,
 		Type:             datapb.CompactionType_MixCompaction,
-		TimeoutInSeconds: 1,
 		Channel:          "ch-1",
 		State:            datapb.CompactionTaskState_executing,
 		NodeID:           111,
+		StartTime:        time.Now().Unix(),
+		TimeoutInSeconds: 3600,
 	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  2,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-1",
-		State:   datapb.CompactionTaskState_executing,
-		NodeID:  111,
+		PlanID:           2,
+		Type:             datapb.CompactionType_MixCompaction,
+		Channel:          "ch-1",
+		State:            datapb.CompactionTaskState_executing,
+		NodeID:           111,
+		StartTime:        time.Now().Unix(),
+		TimeoutInSeconds: 3600,
 	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
 
 	t3 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  3,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-1",
-		State:   datapb.CompactionTaskState_timeout,
-		NodeID:  111,
+		PlanID:           3,
+		Type:             datapb.CompactionType_MixCompaction,
+		Channel:          "ch-1",
+		State:            datapb.CompactionTaskState_timeout,
+		NodeID:           111,
+		StartTime:        time.Now().Unix(),
+		TimeoutInSeconds: 3600,
 	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
 
 	t4 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  4,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-1",
-		State:   datapb.CompactionTaskState_timeout,
-		NodeID:  111,
+		PlanID:           4,
+		Type:             datapb.CompactionType_MixCompaction,
+		Channel:          "ch-1",
+		State:            datapb.CompactionTaskState_timeout,
+		NodeID:           111,
+		StartTime:        time.Now().Unix(),
+		TimeoutInSeconds: 3600,
 	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
 
 	t6 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:  6,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-2",
-		State:   datapb.CompactionTaskState_executing,
-		NodeID:  111,
+		PlanID:           6,
+		Type:             datapb.CompactionType_MixCompaction,
+		Channel:          "ch-2",
+		State:            datapb.CompactionTaskState_executing,
+		NodeID:           111,
+		StartTime:        time.Now().Unix(),
+		TimeoutInSeconds: 3600,
 	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
 
 	inTasks := map[int64]CompactionTask{

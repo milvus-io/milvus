@@ -150,7 +150,8 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
         auto dim = source->Dim();
 
         while (total_rows > 0) {
-            auto mat = static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
+            auto mat = static_cast<
+                const knowhere::sparse::SparseRow<SparseValueType>*>(
                 source->get_chunk_data(chunk_id));
             auto rows = std::min(source->get_size_per_chunk(), total_rows);
             auto dataset = knowhere::GenDataSet(rows, dim, mat);
@@ -369,6 +370,9 @@ CreateIndex(const FieldMeta& field_meta,
                                                                 segcore_config);
         case DataType::DOUBLE:
             return std::make_unique<ScalarFieldIndexing<double>>(
+                field_meta, segcore_config);
+        case DataType::TIMESTAMPTZ:
+            return std::make_unique<ScalarFieldIndexing<int64_t>>(
                 field_meta, segcore_config);
         case DataType::VARCHAR:
             return std::make_unique<ScalarFieldIndexing<std::string>>(

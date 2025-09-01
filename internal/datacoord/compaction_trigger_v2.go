@@ -56,6 +56,8 @@ func (t CompactionTriggerType) String() string {
 		return "Clustering"
 	case TriggerTypeSingle:
 		return "Single"
+	case TriggerTypeSort:
+		return "Sort"
 	default:
 		return ""
 	}

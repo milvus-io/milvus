@@ -70,9 +70,9 @@ class GroupChunk {
         return chunks_;
     }
 
-    size_t
+    cachinglayer::ResourceUsage
     CellByteSize() const {
-        size_t total_size = 0;
+        cachinglayer::ResourceUsage total_size = {0, 0};
         for (const auto& chunk : chunks_) {
             total_size += chunk.second->CellByteSize();
         }

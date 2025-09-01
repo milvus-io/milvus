@@ -134,8 +134,10 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         ASSERT_NO_THROW(index->Build(xb_dataset));
     } else if (vec_field_data_type == DataType::VECTOR_SPARSE_U32_F32) {
         auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
-        auto sparse_vecs = dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(
-            milvus::FieldId(100));
+        auto sparse_vecs =
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    milvus::FieldId(100));
         xb_dataset =
             knowhere::GenDataSet(NB, kTestSparseDim, sparse_vecs.data());
         xb_dataset->SetIsSparse(true);
@@ -179,8 +181,10 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     } else if (vec_field_data_type == DataType::VECTOR_SPARSE_U32_F32) {
         auto dataset = GenFieldData(NQ, metric_type, vec_field_data_type);
-        auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<milvus::sparseValueType>>(
-            milvus::FieldId(100));
+        auto xb_data =
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    milvus::FieldId(100));
         auto xq_dataset =
             knowhere::GenDataSet(NQ, kTestSparseDim, xb_data.data());
         xq_dataset->SetIsSparse(true);

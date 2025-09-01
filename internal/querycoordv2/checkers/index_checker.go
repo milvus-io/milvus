@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -247,17 +248,15 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 		for _, v := range loadField {
 			loadFieldMap[v] = struct{}{}
 		}
-		jsonStatsFieldMap := make(map[int64]struct{})
-		for _, v := range segment.JSONIndexField {
-			jsonStatsFieldMap[v] = struct{}{}
-		}
+
 		for _, field := range schema.GetFields() {
 			// Check if the field exists in both loadFieldMap and jsonStatsFieldMap
 			h := typeutil.CreateFieldSchemaHelper(field)
+			fieldID := field.GetFieldID()
 			if h.EnableJSONKeyStatsIndex() {
-				if _, ok := loadFieldMap[field.FieldID]; ok {
-					if _, ok := jsonStatsFieldMap[field.FieldID]; !ok {
-						result = append(result, field.FieldID)
+				if _, ok := loadFieldMap[fieldID]; ok {
+					if info, ok := segment.JSONStatsField[fieldID]; !ok || info.GetDataFormatVersion() < common.JSONStatsDataFormatVersion {
+						result = append(result, fieldID)
 					}
 				}
 			}

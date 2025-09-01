@@ -43,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -2707,7 +2707,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	} else if err != nil {
 		rsp.Status = merr.Status(err)
 	}
-	return rsp, err
+	if err != nil {
+		rsp.Status = merr.Status(err)
+	}
+	return rsp, nil
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
@@ -6216,16 +6219,16 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 }
 
 func (node *Proxy) runAnalyzer(req *milvuspb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
+	analyzer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
 	if err != nil {
 		return nil, err
 	}
 
-	defer tokenizer.Destroy()
+	defer analyzer.Destroy()
 
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
 	for i, text := range req.GetPlaceholder() {
-		stream := tokenizer.NewTokenStream(string(text))
+		stream := analyzer.NewTokenStream(string(text))
 		defer stream.Destroy()
 
 		results[i] = &milvuspb.AnalyzerResult{

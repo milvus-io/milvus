@@ -73,7 +73,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
-	distManager := meta.NewDistributionManager()
+	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 

@@ -31,6 +31,8 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "folly/SharedMutex.h"
+#include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
@@ -38,10 +40,10 @@
 #include "pb/segcore.pb.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/JsonKeyStatsInvertedIndex.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -143,8 +145,6 @@ class SegmentInterface {
     GetJsonIndex(FieldId field_id, std::string path) const {
         return nullptr;
     }
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const = 0;
 
     virtual void
     BulkGetJsonData(FieldId field_id,
@@ -165,6 +165,9 @@ class SegmentInterface {
     virtual bool
     HasNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const = 0;
+
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -202,6 +205,8 @@ class SegmentInternalInterface : public SegmentInterface {
             return chunk_string_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+            return chunk_vector_array_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_view_impl(field_id, chunk_id, offset_len);
             auto [string_views, valid_data] = pw.get();
@@ -375,9 +380,6 @@ class SegmentInternalInterface : public SegmentInterface {
     index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const override;
 
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const override;
-
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
 
@@ -391,6 +393,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
+
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override;
 
  public:
     // `query_lims` is not null only for vector array (embedding list) search
@@ -534,6 +539,13 @@ class SegmentInternalInterface : public SegmentInterface {
                               offset_len = std::nullopt) const = 0;
 
     virtual PinWrapper<
+        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    chunk_vector_array_view_impl(FieldId field_id,
+                                 int64_t chunk_id,
+                                 std::optional<std::pair<int64_t, int64_t>>
+                                     offset_len = std::nullopt) const = 0;
+
+    virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
         FieldId field_id,
@@ -607,9 +619,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
 
-    std::unordered_map<FieldId,
-                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
-        json_indexes_;
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+        json_stats_;
 };
 
 }  // namespace milvus::segcore

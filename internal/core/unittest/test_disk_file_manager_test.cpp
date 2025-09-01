@@ -481,7 +481,7 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
             PrepareOptionalField<TYPE>(file_manager, insert_file_path);      \
         milvus::Config config;                                               \
         config[VEC_OPT_FIELDS] = opt_fields;                                 \
-        auto res = file_manager->CacheOptFieldToDisk(config);            \
+        auto res = file_manager->CacheOptFieldToDisk(config);                \
         ASSERT_FALSE(res.empty());                                           \
         CheckOptFieldCorrectness(res, RANGE);                                \
     };
@@ -514,7 +514,7 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
 TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     std::string local_index_file_path;
     std::string local_text_index_file_path;
-    std::string local_json_key_index_file_path;
+    std::string local_json_stats_file_path;
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -525,25 +525,25 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
         auto random_file_suffix = std::to_string(rand());
         local_text_index_file_path =
             file_manager->GetLocalTextIndexPrefix() + random_file_suffix;
-        local_json_key_index_file_path =
-            file_manager->GetLocalJsonKeyIndexPrefix() + random_file_suffix;
         local_index_file_path =
             file_manager->GetLocalIndexObjectPrefix() + random_file_suffix;
+        local_json_stats_file_path =
+            file_manager->GetLocalJsonStatsPrefix() + random_file_suffix;
 
         local_chunk_manager->CreateFile(local_text_index_file_path);
-        local_chunk_manager->CreateFile(local_json_key_index_file_path);
         local_chunk_manager->CreateFile(local_index_file_path);
+        local_chunk_manager->CreateFile(local_json_stats_file_path);
 
         // verify these files exist
         EXPECT_TRUE(
             file_manager->IsExisted(local_text_index_file_path).value());
-        EXPECT_TRUE(
-            file_manager->IsExisted(local_json_key_index_file_path).value());
         EXPECT_TRUE(file_manager->IsExisted(local_index_file_path).value());
+        EXPECT_TRUE(
+            file_manager->IsExisted(local_json_stats_file_path).value());
     }
 
     // verify these files not exist
     EXPECT_FALSE(local_chunk_manager->Exist(local_text_index_file_path));
-    EXPECT_FALSE(local_chunk_manager->Exist(local_json_key_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file_path));
+    EXPECT_FALSE(local_chunk_manager->Exist(local_json_stats_file_path));
 }

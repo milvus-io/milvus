@@ -48,6 +48,7 @@ class MilvusConan(ConanFile):
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
+        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -68,8 +69,10 @@ class MilvusConan(ConanFile):
         "arrow:with_boost": True,
         "arrow:with_thrift": True,
         "arrow:with_jemalloc": True,
+        "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_s3": True,
+        "arrow:encryption": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,

@@ -43,7 +43,7 @@ namespace milvus {
     (data_array->vectors().type##_vector().data())
 
 using CheckDataValid = std::function<bool(size_t)>;
-using sparseValueType = typename knowhere::sparse_u32_f32::ValueType;
+using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
 
 inline DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
@@ -246,18 +246,19 @@ EscapeBraces(const std::string& input) {
     return result;
 }
 
-inline knowhere::sparse::SparseRow<sparseValueType>
+inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
     size_t num_elements =
-        size / knowhere::sparse::SparseRow<sparseValueType>::element_size();
-    knowhere::sparse::SparseRow<sparseValueType> row(num_elements);
+        size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
+    knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     std::memcpy(row.data(), data, size);
     if (validate) {
-        AssertInfo(
-            size % knowhere::sparse::SparseRow<sparseValueType>::element_size() == 0,
-            "Invalid size for sparse row data");
+        AssertInfo(size % knowhere::sparse::SparseRow<
+                              SparseValueType>::element_size() ==
+                       0,
+                   "Invalid size for sparse row data");
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
             AssertInfo(std::isfinite(element.val),
@@ -277,17 +278,17 @@ CopyAndWrapSparseRow(const void* data,
 
 // Iterable is a list of bytes, each is a byte array representation of a single
 // sparse float row. This helper function converts such byte arrays into a list
-// of knowhere::sparse::SparseRow<sparseValueType>. The resulting list is a deep copy of
+// of knowhere::sparse::SparseRow<SparseValueType>. The resulting list is a deep copy of
 // the source data.
 //
 // Here in segcore we validate the sparse row data only for search requests,
 // as the insert/upsert data are already validated in go code.
 template <typename Iterable>
-std::unique_ptr<knowhere::sparse::SparseRow<sparseValueType>[]>
+std::unique_ptr<knowhere::sparse::SparseRow<SparseValueType>[]>
 SparseBytesToRows(const Iterable& rows, const bool validate = false) {
     AssertInfo(rows.size() > 0, "at least 1 sparse row should be provided");
-    auto res =
-        std::make_unique<knowhere::sparse::SparseRow<sparseValueType>[]>(rows.size());
+    auto res = std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(
+        rows.size());
     for (size_t i = 0; i < rows.size(); ++i) {
         res[i] = std::move(
             CopyAndWrapSparseRow(rows[i].data(), rows[i].size(), validate));
@@ -295,12 +296,12 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
     return res;
 }
 
-// SparseRowsToProto converts a list of knowhere::sparse::SparseRow<sparseValueType> to
+// SparseRowsToProto converts a list of knowhere::sparse::SparseRow<SparseValueType> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
 inline void SparseRowsToProto(
-    const std::function<const knowhere::sparse::SparseRow<sparseValueType>*(size_t)>&
-        source,
+    const std::function<
+        const knowhere::sparse::SparseRow<SparseValueType>*(size_t)>& source,
     int64_t rows,
     milvus::proto::schema::SparseFloatArray* proto) {
     int64_t max_dim = 0;

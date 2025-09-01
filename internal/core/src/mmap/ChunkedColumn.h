@@ -266,8 +266,10 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
         ThrowInfo(
             ErrorCode::Unsupported,
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
@@ -552,6 +554,30 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }
+
+    void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const override {
+        if (count == 0) {
+            return;
+        }
+        AssertInfo(row_offsets != nullptr && value_offsets != nullptr,
+                   "row_offsets and value_offsets must be provided");
+
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(cids));
+        for (int64_t i = 0; i < count; i++) {
+            auto chunk = ca->get_cell_of(cids[i]);
+            auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                offsets_in_chunk[i]);
+            fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size()),
+               row_offsets[i],
+               value_offsets[i]);
+        }
+    }
 };
 
 class ChunkedArrayColumn : public ChunkedColumnBase {
@@ -620,13 +646,16 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         }
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(int64_t chunk_id,
+                     std::optional<std::pair<int64_t, int64_t>> offset_len =
+                         std::nullopt) const override {
         auto ca =
             SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<std::vector<VectorArrayView>>(
-            ca, static_cast<VectorArrayChunk*>(chunk)->Views());
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+            ca, static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
     }
 
     PinWrapper<const size_t*>

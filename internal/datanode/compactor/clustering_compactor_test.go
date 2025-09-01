@@ -92,6 +92,7 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 	s.plan = &datapb.CompactionPlan{
 		PlanID: 999,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID:        CollectionID,
 			SegmentID:           100,
 			FieldBinlogs:        nil,
 			Field2StatslogPaths: nil,
@@ -172,7 +173,8 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
-			SegmentID: 100,
+			CollectionID: CollectionID,
+			SegmentID:    100,
 		},
 	}
 	err := s.task.init()
@@ -223,6 +225,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
+			CollectionID: CollectionID,
 			SegmentID:    segmentID,
 			FieldBinlogs: lo.Values(fBinlogs),
 			Deltalogs: []*datapb.FieldBinlog{
@@ -323,6 +326,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
+			CollectionID: CollectionID,
 			SegmentID:    segmentID,
 			FieldBinlogs: lo.Values(fBinlogs),
 		},
@@ -412,6 +416,7 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
+			CollectionID: CollectionID,
 			SegmentID:    segmentID,
 			FieldBinlogs: lo.Values(fBinlogs),
 		},

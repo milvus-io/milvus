@@ -175,6 +175,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
             return GetChunkDataAccessor<int32_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return GetChunkDataAccessor<int64_t>(
                 field_id, index, current_chunk_id, current_chunk_pos);
         case DataType::FLOAT:
@@ -286,6 +287,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
         case DataType::INT32:
             return GetChunkDataAccessor<int32_t>(
                 field_id, chunk_id, data_barrier);
+        case DataType::TIMESTAMPTZ:
         case DataType::INT64:
             return GetChunkDataAccessor<int64_t>(
                 field_id, chunk_id, data_barrier);

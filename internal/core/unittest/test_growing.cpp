@@ -144,6 +144,8 @@ TEST_P(GrowingTest, FillData) {
     auto int16_field = schema->AddDebugField("int16", DataType::INT16);
     auto int32_field = schema->AddDebugField("int32", DataType::INT32);
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
@@ -207,6 +209,8 @@ TEST_P(GrowingTest, FillData) {
             float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
             double_field, ids_ds->GetIds(), num_inserted);
+        auto timestamptz_result = segment->bulk_subscript(
+            timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
@@ -231,6 +235,8 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(int16_result->scalars().int_data().data_size(), num_inserted);
         EXPECT_EQ(int32_result->scalars().int_data().data_size(), num_inserted);
         EXPECT_EQ(int64_result->scalars().long_data().data_size(),
+                  num_inserted);
+        EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
                   num_inserted);
         EXPECT_EQ(float_result->scalars().float_data().data_size(),
                   num_inserted);
@@ -269,6 +275,7 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(int64_result->valid_data_size(), 0);
         EXPECT_EQ(float_result->valid_data_size(), 0);
         EXPECT_EQ(double_result->valid_data_size(), 0);
+        EXPECT_EQ(timestamptz_result->valid_data_size(), 0);
         EXPECT_EQ(varchar_result->valid_data_size(), 0);
         EXPECT_EQ(json_result->valid_data_size(), 0);
         EXPECT_EQ(int_array_result->valid_data_size(), 0);
@@ -290,6 +297,8 @@ TEST(Growing, FillNullableData) {
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT, true);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE, true);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
@@ -353,6 +362,8 @@ TEST(Growing, FillNullableData) {
             float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
             double_field, ids_ds->GetIds(), num_inserted);
+        auto timestamptz_result = segment->bulk_subscript(
+            timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
@@ -382,6 +393,8 @@ TEST(Growing, FillNullableData) {
                   num_inserted);
         EXPECT_EQ(double_result->scalars().double_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
+                  num_inserted);
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
@@ -405,6 +418,7 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(int32_result->valid_data_size(), num_inserted);
         EXPECT_EQ(float_result->valid_data_size(), num_inserted);
         EXPECT_EQ(double_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(timestamptz_result->valid_data_size(), num_inserted);
         EXPECT_EQ(varchar_result->valid_data_size(), num_inserted);
         EXPECT_EQ(json_result->valid_data_size(), num_inserted);
         EXPECT_EQ(int_array_result->valid_data_size(), num_inserted);

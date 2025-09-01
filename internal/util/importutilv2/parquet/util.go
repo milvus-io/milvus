@@ -241,7 +241,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.Int16Type{}, nil
 	case schemapb.DataType_Int32:
 		return &arrow.Int32Type{}, nil
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		return &arrow.Int64Type{}, nil
 	case schemapb.DataType_Float:
 		return &arrow.Float32Type{}, nil
@@ -292,7 +292,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 
 // This method is used only by import util and related tests. Returned arrow.Schema
 // doesn't include function output fields.
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
+func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {

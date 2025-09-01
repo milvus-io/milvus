@@ -27,8 +27,8 @@ using namespace milvus::query;
 namespace {
 
 std::vector<int>
-SearchRef(const knowhere::sparse::SparseRow<milvus::sparseValueType>* base,
-          const knowhere::sparse::SparseRow<milvus::sparseValueType>& query,
+SearchRef(const knowhere::sparse::SparseRow<milvus::SparseValueType>* base,
+          const knowhere::sparse::SparseRow<milvus::SparseValueType>& query,
           int nb,
           int topk) {
     std::vector<std::tuple<float, int>> res;
@@ -51,12 +51,13 @@ SearchRef(const knowhere::sparse::SparseRow<milvus::sparseValueType>* base,
 }
 
 std::vector<int>
-RangeSearchRef(const knowhere::sparse::SparseRow<milvus::sparseValueType>* base,
-               const knowhere::sparse::SparseRow<milvus::sparseValueType>& query,
-               int nb,
-               float radius,
-               float range_filter,
-               int topk) {
+RangeSearchRef(
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>* base,
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>& query,
+    int nb,
+    float radius,
+    float range_filter,
+    int topk) {
     std::vector<int> offsets;
     for (int i = 0; i < nb; i++) {
         auto& row = base[i];

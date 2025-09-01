@@ -975,7 +975,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 	log.Debug("received query request",
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()), // should be empty
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 		zap.Bool("isCount", req.GetReq().GetIsCount()),
@@ -1264,7 +1264,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
-			FieldJsonIndexStats: s.GetFieldJSONIndexStats(),
+			JsonStatsInfo: s.GetFieldJSONIndexStats(),
 		})
 	}
 

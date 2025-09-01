@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -255,6 +256,17 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 	}
 
+	binlogWriterOpts := []BinlogWriterOptions{}
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(insertCodec.Schema.GetSchema().GetProperties(), insertCodec.Schema.ID); ez != nil {
+			encryptor, safeKey, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
+			if err != nil {
+				return nil, err
+			}
+			binlogWriterOpts = append(binlogWriterOpts, WithWriterEncryptionContext(ez.EzID, safeKey, encryptor))
+		}
+	}
+
 	serializeField := func(field *schemapb.FieldSchema) error {
 		// check insert data contain this field
 		// must be all missing or all exists
@@ -280,19 +292,18 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 
 		// encode fields
-		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
+		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable(), binlogWriterOpts...)
 
 		// get payload writing configs, including nullable and fallback encoding method
-		opts := []PayloadWriterOptions{WithNullable(field.GetNullable()), WithWriterProps(getFieldWriterProps(field))}
-
+		payloadWriterOpts := []PayloadWriterOptions{WithNullable(field.GetNullable()), WithWriterProps(getFieldWriterProps(field))}
 		if typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
 			dim, err := typeutil.GetDim(field)
 			if err != nil {
 				return err
 			}
-			opts = append(opts, WithDim(int(dim)))
+			payloadWriterOpts = append(payloadWriterOpts, WithDim(int(dim)))
 		}
-		eventWriter, err := writer.NextInsertEventWriter(opts...)
+		eventWriter, err := writer.NextInsertEventWriter(payloadWriterOpts...)
 		if err != nil {
 			writer.Close()
 			return err
@@ -386,6 +397,10 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		}
 	case schemapb.DataType_Double:
 		if err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data, singleData.(*DoubleFieldData).ValidData); err != nil {
+			return err
+		}
+	case schemapb.DataType_Timestamptz:
+		if err = eventWriter.AddTimestamptzToPayload(singleData.(*TimestamptzFieldData).Data, singleData.(*TimestamptzFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
@@ -645,6 +660,18 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
 		doubleFieldData.ValidData = append(doubleFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = doubleFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Timestamptz:
+		singleData := data.([]int64)
+		if fieldData == nil {
+			fieldData = &TimestamptzFieldData{Data: make([]int64, 0, rowNum)}
+		}
+		timestamptzFieldData := fieldData.(*TimestamptzFieldData)
+
+		timestamptzFieldData.Data = append(timestamptzFieldData.Data, singleData...)
+		timestamptzFieldData.ValidData = append(timestamptzFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = timestamptzFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:

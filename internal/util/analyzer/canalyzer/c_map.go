@@ -1,4 +1,4 @@
-package ctokenizer
+package canalyzer
 
 /*
 #cgo pkg-config: milvus_core

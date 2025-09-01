@@ -196,7 +196,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.store = querycoord.NewCatalog(suite.kv)
 
 	// Dependencies
-	suite.dist = meta.NewDistributionManager()
+	suite.dist = meta.NewDistributionManager(session.NewNodeManager())
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())

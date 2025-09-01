@@ -307,7 +307,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
-        this->CreateJSONIndexes();
     }
 
     ~SegmentGrowingImpl() {
@@ -437,6 +436,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    chunk_vector_array_view_impl(
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
         FieldId field_id,
@@ -472,19 +477,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndexes();
-
-    void
-    AddJSONDatas(FieldId field_id,
-                 const std::string* jsondatas,
-                 const bool* jsondatas_valid_data,
-                 size_t n,
-                 int64_t offset_begin);
-
-    void
-    CreateJSONIndexes();
-
-    void
-    CreateJSONIndex(FieldId field_id);
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;

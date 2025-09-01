@@ -417,6 +417,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetFloatData().GetData())
 	case schemapb.DataType_Double:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_Timestamptz:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetTimestamptzData().GetData())
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
@@ -482,6 +484,8 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetFloatData().Data)
 		case *schemapb.ScalarField_DoubleData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
+		case *schemapb.ScalarField_TimestamptzData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimestamptzData().Data)
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:

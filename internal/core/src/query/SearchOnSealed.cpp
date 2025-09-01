@@ -115,7 +115,8 @@ SearchOnSealedColumn(const Schema& schema,
     auto data_type = field.get_data_type();
     auto element_type = field.get_element_type();
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-    auto dim = data_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : field.get_dim();
+    auto dim =
+        data_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : field.get_dim();
 
     query::dataset::SearchDataset query_dataset{search_info.metric_type_,
                                                 num_queries,

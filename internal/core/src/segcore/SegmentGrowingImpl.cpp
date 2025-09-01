@@ -42,6 +42,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -214,33 +215,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                      reserved_offset);
         }
 
-        // index json.
-        if (field_meta.enable_growing_jsonStats()) {
-            std::vector<std::string> jsonDatas(
-                insert_record_proto->fields_data(data_offset)
-                    .scalars()
-                    .json_data()
-                    .data()
-                    .begin(),
-                insert_record_proto->fields_data(data_offset)
-                    .scalars()
-                    .json_data()
-                    .data()
-                    .end());
-            FixedVector<bool> jsonDatas_valid_data(
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .begin(),
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .end());
-            AddJSONDatas(field_id,
-                         jsonDatas.data(),
-                         jsonDatas_valid_data.data(),
-                         num_rows,
-                         reserved_offset);
-        }
-
         // update average row data size
         auto field_data_size = GetRawDataSizeOfDataArray(
             &insert_record_proto->fields_data(data_offset),
@@ -409,15 +383,6 @@ SegmentGrowingImpl::load_field_data_common(
         index->Reload();
     }
 
-    // build json match index
-    if (field_meta.enable_growing_jsonStats()) {
-        auto index = GetJsonKeyIndex(field_id);
-        index->BuildWithFieldData(field_data, field_meta.is_nullable());
-        index->Commit();
-        // Reload reader so that the index can be read immediately
-        index->Reload();
-    }
-
     // update the mem size
     stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
@@ -444,9 +409,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
         storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-
         auto column_group_info =
-            FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
+            FieldDataInfo(column_group_id.get(), num_rows, "");
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
 
         LOG_INFO(
@@ -462,8 +426,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
         for (const auto& file : insert_files) {
-            auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+            auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+                fs,
+                file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties());
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);
@@ -642,6 +609,16 @@ SegmentGrowingImpl::chunk_array_view_impl(
         std::nullopt) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk array view impl not implement for growing segment");
+}
+
+PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_vector_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    ThrowInfo(ErrorCode::NotImplemented,
+              "chunk vector array view impl not implement for growing segment");
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -893,6 +870,16 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_double_data()
                                             ->mutable_data()
                                             ->mutable_data());
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::VARCHAR:
@@ -1216,44 +1203,6 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
             fmt::format("text index not found for field {}", field_id.get()));
     }
     iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
-}
-
-void
-SegmentGrowingImpl::AddJSONDatas(FieldId field_id,
-                                 const std::string* jsondatas,
-                                 const bool* jsondatas_valid_data,
-                                 size_t n,
-                                 int64_t offset_begin) {
-    std::unique_lock lock(mutex_);
-    auto iter = json_indexes_.find(field_id);
-    AssertInfo(iter != json_indexes_.end(), "json index not found");
-    iter->second->AddJSONDatas(
-        n, jsondatas, jsondatas_valid_data, offset_begin);
-}
-
-void
-SegmentGrowingImpl::CreateJSONIndexes() {
-    for (auto [field_id, field_meta] : schema_->get_fields()) {
-        if (field_meta.enable_growing_jsonStats()) {
-            CreateJSONIndex(FieldId(field_id));
-        }
-    }
-}
-
-void
-SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
-    std::unique_lock lock(mutex_);
-    const auto& field_meta = schema_->operator[](field_id);
-    AssertInfo(IsJsonDataType(field_meta.get_data_type()),
-               "cannot create json index on non-json type");
-    std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
-    auto index = std::make_unique<index::JsonKeyStatsInvertedIndex>(
-        JSON_KEY_STATS_COMMIT_INTERVAL, unique_id.c_str());
-
-    index->Commit();
-    index->CreateReader(milvus::index::SetBitsetGrowing);
-
-    json_indexes_[field_id] = std::move(index);
 }
 
 void

@@ -76,6 +76,48 @@ TEST(chunk, test_int64_field) {
     }
 }
 
+TEST(chunk, test_timestmamptz_field) {
+    FixedVector<int64_t> data = {
+        1, 2, 3, 4, 5};  // Timestamptz is stored as int64
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMPTZ);
+    field_data->FillFieldData(data.data(), data.size());
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::TIMESTAMPTZ,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_EQ(span.row_count(), data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
+        EXPECT_EQ(n, data[i]);
+    }
+}
+
 TEST(chunk, test_variable_field) {
     FixedVector<std::string> data = {
         "test1", "test2", "test3", "test4", "test5"};
@@ -568,7 +610,10 @@ TEST(chunk, test_sparse_float) {
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
     auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_U32_F32, false, kTestSparseDim, n_rows);
+        storage::DataType::VECTOR_SPARSE_U32_F32,
+        false,
+        kTestSparseDim,
+        n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;
@@ -614,16 +659,24 @@ TEST(chunk, test_sparse_float) {
 
 TEST(chunk, test_lower_bound_string) {
     // Test data: sorted strings
-    FixedVector<std::string> data = {
-        "apple", "banana", "cherry", "date", "elderberry", 
-        "fig", "grape", "honeydew", "kiwi", "lemon"
-    };
-    
-    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    FixedVector<std::string> data = {"apple",
+                                     "banana",
+                                     "cherry",
+                                     "date",
+                                     "elderberry",
+                                     "fig",
+                                     "grape",
+                                     "honeydew",
+                                     "kiwi",
+                                     "lemon"};
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
     event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
@@ -653,27 +706,28 @@ TEST(chunk, test_lower_bound_string) {
     // Test cases for lower_bound_string
     // Case 1: Target exists in the middle
     EXPECT_EQ(string_chunk->lower_bound_string("cherry"), 2);
-    
+
     // Case 2: Target exists at the beginning
     EXPECT_EQ(string_chunk->lower_bound_string("apple"), 0);
-    
+
     // Case 3: Target exists at the end
     EXPECT_EQ(string_chunk->lower_bound_string("lemon"), 9);
-    
+
     // Case 4: Target doesn't exist, should return insertion point
-    EXPECT_EQ(string_chunk->lower_bound_string("blueberry"), 2);  // between banana and cherry
-    EXPECT_EQ(string_chunk->lower_bound_string("mango"), 10);     // after lemon
-    EXPECT_EQ(string_chunk->lower_bound_string("apricot"), 1);    // after apple
-    
+    EXPECT_EQ(string_chunk->lower_bound_string("blueberry"),
+              2);  // between banana and cherry
+    EXPECT_EQ(string_chunk->lower_bound_string("mango"), 10);   // after lemon
+    EXPECT_EQ(string_chunk->lower_bound_string("apricot"), 1);  // after apple
+
     // Case 5: Target is less than all elements
     EXPECT_EQ(string_chunk->lower_bound_string("aardvark"), 0);
-    
+
     // Case 6: Target is greater than all elements
     EXPECT_EQ(string_chunk->lower_bound_string("zebra"), 10);
-    
+
     // Case 7: Empty string edge case
     EXPECT_EQ(string_chunk->lower_bound_string(""), 0);
-    
+
     // Case 8: Duplicate elements (if they existed, lower_bound would return first occurrence)
     // Since our data has no duplicates, test with existing elements
     EXPECT_EQ(string_chunk->lower_bound_string("banana"), 1);
@@ -681,16 +735,24 @@ TEST(chunk, test_lower_bound_string) {
 
 TEST(chunk, test_upper_bound_string) {
     // Test data: sorted strings
-    FixedVector<std::string> data = {
-        "apple", "banana", "cherry", "date", "elderberry", 
-        "fig", "grape", "honeydew", "kiwi", "lemon"
-    };
-    
-    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    FixedVector<std::string> data = {"apple",
+                                     "banana",
+                                     "cherry",
+                                     "date",
+                                     "elderberry",
+                                     "fig",
+                                     "grape",
+                                     "honeydew",
+                                     "kiwi",
+                                     "lemon"};
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
     event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
@@ -719,28 +781,31 @@ TEST(chunk, test_upper_bound_string) {
 
     // Test cases for upper_bound_string
     // Case 1: Target exists in the middle
-    EXPECT_EQ(string_chunk->upper_bound_string("cherry"), 3);  // points to next element
-    
+    EXPECT_EQ(string_chunk->upper_bound_string("cherry"),
+              3);  // points to next element
+
     // Case 2: Target exists at the beginning
-    EXPECT_EQ(string_chunk->upper_bound_string("apple"), 1);   // points to next element
-    
+    EXPECT_EQ(string_chunk->upper_bound_string("apple"),
+              1);  // points to next element
+
     // Case 3: Target exists at the end
     EXPECT_EQ(string_chunk->upper_bound_string("lemon"), 10);  // points to end
-    
+
     // Case 4: Target doesn't exist, should return insertion point
-    EXPECT_EQ(string_chunk->upper_bound_string("blueberry"), 2);  // between banana and cherry
-    EXPECT_EQ(string_chunk->upper_bound_string("mango"), 10);     // after lemon
-    EXPECT_EQ(string_chunk->upper_bound_string("apricot"), 1);    // after apple
-    
+    EXPECT_EQ(string_chunk->upper_bound_string("blueberry"),
+              2);  // between banana and cherry
+    EXPECT_EQ(string_chunk->upper_bound_string("mango"), 10);   // after lemon
+    EXPECT_EQ(string_chunk->upper_bound_string("apricot"), 1);  // after apple
+
     // Case 5: Target is less than all elements
     EXPECT_EQ(string_chunk->upper_bound_string("aardvark"), 0);
-    
+
     // Case 6: Target is greater than all elements
     EXPECT_EQ(string_chunk->upper_bound_string("zebra"), 10);
-    
+
     // Case 7: Empty string edge case
     EXPECT_EQ(string_chunk->upper_bound_string(""), 0);
-    
+
     // Case 8: Test with existing elements (upper_bound points to next element)
     EXPECT_EQ(string_chunk->upper_bound_string("banana"), 2);
     EXPECT_EQ(string_chunk->upper_bound_string("date"), 4);
@@ -749,12 +814,14 @@ TEST(chunk, test_upper_bound_string) {
 TEST(chunk, test_binary_search_methods_edge_cases) {
     // Test with single element
     FixedVector<std::string> single_data = {"middle"};
-    
-    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(single_data.data(), single_data.size());
 
     storage::InsertEventData event_data;
-    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
     event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
@@ -793,14 +860,15 @@ TEST(chunk, test_binary_search_methods_edge_cases) {
 TEST(chunk, test_binary_search_methods_duplicates) {
     // Test with duplicate elements (if the data had duplicates)
     FixedVector<std::string> data = {
-        "apple", "apple", "banana", "banana", "banana", "cherry"
-    };
-    
-    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+        "apple", "apple", "banana", "banana", "banana", "cherry"};
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
     event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
@@ -832,7 +900,7 @@ TEST(chunk, test_binary_search_methods_duplicates) {
     EXPECT_EQ(string_chunk->lower_bound_string("apple"), 0);
     EXPECT_EQ(string_chunk->lower_bound_string("banana"), 2);
     EXPECT_EQ(string_chunk->lower_bound_string("cherry"), 5);
-    
+
     // upper_bound should return the position after the last occurrence
     EXPECT_EQ(string_chunk->upper_bound_string("apple"), 2);
     EXPECT_EQ(string_chunk->upper_bound_string("banana"), 5);
@@ -842,14 +910,15 @@ TEST(chunk, test_binary_search_methods_duplicates) {
 TEST(chunk, test_binary_search_methods_comparison) {
     // Test to verify the relationship between lower_bound and upper_bound
     FixedVector<std::string> data = {
-        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"
-    };
-    
-    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
     event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
@@ -877,11 +946,12 @@ TEST(chunk, test_binary_search_methods_comparison) {
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
 
     // Test that upper_bound >= lower_bound for any target
-    for (const auto& target : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "z", ""}) {
+    for (const auto& target :
+         {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "z", ""}) {
         auto lb = string_chunk->lower_bound_string(target);
         auto ub = string_chunk->upper_bound_string(target);
         EXPECT_GE(ub, lb) << "For target: " << target;
-        
+
         // For existing elements, upper_bound should be lower_bound + 1
         if (std::find(data.begin(), data.end(), target) != data.end()) {
             EXPECT_EQ(ub, lb + 1) << "For existing target: " << target;

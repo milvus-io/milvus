@@ -315,6 +315,10 @@ type commonConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 
 	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
+
+	EnablePosixMode ParamItem `refreshable:"false"`
+
+	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1128,6 +1132,15 @@ This helps Milvus-CDC synchronize incremental data`,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
 
+	p.UsingJSONStatsForQuery = ParamItem{
+		Key:          "common.UsingJSONStatsForQuery",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to use json stats when query",
+		Export:       true,
+	}
+	p.UsingJSONStatsForQuery.Init(base.mgr)
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -1154,6 +1167,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnableConfigParamTypeCheck.Init(base.mgr)
+
+	p.EnablePosixMode = ParamItem{
+		Key:          "common.enablePosixMode",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Specifies whether to run in POSIX mode for enhanced file system compatibility",
+		Export:       true,
+	}
+	p.EnablePosixMode.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2909,7 +2931,7 @@ type queryNodeConfig struct {
 	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
-	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
+	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
@@ -2927,13 +2949,15 @@ type queryNodeConfig struct {
 	// cache limit
 	// Deprecated: Never used
 	CacheMemoryLimit ParamItem `refreshable:"false"`
-	MmapDirPath      ParamItem `refreshable:"false"`
+	// Deprecated: Since 2.6.0, use local storage path instead
+	MmapDirPath ParamItem `refreshable:"false"`
 	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
 	MmapEnabled                         ParamItem `refreshable:"false"`
 	MmapVectorField                     ParamItem `refreshable:"false"`
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -3013,7 +3037,6 @@ type queryNodeConfig struct {
 	WorkerPoolingSize ParamItem `refreshable:"false"`
 
 	// Json Key Stats
-	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
@@ -3261,21 +3284,21 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.TieredEvictionIntervalMs.Init(base.mgr)
 
-	p.TieredLoadingMemoryFactor = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.loadingMemoryFactor",
+	p.TieredLoadingResourceFactor = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
 		Version:      "2.6.0",
-		DefaultValue: "3.5",
+		DefaultValue: "1.0",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
-				return "3.5"
+				return "1.0"
 			}
 			return fmt.Sprintf("%.2f", factor)
 		},
-		Doc:    "Loading memory factor for estimating memory during loading.",
+		Doc:    "Loading resource factor for estimating resource during loading.",
 		Export: false,
 	}
-	p.TieredLoadingMemoryFactor.Init(base.mgr)
+	p.TieredLoadingResourceFactor.Init(base.mgr)
 
 	p.CacheCellUnaccessedSurvivalTime = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
@@ -3535,7 +3558,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.3.0",
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
-		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				return path.Join(base.Get("localStorage.path"), "mmap")
@@ -3614,6 +3637,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapScalarIndex.Init(base.mgr)
+
+	p.MmapJSONStats = ParamItem{
+		Key:          "queryNode.mmap.jsonStats",
+		Version:      "2.6.1",
+		DefaultValue: "true",
+		Doc:          "Enable mmap for loading json stats",
+		Export:       true,
+	}
+	p.MmapJSONStats.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
@@ -4019,15 +4051,6 @@ user-task-polling:
 	}
 	p.ExprResCacheCapacityBytes.Init(base.mgr)
 
-	p.JSONKeyStatsCommitInterval = ParamItem{
-		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
-		Version:      "2.5.0",
-		DefaultValue: "200",
-		Doc:          "the commit interval for the JSON key Stats to commit",
-		Export:       true,
-	}
-	p.JSONKeyStatsCommitInterval.Init(base.mgr)
-
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -4259,12 +4282,14 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableSortCompaction              ParamItem `refreshable:"true"`
-	TaskCheckInterval                 ParamItem `refreshable:"true"`
-	SortCompactionTriggerCount        ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
-	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
-	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+	EnableSortCompaction             ParamItem `refreshable:"true"`
+	TaskCheckInterval                ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount       ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount            ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval         ParamItem `refreshable:"true"`
+	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
+	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
+	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -5352,14 +5377,32 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
 
-	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
-		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
-		Version:      "2.5.5",
-		DefaultValue: "16777216",
-		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+	p.JSONStatsMaxShreddingColumns = ParamItem{
+		Key:          "dataCoord.jsonStatsMaxShreddingColumns",
+		Version:      "2.6.1",
+		DefaultValue: "1024",
+		Doc:          "the max number of columns to shred",
 		Export:       true,
 	}
-	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
+
+	p.JSONStatsShreddingRatioThreshold = ParamItem{
+		Key:          "dataCoord.jsonStatsShreddingRatioThreshold",
+		Version:      "2.6.1",
+		DefaultValue: "0.3",
+		Doc:          "the ratio threshold to shred",
+		Export:       true,
+	}
+	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
+
+	p.JSONStatsWriteBatchSize = ParamItem{
+		Key:          "dataCoord.jsonStatsWriteBatchSize",
+		Version:      "2.6.1",
+		DefaultValue: "81920",
+		Doc:          "the batch size to write",
+		Export:       true,
+	}
+	p.JSONStatsWriteBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

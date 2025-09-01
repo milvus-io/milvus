@@ -360,7 +360,7 @@ func NewIndexFileBinlogWriter(
 	descriptorEvent.AddExtra("key", key)
 	w := &IndexFileBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent: *descriptorEvent,
+			descriptorEvent: descriptorEvent,
 			magicNumber:     MagicNumber,
 			binlogType:      IndexFileBinlog,
 			eventWriters:    make([]EventWriter, 0),

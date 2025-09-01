@@ -38,7 +38,8 @@ StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
+        // for bson, we use binary array to store the string
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
             strs.emplace_back(str);
@@ -413,6 +414,9 @@ create_chunk_writer(const FieldMeta& field_meta, Args&&... args) {
                 dim, std::forward<Args>(args)..., nullable);
         case milvus::DataType::DOUBLE:
             return std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::TIMESTAMPTZ:
+            return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
                 dim, std::forward<Args>(args)..., nullable);
         case milvus::DataType::VECTOR_FLOAT:
             return std::make_shared<

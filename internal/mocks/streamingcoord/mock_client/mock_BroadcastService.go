@@ -24,17 +24,17 @@ func (_m *MockBroadcastService) EXPECT() *MockBroadcastService_Expecter {
 	return &MockBroadcastService_Expecter{mock: &_m.Mock}
 }
 
-// Ack provides a mock function with given fields: ctx, req
-func (_m *MockBroadcastService) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
-	ret := _m.Called(ctx, req)
+// Ack provides a mock function with given fields: ctx, msg
+func (_m *MockBroadcastService) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+	ret := _m.Called(ctx, msg)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Ack")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.BroadcastAckRequest) error); ok {
-		r0 = rf(ctx, req)
+	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableMessage) error); ok {
+		r0 = rf(ctx, msg)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -49,14 +49,14 @@ type MockBroadcastService_Ack_Call struct {
 
 // Ack is a helper method to define mock.On call
 //   - ctx context.Context
-//   - req types.BroadcastAckRequest
-func (_e *MockBroadcastService_Expecter) Ack(ctx interface{}, req interface{}) *MockBroadcastService_Ack_Call {
-	return &MockBroadcastService_Ack_Call{Call: _e.mock.On("Ack", ctx, req)}
+//   - msg message.ImmutableMessage
+func (_e *MockBroadcastService_Expecter) Ack(ctx interface{}, msg interface{}) *MockBroadcastService_Ack_Call {
+	return &MockBroadcastService_Ack_Call{Call: _e.mock.On("Ack", ctx, msg)}
 }
 
-func (_c *MockBroadcastService_Ack_Call) Run(run func(ctx context.Context, req types.BroadcastAckRequest)) *MockBroadcastService_Ack_Call {
+func (_c *MockBroadcastService_Ack_Call) Run(run func(ctx context.Context, msg message.ImmutableMessage)) *MockBroadcastService_Ack_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.BroadcastAckRequest))
+		run(args[0].(context.Context), args[1].(message.ImmutableMessage))
 	})
 	return _c
 }
@@ -66,7 +66,7 @@ func (_c *MockBroadcastService_Ack_Call) Return(_a0 error) *MockBroadcastService
 	return _c
 }
 
-func (_c *MockBroadcastService_Ack_Call) RunAndReturn(run func(context.Context, types.BroadcastAckRequest) error) *MockBroadcastService_Ack_Call {
+func (_c *MockBroadcastService_Ack_Call) RunAndReturn(run func(context.Context, message.ImmutableMessage) error) *MockBroadcastService_Ack_Call {
 	_c.Call.Return(run)
 	return _c
 }

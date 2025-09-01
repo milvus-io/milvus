@@ -73,7 +73,8 @@ TEST(CPackedTest, PackedWriterAndReader) {
                                1,
                                part_upload_size,
                                cgs,
-                               &c_packed_writer);
+                               &c_packed_writer,
+                               nullptr);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_writer, nullptr);
 
@@ -84,7 +85,8 @@ TEST(CPackedTest, PackedWriterAndReader) {
     struct ArrowArray arrays[] = {carray};
     struct ArrowSchema array_schemas[] = {cschema};
 
-    c_status = WriteRecordBatch(c_packed_writer, arrays, array_schemas, &c_origin_schema);
+    c_status = WriteRecordBatch(
+        c_packed_writer, arrays, array_schemas, &c_origin_schema);
     EXPECT_EQ(c_status.error_code, 0);
 
     c_status = CloseWriter(c_packed_writer);
@@ -94,7 +96,7 @@ TEST(CPackedTest, PackedWriterAndReader) {
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_read_schema).ok());
     CPackedReader c_packed_reader = nullptr;
     c_status = NewPackedReader(
-        paths, 1, &c_read_schema, buffer_size, &c_packed_reader);
+        paths, 1, &c_read_schema, buffer_size, &c_packed_reader, nullptr);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_reader, nullptr);
 

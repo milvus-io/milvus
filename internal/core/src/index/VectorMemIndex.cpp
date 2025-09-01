@@ -343,8 +343,6 @@ VectorMemIndex<T>::Build(const Config& config) {
         for (auto data : field_datas) {
             total_size += data->Size();
             total_num_rows += data->get_num_rows();
-            AssertInfo(dim == 0 || dim == data->get_dim(),
-                       "inconsistent dim value between field datas!");
 
             // todo(SapdeA): now, vector arrays (embedding list) are serialized
             // to parquet by using binary format which does not provide dim
@@ -354,6 +352,9 @@ VectorMemIndex<T>::Build(const Config& config) {
                            "embedding list index must have elem_type");
                 dim = config[DIM_KEY].get<int64_t>();
             } else {
+                AssertInfo(dim == 0 || dim == data->get_dim(),
+                           "inconsistent dim value between field datas!");
+
                 dim = data->get_dim();
             }
         }
@@ -426,10 +427,12 @@ VectorMemIndex<T>::Build(const Config& config) {
                     field_data)
                     ->Dim());
         }
-        std::vector<knowhere::sparse::SparseRow<sparseValueType>> vec(total_rows);
+        std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
+            total_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
-            auto ptr = static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
+            auto ptr = static_cast<
+                const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
             for (size_t i = 0; i < field_data->Length(); ++i) {
@@ -570,7 +573,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>
+std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
@@ -579,8 +582,9 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     }
     // release and transfer ownership to the result unique ptr.
     res.value()->SetIsOwner(false);
-    return std::unique_ptr<const knowhere::sparse::SparseRow<sparseValueType>[]>(
-        static_cast<const knowhere::sparse::SparseRow<sparseValueType>*>(
+    return std::unique_ptr<
+        const knowhere::sparse::SparseRow<SparseValueType>[]>(
+        static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
             res.value()->GetTensor()));
 }
 

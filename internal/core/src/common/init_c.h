@@ -46,9 +46,6 @@ void
 SetDefaultOptimizeExprEnable(bool val);
 
 void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val);
-
-void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);
 
 void
