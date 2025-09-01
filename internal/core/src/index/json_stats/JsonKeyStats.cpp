@@ -608,6 +608,7 @@ JsonKeyStats::Build(const Config& config) {
         }();
         auto field_data = storage::CreateFieldData(
             static_cast<DataType>(field_schema.data_type()),
+            DataType::NONE,
             true,
             1,
             lack_binlog_rows.value());
