@@ -159,8 +159,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "limit": default_limit})
         # 5. insert data(old field)
         rows_old = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                    default_float_field_name: i * 1.0,
-                    default_string_field_name: str(i)} for i in range(default_nb, default_nb * 2)]
+                     default_float_field_name: i * 1.0,
+                     default_string_field_name: str(i)} for i in range(default_nb, default_nb * 2)]
         results = self.insert(client, collection_name, rows_old)[0]
         assert results['insert_count'] == default_nb
         insert_ids_with_old_field = [i for i in range(default_nb, default_nb * 2)]
@@ -190,7 +190,6 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "limit": default_limit})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_with_added_field(self):
@@ -325,6 +324,115 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [],
                                 "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_add_field_with_analyzer(self):
+        """
+        target: test add field with analyzer configuration
+        method: create collection, add field with standard analyzer,
+                insert data and verify
+        expected: successfully add field with analyzer and perform text search
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+
+        # 1. create collection with basic schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        # 2. insert initial data before adding analyzer field
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+
+        # 3. add new field with standard analyzer
+        analyzer_params = {
+            "type": "standard",
+            "stop_words": ["for", "the", "is", "a"]
+        }
+        self.add_collection_field(client, collection_name, field_name="text_content", data_type=DataType.VARCHAR,
+                                  nullable=True, max_length=1000, enable_analyzer=True, analyzer_params=analyzer_params)
+
+        # 4. insert data with the new analyzer field
+        text_data = [
+            "The Milvus vector database is built for scale",
+            "This is a test document for analyzer",
+            "Vector search with text analysis capabilities",
+            "Database performance and scalability features"
+        ]
+        rows_with_analyzer = []
+        for i in range(default_nb, default_nb + len(text_data)):
+            rows_with_analyzer.append({
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i - default_nb],
+                default_string_field_name: str(i),
+                "text_content": text_data[i - default_nb]
+            })
+        results = self.insert(client, collection_name, rows_with_analyzer)[0]
+        assert results['insert_count'] == len(text_data)
+
+        # 5. verify the analyzer field was added correctly
+        collection_info = self.describe_collection(client, collection_name)[0]
+        field_names = [field["name"] for field in collection_info["fields"]]
+        assert "text_content" in field_names
+
+        # 6. test text search using the analyzer field
+        vectors_to_search = [vectors[0]]
+        # Simple search without filter to verify basic functionality
+        search_results = self.search(
+            client, collection_name, vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "limit": 10,  # Adjust limit to match actual results
+                "pk_name": default_primary_key_field_name
+            }
+        )
+        # Verify search returned some results
+        assert len(search_results[0]) > 0
+
+        # 7. test query with analyzer field - use simpler condition
+        query_results = self.query(
+            client, collection_name,
+            filter="text_content is not null",
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                "pk_name": default_primary_key_field_name,
+                "exp_limit": 4  # We expect 4 documents with text_content
+            }
+        )
+        # Verify that we get results for documents with text_content
+        assert len(query_results[0]) > 0
+
+        # 8. test run_analyzer to verify the analyzer configuration
+        sample_text = "The Milvus vector database is built for scale"
+        analyzer_result = client.run_analyzer(sample_text, analyzer_params)
+        # Verify analyzer produces tokens
+        # (should remove stop words like "the", "is", "a")
+        tokens = analyzer_result.tokens
+        assert len(tokens) > 0
+        # Handle different token formats - tokens might be strings or dictionaries
+        if isinstance(tokens[0], str):
+            token_texts = tokens
+        else:
+            token_texts = [token["token"] for token in tokens]
+        # Check that stop words are filtered out
+        assert "the" not in token_texts
+        assert "is" not in token_texts
+        assert "a" not in token_texts
+
+        # 9. cleanup
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -515,3 +623,70 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
                                       data_type=DataType.VARCHAR, nullable=True, max_length=64)
         self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
                                   nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_add_field_with_reranker_unsupported(self):
+        """
+        target: test that add_collection_field and decay ranker combination is not supported
+        method: create collection without reranker field, add nullable reranker field via add_collection_field,
+                then try to use it with decay ranker
+        expected: raise exception because decay ranker requires non-nullable fields but add_collection_field
+                 only supports nullable fields, creating a technical limitation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+
+        # 1. create collection WITHOUT reranker field initially
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        # Note: NO reranker field here - we'll try to add it later via add_collection_field
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        # 2. insert initial data WITHOUT reranker field
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+
+        # 3. Try to add nullable reranker field via add_collection_field (nullable must be True)
+        # This will succeed in adding the field, but then we'll test if it can work with decay reranker
+        # The conflict: add_collection_field only supports nullable fields, but decay reranker needs non-nullable fields
+        self.add_collection_field(client, collection_name, field_name=ct.default_reranker_field_name,
+                                  data_type=DataType.INT64, nullable=True, default_value=0)
+
+        # 4. Insert data with the newly added reranker field
+        # Generate new vectors for the second batch of data
+        vectors_batch2 = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows_with_reranker = [{default_primary_key_field_name: i, default_vector_field_name: vectors_batch2[i - default_nb],
+                               default_string_field_name: str(i), ct.default_reranker_field_name: i}
+                              for i in range(default_nb, default_nb * 2)]
+        results = self.insert(client, collection_name, rows_with_reranker)[0]
+        assert results['insert_count'] == default_nb
+
+        # 5. Try to use the nullable reranker field with decay reranker
+        # This should fail because decay reranker requires non-nullable fields for proper functionality
+        from pymilvus import Function, FunctionType
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+
+        error = {ct.err_code: 65535, ct.err_msg: "Function input field cannot be nullable: field reranker_field"}
+        self.search(client, collection_name, [vectors[0]], ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
