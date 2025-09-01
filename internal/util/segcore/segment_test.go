@@ -25,6 +25,8 @@ func TestGrowingSegment(t *testing.T) {
 	initcore.InitLocalChunkManager(localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get(), 1)
 	assert.NoError(t, err)
+	initcore.InitTieredStorage(paramtable.Get())
+	assert.NoError(t, err)
 
 	collectionID := int64(100)
 	segmentID := int64(100)

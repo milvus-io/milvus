@@ -137,13 +137,20 @@ GroupChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 GroupChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
     auto& row_group_meta = row_group_meta_list_[file_idx].Get(row_group_idx);
-    // TODO(tiered storage 1): should take into consideration of mmap or not.
-    return {static_cast<int64_t>(row_group_meta.memory_size()), 0};
+
+    auto cell_sz = static_cast<int64_t>(row_group_meta.memory_size());
+
+    if (use_mmap_) {
+        return {{0, cell_sz}, {2 * cell_sz, cell_sz}};
+    } else {
+        return {{cell_sz, 0}, {2 * cell_sz, 0}};
+    }
 }
 
 const std::string&
@@ -264,6 +271,7 @@ std::unique_ptr<milvus::GroupChunk>
 GroupChunkTranslator::load_group_chunk(
     const std::shared_ptr<arrow::Table>& table,
     const milvus::cachinglayer::cid_t cid) {
+    AssertInfo(table != nullptr, "arrow table is nullptr");
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     // Iterate through field_id_list to get field_id and create chunk

@@ -419,10 +419,7 @@ func (s *Server) initMeta() error {
 		return err
 	}
 
-	s.dist = &meta.DistributionManager{
-		SegmentDistManager: meta.NewSegmentDistManager(),
-		ChannelDistManager: meta.NewChannelDistManager(),
-	}
+	s.dist = meta.NewDistributionManager(s.nodeMgr)
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {

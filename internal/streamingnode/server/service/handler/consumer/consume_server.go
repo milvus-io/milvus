@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -187,17 +186,10 @@ func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) (err 
 		metricsGuard.Finish(err)
 	}()
 
-	pb := msg.IntoMessageProto()
 	// Send Consumed message to client and do metrics.
 	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
 		ConsumerId: c.consumerID,
-		Message: &messagespb.ImmutableMessage{
-			Id: &messagespb.MessageID{
-				Id: msg.MessageID().Marshal(),
-			},
-			Payload:    pb.Payload,
-			Properties: pb.Properties,
-		},
+		Message:    msg.IntoImmutableMessageProto(),
 	}); err != nil {
 		return status.NewInner("send consume message failed: %s", err.Error())
 	}

@@ -13,6 +13,7 @@
 
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_vector.h>
+#include <folly/Synchronized.h>
 
 #include <memory>
 #include <string>
@@ -101,20 +102,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+
     void
-    LoadJsonKeyIndex(
-        FieldId field_id,
-        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override {
+    RemoveJsonStats(FieldId field_id) override {
         std::unique_lock lck(mutex_);
-        const auto& field_meta = schema_->operator[](field_id);
-        json_key_indexes_[field_id] = std::move(index);
+        json_stats_.erase(field_id);
     }
 
-    index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const override {
+    void
+    LoadJsonStats(FieldId field_id,
+                  std::shared_ptr<index::JsonKeyStats> stats) override {
+        std::unique_lock lck(mutex_);
+        json_stats_[field_id] = stats;
+    }
+
+    index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
-        auto iter = json_key_indexes_.find(field_id);
-        if (iter == json_key_indexes_.end()) {
+        auto iter = json_stats_.find(field_id);
+        if (iter == json_stats_.end()) {
             return nullptr;
         }
         return iter->second.get();
@@ -142,13 +148,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
 
-    // TODO(tiered storage 1): should return a PinWrapper
     void
     BulkGetJsonData(FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const override {
-        auto column = fields_.at(field_id);
+        auto column = fields_.rlock()->at(field_id);
         column->BulkRawJsonAt(fn, offsets, count);
     }
 
@@ -464,6 +469,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column);
 
+    std::shared_ptr<ChunkedColumnInterface>
+    get_column(FieldId field_id) const {
+        std::shared_ptr<ChunkedColumnInterface> res;
+        fields_.withRLock([&](auto& fields) {
+            auto it = fields.find(field_id);
+            if (it != fields.end()) {
+                res = it->second;
+            }
+        });
+        return res;
+    }
+
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -494,6 +511,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
+
     // vector field index
     SealedIndexingRecord vector_indexings_;
 
@@ -507,9 +525,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    mutable std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
+    mutable folly::Synchronized<
+        std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
         fields_;
-    std::unordered_set<FieldId> mmap_fields_;
+    std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
@@ -522,10 +541,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
-    // used for json expr optimization
-    std::unordered_map<FieldId,
-                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
-        json_key_indexes_;
 };
 
 inline SegmentSealedUPtr

@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -189,9 +188,8 @@ func TestConsumerServeSendArm(t *testing.T) {
 
 	// test send.
 	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(1))
 	msg.EXPECT().EstimateSize().Return(0)
-	msg.EXPECT().IntoMessageProto().Return(&messagespb.Message{})
+	msg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{})
 	scanCh <- msg
 
 	// test send txn message.

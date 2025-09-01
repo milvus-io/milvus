@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -274,6 +275,112 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
+func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
+	switch policy {
+	case "sync":
+		return C.CacheWarmupPolicy_Sync, nil
+	case "disable":
+		return C.CacheWarmupPolicy_Disable, nil
+	default:
+		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
+	}
+}
+
+func InitTieredStorage(params *paramtable.ComponentParam) error {
+	// init tiered storage
+	scalarFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	if err != nil {
+		return err
+	}
+	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
+	if deprecatedCacheWarmupPolicy == "sync" {
+		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
+	} else if deprecatedCacheWarmupPolicy == "async" {
+		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+	}
+	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	osMemBytes := hardware.GetMemoryCount()
+	osDiskBytes := params.QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+
+	memoryLowWatermarkRatio := params.QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
+	memoryHighWatermarkRatio := params.QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
+	memoryMaxRatio := params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
+	diskLowWatermarkRatio := params.QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
+	diskHighWatermarkRatio := params.QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
+	diskMaxRatio := params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
+
+	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
+		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+	}
+	if memoryHighWatermarkRatio > memoryMaxRatio {
+		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+	}
+	if memoryMaxRatio >= 1 {
+		return errors.New("memoryMaxRatio should not be greater than 1")
+	}
+
+	if diskLowWatermarkRatio > diskHighWatermarkRatio {
+		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+	}
+	if diskHighWatermarkRatio > diskMaxRatio {
+		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+	}
+	if diskMaxRatio >= 1 {
+		return errors.New("diskMaxRatio should not be greater than 1")
+	}
+
+	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
+	memoryHighWatermarkBytes := C.int64_t(memoryHighWatermarkRatio * float64(osMemBytes))
+	memoryMaxBytes := C.int64_t(memoryMaxRatio * float64(osMemBytes))
+
+	diskLowWatermarkBytes := C.int64_t(diskLowWatermarkRatio * float64(osDiskBytes))
+	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
+	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
+
+	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
+	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
+	evictionIntervalMs := C.int64_t(params.QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+	cacheCellUnaccessedSurvivalTime := C.int64_t(params.QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
+	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
+	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
+	maxDiskUsagePercentage := C.float(diskMaxRatio)
+	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
+	defer C.free(unsafe.Pointer(diskPath))
+
+	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
+		vectorFieldCacheWarmupPolicy,
+		scalarIndexCacheWarmupPolicy,
+		vectorIndexCacheWarmupPolicy,
+		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
+		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath)
+
+	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
+	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
+
+	log.Info("tiered storage eviction cache ratio configured",
+		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
+		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
+	)
+
+	return nil
+}
+
 func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	mode := params.CommonCfg.DiskWriteMode.GetValue()
 	bufferSize := params.CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()
@@ -383,15 +490,6 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateDefaultExprEvalBatchSize(size)
-			return nil
-		})
-
-		paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			interval, err := strconv.Atoi(newValue)
-			if err != nil {
-				return err
-			}
-			UpdateDefaultJSONKeyStatsCommitInterval(interval)
 			return nil
 		})
 

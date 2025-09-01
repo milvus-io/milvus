@@ -36,6 +36,7 @@ enum class ScalarIndexType {
     MARISA,
     INVERTED,
     HYBRID,
+    JSONSTATS,
 };
 
 inline std::string

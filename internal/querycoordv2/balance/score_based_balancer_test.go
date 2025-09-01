@@ -74,7 +74,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
 	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
-	distManager := meta.NewDistributionManager()
+	distManager := meta.NewDistributionManager(nodeManager)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.balancer = NewScoreBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 

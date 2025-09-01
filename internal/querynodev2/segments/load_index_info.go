@@ -124,26 +124,6 @@ func (li *LoadIndexInfo) appendStorageInfo(uri string, version int64) {
 	}).Await()
 }
 
-// appendIndexData appends index path to cLoadIndexInfo and create index
-func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string) error {
-	for _, indexPath := range indexKeys {
-		err := li.appendIndexFile(ctx, indexPath)
-		if err != nil {
-			return err
-		}
-	}
-
-	var status C.CStatus
-	GetLoadPool().Submit(func() (any, error) {
-		traceCtx := ParseCTraceContext(ctx)
-		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
-		runtime.KeepAlive(traceCtx)
-		return nil, nil
-	}).Await()
-
-	return HandleCStatus(ctx, &status, "AppendIndex failed")
-}
-
 func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngineVersion int32) error {
 	cIndexEngineVersion := C.int32_t(indexEngineVersion)
 

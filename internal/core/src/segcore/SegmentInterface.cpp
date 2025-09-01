@@ -538,16 +538,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     return result;
 }
 
-index::JsonKeyStatsInvertedIndex*
-SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = json_indexes_.find(field_id);
-    if (iter == json_indexes_.end()) {
-        return nullptr;
-    }
-    return iter->second.get();
-}
-
 // Only sealed segment has ngram index
 PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
@@ -569,6 +559,16 @@ bool
 SegmentInternalInterface::HasNgramIndexForJson(
     FieldId field_id, const std::string& nested_path) const {
     return false;
+}
+
+index::JsonKeyStats*
+SegmentInternalInterface::GetJsonStats(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = json_stats_.find(field_id);
+    if (iter == json_stats_.end()) {
+        return nullptr;
+    }
+    return iter->second.get();
 }
 
 }  // namespace milvus::segcore

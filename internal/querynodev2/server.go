@@ -303,11 +303,9 @@ func (node *QueryNode) InitSegcore() error {
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
-	cJSONKeyStatsCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.GetAsInt64())
-	C.SetDefaultJSONKeyStatsCommitInterval(cJSONKeyStatsCommitInterval)
-
 	cGrowingJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.GetAsBool())
 	C.SetDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
+
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
@@ -345,101 +343,10 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	// init tiered storage
-	scalarFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	err = initcore.InitTieredStorage(paramtable.Get())
 	if err != nil {
 		return err
 	}
-	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.GetValue())
-	if err != nil {
-		return err
-	}
-	deprecatedCacheWarmupPolicy := paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
-	if deprecatedCacheWarmupPolicy == "sync" {
-		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
-		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
-		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
-		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
-	} else if deprecatedCacheWarmupPolicy == "async" {
-		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
-	}
-	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
-	if err != nil {
-		return err
-	}
-	vectorIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
-	if err != nil {
-		return err
-	}
-	osMemBytes := hardware.GetMemoryCount()
-	osDiskBytes := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
-
-	memoryLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
-	memoryHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
-	memoryMaxRatio := paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
-	diskLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
-	diskHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
-	diskMaxRatio := paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
-
-	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
-		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
-	}
-	if memoryHighWatermarkRatio > memoryMaxRatio {
-		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
-	}
-	if memoryMaxRatio >= 1 {
-		return errors.New("memoryMaxRatio should not be greater than 1")
-	}
-
-	if diskLowWatermarkRatio > diskHighWatermarkRatio {
-		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
-	}
-	if diskHighWatermarkRatio > diskMaxRatio {
-		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
-	}
-	if diskMaxRatio >= 1 {
-		return errors.New("diskMaxRatio should not be greater than 1")
-	}
-
-	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
-	memoryHighWatermarkBytes := C.int64_t(memoryHighWatermarkRatio * float64(osMemBytes))
-	memoryMaxBytes := C.int64_t(memoryMaxRatio * float64(osMemBytes))
-
-	diskLowWatermarkBytes := C.int64_t(diskLowWatermarkRatio * float64(osDiskBytes))
-	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
-	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
-
-	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
-
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
-		panic("tiered storage eviction is not supported in POSIX mode, change config and restart")
-	}
-
-	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
-	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
-	cacheCellUnaccessedSurvivalTime := C.int64_t(paramtable.Get().QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
-	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
-	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
-	maxDiskUsagePercentage := C.float(diskMaxRatio)
-	diskPath := C.CString(paramtable.Get().LocalStorageCfg.Path.GetValue())
-	defer C.free(unsafe.Pointer(diskPath))
-
-	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
-		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
-		C.CacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
-		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
-		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
-		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
-		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingMemoryFactor, maxDiskUsagePercentage, diskPath)
-
-	tieredEvictableMemoryCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
-	tieredEvictableDiskCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
-
-	log.Ctx(node.ctx).Info("tiered storage eviction cache ratio configured",
-		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
-		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
-	)
 
 	err = initcore.InitInterminIndexConfig(paramtable.Get())
 	if err != nil {

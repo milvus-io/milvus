@@ -106,5 +106,5 @@ type Segment interface {
 	NeedUpdatedVersion() int64
 	RemoveUnusedFieldFiles() error
 
-	GetFieldJSONIndexStats() []int64
+	GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 }

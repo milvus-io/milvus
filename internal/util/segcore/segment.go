@@ -295,14 +295,3 @@ func (s *cSegmentImpl) FinishLoad() error {
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
 }
-
-func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
-	switch policy {
-	case "sync":
-		return C.CacheWarmupPolicy_Sync, nil
-	case "disable":
-		return C.CacheWarmupPolicy_Disable, nil
-	default:
-		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
-	}
-}

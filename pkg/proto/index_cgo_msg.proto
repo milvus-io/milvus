@@ -97,6 +97,9 @@ message BuildIndexInfo {
   int64 storage_version = 24;
   SegmentInsertFiles segment_insert_files = 25;
   StoragePluginContext storage_plugin_context = 26;
+  int64 json_stats_max_shredding_columns = 27;
+  double json_stats_shredding_ratio_threshold = 28;
+  int64 json_stats_write_batch_size = 29;
 }
 
 message StoragePluginContext {
@@ -127,4 +130,5 @@ message LoadJsonKeyIndexInfo {
   int64 partitionID = 7;
   common.LoadPriority load_priority = 8;
   bool enable_mmap = 9;
+  string mmap_dir_path = 10;
 }

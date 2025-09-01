@@ -1952,6 +1952,10 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			continue
 		}
 
+		if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
+			continue
+		}
+
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
 				IsBM25FunctionOutputField(fieldSchema, schema) ||
