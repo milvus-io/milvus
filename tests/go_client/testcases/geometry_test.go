@@ -7,12 +7,11 @@ import (
 	"testing"
 	"time"
 
+	// Import OGC-compliant geometry library to provide standard spatial relation predicates
+	sgeom "github.com/peterstace/simplefeatures/geom"
 	"github.com/stretchr/testify/require"
 	"github.com/twpayne/go-geom"
 	"github.com/twpayne/go-geom/encoding/wkt"
-
-	// Import OGC-compliant geometry library to provide standard spatial relation predicates
-	sgeom "github.com/peterstace/simplefeatures/geom"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
