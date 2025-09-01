@@ -611,14 +611,12 @@ CreateArrowSchema(DataType data_type,
     AssertInfo(dim > 0, "invalid dim value");
 
     auto value_type = GetArrowDataTypeForVectorArray(element_type);
-    auto list_type = arrow::list(value_type);
-
     auto metadata = arrow::KeyValueMetadata::Make(
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
     auto field =
-        arrow::field("val", list_type, nullable)->WithMetadata(metadata);
+        arrow::field("val", value_type, nullable)->WithMetadata(metadata);
     return arrow::schema({field});
 }
 
