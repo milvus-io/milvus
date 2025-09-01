@@ -6,6 +6,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -17,6 +19,12 @@ var singleton WALAccesser = nil
 // should be called before any other operations.
 func Init() {
 	c, _ := kvfactory.GetEtcdAndPath()
+	// init and select wal name
+	util.InitAndSelectWALName()
+	// register cipher for cipher message
+	if hookutil.IsClusterEncyptionEnabled() {
+		message.RegisterCipher(hookutil.GetCipher())
+	}
 	singleton = newWALAccesser(c)
 }
 
@@ -126,9 +134,6 @@ type WALAccesser interface {
 
 	// Balancer returns the balancer management of the wal.
 	Balancer() Balancer
-
-	// WALName returns the name of the wal.
-	WALName() string
 
 	// Local returns the local services.
 	Local() Local

@@ -165,10 +165,7 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 			r.replicateInfo.GetTargetChannelName(), r.replicateInfo.GetTargetCluster().GetClusterId())
 	}
 
-	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(
-		streaming.WAL().WALName(),
-		[]byte(checkpoint.GetMessageId().GetId()),
-	)
+	startFrom := message.MustUnmarshalMessageID(checkpoint.GetMessageId())
 	log.Info("replicate messages from position",
 		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
 		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),

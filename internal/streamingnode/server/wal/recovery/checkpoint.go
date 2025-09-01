@@ -1,7 +1,6 @@
 package recovery
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -12,9 +11,9 @@ const (
 )
 
 // newWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
-func newWALCheckpointFromProto(walName string, cp *streamingpb.WALCheckpoint) *WALCheckpoint {
+func newWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 	return &WALCheckpoint{
-		MessageID: message.MustUnmarshalMessageID(walName, cp.MessageId.Id),
+		MessageID: message.MustUnmarshalMessageID(cp.MessageId),
 		TimeTick:  cp.TimeTick,
 		Magic:     cp.RecoveryMagic,
 	}
@@ -30,9 +29,7 @@ type WALCheckpoint struct {
 // IntoProto converts the WALCheckpoint to a protobuf message.
 func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 	cp := &streamingpb.WALCheckpoint{
-		MessageId: &messagespb.MessageID{
-			Id: c.MessageID.Marshal(),
-		},
+		MessageId:     c.MessageID.IntoProto(),
 		TimeTick:      c.TimeTick,
 		RecoveryMagic: c.Magic,
 	}

@@ -36,20 +36,6 @@ func NewBroadcastMutableMessageBeforeAppend(payload []byte, properties map[strin
 	return m
 }
 
-// NewImmutableMessageFromProto creates a new immutable message from the proto message.
-// !!! Only used at server side for streaming internal service, don't use it at client side.
-func NewImmutableMessageFromProto(walName string, msg *messagespb.ImmutableMessage) ImmutableMessage {
-	id, err := UnmarshalMessageID(walName, msg.Id.Id)
-	if err != nil {
-		panic(err)
-	}
-	return NewImmutableMesasge(
-		id,
-		msg.Payload,
-		msg.Properties,
-	)
-}
-
 // NewImmutableMessage creates a new immutable message.
 // !!! Only used at server side for streaming internal service, don't use it at client side.
 func NewImmutableMesasge(
@@ -68,7 +54,7 @@ func NewImmutableMesasge(
 
 // NewReplicateMessage creates a new replicate message.
 func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) MutableMessage {
-	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
 	pmsg := msg.IntoImmutableMessageProto()
 	m := &messageImpl{
@@ -89,7 +75,7 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) Mutable
 }
 
 func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
-	messageID := MustUnmarshalMessageID(im.GetId().GetWALName().String(), im.GetId().GetId())
+	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
 	return msg
 }
@@ -97,10 +83,7 @@ func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMes
 func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
 	msg := im.IntoImmutableMessageProto()
 	return &commonpb.ImmutableMessage{
-		Id: &commonpb.MessageID{
-			Id:      msg.GetId().GetId(),
-			WALName: GetWALName(walName),
-		},
+		Id: im.MessageID().IntoProto(),
 		Payload:    msg.GetPayload(),
 		Properties: msg.GetProperties(),
 	}

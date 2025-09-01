@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -65,10 +64,6 @@ type walAccesserImpl struct {
 
 func (w *walAccesserImpl) Balancer() Balancer {
 	return balancerImpl{w}
-}
-
-func (w *walAccesserImpl) WALName() string {
-	return util.MustSelectWALName()
 }
 
 func (w *walAccesserImpl) Local() Local {

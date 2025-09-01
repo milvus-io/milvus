@@ -18,7 +18,6 @@ package replicatestream
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -35,9 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
-	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestReplicateStreamClient_Replicate(t *testing.T) {
@@ -65,7 +64,6 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	)
 
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	streaming.SetWALForTest(wal)
 
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
@@ -81,16 +79,13 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 		for i := 0; i < msgCount; i++ {
 			mockMsg := mock_message.NewMockImmutableMessage(t)
 			tt := uint64(i + 1)
+			messageID := walimplstest.NewTestMessageID(int64(tt))
 			mockMsg.EXPECT().TimeTick().Return(tt)
-			messageID := mock_message.NewMockMessageID(t)
-			messageID.EXPECT().String().Return(fmt.Sprintf("mock-message-id-%d", i))
-			mockMsg.EXPECT().MessageID().Return(messageID)
 			mockMsg.EXPECT().EstimateSize().Return(1024)
 			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
-			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
-				Id: &messagespb.MessageID{
-					Id: strconv.Itoa(int(tt)), // use id as time tick in mock
-				},
+			mockMsg.EXPECT().MessageID().Return(messageID)
+			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&commonpb.ImmutableMessage{
+				Id:         messageID.IntoProto(),
 				Payload:    []byte("test-payload"),
 				Properties: map[string]string{"key": "value"},
 			})
@@ -134,7 +129,6 @@ func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 	)
 
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	streaming.SetWALForTest(wal)
 
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
@@ -186,7 +180,6 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	)
 
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	streaming.SetWALForTest(wal)
 
 	// Create client which will start internal retry loop
@@ -204,15 +197,12 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 			tt := uint64(i + 1)
 			mockMsg := mock_message.NewMockImmutableMessage(t)
 			mockMsg.EXPECT().TimeTick().Return(tt)
-			messageID := mock_message.NewMockMessageID(t)
-			messageID.EXPECT().String().Return(fmt.Sprintf("mock-message-id-%d", i))
+			messageID := walimplstest.NewTestMessageID(int64(tt))
 			mockMsg.EXPECT().MessageID().Return(messageID)
 			mockMsg.EXPECT().EstimateSize().Return(1024)
 			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
-			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&messagespb.ImmutableMessage{
-				Id: &messagespb.MessageID{
-					Id: strconv.Itoa(int(tt)), // use id as time tick in mock
-				},
+			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&commonpb.ImmutableMessage{
+				Id:         messageID.IntoProto(),
 				Payload:    []byte("test-payload"),
 				Properties: map[string]string{"key": "value"},
 			})

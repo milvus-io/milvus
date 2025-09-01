@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -39,8 +40,8 @@ func (id kafkaID) KafkaID() kafka.Offset {
 }
 
 // WALName returns the name of message id related wal.
-func (id kafkaID) WALName() string {
-	return walName
+func (id kafkaID) WALName() message.WALName {
+	return message.WALNameKafka
 }
 
 // LT less than.
@@ -61,6 +62,14 @@ func (id kafkaID) EQ(other message.MessageID) bool {
 // Marshal marshal the message id.
 func (id kafkaID) Marshal() string {
 	return message.EncodeInt64(int64(id))
+}
+
+// IntoProto marshal the message id to proto.
+func (id kafkaID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      id.Marshal(),
+		WALName: commonpb.WALName(id.WALName()),
+	}
 }
 
 func (id kafkaID) String() string {

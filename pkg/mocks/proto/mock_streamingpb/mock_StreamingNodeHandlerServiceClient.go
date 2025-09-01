@@ -98,8 +98,8 @@ func (_c *MockStreamingNodeHandlerServiceClient_Consume_Call) RunAndReturn(run f
 	return _c
 }
 
-// GetWALCheckpoint provides a mock function with given fields: ctx, in, opts
-func (_m *MockStreamingNodeHandlerServiceClient) GetWALCheckpoint(ctx context.Context, in *streamingpb.GetWALCheckpointRequest, opts ...grpc.CallOption) (*streamingpb.GetWALCheckpointResponse, error) {
+// GetReplicateCheckpoint provides a mock function with given fields: ctx, in, opts
+func (_m *MockStreamingNodeHandlerServiceClient) GetReplicateCheckpoint(ctx context.Context, in *streamingpb.GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*streamingpb.GetReplicateCheckpointResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -110,23 +110,23 @@ func (_m *MockStreamingNodeHandlerServiceClient) GetWALCheckpoint(ctx context.Co
 	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetWALCheckpoint")
+		panic("no return value specified for GetReplicateCheckpoint")
 	}
 
-	var r0 *streamingpb.GetWALCheckpointResponse
+	var r0 *streamingpb.GetReplicateCheckpointResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetWALCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetWALCheckpointResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetReplicateCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetReplicateCheckpointResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetWALCheckpointRequest, ...grpc.CallOption) *streamingpb.GetWALCheckpointResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetReplicateCheckpointRequest, ...grpc.CallOption) *streamingpb.GetReplicateCheckpointResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*streamingpb.GetWALCheckpointResponse)
+			r0 = ret.Get(0).(*streamingpb.GetReplicateCheckpointResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.GetWALCheckpointRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.GetReplicateCheckpointRequest, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -135,21 +135,21 @@ func (_m *MockStreamingNodeHandlerServiceClient) GetWALCheckpoint(ctx context.Co
 	return r0, r1
 }
 
-// MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWALCheckpoint'
-type MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call struct {
+// MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateCheckpoint'
+type MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call struct {
 	*mock.Call
 }
 
-// GetWALCheckpoint is a helper method to define mock.On call
+// GetReplicateCheckpoint is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *streamingpb.GetWALCheckpointRequest
+//   - in *streamingpb.GetReplicateCheckpointRequest
 //   - opts ...grpc.CallOption
-func (_e *MockStreamingNodeHandlerServiceClient_Expecter) GetWALCheckpoint(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call {
-	return &MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call{Call: _e.mock.On("GetWALCheckpoint",
+func (_e *MockStreamingNodeHandlerServiceClient_Expecter) GetReplicateCheckpoint(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call {
+	return &MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call{Call: _e.mock.On("GetReplicateCheckpoint",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call) Run(run func(ctx context.Context, in *streamingpb.GetWALCheckpointRequest, opts ...grpc.CallOption)) *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call {
+func (_c *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call) Run(run func(ctx context.Context, in *streamingpb.GetReplicateCheckpointRequest, opts ...grpc.CallOption)) *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -157,17 +157,17 @@ func (_c *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call) Run(run f
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*streamingpb.GetWALCheckpointRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*streamingpb.GetReplicateCheckpointRequest), variadicArgs...)
 	})
 	return _c
 }
 
-func (_c *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call) Return(_a0 *streamingpb.GetWALCheckpointResponse, _a1 error) *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call {
+func (_c *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call) Return(_a0 *streamingpb.GetReplicateCheckpointResponse, _a1 error) *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call) RunAndReturn(run func(context.Context, *streamingpb.GetWALCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetWALCheckpointResponse, error)) *MockStreamingNodeHandlerServiceClient_GetWALCheckpoint_Call {
+func (_c *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call) RunAndReturn(run func(context.Context, *streamingpb.GetReplicateCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetReplicateCheckpointResponse, error)) *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

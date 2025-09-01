@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -39,7 +38,6 @@ const pendingMessageQueueLength = 128
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
 	replicateInfo *streamingpb.ReplicatePChannelMeta
-	walName       commonpb.WALName
 
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
 	pendingMessages MsgQueue
@@ -55,14 +53,10 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 	ctx1, cancel := context.WithCancel(ctx)
 	ctx1 = contextutil.WithClusterID(ctx1, replicateInfo.GetTargetCluster().GetClusterId())
 
-	walNameStr := streaming.WAL().WALName()
-	walName := message.GetWALName(walNameStr)
-
 	rs := &replicateStreamClient{
 		replicateInfo:   replicateInfo,
-		walName:         walName,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
-		metrics:         NewReplicateMetrics(walName, replicateInfo),
+		metrics:         NewReplicateMetrics(replicateInfo),
 		ctx:             ctx1,
 		cancel:          cancel,
 	}
@@ -244,10 +238,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error 
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
 				Message: &commonpb.ImmutableMessage{
-					Id: &commonpb.MessageID{
-						Id:      immutableMessage.GetId().GetId(),
-						WALName: r.walName,
-					},
+					Id:         msg.MessageID().IntoProto(),
 					Payload:    immutableMessage.GetPayload(),
 					Properties: immutableMessage.GetProperties(),
 				},

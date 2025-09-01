@@ -65,7 +65,6 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	scanner := mock_streaming.NewMockScanner(t)
 	scanner.EXPECT().Close().Return()
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().WALName().Return(commonpb.WALName_Pulsar.String())
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner)
 	streaming.SetWALForTest(wal)
 
