@@ -16762,9 +16762,9 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     // bool: exists or not
     std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
         test_cases = {
-            {{"a"}, true, 0b1111111000000100},
+            {{"a"}, true, 0b1111101000000100},
             {{"a", "b"}, true, 0b0000100000000000},
-            {{"a"}, false, 0b0000000111111011},
+            {{"a"}, false, 0b0000010111111011},
             {{"a", "b"}, false, 0b1111011111111111},
         };
 
@@ -17051,5 +17051,89 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
         auto res =
             ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
         EXPECT_TRUE(res == expect_result);
+    }
+}
+
+TEST(JsonNonIndexExistsTest, TestExistsExprSealedNoIndex) {
+    std::vector<std::string> json_strs = {
+        R"({"a": 1.0})",
+        R"({"a": "abc"})",
+        R"({"a": 3.0})",
+        R"({"a": true})",
+        R"({"a": {"b": 1}})",
+        R"({"a": []})",
+        R"({"a": ["a", "b"]})",
+        R"({"a": null})",
+        R"(1)",
+        R"("abc")",
+        R"(1.0)",
+        R"(true)",
+        R"([1, 2, 3])",
+        R"({"a": 1, "b": 2})",
+        R"({})",
+        R"(null)",
+        R"({"a": {}})",
+        R"({"a": {"b": {}}})",
+        R"({"a": [{}, {}]})",
+        R"({"a": [[], []]})",
+        R"({"a": [{"b": {}}, {"c": {}}]})",
+    };
+
+    // bool: exists or not
+    std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
+        test_cases = {
+            {{"a"}, true, 0b111110100000010000000},
+            {{"a", "b"}, true, 0b000010000000000000000},
+            {{"a"}, false, 0b000001011111101111111},
+            {{"a", "b"}, false, 0b111101111111111111111},
+        };
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    for (auto& json_str : json_strs) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
+    }
+    json_field->add_json_data(jsons);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    for (auto& [nested_path, exists, expect] : test_cases) {
+        BitsetType expect_res;
+        expect_res.resize(json_strs.size());
+        for (int i = json_strs.size() - 1; expect > 0; i--) {
+            expect_res.set(i, (expect & 1) != 0);
+            expect >>= 1;
+        }
+
+        std::shared_ptr<expr::ITypeFilterExpr> exists_expr;
+        if (exists) {
+            exists_expr = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, nested_path));
+        } else {
+            auto child_expr = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, nested_path));
+            exists_expr = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
+        }
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           exists_expr);
+        auto result =
+            ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+
+        EXPECT_TRUE(result == expect_res);
     }
 }
