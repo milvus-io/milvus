@@ -91,11 +91,14 @@ func ValidateFunctions(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
+func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema) (*FunctionExecutor, error) {
 	executor := &FunctionExecutor{
 		runners: make(map[int64]Runner),
 	}
-	for _, fSchema := range schema.Functions {
+	if functions == nil {
+		functions = schema.Functions
+	}
+	for _, fSchema := range functions {
 		runner, err := createFunction(schema, fSchema)
 		if err != nil {
 			return nil, err
