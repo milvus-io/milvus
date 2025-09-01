@@ -3,8 +3,10 @@
 package mock_message
 
 import (
-	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -162,19 +164,19 @@ func (_c *MockImmutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *
 }
 
 // IntoImmutableMessageProto provides a mock function with no fields
-func (_m *MockImmutableMessage) IntoImmutableMessageProto() *messagespb.ImmutableMessage {
+func (_m *MockImmutableMessage) IntoImmutableMessageProto() *commonpb.ImmutableMessage {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for IntoImmutableMessageProto")
 	}
 
-	var r0 *messagespb.ImmutableMessage
-	if rf, ok := ret.Get(0).(func() *messagespb.ImmutableMessage); ok {
+	var r0 *commonpb.ImmutableMessage
+	if rf, ok := ret.Get(0).(func() *commonpb.ImmutableMessage); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*messagespb.ImmutableMessage)
+			r0 = ret.Get(0).(*commonpb.ImmutableMessage)
 		}
 	}
 
@@ -198,12 +200,12 @@ func (_c *MockImmutableMessage_IntoImmutableMessageProto_Call) Run(run func()) *
 	return _c
 }
 
-func (_c *MockImmutableMessage_IntoImmutableMessageProto_Call) Return(_a0 *messagespb.ImmutableMessage) *MockImmutableMessage_IntoImmutableMessageProto_Call {
+func (_c *MockImmutableMessage_IntoImmutableMessageProto_Call) Return(_a0 *commonpb.ImmutableMessage) *MockImmutableMessage_IntoImmutableMessageProto_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockImmutableMessage_IntoImmutableMessageProto_Call) RunAndReturn(run func() *messagespb.ImmutableMessage) *MockImmutableMessage_IntoImmutableMessageProto_Call {
+func (_c *MockImmutableMessage_IntoImmutableMessageProto_Call) RunAndReturn(run func() *commonpb.ImmutableMessage) *MockImmutableMessage_IntoImmutableMessageProto_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -807,18 +809,18 @@ func (_c *MockImmutableMessage_Version_Call) RunAndReturn(run func() message.Ver
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockImmutableMessage) WALName() string {
+func (_m *MockImmutableMessage) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -841,12 +843,12 @@ func (_c *MockImmutableMessage_WALName_Call) Run(run func()) *MockImmutableMessa
 	return _c
 }
 
-func (_c *MockImmutableMessage_WALName_Call) Return(_a0 string) *MockImmutableMessage_WALName_Call {
+func (_c *MockImmutableMessage_WALName_Call) Return(_a0 message.WALName) *MockImmutableMessage_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockImmutableMessage_WALName_Call) RunAndReturn(run func() string) *MockImmutableMessage_WALName_Call {
+func (_c *MockImmutableMessage_WALName_Call) RunAndReturn(run func() message.WALName) *MockImmutableMessage_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

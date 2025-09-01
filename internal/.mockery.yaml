@@ -18,6 +18,7 @@ packages:
       Balancer:
   github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
+      Broadcaster:
       AppendOperator:
       Watcher:
   github.com/milvus-io/milvus/internal/streamingcoord/client:

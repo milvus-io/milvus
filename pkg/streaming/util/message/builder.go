@@ -35,20 +35,6 @@ func NewBroadcastMutableMessageBeforeAppend(payload []byte, properties map[strin
 	return m
 }
 
-// NewImmutableMessageFromProto creates a new immutable message from the proto message.
-// !!! Only used at server side for streaming internal service, don't use it at client side.
-func NewImmutableMessageFromProto(walName string, msg *messagespb.ImmutableMessage) ImmutableMessage {
-	id, err := UnmarshalMessageID(walName, msg.Id.Id)
-	if err != nil {
-		panic(err)
-	}
-	return NewImmutableMesasge(
-		id,
-		msg.Payload,
-		msg.Properties,
-	)
-}
-
 // NewImmutableMessage creates a new immutable message.
 // !!! Only used at server side for streaming internal service, don't use it at client side.
 func NewImmutableMesasge(

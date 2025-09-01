@@ -4,6 +4,7 @@ package milvus.proto.streaming;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
+import "common.proto";
 import "data_coord.proto";
 import "messages.proto";
 import "milvus.proto";
@@ -136,7 +137,7 @@ message BroadcastResponse {
 message BroadcastAckRequest {
     uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
     string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
-    messages.ImmutableMessage message = 3;       // the message that to be acked.
+    common.ImmutableMessage message = 3;       // the message that to be acked.
 }
 
 message BroadcastAckResponse {
@@ -243,9 +244,9 @@ message DeliverPolicy {
     oneof policy {
         google.protobuf.Empty all    = 1;  // deliver all messages.
         google.protobuf.Empty latest = 2;  // deliver the latest message.
-        messages.MessageID start_from =
+        common.MessageID start_from =
             3;  // deliver message from this message id. [startFrom, ...]
-        messages.MessageID start_after =
+        common.MessageID start_after =
             4;  // deliver message after this message id. (startAfter, ...]
     }
 }
@@ -366,7 +367,7 @@ message ProduceResponse {
 
 // CreateProducerResponse is the result of the CreateProducer RPC.
 message CreateProducerResponse {
-    string wal_name   = 1;  // wal name at server side.
+    string wal_name          = 1 [deprecated = true];  // wal name at server side.
     int64 producer_server_id = 2;   // A unique producer server id on streamingnode
            // for this producer in streamingnode lifetime.
     // Is used to identify the producer in streamingnode for other unary grpc
@@ -385,7 +386,7 @@ message ProduceMessageResponse {
 // ProduceMessageResponseResult is the result of the produce message streaming
 // RPC.
 message ProduceMessageResponseResult {
-    messages.MessageID id = 1;  // the offset of the message in the channel.
+    common.MessageID id = 1;  // the offset of the message in the channel.
     uint64 timetick       = 2;  // the timetick of that message sent.
     messages.TxnContext txnContext = 3;  // the txn context of the message.
     google.protobuf.Any extra      = 4;  // the extra message.
@@ -466,7 +467,7 @@ message ConsumeResponse {
 }
 
 message CreateConsumerResponse {
-    string wal_name = 1;  // wal name at server side.
+    string wal_name          = 1 [deprecated = true];  // wal name at server side.
     // A unique consumer id on streamingnode for this
     // consumer in streamingnode lifetime.
     int64 consumer_server_id = 2;
@@ -474,7 +475,7 @@ message CreateConsumerResponse {
 
 message ConsumeMessageReponse {
     int64 consumer_id = 1;
-    messages.ImmutableMessage message = 2;
+    common.ImmutableMessage message = 2;
 }
 
 message CloseConsumerResponse {}
@@ -638,7 +639,7 @@ message SegmentAssignmentStat {
 
 // The WALCheckpoint that is used to recovery the wal scanner.
 message WALCheckpoint {
-    messages.MessageID message_id = 1; // From here to recover all uncommited info.
+    common.MessageID message_id = 1; // From here to recover all uncommited info.
     // e.g., primary key index, segment assignment info, vchannel info...
     // because current data path flush is slow, and managed by the coordinator, current current is not apply to it.
     // 

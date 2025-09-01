@@ -14,23 +14,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-const (
-	walName = "pulsar"
-)
-
 func init() {
 	// register the builder to the wal registry.
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
-	message.RegisterMessageIDUnmsarshaler(walName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(message.WALNamePulsar, UnmarshalMessageID)
 }
 
 // builderImpl is the builder for pulsar wal.
 type builderImpl struct{}
 
 // Name returns the name of the wal.
-func (b *builderImpl) Name() string {
-	return walName
+func (b *builderImpl) Name() message.WALName {
+	return message.WALNamePulsar
 }
 
 // Build build a wal instance.

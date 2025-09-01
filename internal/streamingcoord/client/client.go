@@ -16,7 +16,6 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -89,7 +88,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		conn:              conn,
 		rb:                rb,
 		assignmentService: assignmentServiceImpl,
-		broadcastService:  broadcast.NewGRPCBroadcastService(util.MustSelectWALName(), broadcastService),
+		broadcastService:  broadcast.NewGRPCBroadcastService(broadcastService),
 	}
 }
 

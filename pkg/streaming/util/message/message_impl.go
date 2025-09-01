@@ -3,6 +3,7 @@ package message
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
@@ -311,7 +312,7 @@ type immutableMessageImpl struct {
 }
 
 // WALName returns the name of message related wal.
-func (m *immutableMessageImpl) WALName() string {
+func (m *immutableMessageImpl) WALName() WALName {
 	return m.id.WALName()
 }
 
@@ -329,7 +330,10 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 	if !ok {
 		panic(fmt.Sprintf("there's a bug in the message codes, last confirmed message lost in properties of message, id: %+v", m.id))
 	}
-	id, err := UnmarshalMessageID(m.id.WALName(), value)
+	id, err := UnmarshalMessageID(&commonpb.MessageID{
+		WALName: commonpb.WALName(m.id.WALName()),
+		Id:      value,
+	})
 	if err != nil {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty last confirmed message in properties of message, id: %+v", m.id))
 	}
@@ -370,11 +374,9 @@ func (m *immutableMessageImpl) overwriteLastConfirmedMessageID(id MessageID) {
 }
 
 // IntoImmutableMessageProto converts the message to a protobuf immutable message.
-func (m *immutableMessageImpl) IntoImmutableMessageProto() *messagespb.ImmutableMessage {
-	return &messagespb.ImmutableMessage{
-		Id: &messagespb.MessageID{
-			Id: m.id.Marshal(),
-		},
+func (m *immutableMessageImpl) IntoImmutableMessageProto() *commonpb.ImmutableMessage {
+	return &commonpb.ImmutableMessage{
+		Id:         m.id.IntoProto(),
 		Payload:    m.payload,
 		Properties: m.properties.ToRawMap(),
 	}

@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
@@ -73,7 +74,7 @@ func init() {
 
 // stopRocksmqIfUsed closes the RocksMQ if it is used.
 func stopRocksmqIfUsed() {
-	if name := util.MustSelectWALName(); name == util.WALTypeRocksmq {
+	if name := util.MustSelectWALName(); name == message.WALNameRocksmq {
 		rocksmqimpl.CloseRocksMQ()
 	}
 }
