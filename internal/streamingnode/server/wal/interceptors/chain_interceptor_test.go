@@ -141,7 +141,7 @@ func testChainInterceptor(t *testing.T, count int, named bool) {
 	msg.EXPECT().MessageType().Return(message.MessageTypeDelete).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
 	msg.EXPECT().TxnContext().Return(nil).Maybe()
-	mw := metricsutil.NewWriteMetrics(types.PChannelInfo{}, "rocksmq")
+	mw := metricsutil.NewWriteMetrics(types.PChannelInfo{}, message.WALNameRocksmq)
 	m := mw.StartAppend(msg)
 	ctx := utility.WithAppendMetricsContext(context.Background(), m)
 	msgID, err := interceptor.DoAppend(ctx, msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {

@@ -77,22 +77,23 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 	}
 }
 
-func MustGetMessageIDFromMQWrapperIDBytes(walName string, msgIDBytes []byte) message.MessageID {
+func MustGetMessageIDFromMQWrapperIDBytes(msgIDBytes []byte) message.MessageID {
+	walName := message.MustGetDefaultWALName()
 	var commonMsgID common.MessageID
 	switch walName {
-	case "rocksmq", commonpb.WALName_RocksMQ.String():
+	case message.WALNameRocksmq:
 		id := server.DeserializeRmqID(msgIDBytes)
 		commonMsgID = &server.RmqID{MessageID: id}
-	case "pulsar", commonpb.WALName_Pulsar.String():
+	case message.WALNamePulsar:
 		msgID, err := mqpulsar.DeserializePulsarMsgID(msgIDBytes)
 		if err != nil {
 			panic(err)
 		}
 		commonMsgID = mqpulsar.NewPulsarID(msgID)
-	case "kafka", commonpb.WALName_Kafka.String():
+	case message.WALNameKafka:
 		id := mqkafka.DeserializeKafkaID(msgIDBytes)
 		commonMsgID = mqkafka.NewKafkaID(id)
-	case "woodpecker", commonpb.WALName_WoodPecker.String():
+	case message.WALNameWoodpecker:
 		msgID, err := mqwoodpecker.DeserializeWoodpeckerMsgID(msgIDBytes)
 		if err != nil {
 			panic(err)

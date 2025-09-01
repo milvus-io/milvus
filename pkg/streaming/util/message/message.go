@@ -4,6 +4,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
@@ -130,7 +131,7 @@ type ImmutableMessage interface {
 	BasicMessage
 
 	// WALName returns the name of message related wal.
-	WALName() string
+	WALName() WALName
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
@@ -148,7 +149,7 @@ type ImmutableMessage interface {
 	LastConfirmedMessageID() MessageID
 
 	// IntoImmutableMessageProto converts the message to a protobuf immutable message.
-	IntoImmutableMessageProto() *messagespb.ImmutableMessage
+	IntoImmutableMessageProto() *commonpb.ImmutableMessage
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.

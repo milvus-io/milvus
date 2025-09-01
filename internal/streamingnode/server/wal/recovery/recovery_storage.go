@@ -32,7 +32,7 @@ type RecoveryMetrics struct {
 // RecoveryStreamBuilder is an interface that is used to build a recovery stream from the WAL.
 type RecoveryStreamBuilder interface {
 	// WALName returns the name of the WAL.
-	WALName() string
+	WALName() message.WALName
 
 	// Channel returns the channel info of wal.
 	Channel() types.PChannelInfo

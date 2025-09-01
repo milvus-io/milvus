@@ -17,7 +17,6 @@
 package replicatestream
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -39,14 +38,12 @@ type msgMetrics struct {
 }
 
 type replicateMetrics struct {
-	walName       commonpb.WALName
 	replicateInfo *streamingpb.ReplicatePChannelMeta
 	msgsMetrics   *typeutil.ConcurrentMap[string, msgMetrics] // message id -> msgMetrics
 }
 
-func NewReplicateMetrics(walName commonpb.WALName, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateMetrics {
+func NewReplicateMetrics(replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateMetrics {
 	return &replicateMetrics{
-		walName:       walName,
 		replicateInfo: replicateInfo,
 		msgsMetrics:   typeutil.NewConcurrentMap[string, msgMetrics](),
 	}

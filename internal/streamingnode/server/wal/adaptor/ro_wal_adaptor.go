@@ -30,7 +30,7 @@ type roWALAdaptorImpl struct {
 	scanMetrics     *metricsutil.ScanMetrics
 }
 
-func (w *roWALAdaptorImpl) WALName() string {
+func (w *roWALAdaptorImpl) WALName() message.WALName {
 	return w.roWALImpls.WALName()
 }
 

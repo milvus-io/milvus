@@ -12,7 +12,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
@@ -23,24 +22,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-const (
-	WALName = "woodpecker"
-)
-
 func init() {
 	// register the builder to the wal registry.
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
-	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
-	message.RegisterMessageIDUnmsarshaler(commonpb.WALName_WoodPecker.String(), UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(message.WALNameWoodpecker, UnmarshalMessageID)
 }
 
 // builderImpl is the builder for woodpecker opener.
 type builderImpl struct{}
 
 // Name of the wal builder, should be a lowercase string.
-func (b *builderImpl) Name() string {
-	return WALName
+func (b *builderImpl) Name() message.WALName {
+	return message.WALNameWoodpecker
 }
 
 // Build build a wal instance.

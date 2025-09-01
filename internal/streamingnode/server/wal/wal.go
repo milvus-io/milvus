@@ -29,7 +29,7 @@ type WAL interface {
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type ROWAL interface {
 	// WALName returns the name of the wal.
-	WALName() string
+	WALName() message.WALName
 
 	// Metrics returns the metrics of the wal.
 	Metrics() types.WALMetrics
