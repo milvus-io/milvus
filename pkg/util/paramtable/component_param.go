@@ -3041,6 +3041,10 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+
+	// delete snapshot dump batch size
+	DeleteDumpBatchSize ParamItem `refreshable:"false"`
+
 	// expr cache
 	ExprResCacheEnabled       ParamItem `refreshable:"false"`
 	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
@@ -4057,6 +4061,15 @@ user-task-polling:
 		Doc:          "expr eval batch size for getnext interface",
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	p.DeleteDumpBatchSize = ParamItem{
+		Key:          "queryNode.segcore.deleteDumpBatchSize",
+		Version:      "2.6.2",
+		DefaultValue: "10000",
+		Doc:          "Batch size for delete snapshot dump in segcore.",
+		Export:       true,
+	}
+	p.DeleteDumpBatchSize.Init(base.mgr)
 
 	// expr cache
 	p.ExprResCacheEnabled = ParamItem{
