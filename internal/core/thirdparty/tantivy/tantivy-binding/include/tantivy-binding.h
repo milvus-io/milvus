@@ -494,4 +494,4 @@ void tantivy_free_analyzer(void *tokenizer);
 
 bool tantivy_index_exist(const char *path);
 
-} // extern "C"
+}  // extern "C"
