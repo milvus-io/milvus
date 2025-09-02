@@ -232,11 +232,8 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
-<<<<<<< HEAD
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
-=======
 	NamespaceEnabledKey        = "namespace.enabled"
->>>>>>> 768fab5f6f (fix)
 )
 
 const (
