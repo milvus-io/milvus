@@ -133,6 +133,9 @@ class SegmentInterface {
     HasRawData(int64_t field_id) const = 0;
 
     virtual bool
+    HasFieldData(FieldId field_id) const = 0;
+
+    virtual bool
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
@@ -141,10 +144,19 @@ class SegmentInterface {
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
 
-    virtual PinWrapper<index::IndexBase*>
-    GetJsonIndex(FieldId field_id, std::string path) const {
-        return nullptr;
+    virtual std::vector<PinWrapper<const index::IndexBase*>>
+    PinJsonIndex(FieldId field_id,
+                 const std::string& path,
+                 DataType data_type,
+                 bool any_type,
+                 bool is_array) const {
+        return {};
     }
+
+    virtual std::vector<PinWrapper<const index::IndexBase*>>
+    PinIndex(FieldId field_id, bool include_ngram = false) const {
+        return {};
+    };
 
     virtual void
     BulkGetJsonData(FieldId field_id,
@@ -157,13 +169,6 @@ class SegmentInterface {
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndexForJson(FieldId field_id,
-                         const std::string& nested_path) const = 0;
-
-    virtual bool
-    HasNgramIndex(FieldId field_id) const = 0;
-
-    virtual bool
-    HasNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const = 0;
 
     virtual index::JsonKeyStats*
@@ -262,45 +267,11 @@ class SegmentInternalInterface : public SegmentInterface {
         }
     }
 
-    template <typename T>
-    PinWrapper<const index::ScalarIndex<T>*>
-    chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
-        static_assert(IsScalar<T>);
-        using IndexType = index::ScalarIndex<T>;
-        auto pw = chunk_index_impl(field_id, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(pw.get());
-        AssertInfo(ptr, "entry mismatch");
-        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
-    }
-
-    // We should not expose this interface directly, but access the index through chunk_scalar_index.
-    // However, chunk_scalar_index requires specifying a template parameter, which makes it impossible to return JsonFlatIndex.
-    // A better approach would be to have chunk_scalar_index return a pointer to a base class,
-    // and then use dynamic_cast to convert it. But this would cause a lot of code changes, so for now, we will do it this way.
-    PinWrapper<const index::IndexBase*>
-    chunk_json_index(FieldId field_id,
-                     std::string& json_path,
-                     int64_t chunk_id) const {
-        return chunk_index_impl(field_id, json_path, chunk_id);
-    }
-
     // union(segment_id, field_id) as unique id
     virtual std::string
     GetUniqueFieldId(int64_t field_id) const {
         return std::to_string(get_segment_id()) + "_" +
                std::to_string(field_id);
-    }
-
-    template <typename T>
-    PinWrapper<const index::ScalarIndex<T>*>
-    chunk_scalar_index(FieldId field_id,
-                       std::string path,
-                       int64_t chunk_id) const {
-        using IndexType = index::ScalarIndex<T>;
-        auto pw = chunk_index_impl(field_id, path, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(pw.get());
-        AssertInfo(ptr, "entry mismatch");
-        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
     }
 
     std::unique_ptr<SearchResult>
@@ -335,16 +306,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
-
-    virtual bool
-    HasIndex(FieldId field_id,
-             const std::string& nested_path,
-             DataType data_type,
-             bool any_type = false,
-             bool is_array = false) const = 0;
-
-    virtual bool
-    HasFieldData(FieldId field_id) const = 0;
 
     virtual std::string
     debug() const = 0;
@@ -387,13 +348,6 @@ class SegmentInternalInterface : public SegmentInterface {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
 
-    virtual bool
-    HasNgramIndex(FieldId field_id) const override;
-
-    virtual bool
-    HasNgramIndexForJson(FieldId field_id,
-                         const std::string& nested_path) const override;
-
     virtual index::JsonKeyStats*
     GetJsonStats(FieldId field_id) const override;
 
@@ -415,10 +369,6 @@ class SegmentInternalInterface : public SegmentInterface {
     mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const = 0;
-
-    // count of chunk that has index available
-    virtual int64_t
-    num_chunk_index(FieldId field_id) const = 0;
 
     // count of chunk that has raw data
     virtual int64_t
@@ -557,9 +507,6 @@ class SegmentInternalInterface : public SegmentInterface {
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
 
-    // internal API: return chunk_index in span, support scalar index only
-    virtual PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
     virtual void
     check_search(const query::Plan* plan) const = 0;
 
@@ -567,13 +514,6 @@ class SegmentInternalInterface : public SegmentInterface {
     get_timestamps() const = 0;
 
  public:
-    virtual PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id,
-                     const std::string& path,
-                     int64_t chunk_id) const {
-        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
-    };
-
     virtual bool
     is_field_exist(FieldId field_id) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type

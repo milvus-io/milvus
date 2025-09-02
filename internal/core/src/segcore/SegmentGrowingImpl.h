@@ -131,7 +131,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
-    num_chunk_index(FieldId field_id) const final {
+    num_chunk_index(FieldId field_id) const {
         return indexing_record_.get_finished_ack();
     }
 
@@ -144,7 +144,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // deprecated
     PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
         return PinWrapper<const index::IndexBase*>(
             indexing_record_.get_field_indexing(field_id)
                 .get_chunk_indexing(chunk_id)
@@ -344,7 +344,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     bool
-    HasIndex(FieldId field_id) const override {
+    HasIndex(FieldId field_id) const {
         auto& field_meta = schema_->operator[](field_id);
         if (IsVectorDataType(field_meta.get_data_type()) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
@@ -354,14 +354,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return false;
     }
 
-    bool
-    HasIndex(FieldId field_id,
-             const std::string& nested_path,
-             DataType data_type,
-             bool any_type = false,
-             bool is_array = false) const override {
-        return false;
-    };
+    std::vector<PinWrapper<const index::IndexBase*>>
+    PinIndex(FieldId field_id, bool include_ngram = false) const override {
+        if (!HasIndex(field_id)) {
+            return {};
+        }
+        auto num_chunk = num_chunk_index(field_id);
+        std::vector<PinWrapper<const index::IndexBase*>> indexes;
+        for (int64_t i = 0; i < num_chunk; i++) {
+            indexes.push_back(chunk_index_impl(field_id, i));
+        }
+        return indexes;
+    }
 
     bool
     HasFieldData(FieldId field_id) const override {

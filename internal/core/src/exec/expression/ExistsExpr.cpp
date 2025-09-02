@@ -56,38 +56,41 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
     if (cached_index_chunk_id_ != 0) {
         cached_index_chunk_id_ = 0;
         auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-        auto pw = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
-        auto* index = pw.get();
+        auto* index = pinned_index_[cached_index_chunk_id_].get();
         AssertInfo(index != nullptr,
                    "Cannot find json index with path: " + pointer);
         switch (index->GetCastType().data_type()) {
             case JsonCastType::DataType::DOUBLE: {
                 auto* json_index =
-                    dynamic_cast<index::JsonInvertedIndex<double>*>(index);
+                    const_cast<index::JsonInvertedIndex<double>*>(
+                        dynamic_cast<const index::JsonInvertedIndex<double>*>(
+                            index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(json_index->Exists()));
                 break;
             }
 
             case JsonCastType::DataType::VARCHAR: {
-                auto* json_index =
-                    dynamic_cast<index::JsonInvertedIndex<std::string>*>(index);
+                auto* json_index = const_cast<
+                    index::JsonInvertedIndex<std::string>*>(
+                    dynamic_cast<const index::JsonInvertedIndex<std::string>*>(
+                        index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(json_index->Exists()));
                 break;
             }
 
             case JsonCastType::DataType::BOOL: {
-                auto* json_index =
-                    dynamic_cast<index::JsonInvertedIndex<bool>*>(index);
+                auto* json_index = const_cast<index::JsonInvertedIndex<bool>*>(
+                    dynamic_cast<const index::JsonInvertedIndex<bool>*>(index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(json_index->Exists()));
                 break;
             }
 
             case JsonCastType::DataType::JSON: {
-                auto* json_flat_index =
-                    dynamic_cast<index::JsonFlatIndex*>(index);
+                auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
+                    dynamic_cast<const index::JsonFlatIndex*>(index));
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
