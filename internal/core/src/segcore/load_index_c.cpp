@@ -317,8 +317,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                 ? field_schema.get_dim()
                 : 1;
         load_index_info->dim = dim;
-        LOG_INFO("FUCK dim: {}", dim);
-        LOG_INFO("FUCK num_rows: {}", load_index_info->num_rows);
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
         auto load_priority_str =

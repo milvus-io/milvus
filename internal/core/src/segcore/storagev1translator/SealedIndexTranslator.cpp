@@ -31,14 +31,21 @@ SealedIndexTranslator::SealedIndexTranslator(
                         std::to_string(load_index_info->field_id),
                         load_index_info->num_rows,
                         load_index_info->dim}),
-      meta_(load_index_info->enable_mmap
-                ? milvus::cachinglayer::StorageType::DISK
-                : milvus::cachinglayer::StorageType::MEMORY,
-            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
-            milvus::segcore::getCacheWarmupPolicy(
-                IsVectorDataType(load_index_info->field_type),
-                /* is_index */ true),
-            /* support_eviction */ true) {
+      meta_(
+          load_index_info->enable_mmap
+              ? milvus::cachinglayer::StorageType::DISK
+              : milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+          milvus::segcore::getCacheWarmupPolicy(
+              IsVectorDataType(load_index_info->field_type),
+              /* is_index */ true),
+          /* support_eviction */
+          // if index data supports lazy load internally, we don't need to support eviction for index metadata
+          IsVectorDataType(load_index_info->field_type) &&
+                  knowhere::IndexFactory::Instance().FeatureCheck(
+                      index_info_.index_type, knowhere::feature::LAZY_LOAD)
+              ? false
+              : true) {
 }
 
 size_t
@@ -66,12 +73,8 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.num_rows,
             index_load_info_.dim);
     // this is an estimation, error could be up to 20%.
-    int64_t final_memory_cost = request.final_memory_cost * 1024 * 1024 * 1024;
-    int64_t final_disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
-    int64_t max_memory_cost = request.max_memory_cost * 1024 * 1024 * 1024;
-    int64_t max_disk_cost = request.max_disk_cost * 1024 * 1024 * 1024;
-    return {{final_memory_cost, final_disk_cost},
-            {max_memory_cost, max_disk_cost}};
+    return {{request.final_memory_cost, request.final_disk_cost},
+            {request.max_memory_cost, request.max_disk_cost}};
 }
 
 const std::string&
@@ -94,9 +97,8 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_info_.dim);
-    index->SetCellSize({request.final_memory_cost * 1024 * 1024 * 1024,
-                        request.final_disk_cost * 1024 * 1024 * 1024});
+            index_load_info_.dim);
+    index->SetCellSize({request.final_memory_cost, request.final_disk_cost});
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");
