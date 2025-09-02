@@ -18,6 +18,8 @@
 
 #include "knowhere/comp/index_param.h"
 
+#include <cstdint>
+
 namespace milvus::index {
 constexpr const char* OPERATOR_TYPE = "operator_type";
 constexpr const char* RANGE_VALUE = "range_value";
