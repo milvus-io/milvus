@@ -39,7 +39,7 @@ func newMockPulsarMessageID() *commonpb.MessageID {
 	pulsarID := pulsar.EarliestMessageID()
 	msgID := pulsar2.NewPulsarID(pulsarID).Marshal()
 	return &commonpb.MessageID{
-		Id:      string(msgID),
+		Id:      msgID,
 		WALName: commonpb.WALName_Pulsar,
 	}
 }

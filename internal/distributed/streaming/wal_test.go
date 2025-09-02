@@ -75,7 +75,17 @@ func createMockWAL(t *testing.T) (
 
 func TestWAL(t *testing.T) {
 	ctx := context.Background()
-	w, _, _, handler := createMockWAL(t)
+	w, coordClient, _, handler := createMockWAL(t)
+
+	mockAssignmentService := mock_client.NewMockAssignmentService(t)
+	mockAssignmentService.EXPECT().GetLatestAssignments(mock.Anything).Return(&types.VersionedStreamingNodeAssignments{
+		Assignments: map[int64]types.StreamingNodeAssignment{
+			1: {
+				NodeInfo: types.StreamingNodeInfo{ServerID: 1},
+			},
+		},
+	}, nil)
+	coordClient.EXPECT().Assignment().Return(mockAssignmentService)
 
 	available := make(chan struct{})
 	p := mock_producer.NewMockProducer(t)

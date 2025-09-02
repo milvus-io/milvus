@@ -111,8 +111,8 @@ func (r *channelReplicator) replicateLoop() error {
 		return err
 	}
 	ch := make(adaptor.ChanMessageHandler, scannerHandlerChanSize)
-	deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
-	deliverPolicy = options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
+	// deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
+	deliverPolicy := options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
 		PChannel:       r.replicateInfo.GetSourceChannelName(),
 		DeliverPolicy:  deliverPolicy,
