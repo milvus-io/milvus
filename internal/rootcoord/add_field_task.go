@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
@@ -61,22 +60,13 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	}
 
 	// assign field id
-	t.fieldSchema.FieldID = t.nextFieldID(oldColl)
+	t.fieldSchema.FieldID = nextFieldID(oldColl)
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
 	ts := t.GetTs()
+	t.Req.CollectionID = oldColl.CollectionID
 	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
-}
-
-func (t *addCollectionFieldTask) nextFieldID(coll *model.Collection) int64 {
-	maxFieldID := int64(common.StartOfUserFieldID)
-	for _, field := range coll.Fields {
-		if field.FieldID > maxFieldID {
-			maxFieldID = field.FieldID
-		}
-	}
-	return maxFieldID + 1
 }
 
 func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
@@ -88,17 +78,26 @@ func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
 	)
 }
 
+type collInfoProvider interface {
+	GetDbName() string
+	GetCollectionName() string
+	GetCollectionID() int64
+}
+
 func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
 	newField *model.Field,
-	req *milvuspb.AddCollectionFieldRequest,
+	req collInfoProvider,
 	ts Timestamp,
 ) error {
 	redoTask := newBaseRedoTask(core.stepExecutor)
 
 	updatedCollection := col.Clone()
 	updatedCollection.Fields = append(updatedCollection.Fields, newField)
+	if newField.IsDynamic {
+		updatedCollection.EnableDynamicField = true
+	}
 	redoTask.AddSyncStep(&WriteSchemaChangeWALStep{
 		baseStep:   baseStep{core: core},
 		collection: updatedCollection,
@@ -112,7 +111,6 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 		newField:          newField,
 	})
 
-	req.CollectionID = oldColl.CollectionID
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
 		baseStep: baseStep{core: core},
 		req: &milvuspb.AlterCollectionRequest{

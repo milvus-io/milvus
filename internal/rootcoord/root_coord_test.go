@@ -34,6 +34,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
@@ -1515,6 +1516,32 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("set_dynamic_field_bad_request", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableDynamicSchemaKey, Value: "abc"},
+			},
+		})
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+	})
+
+	t.Run("set_dynamic_field_ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableDynamicSchemaKey, Value: "true"},
+			},
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 }
 

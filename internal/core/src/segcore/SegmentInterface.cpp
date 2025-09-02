@@ -523,6 +523,17 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            // for enabling dynamic field, normal json not support default value yet
+            case DataType::JSON: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_json_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
+                }
+                break;
+            }
             default: {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported default value type {}",
