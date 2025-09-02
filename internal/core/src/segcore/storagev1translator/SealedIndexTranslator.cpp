@@ -41,11 +41,10 @@ SealedIndexTranslator::SealedIndexTranslator(
               /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
-          IsVectorDataType(load_index_info->field_type) &&
-                  knowhere::IndexFactory::Instance().FeatureCheck(
-                      index_info_.index_type, knowhere::feature::LAZY_LOAD)
-              ? false
-              : true) {
+          // currently only vector index is possible to support lazy load
+          !(IsVectorDataType(load_index_info->field_type) &&
+            knowhere::IndexFactory::Instance().FeatureCheck(
+                index_info_.index_type, knowhere::feature::LAZY_LOAD))) {
 }
 
 size_t
