@@ -83,7 +83,7 @@ func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMes
 func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
 	msg := im.IntoImmutableMessageProto()
 	return &commonpb.ImmutableMessage{
-		Id: im.MessageID().IntoProto(),
+		Id:         im.MessageID().IntoProto(),
 		Payload:    msg.GetPayload(),
 		Properties: msg.GetProperties(),
 	}
