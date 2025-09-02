@@ -56,7 +56,11 @@ func withMaxCapCheck() validateOption {
 func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	wkbArray := (*fieldData).GetScalars().GetGeometryData().GetData()
 	wktArray := make([]string, len(wkbArray))
+	validData := (*fieldData).GetValidData()
 	for i, data := range wkbArray {
+		if validData == nil || !validData[i] {
+			continue
+		}
 		geomT, err := wkb.Unmarshal(data)
 		if err != nil {
 			log.Warn("translate the wkb format search result into geometry failed")

@@ -912,6 +912,9 @@ class SegmentExpr : public Expr {
                     case DataType::VARCHAR: {
                         return ProcessIndexChunksForValid<std::string>();
                     }
+                    case DataType::GEOMETRY: {
+                        return ProcessIndexChunksForValid<std::string>();
+                    }
                     default:
                         PanicInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
@@ -972,6 +975,10 @@ class SegmentExpr : public Expr {
                     }
                     case DataType::STRING:
                     case DataType::VARCHAR: {
+                        return ProcessChunksForValidByOffsets<std::string>(
+                            use_index, input);
+                    }
+                    case DataType::GEOMETRY: {
                         return ProcessChunksForValidByOffsets<std::string>(
                             use_index, input);
                     }
