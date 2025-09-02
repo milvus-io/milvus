@@ -23,30 +23,13 @@ namespace exec {
 
 template <typename TInput, typename TAccumulator, typename ResultType>
 using SumAggregate = SumAggregateBase<TInput, TAccumulator, ResultType, false>;
-
+//hc---resigster agg function
 template <template <typename U, typename V, typename W> class T>
 void
 registerSum(const std::string& name) {
-    std::vector<std::shared_ptr<expr::AggregateFunctionSignature>> signatures{
-        expr::AggregateFunctionSignatureBuilder()
-            .argumentType(DataType::DOUBLE)
-            .intermediateType(DataType::DOUBLE)
-            .returnType(DataType::DOUBLE)
-            .build()};
-
-    for (const auto& inputType :
-         {DataType::INT8, DataType::INT16, DataType::INT32, DataType::INT64}) {
-        signatures.emplace_back(expr::AggregateFunctionSignatureBuilder()
-                                    .argumentType(inputType)
-                                    .intermediateType(DataType::INT64)
-                                    .returnType(DataType::INT64)
-                                    .build());
-    }
     exec::registerAggregateFunction(
         name,
-        signatures,
-        [name](plan::AggregationNode::Step step,
-               const std::vector<DataType>& argumentTypes,
+        [name](const std::vector<DataType>& argumentTypes,
                const QueryConfig& config) -> std::unique_ptr<Aggregate> {
             AssertInfo(argumentTypes.size() == 1,
                        "function:{} only accept one argument",
@@ -72,7 +55,7 @@ registerSum(const std::string& name) {
                     return std::make_unique<T<float, double, double>>(
                         DataType::DOUBLE);
                 default:
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               "Unknown input type for {} aggregation {}",
                               name,
                               GetDataTypeName(inputType));
@@ -82,7 +65,7 @@ registerSum(const std::string& name) {
 
 void
 registerSumAggregate(const std::string& prefix) {
-    registerSum<SumAggregate>(prefix + kSum);
+    registerSum<SumAggregate>(kSum);
     LOG_INFO("Registered Sum Aggregate Function");
 }
 }  // namespace exec

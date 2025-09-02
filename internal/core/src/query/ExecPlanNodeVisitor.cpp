@@ -144,7 +144,7 @@ ExecPlanNodeVisitor::ExecuteTask(
                         std::dynamic_pointer_cast<ColumnVector>(ret->child(i));
                     ret_column_vector->append(*column_vec);
                 } else {
-                    PanicInfo(UnexpectedError, "expr return type not matched");
+                    ThrowInfo(UnexpectedError, "expr return type not matched");
                 }
             }
         } else {
@@ -298,7 +298,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported data type {}", column_vector->type()));
         }

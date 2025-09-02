@@ -203,9 +203,9 @@ message RetrieveRequest {
   bool is_iterator = 19;
   uint64 collection_ttl_timestamps = 20;
   // for query agg
-  repeated int64 group_by_field_ids = 20;
-  repeated plan.Aggregate aggregates = 21;
-  bool ignore_null_keys = 22;
+  repeated int64 group_by_field_ids = 21;
+  repeated plan.Aggregate aggregates = 22;
+  bool ignore_null_keys = 23;
 }
 
 

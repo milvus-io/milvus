@@ -141,7 +141,7 @@ execPlan(std::shared_ptr<Task>& task) {
                         std::dynamic_pointer_cast<ColumnVector>(ret->child(i));
                     ret_column_vector->append(*column_vec);
                 } else {
-                    PanicInfo(UnexpectedError, "expr return type not matched");
+                    ThrowInfo(UnexpectedError, "expr return type not matched");
                 }
             }
         } else {

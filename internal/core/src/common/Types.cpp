@@ -16,6 +16,8 @@
 
 #pragma once
 #include "Types.h"
+#include "common/Exception.h"
+#include "common/EasyAssert.h"
 
 const RowTypePtr RowType::None = std::make_shared<const RowType>(
     std::vector<std::string>{}, std::vector<milvus::DataType>{});
@@ -54,7 +56,7 @@ IsFixedSizeType(DataType type) {
         case DataType::VECTOR_FLOAT:
             return TypeTraits<DataType::VECTOR_FLOAT>::IsFixedWidth;
         default:
-            PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
+            ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
     }
 }
 }  // namespace milvus

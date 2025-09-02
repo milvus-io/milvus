@@ -587,7 +587,7 @@ ResizeScalarFieldData(const DataType& type,
             return;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "ResizeScalarFieldData not support data type " +
                           GetDataTypeName(type));
     }

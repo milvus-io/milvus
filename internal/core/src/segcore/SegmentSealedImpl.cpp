@@ -79,7 +79,7 @@ namespace milvus::segcore {
                 break;                                                     \
             }                                                              \
             default: {                                                     \
-                PanicInfo(DataTypeInvalid,                                 \
+                ThrowInfo(DataTypeInvalid,                                 \
                           fmt::format("unsupported primary key data type", \
                                       data_type));                         \
             }                                                              \
@@ -272,7 +272,7 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported primary key type {}",
                                       field_meta.get_data_type()));
             }
@@ -473,7 +473,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported data type", data_type));
                 }
             }
@@ -620,7 +620,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported data type {}", data_type));
             }
         }
@@ -742,7 +742,7 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
         return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
                               valid_data);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
 }
 
@@ -781,7 +781,7 @@ SegmentSealedImpl::chunk_string_view_impl(
         auto& field_data = it->second;
         return field_data->StringViews();
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_string_view_impl only used for variable column field ");
 }
 
@@ -798,7 +798,7 @@ SegmentSealedImpl::chunk_array_view_impl(
         auto& field_data = it->second;
         return field_data->ArrayViews();
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_array_view_impl only used for array column field ");
 }
 
@@ -814,7 +814,7 @@ SegmentSealedImpl::chunk_view_by_offsets(
         auto& field_data = it->second;
         return field_data->ViewsByOffsets(offsets);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_view_by_offsets only used for variable column field ");
 }
 
@@ -910,7 +910,7 @@ SegmentSealedImpl::search_sorted_pk(const PkType& pk,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format(
                     "unsupported type {}",
@@ -1206,7 +1206,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
                "Extra info of search plan doesn't have value");
 
     if (!is_system_field_ready()) {
-        PanicInfo(
+        ThrowInfo(
             FieldNotLoaded,
             "failed to load row ID or timestamp, potential missing bin logs or "
             "empty segments. Segment ID = " +
@@ -1226,7 +1226,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
-        PanicInfo(
+        ThrowInfo(
             FieldNotLoaded,
             "User Field(" + field_meta.get_name().get() + ") is not loaded");
     }
@@ -1298,10 +1298,10 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 static_cast<Timestamp*>(output));
             break;
         case SystemFieldType::RowId:
-            PanicInfo(ErrorCode::Unsupported, "RowId retrieve not supported");
+            ThrowInfo(ErrorCode::Unsupported, "RowId retrieve not supported");
             break;
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unknown subscript fields", system_type));
     }
 }
@@ -1382,7 +1382,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
                                   field_meta.get_data_type()));
         }
@@ -1692,7 +1692,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
                                   field_meta.get_data_type()));
         }
@@ -1858,7 +1858,7 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported type {}", data_type));
                 }
             }
@@ -1965,7 +1965,7 @@ SegmentSealedImpl::LoadSegmentMeta(
         slice_lengths.push_back(info.row_count());
     }
     insert_record_.timestamp_index_.set_length_meta(std::move(slice_lengths));
-    PanicInfo(NotImplemented, "unimplemented");
+    ThrowInfo(NotImplemented, "unimplemented");
 }
 
 int64_t

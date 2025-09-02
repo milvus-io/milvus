@@ -161,7 +161,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     int64_t
     chunk_size(FieldId field_id, int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
+        ThrowInfo(ErrorCode::Unsupported, "Not implemented");
     }
     bool
     is_chunked() const override {
@@ -171,7 +171,7 @@ class SegmentSealedImpl : public SegmentSealed {
     std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
         if (fields_.find(field_id) == fields_.end()) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::FieldIDInvalid,
                 "Failed to get chunk offset towards a non-existing field:{}",
                 field_id.get());
@@ -182,7 +182,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     int64_t
     num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
+        ThrowInfo(ErrorCode::Unsupported, "Not implemented");
     }
     std::string
     debug() const override;

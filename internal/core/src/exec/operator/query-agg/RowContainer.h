@@ -170,7 +170,7 @@ class RowContainer {
                   vector_size_t index) {
         if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
                       Type == DataType::JSON || Type == DataType::ARRAY) {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Cannot support complex data type:[ROW/JSON/ARRAY] in "
                       "rows container for now");
         } else {
@@ -244,7 +244,7 @@ class RowContainer {
         static std::string* null_string_val_ptr = &null_string_val;
         if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
                       Type == DataType::JSON || Type == DataType::ARRAY) {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Cannot support complex data type:[ROW/JSON/ARRAY] in "
                       "rows container for now");
         } else {
@@ -272,7 +272,7 @@ class RowContainer {
         using T = typename milvus::TypeTraits<Type>::NativeType;
         if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
                       Type == DataType::JSON || Type == DataType::ARRAY) {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Cannot support complex data type:[ROW/JSON/ARRAY] in "
                       "rows container for now");
         } else {
@@ -369,7 +369,7 @@ class RowContainer {
         result->resize(numRows + resultOffset);
         if constexpr (Type == DataType::ROW || Type == DataType::JSON ||
                       Type == DataType::ARRAY || Type == DataType::NONE) {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Not Support Extract types:[ROW/JSON/ARRAY/NONE]");
         } else {
             using T = typename milvus::TypeTraits<Type>::NativeType;

@@ -30,9 +30,9 @@ class FunctionSignature {
     }
 
  private:
-    const DataType returnType_;
     const std::vector<DataType> argumentTypes_;
     const bool variableArity_;
+    const DataType returnType_;
 };
 
 using FunctionSignaturePtr = std::shared_ptr<FunctionSignature>;

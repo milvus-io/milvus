@@ -364,7 +364,7 @@ checkPlus(const T& a, const T& b, const char* typeName = "integer") {
     T result;
     bool overflow = __builtin_add_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        PanicInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+        ThrowInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
     }
     return result;
 }
@@ -375,7 +375,7 @@ checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
     T result;
     bool overflow = __builtin_mul_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        PanicInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
+        ThrowInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
     }
     return result;
 }
@@ -402,7 +402,7 @@ GetAggResultType(std::string func_name, DataType input_type) {
                 return DataType::DOUBLE;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           "Unsupported data type for type:{}",
                           input_type);
             }
@@ -411,7 +411,7 @@ GetAggResultType(std::string func_name, DataType input_type) {
     if (func_name == KCount) {
         return DataType::INT64;
     }
-    PanicInfo(OpTypeInvalid, "Unsupported func type:{}", func_name);
+    ThrowInfo(OpTypeInvalid, "Unsupported func type:{}", func_name);
 }
 
 inline int32_t

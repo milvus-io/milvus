@@ -139,6 +139,10 @@ GetProtoDataType(DataType internal_data_type) {
             return milvus::proto::schema::Array;
         case DataType::JSON:
             return milvus::proto::schema::JSON;
+        case DataType::TEXT:
+            return milvus::proto::schema::Text;
+        case DataType::TIMESTAMPTZ:
+            return milvus::proto::schema::Timestamptz;
         case DataType::VECTOR_FLOAT:
             return milvus::proto::schema::FloatVector;
         case DataType::VECTOR_BINARY: {
@@ -150,11 +154,17 @@ GetProtoDataType(DataType internal_data_type) {
         case DataType::VECTOR_BFLOAT16: {
             return milvus::proto::schema::BFloat16Vector;
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             return milvus::proto::schema::SparseFloatVector;
         }
+        case DataType::VECTOR_INT8: {
+            return milvus::proto::schema::Int8Vector;
+        }
+        case DataType::VECTOR_ARRAY: {
+            return milvus::proto::schema::ArrayOfVector;
+        }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("failed to get data type size, invalid type {}",
                             internal_data_type));
@@ -1293,7 +1303,7 @@ class RowType final {
     static const std::shared_ptr<const RowType> None;
 
     column_index_t
-    GetChildIndex(std::string name) const {
+    GetChildIndex(const std::string& name) const {
         std::optional<column_index_t> idx;
         for (auto i = 0; i < names_.size(); i++) {
             if (names_[i] == name) {
@@ -1357,7 +1367,7 @@ using RowTypePtr = std::shared_ptr<const RowType>;
             case milvus::DataType::ROW:                                       \
                 return PREFIX<milvus::DataType::ROW> SUFFIX(__VA_ARGS__);     \
             default:                                                          \
-                PanicInfo(milvus::DataTypeInvalid,                            \
+                ThrowInfo(milvus::DataTypeInvalid,                            \
                           "UnsupportedDataType for "                          \
                           "MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL");               \
         }                                                                     \

@@ -53,7 +53,7 @@ class Aggregate {
     create(const std::string& name,
            plan::AggregationNode::Step step,
            const std::vector<DataType>& argTypes,
-           const QueryConfig& query_config);
+           const QueryConfig& query_config);//hc---the meaning for argTypes?
 
     void
     setOffsets(int32_t offset,
@@ -173,20 +173,14 @@ class Aggregate {
 };
 
 using AggregateFunctionFactory = std::function<std::unique_ptr<Aggregate>(
-    plan::AggregationNode::Step step,
     const std::vector<DataType>& argTypes,
     const QueryConfig& config)>;
-
-struct AggregateFunctionEntry {
-    std::vector<expr::AggregateFunctionSignaturePtr> signatures;
-    AggregateFunctionFactory factory;
-};
 
 const AggregateFunctionEntry*
 getAggregateFunctionEntry(const std::string& name);
 
 using AggregateFunctionMap = folly::Synchronized<
-    std::unordered_map<std::string, AggregateFunctionEntry>>;
+    std::unordered_map<std::string, AggregateFunctionFactory>>;
 
 AggregateFunctionMap&
 aggregateFunctions();
@@ -199,12 +193,7 @@ aggregateFunctions();
 void
 registerAggregateFunction(
     const std::string& name,
-    const std::vector<std::shared_ptr<expr::AggregateFunctionSignature>>&
-        signatures,
     const AggregateFunctionFactory& factory);
-
-bool
-isPartialOutput(milvus::plan::AggregationNode::Step step);
 
 }  // namespace exec
 }  // namespace milvus

@@ -386,7 +386,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_ptr_impl(const ChunkedColumnBase* field,
+    bulk_subscript_ptr_impl(const ChunkedColumnInterface* field,
                             const int64_t* seg_offsets,
                             int64_t count,
                             T* dst);

@@ -447,7 +447,7 @@ func (node *QueryNode) InitSegcore() error {
 	}
 
 	initcore.InitTraceConfig(paramtable.Get())
-	C.InitExecExpressionFunctionFactory()
+	C.InitExecExpressionFunctionFactory() //hc---register entry here
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

@@ -1167,7 +1167,7 @@ bulk_script_field_data(FieldId fieldId,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}", dataType));
         }
     }

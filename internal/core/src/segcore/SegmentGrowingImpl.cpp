@@ -1213,7 +1213,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported type {}", field_meta.get_data_type()));
         }

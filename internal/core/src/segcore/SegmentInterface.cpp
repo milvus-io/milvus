@@ -321,7 +321,6 @@ SegmentInternalInterface::get_real_count() const {
     }
     plannode = std::make_shared<plan::AggregationNode>(
         milvus::plan::GetNextPlanNodeId(),
-        milvus::plan::AggregationNode::Step::kSingle,
         std::vector<expr::FieldAccessTypeExprPtr>{},
         std::vector<std::string>{agg_name},
         std::move(aggregates),

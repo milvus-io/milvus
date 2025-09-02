@@ -1485,7 +1485,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
                                   field_meta.get_data_type()));
         }
@@ -1555,7 +1555,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
 template <typename S, typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
-    const ChunkedColumnBase* column,
+    const ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
     T* dst) {

@@ -74,7 +74,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
             TargetBitmapView tmp_views(activeRows);
             hashers[i]->hash(i > 0, tmp_views, lookup.hashes_);
         } else {
-            PanicInfo(
+            ThrowInfo(
                 milvus::OpTypeInvalid,
                 "Not support target hashMode, only support kHash for now");
         }
@@ -156,7 +156,7 @@ class ProbeState {
             tagsInTable_ = table.loadTags(bucketOffset_);
             hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
         }
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "Slots in hash table is not enough for hash operation, fail "
                   "the request");
     }

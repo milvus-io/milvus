@@ -498,9 +498,9 @@ class RescoresNode : public PlanNode {
                 sources_{std::move(sources)} {
         }
 
-        DataType
+        RowTypePtr
         output_type() const override {
-            return DataType::INT64;
+            return std::make_shared<const RowType>(std::vector<std::string>{"scores"}, std::vector<milvus::DataType>{DataType::INT64});
         }
 
         std::vector<PlanNodePtr>
@@ -531,17 +531,6 @@ class RescoresNode : public PlanNode {
 
 class AggregationNode : public PlanNode {
  public:
-    enum class Step {
-        // raw input in - partial result out
-        kPartial,
-        // partial result in - final result out
-        kFinal,
-        // partial result in - partial result out
-        kIntermediate,
-        // raw input in - final result out
-        kSingle
-    };
-
     struct Aggregate {
         /// Function name and input column names.
         expr::CallExprPtr call_;
@@ -560,7 +549,6 @@ class AggregationNode : public PlanNode {
 
     AggregationNode(
         const PlanNodeId& id,
-        Step step,
         std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
         std::vector<std::string>&& aggNames,
         std::vector<Aggregate>&& aggregates,
@@ -598,11 +586,6 @@ class AggregationNode : public PlanNode {
         return aggregates_;
     }
 
-    Step
-    step() const {
-        return step_;
-    }
-
     bool
     ignoreNullKeys() const {
         return ignoreNullKeys_;
@@ -614,7 +597,6 @@ class AggregationNode : public PlanNode {
     }
 
  private:
-    const Step step_;
     const std::vector<expr::FieldAccessTypeExprPtr> groupingKeys_;
     const std::vector<std::string> aggregateNames_;
     const std::vector<Aggregate> aggregates_;

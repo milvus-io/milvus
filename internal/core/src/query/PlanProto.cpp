@@ -42,7 +42,7 @@ getAggregateOpName(planpb::AggregateOp op) {
         case planpb::max:
             return "max";
         default:
-            PanicInfo(OpTypeInvalid, "Unknown op type for aggregation");
+            ThrowInfo(OpTypeInvalid, "Unknown op type for aggregation");
     }
 }
 
@@ -325,7 +325,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                 project_name_list.reserve(group_by_field_count);
                 project_type_list.reserve(group_by_field_count);
 
-                std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
+                std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;//hc---what is FieldAccessTypeExprPtr
                 groupingKeys.reserve(group_by_field_count);
                 auto insert_project_field_if_not_exist =
                     [&](FieldId& field_id,
@@ -361,7 +361,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                 aggregates.reserve(query.aggregates_size());
                 for (int i = 0; i < query.aggregates_size(); i++) {
                     auto aggregate = query.aggregates(i);
-                    auto agg_name = getAggregateOpName(aggregate.op());
+                    auto agg_name = getAggregateOpName(aggregate.op());//hc---how register aggregate function?
                     agg_names.emplace_back(agg_name);
                     auto input_agg_field_id = aggregate.field_id();
                     if (input_agg_field_id == 0) {
@@ -369,7 +369,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                         auto call = std::make_shared<const expr::CallExpr>(
                             agg_name,
                             std::vector<expr::TypedExprPtr>{},
-                            nullptr);
+                            nullptr);//hc---what is CallExpr?
                         aggregates.emplace_back(
                             plan::AggregationNode::Aggregate{call});
                         aggregates.back().resultType_ =
@@ -394,7 +394,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                         aggregates.back().rawInputTypes_.emplace_back(
                             field_type);
                         aggregates.back().resultType_ =
-                            GetAggResultType(agg_name, field_type);
+                            GetAggResultType(agg_name, field_type);//hc---this should be defined agg function implementation
                         insert_project_field_if_not_exist(
                             field_id, field_name, field_type);
                     }
@@ -416,7 +416,6 @@ ProtoParser::RetrievePlanNodeFromProto(
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
                 plannode = std::make_shared<plan::AggregationNode>(
                     milvus::plan::GetNextPlanNodeId(),
-                    milvus::plan::AggregationNode::Step::kSingle,
                     std::move(groupingKeys),
                     std::move(agg_names),
                     std::move(aggregates),

@@ -30,6 +30,30 @@ PhyAggregationNode::PhyAggregationNode(
 }
 
 void
+PhyAggregationNode::initialize() {
+    Operator::initialize();
+    const auto& input_type = aggregationNode_->sources()[0]->output_type();
+    auto hashers =
+        createVectorHashers(input_type, aggregationNode_->GroupingKeys());
+    auto numHashers = hashers.size();
+    std::vector<AggregateInfo> aggregateInfos =
+        toAggregateInfo(*aggregationNode_, *operator_context_, numHashers);
+    grouping_set_ =
+        std::make_unique<GroupingSet>(input_type,
+                                      std::move(hashers),
+                                      std::move(aggregateInfos),
+                                      aggregationNode_->ignoreNullKeys(),
+                                      aggregationNode_->group_limit());
+    aggregationNode_.reset();
+}
+
+void
+PhyAggregationNode::AddInput(RowVectorPtr& input) {
+    grouping_set_->addInput(input);
+    numInputRows_ += input->size();
+}
+
+void
 PhyAggregationNode::prepareOutput(vector_size_t size) {
     if (output_) {
         VectorPtr new_output = std::move(output_);
@@ -55,30 +79,6 @@ PhyAggregationNode::GetOutput() {
     }
     numOutputRows_ += output_->size();
     return output_;
-}
-
-void
-PhyAggregationNode::initialize() {
-    Operator::initialize();
-    const auto& input_type = aggregationNode_->sources()[0]->output_type();
-    auto hashers =
-        createVectorHashers(input_type, aggregationNode_->GroupingKeys());
-    auto numHashers = hashers.size();
-    std::vector<AggregateInfo> aggregateInfos =
-        toAggregateInfo(*aggregationNode_, *operator_context_, numHashers);
-    grouping_set_ =
-        std::make_unique<GroupingSet>(input_type,
-                                      std::move(hashers),
-                                      std::move(aggregateInfos),
-                                      aggregationNode_->ignoreNullKeys(),
-                                      aggregationNode_->group_limit());
-    aggregationNode_.reset();
-}
-
-void
-PhyAggregationNode::AddInput(milvus::RowVectorPtr& input) {
-    grouping_set_->addInput(input);
-    numInputRows_ += input->size();
 }
 
 };  // namespace exec

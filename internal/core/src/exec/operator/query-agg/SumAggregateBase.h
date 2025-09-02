@@ -11,7 +11,7 @@
 #pragma once
 #include "SimpleNumericAggregate.h"
 #include "common/Utils.h"
-
+//hc---sum aggregate base
 namespace milvus {
 namespace exec {
 template <typename TInput,

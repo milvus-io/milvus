@@ -39,15 +39,13 @@ toAggregateInfo(const plan::AggregationNode& aggregationNode,
                 inputColumnIdxes.emplace_back(
                     inputType->GetChildIndex(fieldExpr->name()));
             } else if (inputExpr != nullptr) {
-                PanicInfo(ExprInvalid,
+                ThrowInfo(ExprInvalid,
                           "Only support aggregation towards column for now");
             }
         }
         auto index = numKeys + i;
         info.function_ = Aggregate::create(
             aggregate.call_->fun_name(),
-            isPartialOutput(step) ? plan::AggregationNode::Step::kPartial
-                                  : plan::AggregationNode::Step::kSingle,
             aggregate.rawInputTypes_,
             *(operatorCtx.get_exec_context()->get_query_config()));
         info.output_ = index;
