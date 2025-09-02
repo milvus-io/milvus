@@ -31,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func newMockPulsarMessageID() *commonpb.MessageID {
-	msgID := pulsar.EarliestMessageID().Serialize()
+	pulsarID := pulsar.EarliestMessageID()
+	msgID := pulsar2.NewPulsarID(pulsarID).Marshal()
 	return &commonpb.MessageID{
 		Id:      string(msgID),
 		WALName: commonpb.WALName_Pulsar,
