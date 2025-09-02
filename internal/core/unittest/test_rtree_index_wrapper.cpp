@@ -139,7 +139,7 @@ TEST_F(RTreeIndexWrapperTest, TestBuildAndLoad) {
         std::vector<int64_t> candidates;
         wrapper.query_candidates(
             milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-            *query_geom,
+            query_geom,
             candidates);
 
         // Should find points 1 and 2, but not point 3
@@ -199,7 +199,7 @@ TEST_F(RTreeIndexWrapperTest, TestQueryOperations) {
         std::vector<int64_t> candidates;
         wrapper.query_candidates(
             milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-            *query_geom,
+            query_geom,
             candidates);
 
         // Should find the large polygon and point1, but not point2 or point3

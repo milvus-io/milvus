@@ -568,9 +568,13 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
 	}
-	if err := validateGeometryFieldSearchResult(&t.result.FieldsData); err != nil {
-		log.Warn("fail to validate geometry field search result", zap.Error(err))
-		return err
+	for i, fieldData := range t.result.FieldsData {
+		if fieldData.Type == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
+		}
 	}
 	t.result.OutputFields = t.userOutputFields
 	primaryFieldSchema, err := t.schema.GetPkField()
