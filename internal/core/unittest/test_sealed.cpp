@@ -2453,7 +2453,7 @@ TEST(Sealed, SearchVectorArray) {
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = 5;
-    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
     vec_index->Query(query_dataset, searchInfo, nullptr, result);

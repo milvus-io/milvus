@@ -275,7 +275,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     // Create index using storage v2 config
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -326,7 +326,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
         searchInfo.topk_ = 5;
-        searchInfo.metric_type_ = knowhere::metric::L2;
+        searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         vec_index->Query(query_dataset, searchInfo, nullptr, result);
