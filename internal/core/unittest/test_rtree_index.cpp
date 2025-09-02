@@ -61,6 +61,11 @@ CreateWkbFromWkt(const std::string& wkt) {
     return milvus::Geometry(wkt.c_str()).to_wkb_string();
 }
 
+static milvus::Geometry
+CreateGeometryFromWkt(const std::string& wkt) {
+    return milvus::Geometry(wkt.c_str());
+}
+
 // Helper: write an InsertData parquet file to "remote" storage managed by chunk_manager_
 static std::string
 WriteGeometryInsertFile(const milvus::storage::ChunkManagerPtr& cm,
@@ -516,7 +521,7 @@ TEST_F(RTreeIndexTest, Query_CoarseAndExact_Equals_Intersects_Within) {
                          const std::string& wkt) {
         auto ds = std::make_shared<milvus::Dataset>();
         ds->Set(milvus::index::OPERATOR_TYPE, op);
-        ds->Set(milvus::index::MATCH_VALUE, CreateWkbFromWkt(wkt));
+        ds->Set(milvus::index::MATCH_VALUE, CreateGeometryFromWkt(wkt));
         return rtree_load.Query(ds);
     };
 
@@ -591,7 +596,7 @@ TEST_F(RTreeIndexTest, Query_Touches_Contains_Crosses_Overlaps) {
                          const std::string& wkt) {
         auto ds = std::make_shared<milvus::Dataset>();
         ds->Set(milvus::index::OPERATOR_TYPE, op);
-        ds->Set(milvus::index::MATCH_VALUE, CreateWkbFromWkt(wkt));
+        ds->Set(milvus::index::MATCH_VALUE, CreateGeometryFromWkt(wkt));
         return rtree_load.Query(ds);
     };
 
