@@ -232,6 +232,41 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			b.Append(val)
 			return uint64(len(val)), nil
 		}
+	case *array.ListBuilder:
+		// Handle ListBuilder for ArrayOfVector type
+		if a == nil {
+			b.AppendNull()
+			return 0, nil
+		}
+		la, ok := a.(*array.List)
+		if !ok {
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+		}
+		if la.IsNull(idx) {
+			b.AppendNull()
+			return 0, nil
+		}
+
+		start, end := la.ValueOffsets(idx)
+		b.Append(true)
+
+		valuesArray := la.ListValues()
+		valueBuilder := b.ValueBuilder()
+
+		var totalSize uint64 = 0
+		switch vb := valueBuilder.(type) {
+		case *array.Float32Builder:
+			if floatArray, ok := valuesArray.(*array.Float32); ok {
+				for i := start; i < end; i++ {
+					vb.Append(floatArray.Value(int(i)))
+					totalSize += 4
+				}
+			}
+		default:
+			return 0, fmt.Errorf("unsupported value builder type in ListBuilder: %T", valueBuilder)
+		}
+
+		return totalSize, nil
 	default:
 		return 0, fmt.Errorf("unsupported builder type: %T", builder)
 	}

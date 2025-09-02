@@ -25,12 +25,14 @@ import (
 
 // PayloadReader reads data from payload
 type PayloadReader struct {
-	reader      *file.Reader
-	colType     schemapb.DataType
-	numRows     int64
-	nullable    bool
-	elementType schemapb.DataType // For VectorArray type
-	dim         int64             // For VectorArray type
+	reader   *file.Reader
+	colType  schemapb.DataType
+	numRows  int64
+	nullable bool
+	// For VectorArray type
+	elementType schemapb.DataType
+	// For VectorArray type
+	dim int64
 }
 
 var _ PayloadReaderInterface = (*PayloadReader)(nil)

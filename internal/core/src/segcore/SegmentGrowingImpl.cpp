@@ -294,12 +294,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
-            auto field_data = storage::CreateFieldData(
-                static_cast<DataType>(field_meta.get_data_type()),
-                DataType::NONE,
-                true,
-                1,
-                lack_num);
+            auto field_data =
+                storage::CreateFieldData(field_meta.get_data_type(),
+                                         field_meta.get_element_type(),
+                                         true,
+                                         1,
+                                         lack_num);
             field_data->FillFieldData(field_meta.default_value(), lack_num);
             channel->push(field_data);
         }
@@ -495,7 +495,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         auto data_type = field.second.get_data_type();
                         auto field_data = storage::CreateFieldData(
                             data_type,
-                            DataType::NONE,
+                            field.second.get_element_type(),
                             field.second.is_nullable(),
                             IsVectorDataType(data_type) &&
                                     !IsSparseFloatVectorDataType(data_type)

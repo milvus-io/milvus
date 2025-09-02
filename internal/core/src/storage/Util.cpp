@@ -1093,7 +1093,7 @@ CreateFieldData(const DataType& type,
                 dim, type, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
-                dim, element_type, type, total_num_rows);
+                dim, element_type, total_num_rows);
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
@@ -1135,8 +1135,16 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     for (const auto& data : data_array) {
         total_length += data->Length();
     }
+
+    auto element_type = DataType::NONE;
+    auto vector_array_data =
+        dynamic_cast<FieldData<VectorArray>*>(data_array[0].get());
+    if (vector_array_data) {
+        element_type = vector_array_data->get_element_type();
+    }
+
     auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
-                                                DataType::NONE,
+                                                element_type,
                                                 data_array[0]->IsNullable());
     merged_data->Reserve(total_length);
     for (const auto& data : data_array) {
@@ -1331,7 +1339,7 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
         }();
         auto field_data = storage::CreateFieldData(
             static_cast<DataType>(field_schema.data_type()),
-            DataType::NONE,
+            static_cast<DataType>(field_schema.element_type()),
             true,
             1,
             lack_binlog_rows);

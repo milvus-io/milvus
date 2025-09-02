@@ -1775,7 +1775,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.EqualValues(t, []float32{11.0, 22.0, 33.0, 44.0}, vectorArrays[1].GetFloatVector().GetData())
 		assert.EqualValues(t, []float32{111.0, 222.0, 333.0, 444.0, 555.0, 666.0, 777.0, 888.0, 999.0, 1000.0, 1111.0, 1212.0, 1313.0, 1414.0, 1515.0, 1616.0, 1717.0, 1818.0, 1919.0, 2020.0}, vectorArrays[2].GetFloatVector().GetData())
 		for _, v := range vectorArrays {
-			assert.Equal(t, dim, v.GetDim())
+			assert.Equal(t, int64(dim), v.GetDim())
 		}
 
 		iArrayList, _, _, err := r.GetDataFromPayload()
@@ -1785,7 +1785,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.EqualValues(t, []float32{11.0, 22.0, 33.0, 44.0}, vectorArrays[1].GetFloatVector().GetData())
 		assert.EqualValues(t, []float32{111.0, 222.0, 333.0, 444.0, 555.0, 666.0, 777.0, 888.0, 999.0, 1000.0, 1111.0, 1212.0, 1313.0, 1414.0, 1515.0, 1616.0, 1717.0, 1818.0, 1919.0, 2020.0}, vectorArrays[2].GetFloatVector().GetData())
 		for _, v := range vectorArrays {
-			assert.Equal(t, dim, v.GetDim())
+			assert.Equal(t, int64(dim), v.GetDim())
 		}
 
 		r.ReleasePayloadReader()

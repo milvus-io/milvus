@@ -166,6 +166,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
+	log.Info("=========================Index created for float vector=========================")
 	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.FloatVecField)
 
 	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
@@ -179,7 +180,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
 	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.StructSubFloatVecField)
 
-	log.Info("=========================Index created=========================")
+	log.Info("=========================Index created for array of vector=========================")
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{

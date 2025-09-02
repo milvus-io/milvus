@@ -85,11 +85,12 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
     explicit FieldData(int64_t dim,
                        DataType element_type,
-                       DataType data_type,
                        int64_t buffered_num_rows = 0)
-        : FieldDataVectorArrayImpl(data_type, buffered_num_rows),
+        : FieldDataVectorArrayImpl(DataType::VECTOR_ARRAY, buffered_num_rows),
           dim_(dim),
           element_type_(element_type) {
+        AssertInfo(element_type != DataType::NONE,
+                   "element_type must be specified for VECTOR_ARRAY");
     }
 
     int64_t

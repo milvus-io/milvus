@@ -842,7 +842,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 	}
 
 	// Validate dimension for vector types that have fixed dimensions
-	if dim > 0 && totalElements != dim {
+	if dim > 0 && totalElements%dim != 0 {
 		// Dimension mismatch - data corruption or schema inconsistency
 		return nil, false
 	}
