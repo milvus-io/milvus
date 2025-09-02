@@ -667,10 +667,6 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("index name is empty")
 	}
 
-	if err = validateIndexName(t.req.GetIndexName()); err != nil {
-		return err
-	}
-
 	// TODO fubang should implement it when the alter index is reconstructed
 	// typeParams := funcutil.KeyValuePair2Map(t.req.GetExtraParams())
 	// if err = ValidateAutoIndexMmapConfig(typeParams); err != nil {
