@@ -149,7 +149,9 @@ class BitmapIndex : public ScalarIndex<T> {
                 return Query(std::move(dataset));
             }
             case proto::plan::OpType::Match: {
-                return RegexQuery(pattern);
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(pattern);
+                return RegexQuery(regex_pattern);
             }
             default:
                 ThrowInfo(ErrorCode::OpTypeInvalid,

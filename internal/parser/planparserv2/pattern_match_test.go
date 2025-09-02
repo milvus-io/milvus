@@ -15,6 +15,7 @@ func Test_escapeStringWithWildcards(t *testing.T) {
 	}{
 		// inner match
 		{`"%abc%"`, planpb.OpType_InnerMatch, "abc", true},
+		{`" %% "`, planpb.OpType_Match, " [\\s\\S]* ", true},
 		{`"%a\%b%"`, planpb.OpType_InnerMatch, "a%b", true},
 		{`"%a\_b%"`, planpb.OpType_InnerMatch, "a_b", true},
 		{`"%a\\%"`, planpb.OpType_InnerMatch, "a\\", true},

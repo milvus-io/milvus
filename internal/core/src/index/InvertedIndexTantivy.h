@@ -213,7 +213,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return RegexQuery(regex_pattern);
             }
             case proto::plan::OpType::Match: {
-                return RegexQuery(pattern);
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(pattern);
+                return RegexQuery(regex_pattern);
             }
             default:
                 ThrowInfo(
