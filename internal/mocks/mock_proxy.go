@@ -7650,8 +7650,7 @@ func (_c *MockProxy_Upsert_Call) RunAndReturn(run func(context.Context, *milvusp
 func NewMockProxy(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockProxy {
+}) *MockProxy {
 	mock := &MockProxy{}
 	mock.Mock.Test(t)
 

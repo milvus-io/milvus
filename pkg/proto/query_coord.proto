@@ -99,6 +99,8 @@ service QueryCoord {
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
+  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
 }
 
 service QueryNode {
@@ -171,6 +173,7 @@ service QueryNode {
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -991,6 +994,19 @@ message RunAnalyzerRequest{
 
     bool with_detail = 6;
     bool with_hash = 7;
+
+    string analyzer_params = 8;
+}
+
+message AnalyzerInfo{
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message ValidateAnalyzerRequest{
+    common.MsgBase base = 1;
+    repeated AnalyzerInfo analyzer_infos = 2;
 }
 
 message ListLoadedSegmentsRequest {
