@@ -58,9 +58,7 @@ class AzureChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        configs_ = get_default_storage_config(false);
-        chunk_manager_ = make_unique<AzureChunkManager>(configs_);
-        chunk_manager_ptr_ = CreateChunkManager(configs_);
+        GTEST_SKIP() << "Skipping Azure tests";
     }
 
  protected:

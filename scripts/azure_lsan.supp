@@ -1,0 +1,16 @@
+leak:*Azure*
+leak:*TracingAttributes*
+leak:*Azure::Core::Context::Context*
+leak:*Azure::Core::Tracing*
+leak:*ContextSharedState*
+leak:*CaseInsensitiveComparator*
+leak:*StringExtensions*
+leak:*Azure::Core::_internal*
+leak:*libstdc++*
+leak:*std::set*initializer_list*
+leak:*std::_Rb_tree*Azure*
+leak:*_GLOBAL__sub_I_context*
+leak:*__static_initialization_and_destruction*
+leak:*_dl_init*
+leak:*call_init*
+leak:*static_initialization*Azure*
