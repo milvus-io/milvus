@@ -75,6 +75,9 @@ StringIndexMarisa::Build(const Config& config) {
 void
 StringIndexMarisa::BuildWithFieldData(
     const std::vector<FieldDataPtr>& field_datas) {
+    LOG_INFO("Start to build marisa index, field id: {}", field_id_);
+    index_build_begin_ = std::chrono::system_clock::now();
+
     int64_t total_num_rows = 0;
 
     // fill key set.
@@ -176,6 +179,15 @@ StringIndexMarisa::Upload(const Config& config) {
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+
+    auto index_build_end = std::chrono::system_clock::now();
+    auto index_build_duration =
+        std::chrono::duration<double>(index_build_end - index_build_begin_)
+            .count();
+    LOG_INFO("index build done for marisa index, field id: {}, duration: {}s",
+             field_id_,
+             index_build_duration);
+
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
                                       remote_paths_to_size);
 }
@@ -295,12 +307,14 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
 
 const TargetBitmap
 StringIndexMarisa::IsNotNull() {
-    TargetBitmap bitset(str_ids_.size());
-    for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] != MARISA_NULL_KEY_ID) {
-            bitset.set(i);
-        }
-    }
+    TargetBitmap bitset(str_ids_.size(), true);
+
+    // TargetBitmap bitset(str_ids_.size());
+    // for (size_t i = 0; i < bitset.size(); i++) {
+    //     if (str_ids_[i] != MARISA_NULL_KEY_ID) {
+    //         bitset.set(i);
+    //     }
+    // }
     return bitset;
 }
 

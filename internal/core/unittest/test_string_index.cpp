@@ -16,6 +16,7 @@
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "index/StringIndexMarisa.h"
+#include "index/StringIndexBTree.h"
 
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -463,5 +464,325 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
         }
     }
 }
+
+// StringIndexBTree tests
+class StringIndexBTreeTest : public StringIndexBaseTest {};
+
+TEST_F(StringIndexBTreeTest, Constructor) {
+    auto index = milvus::index::CreateStringIndexBTree();
+}
+
+TEST_F(StringIndexBTreeTest, Build) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(strs.size(), strs.data());
+}
+
+TEST_F(StringIndexBTreeTest, HasRawData) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    ASSERT_TRUE(index->HasRawData());
+}
+
+TEST_F(StringIndexBTreeTest, Count) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    ASSERT_EQ(strs.size(), index->Count());
+}
+
+TEST_F(StringIndexBTreeTest, In) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    auto bitset = index->In(strs.size(), strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(Any(bitset));
+}
+
+TEST_F(StringIndexBTreeTest, InHasNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    FixedVector<bool> is_null(nb);
+    std::vector<std::string> in_strs(nb / 2);
+    int j = 0;
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+        if (i % 2 == 0) {
+            in_strs[j] = strs[i];
+            j++;
+        }
+    }
+
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->In(in_strs.size(), in_strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
+TEST_F(StringIndexBTreeTest, NotIn) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    auto bitset = index->NotIn(strs.size(), strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(BitSetNone(bitset));
+}
+
+TEST_F(StringIndexBTreeTest, NotInHasNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    FixedVector<bool> is_null(nb);
+    std::vector<std::string> in_strs(nb / 2);
+    int j = 0;
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+        if (i % 2 == 0) {
+            in_strs[j] = strs[i];
+            j++;
+        }
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->NotIn(in_strs.size(), in_strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    std::cout << "bitset: " << bitset.count() << std::endl;
+    ASSERT_TRUE(bitset.count() == 0);
+}
+
+TEST_F(StringIndexBTreeTest, Range) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    std::vector<std::string> strings(nb);
+    std::vector<int> counts(10);
+    for (int i = 0; i < nb; ++i) {
+        int val = std::rand() % 10;
+        counts[val]++;
+        strings[i] = std::to_string(val);
+    }
+    index->Build(nb, strings.data());
+
+    {
+        // [0...9]
+        auto bitset = index->Range("0", milvus::OpType::GreaterEqual);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
+    }
+
+    {
+        // [5...9]
+        int expect = std::accumulate(counts.begin() + 5, counts.end(), 0);
+        auto bitset = index->Range("5", milvus::OpType::GreaterEqual);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+
+    {
+        // [6...9]
+        int expect = std::accumulate(counts.begin() + 6, counts.end(), 0);
+        auto bitset = index->Range("5", milvus::OpType::GreaterThan);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+
+    {
+        // [0...3]
+        int expect = std::accumulate(counts.begin(), counts.begin() + 4, 0);
+        auto bitset = index->Range("4", milvus::OpType::LessThan);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+
+    {
+        // [0...4]
+        int expect = std::accumulate(counts.begin(), counts.begin() + 5, 0);
+        auto bitset = index->Range("4", milvus::OpType::LessEqual);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+
+    {
+        // [2...8]
+        int expect = std::accumulate(counts.begin() + 2, counts.begin() + 9, 0);
+        auto bitset = index->Range("2", true, "8", true);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+
+    {
+        // [0...8]
+        int expect = std::accumulate(counts.begin(), counts.begin() + 9, 0);
+        auto bitset = index->Range("0", true, "9", false);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), expect);
+    }
+}
+
+TEST_F(StringIndexBTreeTest, PrefixMatch) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+
+    for (size_t i = 0; i < strs.size(); i++) {
+        auto str = strs[i];
+        auto bitset = index->PrefixMatch(str);
+        ASSERT_EQ(bitset.size(), strs.size());
+        ASSERT_TRUE(bitset[i]);
+    }
+}
+
+TEST_F(StringIndexBTreeTest, IsNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == 0);
+}
+
+TEST_F(StringIndexBTreeTest, IsNullHasNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    FixedVector<bool> is_null(nb);
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
+TEST_F(StringIndexBTreeTest, IsNotNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNotNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == strs.size());
+}
+
+TEST_F(StringIndexBTreeTest, IsNotNullHasNull) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    FixedVector<bool> is_null(nb);
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->IsNotNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
+TEST_F(StringIndexBTreeTest, Query) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    index->Build(nb, strs.data());
+
+    {
+        auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::In);
+        auto bitset = index->Query(ds);
+        ASSERT_TRUE(Any(bitset));
+    }
+
+    {
+        auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::NotIn);
+        auto bitset = index->Query(ds);
+        ASSERT_TRUE(BitSetNone(bitset));
+    }
+
+    {
+        auto ds = std::make_shared<knowhere::DataSet>();
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::GreaterEqual);
+        ds->Set<std::string>(milvus::index::RANGE_VALUE, "0");
+        auto bitset = index->Query(ds);
+        ASSERT_EQ(bitset.size(), strs.size());
+        ASSERT_EQ(Count(bitset), strs.size());
+    }
+
+    {
+        auto ds = std::make_shared<knowhere::DataSet>();
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::Range);
+        ds->Set<std::string>(milvus::index::LOWER_BOUND_VALUE, "0");
+        ds->Set<std::string>(milvus::index::UPPER_BOUND_VALUE, "range");
+        ds->Set<bool>(milvus::index::LOWER_BOUND_INCLUSIVE, true);
+        ds->Set<bool>(milvus::index::UPPER_BOUND_INCLUSIVE, true);
+        auto bitset = index->Query(ds);
+        ASSERT_TRUE(Any(bitset));
+    }
+
+    {
+        for (size_t i = 0; i < strs.size(); i++) {
+            auto ds = std::make_shared<knowhere::DataSet>();
+            ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                    milvus::OpType::PrefixMatch);
+            ds->Set<std::string>(milvus::index::MATCH_VALUE,
+                                 std::move(strs[i]));
+            auto bitset = index->Query(ds);
+            ASSERT_EQ(bitset.size(), strs.size());
+            ASSERT_TRUE(bitset[i]);
+        }
+    }
+}
+
+TEST_F(StringIndexBTreeTest, Codec) {
+    auto index = milvus::index::CreateStringIndexBTree();
+    std::vector<std::string> strings(nb);
+    for (int i = 0; i < nb; ++i) {
+        strings[i] = std::to_string(std::rand() % 10);
+    }
+
+    index->Build(nb, strings.data());
+
+    std::vector<std::string> invalid_strings = {std::to_string(nb)};
+    auto copy_index = milvus::index::CreateStringIndexBTree();
+
+    {
+        auto binary_set = index->Serialize(nullptr);
+        copy_index->Load(binary_set);
+    }
+
+    {
+        auto bitset = copy_index->In(nb, strings.data());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(Any(bitset));
+    }
+
+    {
+        auto bitset = copy_index->In(1, invalid_strings.data());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
+    }
+
+    {
+        auto bitset = copy_index->NotIn(nb, strings.data());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
+    }
+
+    {
+        auto bitset = copy_index->NotIn(1, invalid_strings.data());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
+    }
+
+    {
+        auto bitset = copy_index->Range("0", milvus::OpType::GreaterEqual);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
+    }
+
+    {
+        auto bitset = copy_index->Range("0", true, "90", false);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
+    }
+
+    {
+        for (size_t i = 0; i < nb; i++) {
+            auto str = strings[i];
+            auto bitset = copy_index->PrefixMatch(str);
+            ASSERT_EQ(bitset.size(), nb);
+            ASSERT_TRUE(bitset[i]);
+        }
+    }
+}
+
 }  // namespace index
 }  // namespace milvus

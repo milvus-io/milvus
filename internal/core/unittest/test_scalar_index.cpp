@@ -18,6 +18,8 @@
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/ScalarIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "index/StringIndexBTree.h"
 #include "common/CDataType.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
@@ -381,6 +383,18 @@ TestBuildIndex(int N, int cardinality, int index_type) {
             index->Build(N, raw_data.data());
             return std::move(index);
         }
+    } else if (index_type == 2) {
+        // Add StringIndexBTree as index_type=2
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto index = std::make_unique<milvus::index::StringIndexBTree>();
+            index->Build(N, raw_data.data());
+            return std::move(index);
+        } else {
+            // For non-string types, fallback to sort index
+            auto index = milvus::index::CreateScalarIndexSort<T>();
+            index->Build(N, raw_data.data());
+            return std::move(index);
+        }
     }
 }
 
@@ -461,25 +475,38 @@ TestIndexSearchIn<std::string>() {
             auto bitmap_index = TestBuildIndex<std::string>(N, card, 0);
             auto bitmap_index_ptr =
                 dynamic_cast<ScalarIndex<std::string>*>(bitmap_index.get());
-            auto sort_index = TestBuildIndex<std::string>(N, card, 1);
-            auto sort_index_ptr =
-                dynamic_cast<ScalarIndex<std::string>*>(sort_index.get());
+            auto marisa_index = TestBuildIndex<std::string>(N, card, 1);
+            auto marisa_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(marisa_index.get());
+            auto btree_index = TestBuildIndex<std::string>(N, card, 2);
+            auto btree_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(btree_index.get());
+            
             std::vector<std::string> terms;
             for (int i = 0; i < 10; i++) {
                 terms.push_back(std::to_string(i));
             }
+            
+            // Test In
             auto final1 = bitmap_index_ptr->In(10, terms.data());
-            auto final2 = sort_index_ptr->In(10, terms.data());
+            auto final2 = marisa_index_ptr->In(10, terms.data());
+            auto final3 = btree_index_ptr->In(10, terms.data());
             EXPECT_EQ(final1.size(), final2.size());
+            EXPECT_EQ(final1.size(), final3.size());
             for (int i = 0; i < final1.size(); i++) {
                 EXPECT_EQ(final1[i], final2[i]);
+                EXPECT_EQ(final1[i], final3[i]);
             }
-
-            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
-            auto final4 = sort_index_ptr->NotIn(10, terms.data());
-            EXPECT_EQ(final4.size(), final3.size());
-            for (int i = 0; i < final3.size(); i++) {
-                EXPECT_EQ(final3[i], final4[i]);
+            
+            // Test NotIn
+            auto final4 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final5 = marisa_index_ptr->NotIn(10, terms.data());
+            auto final6 = btree_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final5.size());
+            EXPECT_EQ(final4.size(), final6.size());
+            for (int i = 0; i < final4.size(); i++) {
+                EXPECT_EQ(final4[i], final5[i]);
+                EXPECT_EQ(final4[i], final6[i]);
             }
         }
     }
@@ -491,25 +518,38 @@ TestIndexSearchIn<std::string>() {
             auto bitmap_index = TestBuildIndex<std::string>(N, card, 0);
             auto bitmap_index_ptr =
                 dynamic_cast<ScalarIndex<std::string>*>(bitmap_index.get());
-            auto sort_index = TestBuildIndex<std::string>(N, card, 1);
-            auto sort_index_ptr =
-                dynamic_cast<ScalarIndex<std::string>*>(sort_index.get());
+            auto marisa_index = TestBuildIndex<std::string>(N, card, 1);
+            auto marisa_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(marisa_index.get());
+            auto btree_index = TestBuildIndex<std::string>(N, card, 2);
+            auto btree_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(btree_index.get());
+            
             std::vector<std::string> terms;
             for (int i = 0; i < 10; i++) {
                 terms.push_back(std::to_string(i));
             }
+            
+            // Test In
             auto final1 = bitmap_index_ptr->In(10, terms.data());
-            auto final2 = sort_index_ptr->In(10, terms.data());
+            auto final2 = marisa_index_ptr->In(10, terms.data());
+            auto final3 = btree_index_ptr->In(10, terms.data());
             EXPECT_EQ(final1.size(), final2.size());
+            EXPECT_EQ(final1.size(), final3.size());
             for (int i = 0; i < final1.size(); i++) {
                 EXPECT_EQ(final1[i], final2[i]);
+                EXPECT_EQ(final1[i], final3[i]);
             }
-
-            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
-            auto final4 = sort_index_ptr->NotIn(10, terms.data());
-            EXPECT_EQ(final4.size(), final3.size());
-            for (int i = 0; i < final3.size(); i++) {
-                EXPECT_EQ(final3[i], final4[i]);
+            
+            // Test NotIn
+            auto final4 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final5 = marisa_index_ptr->NotIn(10, terms.data());
+            auto final6 = btree_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final5.size());
+            EXPECT_EQ(final4.size(), final6.size());
+            for (int i = 0; i < final4.size(); i++) {
+                EXPECT_EQ(final4[i], final5[i]);
+                EXPECT_EQ(final4[i], final6[i]);
             }
         }
     }

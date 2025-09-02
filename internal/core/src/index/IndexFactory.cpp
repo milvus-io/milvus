@@ -34,6 +34,7 @@
 #include "index/VectorDiskIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
+#include "index/StringIndexBTree.h"
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
@@ -88,6 +89,9 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     if (index_type == HYBRID_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
             create_index_info.tantivy_index_version, file_manager_context);
+    }
+    if (index_type == BTREE_INDEX_TYPE) {
+        return CreateStringIndexBTree(file_manager_context);
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
@@ -276,6 +280,21 @@ IndexFactory::ScalarIndexLoadResource(
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_gb;
+            request.max_memory_cost = index_size_gb;
+            request.max_disk_cost = index_size_gb;
+        } else {
+            request.final_memory_cost = index_size_gb;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_gb;
+            request.max_disk_cost = 0;
+        }
+        request.has_raw_data = true;
+    } else if (index_type == milvus::index::BTREE_INDEX_TYPE) {
+        // BTree index resource estimation
+        // BTree with external posting lists has similar memory footprint to MARISA
         if (mmap_enable) {
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_gb;

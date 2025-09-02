@@ -30,6 +30,7 @@ const (
 	IndexSTLSORT  IndexType = "STL_SORT"
 	IndexTRIE     IndexType = "TRIE"
 	IndexTrie     IndexType = "Trie"
+	IndexBTREE    IndexType = "BTREE"
 	IndexBitmap   IndexType = "BITMAP"
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
@@ -40,7 +41,7 @@ const (
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBTREE || indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
 }
 
 func IsGpuIndex(indexType IndexType) bool {
@@ -64,7 +65,8 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 	return indexType == IndexINVERTED ||
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
-		indexType == IndexTrie
+		indexType == IndexTrie ||
+		indexType == IndexBTREE
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {
