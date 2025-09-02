@@ -555,6 +555,143 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ignore_growing", [2.3, "str"])
+    def test_milvus_client_query_invalid_ignore_growing_param(self, ignore_growing):
+        """
+        target: test query ignoring growing segment param invalid
+        method: 1. create a collection, insert data and load
+                2. insert data again
+                3. query with ignore_growing type invalid
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", auto_id=False)
+        # 2. insert initial data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. insert data again
+        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=100)
+        self.insert(client, collection_name, new_rows)
+        self.flush(client, collection_name)
+        # 5. query with param ignore_growing invalid
+        error = {ct.err_code: 999, ct.err_msg: "parse ignore growing field failed"}
+        self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("limit", ["12 s", " ", [0, 1], {2}])
+    def test_milvus_client_query_pagination_with_invalid_limit_type(self, limit):
+        """
+        target: test query pagination with invalid limit type
+        method: query with invalid limit type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid limit type
+        error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
+        self.query(client, collection_name, filter=default_search_exp, 
+                  offset=10, limit=limit,
+                  check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("limit", [-1, 67890])
+    def test_milvus_client_query_pagination_with_invalid_limit_value(self, limit):
+        """
+        target: test query pagination with invalid limit value
+        method: query with invalid limit value
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid limit value
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900"}
+        if limit == -1:
+            error = {ct.err_code: 65535,
+                     ct.err_msg: f"invalid max query result window, limit [{limit}] is invalid, should be greater than 0"}
+        self.query(client, collection_name, filter=default_search_exp, 
+                  offset=10, limit=limit,
+                  check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
+    def test_milvus_client_query_pagination_with_invalid_offset_type(self, offset):
+        """
+        target: test query pagination with invalid offset type
+        method: query with invalid offset type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid offset type
+        error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
+        self.query(client, collection_name, filter=default_search_exp, 
+                  offset=offset, limit=10,
+                  check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -569,6 +706,10 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[0, 10, 100])
+    def offset(self, request):
         yield request.param
 
     """
@@ -2552,6 +2693,535 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
         assert len(res) == exp_len
         # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_pagination(self, offset):
+        """
+        target: test query pagination
+        method: create collection and query with pagination params,
+                verify if the result is ordered by primary key
+        expected: query successfully and verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. prepare pagination query
+        int_values = [row[default_primary_key_field_name] for row in rows]
+        pos = 10
+        term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
+        # Expected results: primary key values from offset to pos+offset
+        res = []
+        for i in range(offset, min(pos + offset, len(rows))):
+            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+        # 4. query with pagination params
+        query_res = self.query(client, collection_name, filter=term_expr, 
+                              output_fields=[default_primary_key_field_name],
+                              limit=10,
+                              check_task=CheckTasks.check_query_results,
+                              check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+        # 5. verify primary key order 
+        key_res = [item[key] for item in query_res for key in item]
+        assert key_res == int_values[offset: pos + offset]
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_binary_pagination(self, offset):
+        """
+        target: test query binary pagination
+        method: create collection and query with pagination params,
+                verify if the result is ordered by primary key
+        expected: query successfully and verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with binary vector
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. prepare pagination query
+        int_values = [row[default_primary_key_field_name] for row in rows]
+        pos = 10
+        term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
+        # Expected results: primary key values from offset to pos+offset
+        res = []
+        for i in range(offset, min(pos + offset, len(rows))):
+            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+        # 4. query with pagination params
+        query_res = self.query(client, collection_name, filter=term_expr, 
+                              output_fields=[default_primary_key_field_name],
+                              limit=10,
+                              check_task=CheckTasks.check_query_results,
+                              check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+        # 5. verify primary key order
+        key_res = [item[key] for item in query_res for key in item]
+        assert key_res == int_values[offset: pos + offset]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_pagination_with_partition(self, offset):
+        """
+        target: test query pagination on partition
+        method: create a partition and query with different offset
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        # 2. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_name=partition_name)
+        # 3. verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # 4. create index and load partition
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 5. prepare expected results (first 2 records)
+        res = []
+        for i in range(offset, min(10 + offset, len(rows))):
+            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+        # 6. query with pagination params on partition
+        self.query(client, collection_name, filter=default_search_exp, 
+                  output_fields=[default_primary_key_field_name],
+                  partition_names=[partition_name],
+                  offset=offset, limit=10,
+                  check_task=CheckTasks.check_query_results,
+                  check_items={exp_res: res, "pk_name": default_primary_key_field_name})
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_pagination_with_insert_data(self, offset):
+        """
+        target: test query pagination on partition
+        method: create a partition and query with pagination
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        df = cf.gen_default_dataframe_data()
+        rows = df.to_dict('records')
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. prepare expected results (first 2 records)
+        int_values = [row[ct.default_int64_field_name] for row in rows]
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[offset: pos + offset]}'
+        # Expected results: primary key values from offset to pos+offset
+        res = []
+        for i in range(offset, min(pos + offset, len(rows))):
+            res.append({ct.default_int64_field_name: rows[i][ct.default_int64_field_name]})
+        # 5. query with pagination params
+        query_res = self.query(client, collection_name, filter=term_expr, 
+                  output_fields=[ct.default_int64_field_name],
+                  limit=10,
+                  check_task=CheckTasks.check_query_results,
+                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        key_res = [item[ct.default_int64_field_name] for item in query_res]
+        assert key_res == int_values[offset: pos + offset]
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_pagination_without_limit(self, offset):
+        """
+        target: test query pagination without limit
+        method: create collection and query with pagination params(only offset),
+                compare the result with query without pagination params
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with only offset parameter (no limit)
+        query_res_with_offset = self.query(client, collection_name, filter="id in [0, 1]",
+                                          offset=offset,
+                                          check_task=CheckTasks.check_query_results,
+                                          check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        # 5. query without pagination params
+        query_res_without_pagination = self.query(client, collection_name, filter="id in [0, 1]",
+                                                 check_task=CheckTasks.check_query_results,
+                                                 check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        assert query_res_with_offset == query_res_without_pagination
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [3000, 5000])
+    def test_milvus_client_query_pagination_with_offset_over_num_entities(self, offset):
+        """
+        target: test query pagination with offset over num_entities
+        method: query with offset over num_entities
+        expected: return an empty list
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with offset over num_entities
+        # Use a broader query that could return results, but offset is too large
+        res = self.query(client, collection_name, filter=default_search_exp, 
+                        offset=offset, limit=10)[0]
+        # 5. verify empty result
+        assert len(res) == 0
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_query_with_expression(self, enable_dynamic_field):
+        """
+        target: test query with different expr
+        method: query with different boolean expr
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
+                              enable_dynamic_field=enable_dynamic_field)
+        # 2. insert data
+        nb = 2000
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        #assert self.num_entities(client, collection_name)[0] == nb
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        
+        # 4. filter result with expression in collection
+        for expressions in cf.gen_normal_expressions_and_templates():
+            log.debug(f"test_milvus_client_query_with_expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, row in enumerate(rows):
+                int64 = row[ct.default_int64_field_name]
+                float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+
+            # query and verify result
+            res = self.query(client, collection_name, filter=expr, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+
+            # query again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = self.query(client, collection_name, filter=expr, filter_params=expr_params, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [0, 10, 100])
+    def test_milvus_client_query_pagination_with_expression(self, offset):
+        """
+        target: test query pagination with different expression
+        method: query with different expression and verify the result
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
+                              enable_dynamic_field=False)
+        # 2. insert data
+        nb = 1000
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. filter result with expression in collection
+        for expressions in cf.gen_normal_expressions_and_templates()[1:]:
+            log.debug(f"test_milvus_client_query_pagination_with_expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, row in enumerate(rows):
+                int64 = row[ct.default_int64_field_name]
+                float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+                    
+            # query and verify result
+            query_params = {"offset": offset, "limit": 10}
+            res = self.query(client, collection_name, filter=expr, **query_params)[0]
+            query_ids = [item[ct.default_int64_field_name] for item in res]
+            expected_ids = filter_ids[offset:offset+10]
+            assert query_ids == expected_ids
+
+            # query again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = self.query(client, collection_name, filter=expr, filter_params=expr_params, **query_params)[0]
+            query_ids = [item[ct.default_int64_field_name] for item in res]
+            assert query_ids == expected_ids
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_mmap_query_expr_empty_pk_string(self):
+        """
+        target: turn on mmap to test queries using empty expression
+        method: enable mmap to query for empty expressions with restrictions.
+        expected: return the first K results in order
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
+                              enable_dynamic_field=False)
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)        
+        # 3. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+
+        self.release_collection(client, collection_name)
+        # 4. Set mmap enabled before loading
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        self.load_collection(client, collection_name)
+
+        # 5. prepare expected results
+        exp_ids = ['0', '1', '10', '100', '1000', '1001', '1002', '1003', '1004', '1005']
+        expected_res = []
+        for ids in exp_ids:
+            expected_res.append({ct.default_string_field_name: ids})
+        
+        # 6. query with empty expression and limit
+        res = self.query(client, collection_name, filter="", limit=ct.default_limit)[0]
+        query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        assert query_res == expected_res
+        
+        # 7. query with empty expression, limit + offset
+        expected_res_offset = expected_res[5:]
+        res = self.query(client, collection_name, filter="", limit=5, offset=5)[0]
+        query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        assert query_res == expected_res_offset
+        
+        # 8. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_enable_mmap_query_with_expression(self, enable_dynamic_field):
+        """
+        target: turn on mmap use different expr queries
+        method: turn on mmap and query with different expr
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
+                              enable_dynamic_field=enable_dynamic_field)
+        # 2. insert data
+        nb = 1000
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. enable mmap and create index
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        # 4. filter result with expression in collection
+        for expressions in cf.gen_normal_expressions_and_templates()[1:]:
+            log.debug(f"expr: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for i, row in enumerate(rows):
+                if enable_dynamic_field:
+                    int64 = row[ct.default_int64_field_name]
+                    float = row[ct.default_float_field_name]
+                else:
+                    int64 = row[ct.default_int64_field_name]
+                    float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+
+            # query and verify result
+            res = self.query(client, collection_name, filter=expr, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+
+            # query again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            res = self.query(client, collection_name, filter=expr, filter_params=expr_params, limit=nb)[0]
+            query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+            assert query_ids == set(filter_ids)
+        
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_mmap_query_string_field_not_primary_is_empty(self):
+        """
+        target: enable mmap, use string expr to test query, string field is not the main field
+        method: create collection , string field is primary
+                enable mmap
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with empty string fields
+        nb = 3000
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        # Set all string fields to empty
+        for row in rows:
+            row[ct.default_string_field_name] = ""
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        assert self.get_collection_stats(client, collection_name)[0]['row_count'] == nb
+        # 3. enable mmap and create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        # 4. query with empty string expression
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
+        expr = 'varchar == ""'
+        res = self.query(client, collection_name, filter=expr, output_fields=output_fields)[0]
+        assert len(res) == nb
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([ct.default_string_field_name]))
+    def test_milvus_client_mmap_query_string_is_primary(self, expression):
+        """
+        target: test query with output field only primary field
+        method: specify string primary field as output field
+        expected: return string primary field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string as primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. enable mmap and create index
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        # 4. query with string expression and only string field as output
+        res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        assert set(res[0].keys()) == {ct.default_string_field_name}
         self.drop_collection(client, collection_name)
 
 
