@@ -13,7 +13,6 @@
 
 #include <stdint.h>
 
-#include "map_c.h"
 #include "common/type_c.h"
 
 #ifdef __cplusplus
