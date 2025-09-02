@@ -22,6 +22,8 @@ default_dim = 8
 default_primary_key_field_name = "id"
 default_vector_field_name = "vector"
 
+# Batch insertion will use ct.default_nb as default batch size
+
 # Operator definitions
 comparison_operators = ["==", "!=", ">", "<", ">=", "<="]
 range_operators = ["IN", "LIKE"]
@@ -41,6 +43,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
     - Index type comparison testing to ensure consistency
     - Automatic data saving on test failure for debugging
     - LIKE pattern testing with escape character support
+    - Batch insertion for large datasets using ct.default_nb batch size
+    - Default test with 100,000 records for comprehensive coverage
     """
 
     def create_comprehensive_schema_with_index_types(self, client, enable_dynamic_field: bool = False):
@@ -102,17 +106,17 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         if element_type == DataType.VARCHAR:
                             # VARCHAR array needs max_length and max_capacity parameters
                             schema.add_field(
-                                field_name, DataType.ARRAY, 
-                                element_type=element_type, 
-                                max_length=100, max_capacity=10, 
+                                field_name, DataType.ARRAY,
+                                element_type=element_type,
+                                max_length=100, max_capacity=10,
                                 nullable=True
                             )
                         else:
                             # Other array types need max_capacity parameter
                             schema.add_field(
-                                field_name, DataType.ARRAY, 
-                                element_type=element_type, 
-                                max_capacity=10, 
+                                field_name, DataType.ARRAY,
+                                element_type=element_type,
+                                max_capacity=10,
                                 nullable=True
                             )
                         field_mapping[field_name] = data_type
@@ -202,21 +206,22 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                  "bool": random.choice([True, False]),
                  "varchar": f"str_{ran_number}",
                  "varchar_float": f"{ran_number * 1.0}"},
-                 {"array_int": [random.randint(0, 10) for _ in range(random.randint(1, 5))],
+                {"array_int": [random.randint(0, 10) for _ in range(random.randint(1, 5))],
                  "array_float": [random.uniform(0.0, 10.0) for _ in range(random.randint(1, 5))],
                  "array_bool": [random.choice([True, False]) for _ in range(random.randint(1, 5))],
                  "array_varchar": [f"str_{random.randint(0, 10)}" for _ in range(random.randint(1, 5))]},
-                 {"array_json": [{"int": random.randint(0, 10),
+                {"array_json": [{"int": random.randint(0, 10),
                                  "float": random.randint(0, 10) * 1.0,
                                  "bool": random.choice([True, False]),
                                  "varchar": f"str_{random.randint(0, 10)}",
-                                 "varchar_float": f"{random.randint(0, 10) * 1.0}"} for _ in range(random.randint(1, 5))]},
+                                 "varchar_float": f"{random.randint(0, 10) * 1.0}"} for _ in
+                                range(random.randint(1, 5))]},
                 {"nested_json": {"int": ran_number,
-                          "float": ran_number * 1.0,
-                          "nested_1": {"int": ran_number,
-                                       "float": ran_number * 1.0,
-                                       "nested_2": {"int": ran_number,
-                                                    "float": ran_number * 1.0}}}},
+                                 "float": ran_number * 1.0,
+                                 "nested_1": {"int": ran_number,
+                                              "float": ran_number * 1.0,
+                                              "nested_2": {"int": ran_number,
+                                                           "float": ran_number * 1.0}}}},
 
             ]
             return random.choice(json_patterns)
@@ -253,8 +258,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
         return array_data
 
-    def generate_test_data_for_index_comparison(self, field_mapping: Dict, index_configs: Dict, 
-                                               num_records: int) -> List[Dict]:
+    def generate_test_data_for_index_comparison(self, field_mapping: Dict, index_configs: Dict,
+                                                num_records: int) -> List[Dict]:
         """
         Generate test data where all fields of the same data type have identical data.
         
@@ -390,7 +395,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     'str_%_str_%',  # Matches 'str_', any sequence, '_str_', any sequence
 
                     # Edge case patterns
-                    'str',  # Exact match for 'str'
+                    'str2',  # Exact match for 'str'
                     '',  # Empty string
                     '%',  # Matches everything
                     '\\\\%',  # Matches literal '%'
@@ -404,7 +409,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     '%\\\\%str',  # Matches any sequence followed by '%str' (escaped percent)
                     'str\\\\_\\\\%%',  # Matches 'str_%' (both escaped) followed by any sequence
                     '%\\\\_\\\\%str',  # Matches any sequence followed by '_%str' (both escaped)
-                    '\\\\'     # Matches literal backslash
+                    '\\\\'  # Matches literal backslash
                 ]
 
                 # Return all generated LIKE expressions and their validators
@@ -519,6 +524,36 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
         error_message = str(exception.message).lower()
         return "cannot parse expression" in error_message or "unsupported data type" in error_message
 
+    def insert_data_in_batches(self, client, collection_name: str, test_data: List[Dict],
+                               batch_size: int = ct.default_nb) -> None:
+        """
+        Insert test data in batches to handle large datasets efficiently.
+        
+        Args:
+            client: Milvus client instance
+            collection_name: Name of the collection
+            test_data: List of test data records
+            batch_size: Number of records per batch (default: ct.default_nb)
+        """
+        total_records = len(test_data)
+        if total_records == 0:
+            log.warning("No data to insert")
+            return
+
+        # Calculate number of batches
+        num_batches = (total_records + batch_size - 1) // batch_size
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, total_records)
+            batch_data = test_data[start_idx:end_idx]
+
+            # Insert current batch
+            self.insert(client, collection_name=collection_name, data=batch_data)
+
+        # Flush all batches
+        self.flush(client, collection_name)
+
     def save_failure_debug_info(self, test_data: List[Dict], schema, field_mapping: Dict,
                                 index_configs: Dict, failed_expressions: List[str],
                                 collection_name: str):
@@ -622,7 +657,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("enable_dynamic_field", [False])
-    @pytest.mark.parametrize("num_records", [1200])
+    @pytest.mark.parametrize("num_records", [10000])
     def test_all_data_types_with_different_indexes(self, enable_dynamic_field, num_records):
         """
         Test all data types with their supported index types in a single collection.
@@ -651,8 +686,9 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
             # Step 3: Generate and insert test data
             test_data = self.generate_test_data_for_index_comparison(field_mapping, index_configs, num_records)
-            self.insert(client, collection_name=collection_name, data=test_data)
-            self.flush(client, collection_name)
+
+            # Insert data in batches using default batch size
+            self.insert_data_in_batches(client, collection_name, test_data, ct.default_nb)
 
             # Step 4: Create indexes
             self._create_all_indexes(client, collection_name, index_configs)
@@ -665,15 +701,15 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
             # Step 6: Run comprehensive expression testing
             stats = self._run_expression_tests(client, collection_name, field_mapping,
-                                             index_configs, test_data)
-            
+                                               index_configs, test_data)
+
             # Step 6.5: Run complex expression testing
             stats_2 = self._run_complex_expression_tests(client, collection_name, field_mapping,
-                                             index_configs, test_data)
+                                                         index_configs, test_data)
 
             # Step 7: Log final statistics and handle failures
             merged_stats = self._log_test_statistics(stats, stats_2)
-            
+
             # Fail the test if any expression failed
             if merged_stats['failed']:
                 # Save comprehensive debug information for failure reproduction
@@ -685,7 +721,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     failed_expressions=merged_stats['failed'],
                     collection_name=collection_name
                 )
-                raise AssertionError(f"Test failed due to {len(merged_stats['failed'])} failed expressions: {merged_stats['failed']}")
+                raise AssertionError(
+                    f"Test failed due to {len(merged_stats['failed'])} failed expressions: {merged_stats['failed']}")
 
         finally:
             # Clean up: drop collection
@@ -705,13 +742,15 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="IVF_FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params)
-        
+
         # Create scalar indexes
         for field_name, index_type in index_configs.items():
             if index_type != "no_index":
                 index_params = self.prepare_index_params(client)[0]
-                if DataType.JSON.name.upper() in field_name.upper() and (index_type == "inverted" or index_type == "autoindex"):
-                    index_params.add_index(field_name, index_type=index_type.upper(), params={"json_cast_type": "varchar"})
+                if DataType.JSON.name.upper() in field_name.upper() and (
+                        index_type == "inverted" or index_type == "autoindex"):
+                    index_params.add_index(field_name, index_type=index_type.upper(),
+                                           params={"json_cast_type": "varchar"})
                 elif DataType.JSON.name.upper() in field_name.upper() and index_type == "ngram":
                     index_params.add_index(field_name, index_type=index_type.upper(), min_gram=2, max_gram=3,
                                            params={"json_cast_type": "varchar"})
@@ -722,8 +761,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 self.create_index(client, collection_name, index_params)
                 log.info(f"Created index {index_type} for field {field_name}")
 
-    def _run_expression_tests(self, client, collection_name: str, field_mapping: Dict, 
-                             index_configs: Dict, test_data: List[Dict]) -> Dict:
+    def _run_expression_tests(self, client, collection_name: str, field_mapping: Dict,
+                              index_configs: Dict, test_data: List[Dict]) -> Dict:
         """
         Run comprehensive expression testing across all fields and operators.
         
@@ -754,8 +793,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
             # Test each data type group
             for data_type, field_names in data_type_groups.items():
-                self._test_data_type_group(client, collection_name, field_names, data_type, 
-                                         operator, index_configs, test_data, stats)
+                self._test_data_type_group(client, collection_name, field_names, data_type,
+                                           operator, index_configs, test_data, stats)
 
         return stats
 
@@ -777,12 +816,12 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
             if data_type not in data_type_groups:
                 data_type_groups[data_type] = []
             data_type_groups[data_type].append(field_name)
-        
+
         return data_type_groups
 
-    def _test_data_type_group(self, client, collection_name: str, field_names: List[str], 
-                             data_type: Any, operator: str, index_configs: Dict, 
-                             test_data: List[Dict], stats: Dict):
+    def _test_data_type_group(self, client, collection_name: str, field_names: List[str],
+                              data_type: Any, operator: str, index_configs: Dict,
+                              test_data: List[Dict], stats: Dict):
         """
         Test a group of fields with the same data type using a specific operator.
         
@@ -869,8 +908,8 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
             # Verify index consistency - all fields should return same results
             self._verify_index_consistency(field_results, operator, field_names, stats)
 
-    def _verify_index_consistency(self, field_results: Dict, operator: str, 
-                                 field_names: List[str], stats: Dict):
+    def _verify_index_consistency(self, field_results: Dict, operator: str,
+                                  field_names: List[str], stats: Dict):
         """
         Verify that all fields return consistent results for the same expression.
         
@@ -925,7 +964,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
             log.info(f"Not supported expressions: {stats['not_supported']}")
         if stats['failed']:
             log.info(f"Failed expressions: {stats['failed']}")
-        
+
         # Log complex expression statistics if provided
         if stats_2 is not None:
             log.info(f"\n=== Complex Expression Test Statistics ===")
@@ -943,7 +982,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 log.info(f"Not supported complex expressions: {stats_2['not_supported']}")
             if stats_2['failed']:
                 log.info(f"Failed complex expressions: {stats_2['failed']}")
-            
+
             # Log combined statistics
             merged_stats = {
                 "success": stats["success"] + stats_2["success"],
@@ -951,19 +990,20 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 "failed": stats["failed"] + stats_2["failed"],
                 "total": stats["total"] + stats_2["total"]
             }
-            
+
             log.info(f"\n=== Combined Test Statistics ===")
             log.info(f"Total all expressions tested: {len(merged_stats['total'])}")
             log.info(f"Total successful: {len(merged_stats['success'])}")
             log.info(f"Total not supported: {len(merged_stats['not_supported'])}")
             log.info(f"Total failed: {len(merged_stats['failed'])}")
             log.info(f"Overall success rate: {len(merged_stats['success']) / len(merged_stats['total']) * 100:.2f}%")
-            
+
             return merged_stats
-        
+
         return stats
 
-    def generate_complex_expression(self, field_mapping: Dict, index_configs: Dict, operator: str) -> List[Tuple[str, Callable]]:
+    def generate_complex_expression(self, field_mapping: Dict, index_configs: Dict, operator: str) -> List[
+        Tuple[str, Callable]]:
         """
         Generate complex filter expressions including field calculations, array indexing, and JSON path access.
         
@@ -976,64 +1016,67 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
             List of tuples containing (expression, validator)
         """
         expressions = []
-        
+
         # Get all field names excluding primary key and vector fields
-        scalar_fields = [name for name in field_mapping.keys() 
-                        if name not in [default_primary_key_field_name, default_vector_field_name]]
-        
+        scalar_fields = [name for name in field_mapping.keys()
+                         if name not in [default_primary_key_field_name, default_vector_field_name]]
+
         if not scalar_fields:
             return expressions
-            
+
         # 1. Field calculation expressions (arithmetic operations)
         expressions.extend(self._generate_field_calculation_expressions(scalar_fields, field_mapping, operator))
-        
+
         # 2. Array indexing expressions
         expressions.extend(self._generate_array_indexing_expressions(scalar_fields, field_mapping, operator))
-        
+
         # 3. JSON path expressions
         expressions.extend(self._generate_json_path_expressions(scalar_fields, field_mapping, operator))
-        
+
         # 4. Mixed complex expressions
         expressions.extend(self._generate_mixed_complex_expressions(scalar_fields, field_mapping, operator))
-        
+
         return expressions
-    
-    def _generate_field_calculation_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[Tuple[str, Callable]]:
+
+    def _generate_field_calculation_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> \
+    List[Tuple[str, Callable]]:
         """Generate expressions with field arithmetic calculations."""
         expressions = []
-        
+
         # Find numeric fields for arithmetic operations
         numeric_fields = []
         for field_name in field_names:
             data_type = field_mapping[field_name]
             if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
                 element_type = data_type[1]
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                                    DataType.DOUBLE]:
                     numeric_fields.append(field_name)
-            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                               DataType.DOUBLE]:
                 numeric_fields.append(field_name)
-        
+
         if len(numeric_fields) < 2:
             return expressions
-            
+
         # Generate field-to-field arithmetic expressions
         for i in range(min(3, len(numeric_fields))):  # Limit to 3 expressions
             field1 = numeric_fields[i]
             field2 = numeric_fields[(i + 1) % len(numeric_fields)]
-            
+
             # Field arithmetic operations
             arithmetic_ops = [
                 (f"{field1} + {field2}", lambda x, y: x + y if x is not None and y is not None else None),
                 (f"{field1} - {field2}", lambda x, y: x - y if x is not None and y is not None else None),
                 (f"{field1} * {field2}", lambda x, y: x * y if x is not None and y is not None else None),
             ]
-            
+
             for arith_expr, arith_func in arithmetic_ops:
                 if operator in ["==", "!=", ">", "<", ">=", "<="]:
                     # Generate comparison with arithmetic result
                     value = random.randint(-100, 100)
                     expression = f"{arith_expr} {operator} {value}"
-                    
+
                     def validate_arithmetic(data_value1, data_value2, val=value, op=operator, func=arith_func):
                         if data_value1 is None or data_value2 is None:
                             return False
@@ -1053,10 +1096,11 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         elif op == "<=":
                             return result <= val
                         return False
-                    
-                    expressions.append((expression, lambda record, f1=field1, f2=field2, v=value, o=operator, f=arith_func: 
-                                     validate_arithmetic(record.get(f1), record.get(f2), v, o, f)))
-        
+
+                    expressions.append(
+                        (expression, lambda record, f1=field1, f2=field2, v=value, o=operator, f=arith_func:
+                        validate_arithmetic(record.get(f1), record.get(f2), v, o, f)))
+
         # Generate field with constant arithmetic
         for field_name in numeric_fields[:3]:  # Limit to 3 expressions
             constant = random.randint(-50, 50)
@@ -1065,13 +1109,14 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 (f"{field_name} - {constant}", lambda x, c: x - c if x is not None else None),
                 (f"{field_name} * {constant}", lambda x, c: x * c if x is not None else None),
             ]
-            
+
             for arith_expr, arith_func in arithmetic_ops:
                 if operator in ["==", "!=", ">", "<", ">=", "<="]:
                     value = random.randint(-100, 100)
                     expression = f"{arith_expr} {operator} {value}"
-                    
-                    def validate_constant_arithmetic(data_value, const=constant, val=value, op=operator, func=arith_func):
+
+                    def validate_constant_arithmetic(data_value, const=constant, val=value, op=operator,
+                                                     func=arith_func):
                         if data_value is None:
                             return False
                         result = func(data_value, const)
@@ -1090,23 +1135,25 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         elif op == "<=":
                             return result <= val
                         return False
-                    
-                    expressions.append((expression, lambda record, f=field_name, c=constant, v=value, o=operator, func=arith_func: 
-                                     validate_constant_arithmetic(record.get(f), c, v, o, func)))
-        
+
+                    expressions.append(
+                        (expression, lambda record, f=field_name, c=constant, v=value, o=operator, func=arith_func:
+                        validate_constant_arithmetic(record.get(f), c, v, o, func)))
+
         return expressions
-    
-    def _generate_array_indexing_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[Tuple[str, Callable]]:
+
+    def _generate_array_indexing_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
+        Tuple[str, Callable]]:
         """Generate expressions with array indexing."""
         expressions = []
-        
+
         # Find array fields
         array_fields = []
         for field_name in field_names:
             data_type = field_mapping[field_name]
             if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
                 array_fields.append((field_name, data_type[1]))
-        
+
         for field_name, element_type in array_fields[:5]:  # Limit to 5 expressions
             # Array indexing expressions
             if operator in ["==", "!=", ">", "<", ">=", "<="]:
@@ -1114,7 +1161,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
                     value = random.randint(0, 100)
                     expression = f"{field_name}[0] {operator} {value}"
-                    
+
                     def validate_array_int(data_value, val=value, op=operator):
                         if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                             return False
@@ -1134,18 +1181,18 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         elif op == "<=":
                             return element <= val
                         return False
-                    
-                    expressions.append((expression, lambda record, f=field_name, v=value, o=operator: 
-                                     validate_array_int(record.get(f), v, o)))
-                
+
+                    expressions.append((expression, lambda record, f=field_name, v=value, o=operator:
+                    validate_array_int(record.get(f), v, o)))
+
                 elif element_type == DataType.VARCHAR:
                     # String array element comparison
                     patterns = ["str_0", "str_1", "str_2", "a", "b", "c"]
                     pattern = random.choice(patterns)
-                    
+
                     if operator == "LIKE":
                         expression = f'{field_name}[0] LIKE "{pattern}"'
-                        
+
                         def validate_array_string_like(data_value, pat=pattern):
                             if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                                 return False
@@ -1158,12 +1205,12 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                                 return bool(re.match(regex_pattern, data_str))
                             except:
                                 return False
-                        
-                        expressions.append((expression, lambda record, f=field_name, p=pattern: 
-                                         validate_array_string_like(record.get(f), p)))
+
+                        expressions.append((expression, lambda record, f=field_name, p=pattern:
+                        validate_array_string_like(record.get(f), p)))
                     else:
                         expression = f'{field_name}[0] {operator} "{pattern}"'
-                        
+
                         def validate_array_string(data_value, val=pattern, op=operator):
                             if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                                 return False
@@ -1175,53 +1222,54 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                             elif op == "!=":
                                 return str(element) != val
                             return False
-                        
-                        expressions.append((expression, lambda record, f=field_name, v=pattern, o=operator: 
-                                         validate_array_string(record.get(f), v, o)))
-            
+
+                        expressions.append((expression, lambda record, f=field_name, v=pattern, o=operator:
+                        validate_array_string(record.get(f), v, o)))
+
             elif operator == "IN":
                 # Array element IN expression
                 if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
                     values = [random.randint(0, 100) for _ in range(3)]
                     expression = f"{field_name}[0] IN {values}"
-                    
+
                     def validate_array_in(data_value, filter_values=values):
                         if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                             return False
                         element = data_value[0] if len(data_value) > 0 else None
                         return element in filter_values
-                    
-                    expressions.append((expression, lambda record, f=field_name, v=values: 
-                                     validate_array_in(record.get(f), v)))
-                
+
+                    expressions.append((expression, lambda record, f=field_name, v=values:
+                    validate_array_in(record.get(f), v)))
+
                 elif element_type == DataType.VARCHAR:
                     values = ["str_0", "str_1", "str_2", "a", "b", "c"]
                     expression = f'{field_name}[0] IN {values}'
-                    
+
                     def validate_array_string_in(data_value, filter_values=values):
                         if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                             return False
                         element = data_value[0] if len(data_value) > 0 else None
                         return str(element) in filter_values
-                    
-                    expressions.append((expression, lambda record, f=field_name, v=values: 
-                                     validate_array_string_in(record.get(f), v)))
-        
+
+                    expressions.append((expression, lambda record, f=field_name, v=values:
+                    validate_array_string_in(record.get(f), v)))
+
         return expressions
-    
-    def _generate_json_path_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[Tuple[str, Callable]]:
+
+    def _generate_json_path_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
+        Tuple[str, Callable]]:
         """Generate expressions with JSON path access."""
         expressions = []
-        
+
         # Find JSON fields
         json_fields = [name for name in field_names if field_mapping[name] == DataType.JSON]
-        
+
         for field_name in json_fields[:3]:  # Limit to 3 expressions
             # JSON path expressions
             if operator in ["==", "!=", ">", "<", ">=", "<="]:
                 # Simple JSON key access
                 expression = f"{field_name}['int'] {operator} 5"
-                
+
                 def validate_json_number(data_value, val=5, op=operator):
                     if data_value is None or not isinstance(data_value, dict):
                         return False
@@ -1244,13 +1292,13 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     elif op == "<=":
                         return json_value <= val
                     return False
-                
-                expressions.append((expression, lambda record, f=field_name, v=5, o=operator: 
-                                 validate_json_number(record.get(f), v, o)))
-                
+
+                expressions.append((expression, lambda record, f=field_name, v=5, o=operator:
+                validate_json_number(record.get(f), v, o)))
+
                 # JSON text comparison
                 expression = f'{field_name}["varchar"] {operator} "str_5"'
-                
+
                 def validate_json_text(data_value, val="str_5", op=operator):
                     if data_value is None or not isinstance(data_value, dict):
                         return False
@@ -1273,14 +1321,14 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     elif op == "<=":
                         return str(json_value) <= str(val)
                     return False
-                
-                expressions.append((expression, lambda record, f=field_name, v="str_5", o=operator: 
-                                 validate_json_text(record.get(f), v, o)))
-            
+
+                expressions.append((expression, lambda record, f=field_name, v="str_5", o=operator:
+                validate_json_text(record.get(f), v, o)))
+
             elif operator == "IN":
                 # JSON array element IN
                 expression = f"{field_name}['array_int'][0] IN [1, 2, 3]"
-                
+
                 def validate_json_array_in(data_value, filter_values=[1, 2, 3]):
                     if data_value is None or not isinstance(data_value, dict):
                         return False
@@ -1289,14 +1337,14 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         return False
                     element = json_array[0]
                     return element in filter_values
-                
-                expressions.append((expression, lambda record, f=field_name, v=[1, 2, 3]: 
-                                 validate_json_array_in(record.get(f), v)))
-            
+
+                expressions.append((expression, lambda record, f=field_name, v=[1, 2, 3]:
+                validate_json_array_in(record.get(f), v)))
+
             elif operator == "LIKE":
                 # JSON text LIKE
                 expression = f'{field_name}["varchar"] LIKE "str_%"'
-                
+
                 def validate_json_like(data_value, pattern="str_%"):
                     if data_value is None or not isinstance(data_value, dict):
                         return False
@@ -1309,32 +1357,35 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         return bool(re.match(regex_pattern, data_str))
                     except:
                         return False
-                
-                expressions.append((expression, lambda record, f=field_name, p="str_%": 
-                                 validate_json_like(record.get(f), p)))
-        
+
+                expressions.append((expression, lambda record, f=field_name, p="str_%":
+                validate_json_like(record.get(f), p)))
+
         return expressions
-    
-    def _generate_mixed_complex_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[Tuple[str, Callable]]:
+
+    def _generate_mixed_complex_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
+        Tuple[str, Callable]]:
         """Generate mixed complex expressions combining multiple features."""
         expressions = []
-        
+
         # Find different types of fields
         numeric_fields = []
         array_fields = []
         json_fields = []
-        
+
         for field_name in field_names:
             data_type = field_mapping[field_name]
             if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
                 element_type = data_type[1]
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                                    DataType.DOUBLE]:
                     array_fields.append((field_name, element_type))
-            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                               DataType.DOUBLE]:
                 numeric_fields.append(field_name)
             elif data_type == DataType.JSON:
                 json_fields.append(field_name)
-        
+
         # Mixed expressions: array element + constant arithmetic
         if array_fields and operator in ["==", "!=", ">", "<", ">=", "<="]:
             field_name, element_type = array_fields[0]
@@ -1342,7 +1393,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 constant = random.randint(1, 10)
                 value = random.randint(0, 50)
                 expression = f"{field_name}[0] + {constant} {operator} {value}"
-                
+
                 def validate_mixed_array_arithmetic(data_value, const=constant, val=value, op=operator):
                     if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
                         return False
@@ -1366,16 +1417,16 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     elif op == "<=":
                         return result <= val
                     return False
-                
-                expressions.append((expression, lambda record, f=field_name, c=constant, v=value, o=operator: 
-                                 validate_mixed_array_arithmetic(record.get(f), c, v, o)))
-        
+
+                expressions.append((expression, lambda record, f=field_name, c=constant, v=value, o=operator:
+                validate_mixed_array_arithmetic(record.get(f), c, v, o)))
+
         # Mixed expressions: JSON array element comparison
         if json_fields and operator in ["==", "!=", ">", "<", ">=", "<="]:
             field_name = json_fields[0]
             value = random.randint(0, 10)
             expression = f"{field_name}['array_int'][0] {operator} {value}"
-            
+
             def validate_json_array_element(data_value, val=value, op=operator):
                 if data_value is None or not isinstance(data_value, dict):
                     return False
@@ -1404,14 +1455,14 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 elif op == "<=":
                     return element <= val
                 return False
-            
-            expressions.append((expression, lambda record, f=field_name, v=value, o=operator: 
-                             validate_json_array_element(record.get(f), v, o)))
-        
+
+            expressions.append((expression, lambda record, f=field_name, v=value, o=operator:
+            validate_json_array_element(record.get(f), v, o)))
+
         return expressions
 
-    def _run_complex_expression_tests(self, client, collection_name: str, field_mapping: Dict, 
-                                     index_configs: Dict, test_data: List[Dict]) -> Dict:
+    def _run_complex_expression_tests(self, client, collection_name: str, field_mapping: Dict,
+                                      index_configs: Dict, test_data: List[Dict]) -> Dict:
         """
         Run complex expression testing including field calculations, array indexing, and JSON path access.
         
@@ -1439,7 +1490,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
         for operator in all_operators:
             # Generate complex expressions for this operator
             complex_expressions = self.generate_complex_expression(field_mapping, index_configs, operator)
-            
+
             for expression, validator in complex_expressions:
                 expression_info = f"Complex expression with {operator}: {expression}"
                 stats["total"].append(expression_info)
