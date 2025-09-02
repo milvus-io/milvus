@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -158,10 +159,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 					Channels: channels,
 				}
 			}
+			var repConfigHelper *replicateutil.ConfigHelper
+			if resp.FullAssignment.ReplicateConfiguration != nil {
+				repConfigHelper = replicateutil.NewConfigHelper(resp.FullAssignment.ReplicateConfiguration)
+			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
-				Version:     newIncomingVersion,
-				Assignments: newIncomingAssignments,
-				CChannel:    resp.FullAssignment.Cchannel,
+				Version:               newIncomingVersion,
+				Assignments:           newIncomingAssignments,
+				CChannel:              resp.FullAssignment.Cchannel,
+				ReplicateConfigHelper: repConfigHelper,
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:
 			// nothing to do now, just wait io.EOF.

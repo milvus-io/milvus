@@ -19,6 +19,32 @@ type MilvusServiceServer struct {
 	mock.Mock
 }
 
+// CreateReplicateStream provides a mock function for CreateReplicateStream
+func (_m *MilvusServiceServer) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
+	ret := _m.Called(stream)
+	return ret.Error(0)
+}
+
+// GetReplicateInfo provides a mock function for GetReplicateInfo
+func (_m *MilvusServiceServer) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
+	ret := _m.Called(ctx, req)
+	var r0 *milvuspb.GetReplicateInfoResponse
+	if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*milvuspb.GetReplicateInfoResponse)
+	}
+	return r0, ret.Error(1)
+}
+
+// UpdateReplicateConfiguration provides a mock function for UpdateReplicateConfiguration
+func (_m *MilvusServiceServer) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+	var r0 *commonpb.Status
+	if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*commonpb.Status)
+	}
+	return r0, ret.Error(1)
+}
+
 type MilvusServiceServer_Expecter struct {
 	mock *mock.Mock
 }
@@ -6345,7 +6371,8 @@ func (_c *MilvusServiceServer_Upsert_Call) RunAndReturn(run func(context.Context
 func NewMilvusServiceServer(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MilvusServiceServer {
+},
+) *MilvusServiceServer {
 	mock := &MilvusServiceServer{}
 	mock.Mock.Test(t)
 

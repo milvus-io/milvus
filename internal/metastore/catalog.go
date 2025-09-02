@@ -3,6 +3,7 @@ package metastore
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -207,6 +208,21 @@ type QueryCoordCatalog interface {
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
+// ReplicationCatalog is the interface for replication catalog
+type ReplicationCatalog interface {
+	// SaveReplicatePChannels saves the replicate pchannels to metastore.
+	SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error
+	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
+	RemoveReplicatePChannel(ctx context.Context, sourceChannelName, targetChannelName string) error
+	// ListReplicatePChannels lists all replicate pchannels from metastore.
+	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
+
+	// SaveReplicateConfiguration saves the replicate configuration to metastore.
+	SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+	// GetReplicateConfiguration gets the replicate configuration from metastore.
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+}
+
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
 	// GetCChannel get the control channel from metastore.
@@ -237,6 +253,8 @@ type StreamingCoordCataLog interface {
 	// Make the task recoverable after restart.
 	// When broadcast task is done, it will be removed from metastore.
 	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
+
+	ReplicationCatalog
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

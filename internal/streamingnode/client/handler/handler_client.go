@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -69,6 +70,9 @@ type HandlerClient interface {
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
+	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner.
+	GetReplicateCheckpoint(ctx context.Context, channelName string) (*commonpb.ReplicateCheckpoint, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

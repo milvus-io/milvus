@@ -239,14 +239,26 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateWALBalancePolicy"
-	StreamingCoordAssignmentService_AssignmentDiscover_FullMethodName     = "/milvus.proto.streaming.StreamingCoordAssignmentService/AssignmentDiscover"
+	StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateReplicateConfiguration"
+	StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName       = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateWALBalancePolicy"
+	StreamingCoordAssignmentService_AssignmentDiscover_FullMethodName           = "/milvus.proto.streaming.StreamingCoordAssignmentService/AssignmentDiscover"
 )
 
 // StreamingCoordAssignmentServiceClient is the client API for StreamingCoordAssignmentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingCoordAssignmentServiceClient interface {
+	// UpdateReplicateConfiguration applies a full replacement of the current
+	// replication configuration across Milvus clusters.
+	//
+	// Semantics:
+	//   - The provided ReplicateConfiguration completely replaces any existing
+	//     configuration persisted in the metadata store.
+	//   - Passing an empty ReplicateConfiguration is treated as a "clear"
+	//     operation, effectively removing all replication configuration.
+	//   - The RPC is expected to be idempotent: submitting the same configuration
+	//     multiple times must not cause side effects.
+	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error)
@@ -262,6 +274,15 @@ type streamingCoordAssignmentServiceClient struct {
 
 func NewStreamingCoordAssignmentServiceClient(cc grpc.ClientConnInterface) StreamingCoordAssignmentServiceClient {
 	return &streamingCoordAssignmentServiceClient{cc}
+}
+
+func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error) {
+	out := new(UpdateReplicateConfigurationResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingCoordAssignmentServiceClient) UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error) {
@@ -308,6 +329,17 @@ func (x *streamingCoordAssignmentServiceAssignmentDiscoverClient) Recv() (*Assig
 // All implementations should embed UnimplementedStreamingCoordAssignmentServiceServer
 // for forward compatibility
 type StreamingCoordAssignmentServiceServer interface {
+	// UpdateReplicateConfiguration applies a full replacement of the current
+	// replication configuration across Milvus clusters.
+	//
+	// Semantics:
+	//   - The provided ReplicateConfiguration completely replaces any existing
+	//     configuration persisted in the metadata store.
+	//   - Passing an empty ReplicateConfiguration is treated as a "clear"
+	//     operation, effectively removing all replication configuration.
+	//   - The RPC is expected to be idempotent: submitting the same configuration
+	//     multiple times must not cause side effects.
+	UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error)
@@ -321,6 +353,9 @@ type StreamingCoordAssignmentServiceServer interface {
 type UnimplementedStreamingCoordAssignmentServiceServer struct {
 }
 
+func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateReplicateConfiguration not implemented")
+}
 func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateWALBalancePolicy not implemented")
 }
@@ -337,6 +372,24 @@ type UnsafeStreamingCoordAssignmentServiceServer interface {
 
 func RegisterStreamingCoordAssignmentServiceServer(s grpc.ServiceRegistrar, srv StreamingCoordAssignmentServiceServer) {
 	s.RegisterService(&StreamingCoordAssignmentService_ServiceDesc, srv)
+}
+
+func _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.UpdateReplicateConfigurationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, req.(*milvuspb.UpdateReplicateConfigurationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingCoordAssignmentService_UpdateWALBalancePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -391,6 +444,10 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*StreamingCoordAssignmentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "UpdateReplicateConfiguration",
+			Handler:    _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler,
+		},
+		{
 			MethodName: "UpdateWALBalancePolicy",
 			Handler:    _StreamingCoordAssignmentService_UpdateWALBalancePolicy_Handler,
 		},
@@ -407,14 +464,18 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingNodeHandlerService_Produce_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
-	StreamingNodeHandlerService_Consume_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/Consume"
+	StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetReplicateCheckpoint"
+	StreamingNodeHandlerService_Produce_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
+	StreamingNodeHandlerService_Consume_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Consume"
 )
 
 // StreamingNodeHandlerServiceClient is the client API for StreamingNodeHandlerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error)
 	// Produce is a bi-directional streaming RPC to send messages to a channel.
 	// All messages sent to a channel will be assigned a unique messageID.
 	// The messageID is used to identify the message in the channel.
@@ -438,6 +499,15 @@ type streamingNodeHandlerServiceClient struct {
 
 func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) StreamingNodeHandlerServiceClient {
 	return &streamingNodeHandlerServiceClient{cc}
+}
+
+func (c *streamingNodeHandlerServiceClient) GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error) {
+	out := new(GetReplicateCheckpointResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingNodeHandlerServiceClient) Produce(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ProduceClient, error) {
@@ -506,6 +576,9 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error)
 	// Produce is a bi-directional streaming RPC to send messages to a channel.
 	// All messages sent to a channel will be assigned a unique messageID.
 	// The messageID is used to identify the message in the channel.
@@ -527,6 +600,9 @@ type StreamingNodeHandlerServiceServer interface {
 type UnimplementedStreamingNodeHandlerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeHandlerServiceServer) GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetReplicateCheckpoint not implemented")
+}
 func (UnimplementedStreamingNodeHandlerServiceServer) Produce(StreamingNodeHandlerService_ProduceServer) error {
 	return status.Errorf(codes.Unimplemented, "method Produce not implemented")
 }
@@ -543,6 +619,24 @@ type UnsafeStreamingNodeHandlerServiceServer interface {
 
 func RegisterStreamingNodeHandlerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeHandlerServiceServer) {
 	s.RegisterService(&StreamingNodeHandlerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReplicateCheckpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).GetReplicateCheckpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).GetReplicateCheckpoint(ctx, req.(*GetReplicateCheckpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeHandlerService_Produce_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -603,7 +697,12 @@ func (x *streamingNodeHandlerServiceConsumeServer) Recv() (*ConsumeRequest, erro
 var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingNodeHandlerService",
 	HandlerType: (*StreamingNodeHandlerServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetReplicateCheckpoint",
+			Handler:    _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Produce",

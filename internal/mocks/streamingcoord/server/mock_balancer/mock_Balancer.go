@@ -3,9 +3,10 @@
 package mock_balancer
 
 import (
-	context "context"
-
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	balancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+
+	context "context"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -172,6 +173,53 @@ func (_c *MockBalancer_GetLatestWALLocated_Call) Return(_a0 int64, _a1 bool) *Mo
 }
 
 func (_c *MockBalancer_GetLatestWALLocated_Call) RunAndReturn(run func(context.Context, string) (int64, bool)) *MockBalancer_GetLatestWALLocated_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPChannels provides a mock function with no fields
+func (_m *MockBalancer) GetPChannels() []string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPChannels")
+	}
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func() []string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	return r0
+}
+
+// MockBalancer_GetPChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPChannels'
+type MockBalancer_GetPChannels_Call struct {
+	*mock.Call
+}
+
+// GetPChannels is a helper method to define mock.On call
+func (_e *MockBalancer_Expecter) GetPChannels() *MockBalancer_GetPChannels_Call {
+	return &MockBalancer_GetPChannels_Call{Call: _e.mock.On("GetPChannels")}
+}
+
+func (_c *MockBalancer_GetPChannels_Call) Run(run func()) *MockBalancer_GetPChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBalancer_GetPChannels_Call) Return(_a0 []string) *MockBalancer_GetPChannels_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_GetPChannels_Call) RunAndReturn(run func() []string) *MockBalancer_GetPChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -358,6 +406,40 @@ func (_c *MockBalancer_UpdateBalancePolicy_Call) Return(_a0 *streamingpb.UpdateW
 
 func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)) *MockBalancer_UpdateBalancePolicy_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
+func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
+	_m.Called(ctx, config)
+}
+
+// MockBalancer_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
+type MockBalancer_UpdateReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// UpdateReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+//   - config *commonpb.ReplicateConfiguration
+func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
+	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Return() *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration)) *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Run(run)
 	return _c
 }
 

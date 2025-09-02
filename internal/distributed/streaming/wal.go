@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -30,6 +31,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
 	w := &walAccesserImpl{
 		lifetime:             typeutil.NewLifetime(),
+		clusterID:            paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		streamingCoordClient: streamingCoordClient,
 		handlerClient:        handlerClient,
 		producerMutex:        sync.Mutex{},
@@ -39,6 +41,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		appendExecutionPool:   conc.NewPool[struct{}](0),
 		dispatchExecutionPool: conc.NewPool[struct{}](0),
 	}
+	w.ReplicateService = &replicateService{w}
 	w.SetLogger(log.With(log.FieldComponent("wal-accesser")))
 	return w
 }
@@ -46,11 +49,13 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 // walAccesserImpl is the implementation of WALAccesser.
 type walAccesserImpl struct {
 	log.Binder
-	lifetime *typeutil.Lifetime
+	lifetime  *typeutil.Lifetime
+	clusterID string
 
 	// All services
 	streamingCoordClient client.Client
 	handlerClient        handler.HandlerClient
+	ReplicateService
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer

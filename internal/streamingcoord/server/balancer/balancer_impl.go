@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -78,6 +79,11 @@ type balancerImpl struct {
 	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 }
 
+// GetPChannels returns all pchannels.
+func (b *balancerImpl) GetPChannels() []string {
+	return b.channelMetaManager.GetPChannels()
+}
+
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
@@ -103,6 +109,18 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
+}
+
+// UpdateReplicateConfiguration updates the replicate configuration.
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+	b.channelMetaManager.UpdateReplicateConfiguration(ctx, config)
 }
 
 // UpdateBalancePolicy update the balance policy.

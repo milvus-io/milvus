@@ -14,14 +14,19 @@ import (
 // Otherwise, it will return the pchannel of the vchannel.
 // TODO: support cross-cluster replication, so the remote vchannel should be mapping to the pchannel of the local cluster.
 func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (string, error) {
+	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return "", err
+	}
 	if vchannel == message.ControlChannel {
-		assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
-		if err != nil {
-			return "", err
-		}
 		return assignments.PChannelOfCChannel(), nil
 	}
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	repConfigHelper := assignments.ReplicateConfigHelper
+	if repConfigHelper != nil {
+		// Route the pchannel to the target cluster if the message is replicated.
+		pchannel = repConfigHelper.GetTargetChannel(pchannel, w.clusterID)
+	}
 	return pchannel, nil
 }
 
