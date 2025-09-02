@@ -1099,13 +1099,6 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func addIsolationProperty(schema *schemapb.CollectionSchema) {
-	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
-		Key:   common.PartitionKeyIsolationKey,
-		Value: "true",
-	})
-}
-
 func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
 	for _, p := range props {
 		if p.GetKey() == common.MmapEnabledKey {
