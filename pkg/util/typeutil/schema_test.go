@@ -3539,3 +3539,83 @@ func TestUpdateFieldData(t *testing.T) {
 		assert.Equal(t, false, baseData[0].ValidData[2])
 	})
 }
+
+func TestAppendFieldDataWithNullData(t *testing.T) {
+	// Test data with nullable fields
+	createTestFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, validData []bool) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+			ValidData: validData,
+		}
+
+		switch dataType {
+		case schemapb.DataType_Int32:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data.([]int32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: data.([]float32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Bool:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: data.([]bool),
+						},
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("TestAppendFieldDataWithNullData_SkipNullValues", func(t *testing.T) {
+		// Case 1: Before validateUtil.fillWithValue - skip null values
+		// Data: [1, null, 2] = [1, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 2, 3}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, true) // skipAppendNullData = true, idx = 0
+
+		// Should append value at index 0 (valid)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
+	})
+
+	t.Run("TestAppendFieldDataWithNullData_IncludeNullValues", func(t *testing.T) {
+		// Case 2: After validateUtil.fillWithValue - include null values with zero values
+		// Data: [1, null, 2] = [1, 0, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 0, 2}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, false) // skipAppendNullData = false, idx = 0
+
+		// Should append value at index 0 (including null values)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
+	})
+}
