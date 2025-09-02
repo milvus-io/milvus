@@ -1099,25 +1099,6 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func hasNamespaceField(schema *schemapb.CollectionSchema) bool {
-	for _, f := range schema.Fields {
-		if f.Name == common.NamespaceFieldName {
-			return true
-		}
-	}
-	for _, f := range schema.StructArrayFields {
-		if f.Name == common.NamespaceFieldName {
-			return true
-		}
-		for _, inner := range f.Fields {
-			if inner.Name == common.NamespaceFieldName {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func addIsolationProperty(schema *schemapb.CollectionSchema) {
 	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
 		Key:   common.PartitionKeyIsolationKey,

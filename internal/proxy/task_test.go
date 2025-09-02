@@ -5259,4 +5259,3 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-
