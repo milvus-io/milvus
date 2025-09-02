@@ -316,6 +316,10 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
+  nameValidation:
+    allowedChars: $ # Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.
+  roleNameValidation:
+    allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
