@@ -21,7 +21,19 @@ import (
 	"reflect"
 )
 
-func ParseCandidate(dataType reflect.Type) map[string]int {
+// ReceiverCandidate is the struct stores the information needed for
+// receiver setting when unmarshalling dataset to user defined struct
+type ReceiverCandidate struct {
+	name2Index map[string]int
+}
+
+func (rc *ReceiverCandidate) Name2FieldIndex(fieldName string) (int, bool) {
+	// lock not needed, read ops only
+	index, ok := rc.name2Index[fieldName]
+	return index, ok
+}
+
+func parseCandidate(dataType reflect.Type) map[string]int {
 	result := make(map[string]int)
 	for i := 0; i < dataType.NumField(); i++ {
 		f := dataType.Field(i)

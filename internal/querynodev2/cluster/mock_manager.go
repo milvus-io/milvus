@@ -21,6 +21,53 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
+// GetAllWorkers provides a mock function with no fields
+func (_m *MockManager) GetAllWorkers() []Worker {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllWorkers")
+	}
+
+	var r0 []Worker
+	if rf, ok := ret.Get(0).(func() []Worker); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]Worker)
+		}
+	}
+
+	return r0
+}
+
+// MockManager_GetAllWorkers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllWorkers'
+type MockManager_GetAllWorkers_Call struct {
+	*mock.Call
+}
+
+// GetAllWorkers is a helper method to define mock.On call
+func (_e *MockManager_Expecter) GetAllWorkers() *MockManager_GetAllWorkers_Call {
+	return &MockManager_GetAllWorkers_Call{Call: _e.mock.On("GetAllWorkers")}
+}
+
+func (_c *MockManager_GetAllWorkers_Call) Run(run func()) *MockManager_GetAllWorkers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockManager_GetAllWorkers_Call) Return(_a0 []Worker) *MockManager_GetAllWorkers_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockManager_GetAllWorkers_Call) RunAndReturn(run func() []Worker) *MockManager_GetAllWorkers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetWorker provides a mock function with given fields: ctx, nodeID
 func (_m *MockManager) GetWorker(ctx context.Context, nodeID int64) (Worker, error) {
 	ret := _m.Called(ctx, nodeID)

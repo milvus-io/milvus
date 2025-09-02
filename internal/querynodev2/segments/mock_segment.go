@@ -270,6 +270,53 @@ func (_c *MockSegment_Delete_Call) RunAndReturn(run func(context.Context, storag
 	return _c
 }
 
+// DropIndex provides a mock function with given fields: ctx, indexID
+func (_m *MockSegment) DropIndex(ctx context.Context, indexID int64) error {
+	ret := _m.Called(ctx, indexID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, indexID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_DropIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropIndex'
+type MockSegment_DropIndex_Call struct {
+	*mock.Call
+}
+
+// DropIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - indexID int64
+func (_e *MockSegment_Expecter) DropIndex(ctx interface{}, indexID interface{}) *MockSegment_DropIndex_Call {
+	return &MockSegment_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, indexID)}
+}
+
+func (_c *MockSegment_DropIndex_Call) Run(run func(ctx context.Context, indexID int64)) *MockSegment_DropIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_DropIndex_Call) Return(_a0 error) *MockSegment_DropIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_DropIndex_Call) RunAndReturn(run func(context.Context, int64) error) *MockSegment_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExistIndex provides a mock function with given fields: fieldID
 func (_m *MockSegment) ExistIndex(fieldID int64) bool {
 	ret := _m.Called(fieldID)

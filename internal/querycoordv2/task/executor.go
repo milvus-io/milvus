@@ -145,6 +145,9 @@ func (ex *Executor) Execute(task Task, step int) bool {
 
 		case *LeaderAction:
 			ex.executeLeaderAction(task.(*LeaderTask), step)
+
+		case *DropIndexAction:
+			ex.executeDropIndexAction(task.(*DropIndexTask), step)
 		}
 	}()
 
@@ -550,6 +553,63 @@ func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 	case ActionTypeStatsUpdate:
 		ex.updatePartStatsVersions(task, step)
 	}
+}
+
+func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
+	action := task.Actions()[step].(*DropIndexAction)
+	defer action.rpcReturned.Store(true)
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.String("shard", task.Shard()),
+		zap.Int64("node", action.Node()),
+		zap.String("source", task.Source().String()),
+		zap.Int64s("indexIDs", action.indexIDs),
+	)
+
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+		ex.removeTask(task, step)
+	}()
+
+	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+	if view == nil {
+		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+		log.Warn("failed to get shard leader", zap.Error(err))
+		return
+	}
+
+	req := &querypb.DropIndexRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DropIndex),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		SegmentID:    task.SegmentID(),
+		IndexIDs:     action.indexIDs,
+		Channel:      task.Shard(),
+		NeedTransfer: true,
+	}
+
+	startTs := time.Now()
+	log.Info("drop index...")
+	status, err := ex.cluster.DropIndex(task.Context(), view.Node, req)
+	if err != nil {
+		log.Warn("failed to drop index", zap.Error(err))
+		return
+	}
+	if !merr.Ok(status) {
+		err = merr.Error(status)
+		log.Warn("failed to drop index", zap.Error(err))
+		return
+	}
+
+	elapsed := time.Since(startTs)
+	log.Info("drop index done", zap.Duration("elapsed", elapsed))
 }
 
 func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {

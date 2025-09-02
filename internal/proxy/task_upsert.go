@@ -367,7 +367,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			if !ok {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
-			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
+			typeutil.AppendFieldDataWithNullData(it.insertFieldData, existFieldData, int64(existIndex), false)
 			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(baseIdx), int64(idx))
 			baseIdx += 1
 			if err != nil {
@@ -407,7 +407,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 		}
 		for _, idx := range insertIdxInUpsert {
-			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx))
+			typeutil.AppendFieldDataWithNullData(it.insertFieldData, insertWithNullField, int64(idx), true)
 		}
 	}
 

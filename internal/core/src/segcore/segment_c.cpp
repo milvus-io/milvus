@@ -310,6 +310,15 @@ HasRawData(CSegmentInterface c_segment, int64_t field_id) {
     return segment->HasRawData(field_id);
 }
 
+bool
+HasFieldData(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto segment =
+        reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    return segment->HasFieldData(milvus::FieldId(field_id));
+}
+
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,
@@ -611,6 +620,25 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
+                           int64_t field_id,
+                           const char* nested_path) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->DropJSONIndex(milvus::FieldId(field_id), nested_path);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
