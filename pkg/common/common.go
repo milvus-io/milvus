@@ -229,7 +229,7 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
-	EnableDynamicSchemaKey     = `dynamicschema.enabled`
+	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 )
 
 const (
@@ -477,13 +477,14 @@ func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
 	return 0, false
 }
 
-func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (bool, bool) {
+func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (found bool, value bool, err error) {
 	for _, kv := range kvs {
 		if kv.GetKey() == EnableDynamicSchemaKey {
-			return true, strings.EqualFold(kv.GetValue(), "true")
+			value, err = strconv.ParseBool(kv.GetValue())
+			return true, value, err
 		}
 	}
-	return false, false
+	return false, false, nil
 }
 
 func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, indexParams map[string]string) error {

@@ -45,7 +45,7 @@ func (t *alterDynamicFieldTask) Prepare(ctx context.Context) error {
 
 	oldColl, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.ts)
 	if err != nil {
-		log.Ctx(ctx).Warn("get collection failed during add field",
+		log.Ctx(ctx).Warn("get collection failed during alter dynamic schema",
 			zap.String("collectionName", t.Req.GetCollectionName()), zap.Uint64("ts", t.ts))
 		return err
 	}
@@ -93,7 +93,7 @@ func (t *alterDynamicFieldTask) Execute(ctx context.Context) error {
 		return nil
 	}
 	// assign field id
-	t.fieldSchema.FieldID = t.nextFieldID(t.oldColl)
+	t.fieldSchema.FieldID = nextFieldID(t.oldColl)
 
 	// currently only add dynamic field support
 	// TODO check target value to remove field after supported
@@ -103,16 +103,6 @@ func (t *alterDynamicFieldTask) Execute(ctx context.Context) error {
 
 	ts := t.GetTs()
 	return executeAddCollectionFieldTaskSteps(ctx, t.core, t.oldColl, newField, t.Req, ts)
-}
-
-func (t *alterDynamicFieldTask) nextFieldID(coll *model.Collection) int64 {
-	maxFieldID := int64(common.StartOfUserFieldID)
-	for _, field := range coll.Fields {
-		if field.FieldID > maxFieldID {
-			maxFieldID = field.FieldID
-		}
-	}
-	return maxFieldID + 1
 }
 
 func (t *alterDynamicFieldTask) GetLockerKey() LockerKey {

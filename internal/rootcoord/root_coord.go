@@ -1392,7 +1392,11 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	)
 
 	var t task
-	if ok, value := common.IsEnableDynamicSchema(in.GetProperties()); ok {
+	if ok, value, err := common.IsEnableDynamicSchema(in.GetProperties()); ok {
+		if err != nil {
+			log.Warn("failed to check dynamic schema prop kv", zap.Error(err))
+			return merr.Status(err), nil
+		}
 		log.Info("found update dynamic schema prop kv")
 		t = &alterDynamicFieldTask{
 			baseTask:    newBaseTask(ctx, c),

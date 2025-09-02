@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -553,4 +554,14 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		}
 	}
 	return nil
+}
+
+func nextFieldID(coll *model.Collection) int64 {
+	maxFieldID := int64(common.StartOfUserFieldID)
+	for _, field := range coll.Fields {
+		if field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+	return maxFieldID + 1
 }
