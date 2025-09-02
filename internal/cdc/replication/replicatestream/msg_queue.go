@@ -96,7 +96,7 @@ func (q *msgQueue) Enqueue(ctx context.Context, msg message.ImmutableMessage) er
 		if ctx.Err() != nil {
 			return context.Canceled
 		}
-		q.waitWithContext(q.notFull, ctx)
+		q.waitWithContext(ctx, q.notFull)
 		if ctx.Err() != nil {
 			return context.Canceled
 		}
@@ -125,7 +125,7 @@ func (q *msgQueue) Dequeue(ctx context.Context) (message.ImmutableMessage, error
 		if ctx.Err() != nil {
 			return nil, context.Canceled
 		}
-		q.waitWithContext(q.notEmpty, ctx)
+		q.waitWithContext(ctx, q.notEmpty)
 		if ctx.Err() != nil {
 			return nil, context.Canceled
 		}
@@ -195,7 +195,7 @@ func (q *msgQueue) CleanupConfirmedMessages(lastConfirmedTimeTick uint64) []mess
 //   - We spawn a short-lived goroutine that Broadcasts on ctx.Done(). This is
 //     safe and bounded: after Wait returns, we close a local channel to let the
 //     goroutine exit immediately (even if ctx wasn't canceled).
-func (q *msgQueue) waitWithContext(cond *sync.Cond, ctx context.Context) {
+func (q *msgQueue) waitWithContext(ctx context.Context, cond *sync.Cond) {
 	done := make(chan struct{})
 	go func() {
 		select {

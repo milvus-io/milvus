@@ -2,13 +2,13 @@ package replicate
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
@@ -96,14 +96,14 @@ func TestReplicateStreamServer_Execute(t *testing.T) {
 	wg.Wait()
 }
 
-func TestReplicateStreamServer_ContextCancelled(t *testing.T) {
+func TestReplicateStreamServer_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(createContextWithClusterID("test-cluster"))
 	mockStreamServer := newMockReplicateStreamServer(ctx)
 
 	server, err := CreateReplicateServer(mockStreamServer)
 	assert.NoError(t, err)
 
-	// Test send loop with cancelled context
+	// Test send loop with canceled context
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {

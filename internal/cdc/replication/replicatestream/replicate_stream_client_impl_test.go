@@ -104,7 +104,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	replicateClient.Close()
 }
 
-func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
+func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	targetCluster := &commonpb.MilvusCluster{
 		ClusterId: "test-cluster",
@@ -142,10 +142,10 @@ func TestReplicateStreamClient_Replicate_ContextCancelled(t *testing.T) {
 	// Cancel context
 	cancel()
 
-	// Test Replicate method with cancelled context
+	// Test Replicate method with canceled context
 	mockMsg := mock_message.NewMockImmutableMessage(t)
 	err := client.Replicate(mockMsg)
-	assert.NoError(t, err) // Should return nil when context is cancelled
+	assert.NoError(t, err) // Should return nil when context is canceled
 }
 
 func TestReplicateStreamClient_Reconnect(t *testing.T) {
