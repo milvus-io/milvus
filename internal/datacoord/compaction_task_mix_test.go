@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"testing"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 

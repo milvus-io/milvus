@@ -209,6 +209,12 @@ type QueryCoordCatalog interface {
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	// GetCChannel get the control channel from metastore.
+	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
+
+	// SaveCChannel save the control channel to metastore.
+	SaveCChannel(ctx context.Context, info *streamingpb.CChannelMeta) error
+
 	// GetVersion get the streaming version from metastore.
 	GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
 
