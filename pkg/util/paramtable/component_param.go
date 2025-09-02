@@ -1627,40 +1627,42 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval             ParamItem `refreshable:"false"`
-	HealthCheckTimeout           ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
-	MaxNameLength                ParamItem `refreshable:"true"`
-	MaxUsernameLength            ParamItem `refreshable:"true"`
-	MinPasswordLength            ParamItem `refreshable:"true"`
-	MaxPasswordLength            ParamItem `refreshable:"true"`
-	MaxFieldNum                  ParamItem `refreshable:"true"`
-	MaxVectorFieldNum            ParamItem `refreshable:"true"`
-	MaxShardNum                  ParamItem `refreshable:"true"`
-	MaxDimension                 ParamItem `refreshable:"true"`
-	GinLogging                   ParamItem `refreshable:"false"`
-	GinLogSkipPaths              ParamItem `refreshable:"false"`
-	MaxUserNum                   ParamItem `refreshable:"true"`
-	MaxRoleNum                   ParamItem `refreshable:"true"`
-	MaxTaskNum                   ParamItem `refreshable:"false"`
-	DDLConcurrency               ParamItem `refreshable:"true"`
-	DCLConcurrency               ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
-	CostMetricsExpireTime        ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum      ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor      ParamItem `refreshable:"false"`
-	RetryTimesOnReplica          ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
-	PartitionNameRegexp          ParamItem `refreshable:"true"`
-	MustUsePartitionKey          ParamItem `refreshable:"true"`
-	SkipAutoIDCheck              ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	MaxVarCharLength             ParamItem `refreshable:"false"`
-	MaxTextLength                ParamItem `refreshable:"false"`
-	MaxResultEntries             ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
+	TimeTickInterval               ParamItem `refreshable:"false"`
+	HealthCheckTimeout             ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
+	MaxNameLength                  ParamItem `refreshable:"true"`
+	MaxUsernameLength              ParamItem `refreshable:"true"`
+	MinPasswordLength              ParamItem `refreshable:"true"`
+	MaxPasswordLength              ParamItem `refreshable:"true"`
+	MaxFieldNum                    ParamItem `refreshable:"true"`
+	MaxVectorFieldNum              ParamItem `refreshable:"true"`
+	MaxShardNum                    ParamItem `refreshable:"true"`
+	MaxDimension                   ParamItem `refreshable:"true"`
+	GinLogging                     ParamItem `refreshable:"false"`
+	GinLogSkipPaths                ParamItem `refreshable:"false"`
+	MaxUserNum                     ParamItem `refreshable:"true"`
+	MaxRoleNum                     ParamItem `refreshable:"true"`
+	NameValidationAllowedChars     ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
+	MaxTaskNum                     ParamItem `refreshable:"false"`
+	DDLConcurrency                 ParamItem `refreshable:"true"`
+	DCLConcurrency                 ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
+	CostMetricsExpireTime          ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor        ParamItem `refreshable:"false"`
+	RetryTimesOnReplica            ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck        ParamItem `refreshable:"true"`
+	PartitionNameRegexp            ParamItem `refreshable:"true"`
+	MustUsePartitionKey            ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
+	MaxVarCharLength               ParamItem `refreshable:"false"`
+	MaxTextLength                  ParamItem `refreshable:"false"`
+	MaxResultEntries               ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1854,6 +1856,22 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 	}
 	p.MaxRoleNum.Init(base.mgr)
+
+	p.NameValidationAllowedChars = ParamItem{
+		Key:          "proxy.nameValidation.allowedChars",
+		DefaultValue: "$",
+		Doc:          "Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.",
+		Export:       true,
+	}
+	p.NameValidationAllowedChars.Init(base.mgr)
+
+	p.RoleNameValidationAllowedChars = ParamItem{
+		Key:          "proxy.roleNameValidation.allowedChars",
+		DefaultValue: "$",
+		Doc:          "Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.",
+		Export:       true,
+	}
+	p.RoleNameValidationAllowedChars.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "proxy.soPath",

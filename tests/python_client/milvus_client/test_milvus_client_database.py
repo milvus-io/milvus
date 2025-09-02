@@ -314,7 +314,8 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 65535, ct.err_msg: f"alter database requires either properties or deletekeys to modify or delete keys, both cannot be empty"}
+        error = {ct.err_code: 65535, ct.err_msg: f"alter database with empty properties and delete keys, "
+                                                 f"expected to set either properties or delete keys"}
         self.drop_database_properties(client, db_name, property_keys=properties,
                                       check_task=CheckTasks.err_res,
                                       check_items=error)

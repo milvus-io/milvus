@@ -157,18 +157,15 @@ func (s *StreamingNodeManager) SetBalancerReady(b balancer.Balancer) {
 func (s *StreamingNodeManager) execute() (err error) {
 	defer s.notifier.Finish(struct{}{})
 
-	balancer, err := s.balancer.GetWithContext(s.notifier.Context())
+	b, err := s.balancer.GetWithContext(s.notifier.Context())
 	if err != nil {
 		return errors.Wrap(err, "failed to wait balancer ready")
 	}
 	for {
-		if err := balancer.WatchChannelAssignments(s.notifier.Context(), func(
-			version typeutil.VersionInt64Pair,
-			relations []types.PChannelInfoAssigned,
-		) error {
+		if err := b.WatchChannelAssignments(s.notifier.Context(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 			s.cond.LockAndBroadcast()
 			s.latestAssignments = make(map[string]types.PChannelInfoAssigned)
-			for _, relation := range relations {
+			for _, relation := range param.Relations {
 				s.latestAssignments[relation.Channel.Name] = relation
 			}
 			s.nodeChangedNotifier.NotifyAll()
