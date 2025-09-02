@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -81,6 +82,19 @@ type Scanner interface {
 	Close()
 }
 
+// ReplicateService is the interface for the replicate service.
+type ReplicateService interface {
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+
+	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+
+	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetReplicateCheckpoint(ctx context.Context, channelName string) (*commonpb.ReplicateCheckpoint, error)
+}
+
 // Balancer is the interface for managing the balancer of the wal.
 type Balancer interface {
 	// ListStreamingNode lists the streaming node.
@@ -108,6 +122,8 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	ReplicateService
+
 	// Balancer returns the balancer management of the wal.
 	Balancer() Balancer
 

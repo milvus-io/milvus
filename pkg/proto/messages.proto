@@ -276,6 +276,14 @@ message BroadcastHeader {
     // And the user can watch the resource key to known when the resource is released.
 }
 
+// ReplicateHeader is the header of replicate message.
+message ReplicateHeader {
+    string cluster_id    = 1; // the cluster id of source cluster
+    MessageID message_id = 2; // the message id of replicate msg from source cluster
+    uint64 time_tick     = 3; // the time tick of replicate msg from source cluster
+    string vchannel      = 4; // the vchannel of replicate msg from source cluster
+}
+
 // ResourceDomain is the domain of resource hold.
 enum ResourceDomain {
     ResourceDomainUnknown = 0; // should never be used.

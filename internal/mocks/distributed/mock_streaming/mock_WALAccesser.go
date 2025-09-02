@@ -5,7 +5,10 @@ package mock_streaming
 import (
 	context "context"
 
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -243,6 +246,123 @@ func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broa
 	return _c
 }
 
+// GetReplicateCheckpoint provides a mock function with given fields: ctx, channelName
+func (_m *MockWALAccesser) GetReplicateCheckpoint(ctx context.Context, channelName string) (*commonpb.ReplicateCheckpoint, error) {
+	ret := _m.Called(ctx, channelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateCheckpoint")
+	}
+
+	var r0 *commonpb.ReplicateCheckpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*commonpb.ReplicateCheckpoint, error)); ok {
+		return rf(ctx, channelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *commonpb.ReplicateCheckpoint); ok {
+		r0 = rf(ctx, channelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.ReplicateCheckpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, channelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWALAccesser_GetReplicateCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateCheckpoint'
+type MockWALAccesser_GetReplicateCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetReplicateCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channelName string
+func (_e *MockWALAccesser_Expecter) GetReplicateCheckpoint(ctx interface{}, channelName interface{}) *MockWALAccesser_GetReplicateCheckpoint_Call {
+	return &MockWALAccesser_GetReplicateCheckpoint_Call{Call: _e.mock.On("GetReplicateCheckpoint", ctx, channelName)}
+}
+
+func (_c *MockWALAccesser_GetReplicateCheckpoint_Call) Run(run func(ctx context.Context, channelName string)) *MockWALAccesser_GetReplicateCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_GetReplicateCheckpoint_Call) Return(_a0 *commonpb.ReplicateCheckpoint, _a1 error) *MockWALAccesser_GetReplicateCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWALAccesser_GetReplicateCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*commonpb.ReplicateCheckpoint, error)) *MockWALAccesser_GetReplicateCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetReplicateConfiguration provides a mock function with given fields: ctx
+func (_m *MockWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateConfiguration")
+	}
+
+	var r0 *commonpb.ReplicateConfiguration
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWALAccesser_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
+type MockWALAccesser_GetReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// GetReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockWALAccesser_Expecter) GetReplicateConfiguration(ctx interface{}) *MockWALAccesser_GetReplicateConfiguration_Call {
+	return &MockWALAccesser_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", ctx)}
+}
+
+func (_c *MockWALAccesser_GetReplicateConfiguration_Call) Run(run func(ctx context.Context)) *MockWALAccesser_GetReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockWALAccesser_GetReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWALAccesser_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockWALAccesser_GetReplicateConfiguration_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Local provides a mock function with no fields
 func (_m *MockWALAccesser) Local() streaming.Local {
 	ret := _m.Called()
@@ -468,6 +588,53 @@ func (_c *MockWALAccesser_Txn_Call) Return(_a0 streaming.Txn, _a1 error) *MockWA
 }
 
 func (_c *MockWALAccesser_Txn_Call) RunAndReturn(run func(context.Context, streaming.TxnOption) (streaming.Txn, error)) *MockWALAccesser_Txn_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
+func (_m *MockWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+	ret := _m.Called(ctx, config)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReplicateConfiguration")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
+		r0 = rf(ctx, config)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockWALAccesser_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
+type MockWALAccesser_UpdateReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// UpdateReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+//   - config *commonpb.ReplicateConfiguration
+func (_e *MockWALAccesser_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockWALAccesser_UpdateReplicateConfiguration_Call {
+	return &MockWALAccesser_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
+}
+
+func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockWALAccesser_UpdateReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) Return(_a0 error) *MockWALAccesser_UpdateReplicateConfiguration_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockWALAccesser_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

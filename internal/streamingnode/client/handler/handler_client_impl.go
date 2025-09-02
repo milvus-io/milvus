@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
@@ -63,6 +64,17 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 		return 0, ErrReadOnlyWAL
 	}
 	return w.GetLatestMVCCTimestamp(ctx, vchannel)
+}
+
+// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner.
+func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, channelName string) (*commonpb.ReplicateCheckpoint, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	// TODO: sheep, implement it.
+	panic("not implemented")
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.

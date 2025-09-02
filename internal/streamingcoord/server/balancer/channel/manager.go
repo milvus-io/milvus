@@ -5,8 +5,10 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -20,9 +22,10 @@ var ErrChannelNotExist = errors.New("channel not exist")
 
 type (
 	WatchChannelAssignmentsCallbackParam struct {
-		Version            typeutil.VersionInt64Pair
-		CChannelAssignment *streamingpb.CChannelAssignment
-		Relations          []types.PChannelInfoAssigned
+		Version                typeutil.VersionInt64Pair
+		CChannelAssignment     *streamingpb.CChannelAssignment
+		Relations              []types.PChannelInfoAssigned
+		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
 	WatchChannelAssignmentsCallback func(param WatchChannelAssignmentsCallbackParam) error
 )
@@ -39,7 +42,10 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 	if err != nil {
 		return nil, err
 	}
-
+	replicateConfig, err := recoverReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
 	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, incomingChannel...)
 	if err != nil {
 		return nil, err
@@ -56,6 +62,7 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		metrics:          metrics,
 		cchannelMeta:     cchannelMeta,
 		streamingVersion: streamingVersion,
+		replicateConfig:  replicateConfig,
 	}, nil
 }
 
@@ -116,6 +123,14 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	return channels, metrics, nil
 }
 
+func recoverReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	config, err := resource.Resource().StreamingCatalog().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // ChannelManager manages the channels.
 // ChannelManager is the `wal` of channel assignment and unassignment.
 // Every operation applied to the streaming node should be recorded in ChannelManager first.
@@ -129,6 +144,17 @@ type ChannelManager struct {
 	// null if no streaming service has been run.
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
+	replicateConfig          *commonpb.ReplicateConfiguration
+}
+
+// GetPChannels returns all pchannels.
+func (cm *ChannelManager) GetPChannels() []string {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	return lo.Map(lo.Keys(cm.channels), func(id ChannelID, _ int) string {
+		return id.String()
+	})
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -337,6 +363,13 @@ func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb WatchCha
 	}
 }
 
+// UpdateReplicateConfiguration updates the in-memory replicate configuration.
+func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+	cm.replicateConfig = config
+}
+
 // applyAssignments applies the assignments.
 func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (typeutil.VersionInt64Pair, error) {
 	cm.cond.L.Lock()
@@ -354,7 +387,8 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 		CChannelAssignment: &streamingpb.CChannelAssignment{
 			Meta: cchannelAssignment,
 		},
-		Relations: assignments,
+		Relations:              assignments,
+		ReplicateConfiguration: cm.replicateConfig,
 	})
 }
 

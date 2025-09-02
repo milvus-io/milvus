@@ -1,6 +1,7 @@
 package rmq
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -17,6 +18,7 @@ func init() {
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
 	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(commonpb.WALName_RocksMQ.String(), UnmarshalMessageID)
 }
 
 // builderImpl is the builder for rmq opener.
