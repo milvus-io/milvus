@@ -5015,7 +5015,6 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
     def get_cohere_rerank_results(self, query_texts, document_texts,
                                   model_name="rerank-english-v3.0", max_tokens_per_doc=4096, **kwargs):
-        # Note: enable_truncate and kwargs are used for compatibility with other providers
         COHERE_RERANKER_ENDPOINT = "https://api.cohere.ai"
         COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
@@ -5190,32 +5189,11 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
     def compare_milvus_rerank_with_origin_rerank(self, query_texts, rerank_results, results_without_rerank,
                                                  enable_truncate=False,
-                                                 tei_reranker_endpoint=None,
-                                                 vllm_reranker_endpoint=None,
-                                                 cohere_reranker_endpoint=None,
-                                                 voyageai_reranker_endpoint=None,
-                                                 siliconflow_reranker_endpoint=None,
+                                                 provider_type=None,
                                                  **kwargs):
         # result length should be the same as nq
-        endpoints = [tei_reranker_endpoint, vllm_reranker_endpoint, cohere_reranker_endpoint, 
-                    voyageai_reranker_endpoint, siliconflow_reranker_endpoint]
-        non_none_endpoints = [ep for ep in endpoints if ep is not None]
-        
-        # Check for new providers based on their specific parameters
-        provider_type = None
-        if non_none_endpoints:
-            if len(non_none_endpoints) != 1:
-                raise Exception("Exactly one reranker endpoint must be provided")
-        else:
-            # Identify provider by parameter combination
-            if "max_tokens_per_doc" in kwargs:
-                provider_type = "cohere"
-            elif "truncation" in kwargs:
-                provider_type = "voyageai"
-            elif "max_chunks_per_doc" in kwargs and "overlap_tokens" in kwargs:
-                provider_type = "siliconflow"
-            else:
-                raise Exception("Could not identify reranker provider from parameters")
+        if provider_type is None:
+            raise Exception("provider_type parameter is required")
             
         assert len(results_without_rerank) == len(rerank_results)
         log.debug("results_without_rerank")
@@ -5240,37 +5218,30 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             log.debug(f"distances_without_rerank: {distances_without_rerank}")
             limit = len(actual_rerank_results)
             
-            # Call the appropriate rerank method based on which endpoint is provided or provider type
-            if tei_reranker_endpoint is not None:
-                raw_gt = self.get_tei_rerank_results(query_text, document_texts, tei_reranker_endpoint,
+            # Call the appropriate rerank method based on provider type
+            if provider_type == "tei":
+                endpoint = kwargs.get("endpoint")
+                if endpoint is None:
+                    raise Exception("endpoint parameter is required for tei provider")
+                raw_gt = self.get_tei_rerank_results(query_text, document_texts, endpoint,
                                                      enable_truncate=enable_truncate)[:limit]
-            elif vllm_reranker_endpoint is not None:
-                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, vllm_reranker_endpoint,
+            elif provider_type == "vllm":
+                endpoint = kwargs.get("endpoint")
+                if endpoint is None:
+                    raise Exception("endpoint parameter is required for vllm provider")
+                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, endpoint,
                                                       enable_truncate=enable_truncate)[:limit]
-            elif cohere_reranker_endpoint is not None:
-                raw_gt = self.get_cohere_rerank_results(query_text, document_texts,
-                                                        enable_truncate=enable_truncate,
-                                                        **kwargs)[:limit]
-            elif voyageai_reranker_endpoint is not None:
-                raw_gt = self.get_voyageai_rerank_results(query_text, document_texts,
-                                                          enable_truncate=enable_truncate,
-                                                          **kwargs)[:limit]
-            elif siliconflow_reranker_endpoint is not None:
-                raw_gt = self.get_siliconflow_rerank_results(query_text, document_texts,
-                                                             enable_truncate=enable_truncate,
-                                                             **kwargs)[:limit]
             elif provider_type == "cohere":
                 raw_gt = self.get_cohere_rerank_results(query_text, document_texts,
-                                                        enable_truncate=enable_truncate,
                                                         **kwargs)[:limit]
             elif provider_type == "voyageai":
                 raw_gt = self.get_voyageai_rerank_results(query_text, document_texts,
-                                                          enable_truncate=enable_truncate,
                                                           **kwargs)[:limit]
             elif provider_type == "siliconflow":
                 raw_gt = self.get_siliconflow_rerank_results(query_text, document_texts,
-                                                             enable_truncate=enable_truncate,
                                                              **kwargs)[:limit]
+            else:
+                raise Exception(f"Unsupported provider_type: {provider_type}")
 
             # Create list of (distance, pk, document) tuples for sorting
             gt_with_info = []
@@ -5412,11 +5383,13 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             if ranker_model == "tei":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
                                                               enable_truncate=enable_truncate,
-                                                              tei_reranker_endpoint=tei_reranker_endpoint)
+                                                              provider_type="tei",
+                                                              endpoint=tei_reranker_endpoint)
             else:
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
                                                               enable_truncate=enable_truncate,
-                                                              vllm_reranker_endpoint=vllm_reranker_endpoint)
+                                                              provider_type="vllm",
+                                                              endpoint=vllm_reranker_endpoint)
 
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
@@ -5570,10 +5543,12 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 results_without_rerank = self.merge_and_dedup_hybrid_searchresults(sparse_results, bm25_results)
             if ranker_model == "tei":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                              tei_reranker_endpoint=tei_reranker_endpoint)
+                                                              provider_type="tei",
+                                                              endpoint=tei_reranker_endpoint)
             else:
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                              vllm_reranker_endpoint=vllm_reranker_endpoint)
+                                                              provider_type="vllm",
+                                                              endpoint=vllm_reranker_endpoint)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("model_name", ["rerank-english-v3.0", "rerank-multilingual-v3.0"])
@@ -5626,6 +5601,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         )
         
         self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
+                                                      provider_type="cohere",
                                                       model_name=model_name,
                                                       max_tokens_per_doc=max_tokens_per_doc)
 
@@ -5680,6 +5656,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         )
         
         self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
+                                                      provider_type="voyageai",
                                                       model_name=model_name,
                                                       truncation=truncation)
 
@@ -5735,6 +5712,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         )
         
         self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
+                                                      provider_type="siliconflow",
                                                       model_name=model_name,
                                                       max_chunks_per_doc=max_chunks_per_doc,
                                                       overlap_tokens=overlap_tokens)
@@ -5881,6 +5859,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             
             # Compare Milvus rerank results with origin rerank results
             self.compare_milvus_rerank_with_origin_rerank(query_texts, hybrid_results, results_without_rerank,
+                                                          provider_type="cohere",
                                                           model_name=model_name,
                                                           max_tokens_per_doc=max_tokens_per_doc)
 
@@ -6026,6 +6005,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             
             # Compare Milvus rerank results with origin rerank results
             self.compare_milvus_rerank_with_origin_rerank(query_texts, hybrid_results, results_without_rerank,
+                                                          provider_type="voyageai",
                                                           model_name=model_name,
                                                           truncation=truncation)
             
@@ -6174,6 +6154,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             
             # Compare Milvus rerank results with origin rerank results
             self.compare_milvus_rerank_with_origin_rerank(query_texts, hybrid_results, results_without_rerank,
+                                                          provider_type="siliconflow",
                                                           model_name=model_name,
                                                           max_chunks_per_doc=max_chunks_per_doc,
                                                           overlap_tokens=overlap_tokens)
