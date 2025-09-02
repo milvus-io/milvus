@@ -86,6 +86,9 @@ func (sr *ResultSet) Unmarshal(receiver any) (err error) {
 	if err != nil {
 		return err
 	}
+	if sr.IDs == nil {
+		return nil
+	}
 	return sr.fillPKEntry(receiver)
 }
 
@@ -116,8 +119,8 @@ func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 			et = et.Elem()
 		}
 
-		candidates := row.ParseCandidate(et)
-		candi, ok := candidates[pkField.Name]
+		rc := row.GetReceiverCandidate(et)
+		candi, ok := rc.Name2FieldIndex(pkField.Name)
 		if !ok {
 			// pk field not found in struct, skip
 			return nil
@@ -202,10 +205,10 @@ func (ds DataSet) Unmarshal(receiver any) (err error) {
 }
 
 func (ds DataSet) fillData(data reflect.Value, dataType reflect.Type, idx int) error {
-	m := row.ParseCandidate(dataType)
+	rc := row.GetReceiverCandidate(dataType)
 	for i := 0; i < len(ds); i++ {
 		name := ds[i].Name()
-		fidx, ok := m[name]
+		fidx, ok := rc.Name2FieldIndex(name)
 		if !ok {
 			// if target is not found, the behavior here is to ignore the column
 			// `strict` mode could be added in the future to return error if any column missing
