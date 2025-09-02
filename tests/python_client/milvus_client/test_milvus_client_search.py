@@ -119,8 +119,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
-        rng = np.random.default_rng(seed=19530)
-        vectors_to_search = rng.random((1, 8))
         error = {ct.err_code: 100,
                  ct.err_msg: f"`search_data` value {invalid_data} is illegal"}
         self.search(client, collection_name, invalid_data, limit=default_limit,
@@ -780,7 +778,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         try:
-            my_rerank_fn = Function(
+            Function(
                 name=1,
                 input_field_names=[ct.default_reranker_field_name],
                 function_type=FunctionType.RERANK,
@@ -822,7 +820,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         try:
-            my_rerank_fn = Function(
+            Function(
                 name="my_reranker",
                 input_field_names=1,
                 function_type=FunctionType.RERANK,
@@ -838,7 +836,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         except Exception as e:
             log.info(e)
         try:
-            my_rerank_fn = Function(
+            Function(
                 name="my_reranker",
                 input_field_names=[1],
                 function_type=FunctionType.RERANK,
@@ -968,7 +966,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         try:
-            my_rerank_fn = Function(
+            Function(
                 name="my_reranker",
                 input_field_names=[ct.default_reranker_field_name, ct.default_reranker_field_name],
                 function_type=FunctionType.RERANK,
@@ -1010,7 +1008,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         try:
-            my_rerank_fn = Function(
+            Function(
                 name="my_reranker",
                 input_field_names=[ct.default_reranker_field_name],
                 function_type=1,
@@ -1027,7 +1025,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             log.info(e)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_reranker_invalid_reranker(self):
+    def test_milvus_client_search_reranker_multiple_fields(self):
         """
         target: test search with reranker with multiple fields
         method: create connection, collection, insert and search
@@ -2670,7 +2668,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)
         self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
                                   nullable=True, max_length=100)
         for row in rows:
@@ -2702,7 +2700,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i), "field_new": i} for i in
                 range(delete_num)]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)
         # 7. flush
         self.flush(client, collection_name)
         limit = default_nb
@@ -3687,7 +3685,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 2. insert with different data distribution
         vectors = cf.gen_vectors(default_nb + 60, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i, "b": i}}} for i in
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i, "c": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
