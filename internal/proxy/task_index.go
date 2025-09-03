@@ -272,9 +272,20 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					indexParamsMap[k] = v
 				}
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
-				// override binary vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
-					indexParamsMap[k] = v
+				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {
+					if !Params.AutoIndexConfig.EnableDeduplicateIndex.GetAsBool() {
+						log.Ctx(ctx).Warn("Deduplicate index is not enabled, but metric type is deduplicate.")
+						return merr.WrapErrParameterInvalidMsg("Deduplicate index is not enabled, but metric type is deduplicate.")
+					}
+					// override binary vector index params by autoindex deduplicate params
+					for k, v := range Params.AutoIndexConfig.DeduplicateIndexParams.GetAsJSONMap() {
+						indexParamsMap[k] = v
+					}
+				} else {
+					// override binary vector index params by autoindex
+					for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
+						indexParamsMap[k] = v
+					}
 				}
 			}
 
@@ -292,6 +303,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 				log.Ctx(ctx).Info("AutoIndex triggered", fields...)
 			}
+			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 			handle := func(numberParams int, autoIndexConfig map[string]string) error {
 				// empty case.
@@ -302,8 +314,6 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					useAutoIndex(autoIndexConfig)
 					return nil
 				}
-
-				metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 				if len(indexParamsMap) > numberParams+1 {
 					return errors.New("only metric type can be passed when use AutoIndex")
@@ -333,8 +343,16 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				// override sparse float vector index params by autoindex
 				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
-				// override binary vector index params by autoindex
-				config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {
+					if !Params.AutoIndexConfig.EnableDeduplicateIndex.GetAsBool() {
+						log.Ctx(ctx).Warn("Deduplicate index is not enabled, but metric type is deduplicate.")
+						return merr.WrapErrParameterInvalidMsg("Deduplicate index is not enabled, but metric type is deduplicate.")
+					}
+					config = Params.AutoIndexConfig.DeduplicateIndexParams.GetAsJSONMap()
+				} else {
+					// override binary vector index params by autoindex
+					config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+				}
 			}
 			if !exist {
 				if err := handle(0, config); err != nil {
