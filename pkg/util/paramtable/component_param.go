@@ -238,6 +238,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
+	EnableNamespace                     ParamItem `refreshable:"false"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -623,6 +624,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.EnableNamespace = ParamItem{
+		Key:          "common.namespace.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.",
+		Export:       true,
+	}
+	p.EnableNamespace.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
