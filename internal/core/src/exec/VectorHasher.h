@@ -69,7 +69,6 @@ class VectorHasher {
     template <DataType type>
     void
     hashValues(const ColumnVectorPtr& column_data,
-               const TargetBitmapView& activeRows,
                bool mix,
                uint64_t* result);
 

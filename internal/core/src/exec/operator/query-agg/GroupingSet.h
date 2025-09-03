@@ -89,8 +89,6 @@ class GroupingSet {
     std::vector<VectorPtr> tempVectors_;
     std::unique_ptr<BaseHashTable> hash_table_;
     std::unique_ptr<HashLookup> lookup_;
-    TargetBitmap active_rows_;
-
     uint64_t numInputRows_ = 0;
 
     // Boolean indicating whether accumulators for a global aggregation (i.e.

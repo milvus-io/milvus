@@ -43,7 +43,6 @@ PhyAggregationNode::initialize() {
         std::make_unique<GroupingSet>(input_type,
                                       std::move(hashers),
                                       std::move(aggregateInfos),
-                                      aggregationNode_->ignoreNullKeys(),
                                       aggregationNode_->group_limit());
     aggregationNode_.reset();
 }

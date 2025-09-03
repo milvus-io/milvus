@@ -36,7 +36,6 @@ createVectorHashers(const RowTypePtr& rowType,
 template <DataType Type>
 void
 VectorHasher::hashValues(const ColumnVectorPtr& column_data,
-                         const TargetBitmapView& activeRows,
                          bool mix,
                          uint64_t* result) {
     if constexpr (Type == DataType::ROW || Type == DataType::ARRAY ||
@@ -46,51 +45,36 @@ VectorHasher::hashValues(const ColumnVectorPtr& column_data,
                   Type);
     } else {
         using T = typename TypeTraits<Type>::NativeType;
-        auto start = -1;
-        do {
-            auto next_valid_op = activeRows.find_next(start);
-            if (!next_valid_op.has_value()) {
-                break;
-            }
-            auto next_valid_row = next_valid_op.value();
-            if (!column_data->ValidAt(next_valid_row)) {
-                result[next_valid_row] =
-                    mix ? milvus::bits::hashMix(result[next_valid_row],
+        for (size_t row_idx = 0; row_idx < column_data->size(); ++row_idx) {
+            if (!column_data->ValidAt(row_idx)) {
+                result[row_idx] =
+                    mix ? milvus::bits::hashMix(result[row_idx],
                                                 kNullHash)
                         : kNullHash;
             } else {
-                T raw_value = column_data->ValueAt<T>(next_valid_row);
+                T raw_value = column_data->ValueAt<T>(row_idx);
                 uint64_t hash_value = kNullHash;
                 if constexpr (std::is_floating_point_v<T>) {
                     hash_value = milvus::NaNAwareHash<T>()(raw_value);
                 } else {
                     hash_value = folly::hasher<T>()(raw_value);
                 }
-                result[next_valid_row] =
-                    mix ? milvus::bits::hashMix(result[next_valid_row],
+                result[row_idx] =
+                    mix ? milvus::bits::hashMix(result[row_idx],
                                                 hash_value)
                         : hash_value;
             }
-            start = next_valid_row;
-        } while (true);
+        }
     }
 }
 
 void
 VectorHasher::hash(bool mix,
-                   const TargetBitmapView& activeRows,
                    std::vector<uint64_t>& result) {
-    // auto element_size = GetDataTypeSize(element_data_type);
-    // auto element_count = column_data->size();
-
-    // for(auto i = 0; i < element_count; i++) {
-    //     void* raw_value = column_data->RawValueAt(i, element_size);
-    // }
     auto element_data_type = ChannelDataType();
     MILVUS_DYNAMIC_TYPE_DISPATCH(hashValues,
                                  element_data_type,
                                  columnData(),
-                                 activeRows,
                                  mix,
                                  result.data());
 }

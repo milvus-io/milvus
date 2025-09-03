@@ -36,8 +36,6 @@ GroupingSet::~GroupingSet() {
 void
 GroupingSet::addInput(const RowVectorPtr& input) {
     auto numRows = input->size();
-    active_rows_.resize(numRows);
-    active_rows_.set();
     numInputRows_ += numRows;
     if (isGlobal_) {
         addGlobalAggregationInput(input);
@@ -108,7 +106,6 @@ GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     for (auto i = 0; i < aggregates_.size(); i++) {
         auto& function = aggregates_[i].function_;
         populateTempVectors(i, input);
-        TargetBitmapView active_views(active_rows_);
         function->addSingleGroupRawInput(group, active_views, tempVectors_);
     }
     tempVectors_.clear();
@@ -190,8 +187,7 @@ GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
         createHashTable();
     }
     ensureInputFits(input);
-    hash_table_->prepareForGroupProbe(
-        *lookup_, input, active_rows_);
+    hash_table_->prepareForGroupProbe(*lookup_, input);
     if (lookup_->rows_.empty()) {
         return;
     }
@@ -203,12 +199,8 @@ GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
         if (!newGroups.empty()) {
             function->initializeNewGroups(groups, newGroups);
         }
-        if (!active_rows_.any()) {
-            continue;
-        }
         populateTempVectors(i, input);
-        TargetBitmapView active_views(active_rows_);
-        function->addRawInput(groups, active_views, tempVectors_);
+        function->addRawInput(groups, tempVectors_);
     }
     tempVectors_.clear();
 }

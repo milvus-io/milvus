@@ -44,8 +44,7 @@ populateLookupRows(const TargetBitmapView& activeRows,
 
 void
 BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
-                                    const RowVectorPtr& input,
-                                    TargetBitmap& activeRows) {
+                                    const RowVectorPtr& input) {
     auto& hashers = lookup.hashers_;
     int numKeys = hashers.size();
     // set up column vector to each column
@@ -58,7 +57,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
                    "Failed to get column vector from row vector input");
         hashers[i]->setColumnData(column_ptr);
     }
-    lookup.reset(activeRows.size());
+    lookup.reset(input);
 
     const auto mode = hashMode();
     for (auto i = 0; i < hashers.size(); i++) {
