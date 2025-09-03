@@ -247,6 +247,17 @@ const (
 	ClientRequestMsecKey string = "client-request-unixmsec"
 )
 
+// Timestamptz field
+const (
+	TszYear        string = "year"
+	TszMonth       string = "month"
+	TszDay         string = "day"
+	TszHour        string = "hour"
+	TszMinute      string = "minute"
+	TszSecond      string = "second"
+	TszMicrosecond string = "microsecond"
+)
+
 func IsSystemField(fieldID int64) bool {
 	return fieldID < StartOfUserFieldID
 }

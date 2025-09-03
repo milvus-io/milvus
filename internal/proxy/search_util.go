@@ -641,6 +641,16 @@ func parseTimezone(params []*commonpb.KeyValuePair) string {
 	return timezone
 }
 
+func parseTimeFields(params []*commonpb.KeyValuePair) []string {
+	timeFields, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, params)
+	if err != nil {
+		return nil
+	}
+	return strings.FieldsFunc(timeFields, func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+}
+
 func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
 	groupScorerStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankGroupScorer, params)
 	if err != nil {

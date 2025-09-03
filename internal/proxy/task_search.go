@@ -839,10 +839,22 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	_, colTimezone := getColTimezone(colInfo)
 	_, dbTimezone := getDbTimezone(dbInfo)
-	err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), parseTimezone(t.request.SearchParams), colTimezone, dbTimezone)
-	if err != nil {
-		log.Warn("fail to convert timestamp", zap.Error(err))
-		return err
+	timeFields := parseTimeFields(t.request.SearchParams)
+	timezoneUserDefined := parseTimezone(t.request.SearchParams)
+	if timeFields != nil {
+		log.Debug("extracting fields for timestamptz", zap.Strings("fields", timeFields))
+		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), []string{timezoneUserDefined, colTimezone, dbTimezone}, timeFields)
+		if err != nil {
+			log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+			return err
+		}
+	} else {
+		log.Debug("translate timstamp to ISO string", zap.String("user define timezone", timezoneUserDefined))
+		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), timezoneUserDefined, colTimezone, dbTimezone)
+		if err != nil {
+			log.Warn("fail to translate timestamp", zap.Error(err))
+			return err
+		}
 	}
 
 	log.Debug("Search post execute done",
