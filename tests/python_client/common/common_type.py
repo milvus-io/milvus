@@ -16,6 +16,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_batch_size = 1000
+default_int32_value = np.int32(1234)
 min_limit = 1
 max_limit = 16384
 max_top_k = 16384
