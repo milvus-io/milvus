@@ -2277,7 +2277,7 @@ TEST(Sealed, SearchSortedPk) {
 
 TEST(Sealed, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
@@ -2336,12 +2336,13 @@ TEST(Sealed, SearchVectorArray) {
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
     int64_t index_id = 5000;
+    int64_t dim = 32;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     auto field_meta = milvus::segcore::gen_field_meta(collection_id,
@@ -2359,7 +2360,6 @@ TEST(Sealed, SearchVectorArray) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto emb_list_len = 10;
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
@@ -2372,7 +2372,8 @@ TEST(Sealed, SearchVectorArray) {
     for (auto& v : vec_array_col) {
         vector_arrays.push_back(milvus::VectorArray(v));
     }
-    auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY, false);
+    auto field_data =
+        storage::CreateFieldData(DataType::VECTOR_ARRAY, false, dim);
     field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
 
     // create sealed segment
@@ -2453,7 +2454,7 @@ TEST(Sealed, SearchVectorArray) {
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = 5;
-    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
     vec_index->Query(query_dataset, searchInfo, nullptr, result);

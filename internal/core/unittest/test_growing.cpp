@@ -501,7 +501,7 @@ TEST_P(GrowingTest, FillVectorArrayData) {
 
 TEST(GrowingTest, LoadVectorArrayData) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_float_vector = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
@@ -562,10 +562,12 @@ TEST(GrowingTest, SearchVectorArray) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::MAX_SIM;
 
+    auto dim = 32;
+
     // Add fields
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     // Configure segment
@@ -577,7 +579,8 @@ TEST(GrowingTest, SearchVectorArray) {
         {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
         {"metric_type", metric_type},
         {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         array_vec, std::move(index_params), std::move(type_params));
     std::map<FieldId, FieldIndexMeta> fieldMap = {{array_vec, fieldIndexMeta}};
@@ -602,7 +605,6 @@ TEST(GrowingTest, SearchVectorArray) {
 
     // Prepare search query
     int vec_num = 10;  // Total number of query vectors
-    int dim = 128;
     std::vector<float> query_vec = generate_float_vector(vec_num, dim);
 
     // Create query dataset with lims for VectorArray
