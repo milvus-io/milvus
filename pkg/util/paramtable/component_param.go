@@ -2958,9 +2958,10 @@ type queryNodeConfig struct {
 	TieredEvictableMemoryCacheRatio ParamItem `refreshable:"false"`
 	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
+	TieredBackgroundEvictionEnabled ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
-	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
+	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3300,6 +3301,17 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.TieredCacheTouchWindowMs.Init(base.mgr)
 
+	p.TieredBackgroundEvictionEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.backgroundEvictionEnabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc: `Enable background eviction for Tiered Storage. Defaults to false.
+Background eviction is used to do periodic eviction in a separate thread.
+And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.`,
+		Export: true,
+	}
+	p.TieredBackgroundEvictionEnabled.Init(base.mgr)
+
 	p.TieredEvictionIntervalMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
@@ -3311,10 +3323,28 @@ eviction is necessary and the amount of data to evict from memory/disk.
 			}
 			return fmt.Sprintf("%d", window)
 		},
-		Doc:    "Interval in milliseconds to run periodic eviction.",
+		Doc:    "Interval in milliseconds to run periodic eviction. 'backgroundEvictionEnabled' is required.",
 		Export: false,
 	}
 	p.TieredEvictionIntervalMs.Init(base.mgr)
+
+	p.CacheCellUnaccessedSurvivalTime = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			timeout := getAsInt64(v)
+			if timeout <= 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", timeout)
+		},
+		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 'backgroundEvictionEnabled' is required.
+If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+If set to 0, time based eviction is disabled.`,
+		Export: true,
+	}
+	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
@@ -3331,24 +3361,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: false,
 	}
 	p.TieredLoadingResourceFactor.Init(base.mgr)
-
-	p.CacheCellUnaccessedSurvivalTime = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
-		Version:      "2.6.0",
-		DefaultValue: "0",
-		Formatter: func(v string) string {
-			timeout := getAsInt64(v)
-			if timeout <= 0 {
-				return "0"
-			}
-			return fmt.Sprintf("%d", timeout)
-		},
-		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 
-If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
-If set to 0, time based eviction is disabled.`,
-		Export: true,
-	}
-	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
