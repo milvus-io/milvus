@@ -30,11 +30,9 @@ class GroupingSet {
     GroupingSet(const RowTypePtr& input_type,
                 std::vector<std::unique_ptr<VectorHasher>>&& hashers,
                 std::vector<AggregateInfo>&& aggregates,
-                bool ignoreNullKeys,
                 int64_t group_limit)
         : hashers_(std::move(hashers)),
           aggregates_(std::move(aggregates)),
-          ignoreNullKeys_(ignoreNullKeys),
           group_limit_(group_limit) {
         isGlobal_ = hashers_.empty();
     }
@@ -82,7 +80,6 @@ class GroupingSet {
 
  private:
     bool isGlobal_;
-    const bool ignoreNullKeys_;
     const int64_t group_limit_;
 
     std::vector<std::unique_ptr<VectorHasher>> hashers_;

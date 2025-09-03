@@ -191,10 +191,8 @@ GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
     }
     ensureInputFits(input);
     hash_table_->prepareForGroupProbe(
-        *lookup_, input, active_rows_, ignoreNullKeys_);
+        *lookup_, input, active_rows_);
     if (lookup_->rows_.empty()) {
-        // No rows to probe. Can happen when ignoreNullKeys_ is true and all rows
-        // have null keys.
         return;
     }
     hash_table_->groupProbe(*lookup_);
@@ -255,13 +253,8 @@ initializeAggregates(const std::vector<AggregateInfo>& aggregates,
 
 void
 GroupingSet::createHashTable() {
-    if (ignoreNullKeys_) {
-        hash_table_ = std::make_unique<HashTable<true>>(std::move(hashers_),
-                                                        accumulators());
-    } else {
-        hash_table_ = std::make_unique<HashTable<false>>(std::move(hashers_),
+    hash_table_ = std::make_unique<HashTable<false>>(std::move(hashers_),
                                                          accumulators());
-    }
     auto& rows = *(hash_table_->rows());
     initializeAggregates(aggregates_, rows);
     lookup_ =

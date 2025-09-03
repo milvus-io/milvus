@@ -17,18 +17,9 @@ namespace exec {
 
 void
 registerCount(const std::string name) {
-    std::vector<std::shared_ptr<expr::AggregateFunctionSignature>> signatures{
-        expr::AggregateFunctionSignatureBuilder()
-            .argumentType(DataType::INT64)
-            .intermediateType(DataType::INT64)
-            .returnType(DataType::INT64)
-            .build()};
-
     exec::registerAggregateFunction(
         name,
-        signatures,
-        [name](plan::AggregationNode::Step /*step*/,
-               const std::vector<DataType>& /*argumentTypes*/,
+        [name](const std::vector<DataType>& /*argumentTypes*/,
                const QueryConfig& /*config*/) -> std::unique_ptr<Aggregate> {
             return std::make_unique<CountAggregate>();
         });

@@ -32,6 +32,7 @@ PhyAggregationNode::PhyAggregationNode(
 void
 PhyAggregationNode::initialize() {
     Operator::initialize();
+    // aggregation operator will always have single one source
     const auto& input_type = aggregationNode_->sources()[0]->output_type();
     auto hashers =
         createVectorHashers(input_type, aggregationNode_->GroupingKeys());

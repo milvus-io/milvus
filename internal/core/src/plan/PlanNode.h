@@ -552,7 +552,6 @@ class AggregationNode : public PlanNode {
         std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
         std::vector<std::string>&& aggNames,
         std::vector<Aggregate>&& aggregates,
-        bool ignoreNullKeys,
         int64_t group_limit,
         std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{});
 
@@ -586,11 +585,6 @@ class AggregationNode : public PlanNode {
         return aggregates_;
     }
 
-    bool
-    ignoreNullKeys() const {
-        return ignoreNullKeys_;
-    }
-
     int64_t
     group_limit() const {
         return group_limit_;
@@ -600,7 +594,6 @@ class AggregationNode : public PlanNode {
     const std::vector<expr::FieldAccessTypeExprPtr> groupingKeys_;
     const std::vector<std::string> aggregateNames_;
     const std::vector<Aggregate> aggregates_;
-    const bool ignoreNullKeys_{true};
     const std::vector<PlanNodePtr> sources_;
     const RowTypePtr output_type_;
     const int64_t group_limit_;

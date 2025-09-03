@@ -16,7 +16,6 @@
 
 #include "SumAggregateBase.h"
 #include "RegisterAggregateFunctions.h"
-#include "expr/FunctionSignature.h"
 
 namespace milvus {
 namespace exec {

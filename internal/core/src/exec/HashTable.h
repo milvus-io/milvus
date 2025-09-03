@@ -144,8 +144,7 @@ class BaseHashTable {
     void
     prepareForGroupProbe(HashLookup& lookup,
                          const RowVectorPtr& input,
-                         TargetBitmap& activeRows,
-                         bool nullableKeys);
+                         TargetBitmap& activeRows);
 
     /// Finds or creates a group for each key in 'lookup'. The keys are
     /// returned in 'lookup.hits'.

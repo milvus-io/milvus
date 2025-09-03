@@ -45,8 +45,7 @@ populateLookupRows(const TargetBitmapView& activeRows,
 void
 BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
                                     const RowVectorPtr& input,
-                                    TargetBitmap& activeRows,
-                                    bool ignoreNullKeys) {
+                                    TargetBitmap& activeRows) {
     auto& hashers = lookup.hashers_;
     int numKeys = hashers.size();
     // set up column vector to each column
@@ -58,20 +57,13 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
         hashers[i]->setColumnData(column_ptr);
-        // deselect null values
-        if (ignoreNullKeys) {
-            int64_t length = column_ptr->size();
-            TargetBitmapView valid_bits_view(column_ptr->GetValidRawData(),
-                                             length);
-            activeRows &= valid_bits_view;
-        }
     }
     lookup.reset(activeRows.size());
 
     const auto mode = hashMode();
     for (auto i = 0; i < hashers.size(); i++) {
         if (mode == BaseHashTable::HashMode::kHash) {
-            TargetBitmapView tmp_views(activeRows);
+            TargetBitmapView tmp_views(activeRows);//hc--activeRows is necessary?
             hashers[i]->hash(i > 0, tmp_views, lookup.hashes_);
         } else {
             ThrowInfo(

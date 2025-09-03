@@ -12,7 +12,6 @@
 
 #include "common/Types.h"
 #include "plan/PlanNode.h"
-#include "expr/FunctionSignature.h"
 #include "plan/PlanNode.h"
 #include "exec/QueryContext.h"
 #include <folly/Synchronized.h>
