@@ -3901,6 +3901,17 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
 	})
 
+	t.Run("JSON not supported in struct", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "json_field",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_JSON,
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "JSON is not supported for fields in struct")
+	})
+
 	t.Run("nested array not supported", func(t *testing.T) {
 		testCases := []struct {
 			elementType schemapb.DataType
