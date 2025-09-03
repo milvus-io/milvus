@@ -80,12 +80,10 @@ class Aggregate {
 
     virtual void
     addSingleGroupRawInput(char* group,
-                           const TargetBitmapView& activeRows,
                            const std::vector<VectorPtr>& input) = 0;
 
     virtual void
     addRawInput(char** groups,
-                const TargetBitmapView& activeRows,
                 const std::vector<VectorPtr>& input) = 0;
 
     virtual void
