@@ -592,7 +592,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		return fmt.Errorf("Nested array is not supported %s", field.Name)
 	}
 
-	if field.DataType == schemapb.DataType_JSON {
+	if field.ElementType == schemapb.DataType_JSON {
 		return fmt.Errorf("JSON is not supported for fields in struct, fieldName = %s", field.Name)
 	}
 
