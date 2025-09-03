@@ -309,14 +309,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         index_info.field_type = load_index_info->field_type;
         index_info.index_engine_version = engine_version;
 
-        auto field_schema =
-            milvus::FieldMeta::ParseFrom(load_index_info->schema);
-        size_t dim =
-            IsVectorDataType(field_schema.get_data_type()) &&
-                    !IsSparseFloatVectorDataType(field_schema.get_data_type())
-                ? field_schema.get_dim()
-                : 1;
-        load_index_info->dim = dim;
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
         auto load_priority_str =
@@ -597,6 +589,14 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
             load_index_info->num_rows = info_proto->num_rows();
+            auto field_schema =
+                milvus::FieldMeta::ParseFrom(load_index_info->schema);
+            size_t dim = IsVectorDataType(field_schema.get_data_type()) &&
+                                 !IsSparseFloatVectorDataType(
+                                     field_schema.get_data_type())
+                             ? field_schema.get_dim()
+                             : 1;
+            load_index_info->dim = dim;
 
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
