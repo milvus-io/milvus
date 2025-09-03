@@ -250,6 +250,24 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			compactionParams,
 			[]int64{pk.GetFieldID()},
 		)
+	case datapb.CompactionType_PartitionKeySortCompaction:
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
+		pk, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+		partitionkey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+		if err != nil {
+			return merr.Status(err), err
+		}
+		task = compactor.NewSortCompactionTask(
+			taskCtx,
+			binlogIO,
+			req,
+			compactionParams,
+			[]int64{partitionkey.GetFieldID(), pk.GetFieldID()},
+		)
+	case datapb.CompactionType_ClusteringPartitionKeySortCompaction:
+		//TODO
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil

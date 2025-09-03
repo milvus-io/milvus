@@ -814,10 +814,10 @@ func getExpandedSize(size int64) int64 {
 	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }
 
-func canTriggerSortCompaction(segment *SegmentInfo) bool {
+func canTriggerSortCompaction(segment *SegmentInfo, isPartitionIsolationEnabled bool) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		!segment.GetIsSorted() &&
+		(!segment.GetIsSorted() || (isPartitionIsolationEnabled && !segment.GetIsPartitionKeySorted())) &&
 		!segment.GetIsImporting() &&
 		!segment.isCompacting
 }
