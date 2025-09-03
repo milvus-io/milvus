@@ -54,7 +54,6 @@ class SimpleNumericAggregate : public exec::Aggregate {
               typename UpdateSingleValue>
     void
     updateGroups(char** groups,
-                 const TargetBitmapView& rows,
                  const VectorPtr& vector,
                  UpdateSingleValue updateSingleValue) {
         auto start = -1;

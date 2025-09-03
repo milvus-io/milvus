@@ -50,17 +50,15 @@ class SumAggregateBase
 
     void
     addRawInput(char** groups,
-                const TargetBitmapView& activeRows,
                 const std::vector<VectorPtr>& input) override {
-        updateInternal<TAccumulator>(groups, activeRows, input);
+        updateInternal<TAccumulator>(groups, input);
     }
 
     void
     addSingleGroupRawInput(char* group,
-                           const TargetBitmapView& activeRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
-            group, activeRows, input[0], &updateSingleValue<TAccumulator>);
+            group, input[0], &updateSingleValue<TAccumulator>);
     }
 
     void
@@ -76,15 +74,14 @@ class SumAggregateBase
     template <typename TData, typename TValue = TInput>
     void
     updateInternal(char** groups,
-                   const TargetBitmapView& activeRows,
                    const std::vector<VectorPtr>& input) {
         const auto& input_column = input[0];
         if (Aggregate::numNulls_) {
             BaseAggregate::template updateGroups<true, TData, TValue>(
-                groups, activeRows, input_column, &updateSingleValue<TData>);
+                groups, input_column, &updateSingleValue<TData>);
         } else {
             BaseAggregate::template updateGroups<false, TData, TValue>(
-                groups, activeRows, input_column, &updateSingleValue<TData>);
+                groups, input_column, &updateSingleValue<TData>);
         }
     }
 

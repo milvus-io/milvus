@@ -138,9 +138,7 @@ class BaseHashTable {
 
     /// Populates 'hashes' and 'rows' fields in 'lookup' in preparation for
     /// 'groupProbe' call. Rehashes the table if necessary. Uses lookup.hashes to
-    /// decode grouping keys from 'input'. If 'ignoreNullKeys_' is true, updates
-    /// 'rows' to remove entries with null grouping keys. After this call, 'rows'
-    /// may have no entries selected.
+    /// decode grouping keys from 'input'. 
     void
     prepareForGroupProbe(HashLookup& lookup,
                          const RowVectorPtr& input,
@@ -286,7 +284,7 @@ class HashTable : public BaseHashTable {
     allocateTables(uint64_t size);
 
     void
-    fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck);
+    fullProbe(HashLookup& lookup, ProbeState& state);
 
     void
     clear(bool freeTable = false) override;

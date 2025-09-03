@@ -74,39 +74,31 @@ class ProbeState {
 
     template <Operation op = Operation::kInsert, typename Table>
     inline void
-    firstProbe(const Table& table, int32_t firstKey) {
+    firstProbe(const Table& table) {
         tagsInTable_ = BaseHashTable::loadTags(
             reinterpret_cast<uint8_t*>(table.table_), bucketOffset_);
         hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
         if (hits_) {
-            loadNextHit<op>(table, firstKey);
+            loadNextHit<op>(table);
         }
     }
 
     template <Operation op, typename Compare, typename Insert, typename Table>
     inline char*
     fullProbe(Table& table,
-              int32_t firstKey,
               Compare compare,
-              Insert insert,
-              bool extraCheck) {
+              Insert insert) {
         AssertInfo(op == Operation::kInsert,
                    "Only support insert operation for group cases");
         if (group_ && compare(group_, row_)) {
             return group_;
         }
-
-        if (extraCheck) {
-            tagsInTable_ = table.loadTags(bucketOffset_);
-            hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
-        }
-
         const auto kEmptyGroup = BaseHashTable::TagVector::broadcast(0);
         for (int64_t numProbedBuckets = 0;
              numProbedBuckets < table.numBuckets();
              ++numProbedBuckets) {
             while (hits_ > 0) {
-                loadNextHit<op>(table, firstKey);
+                loadNextHit<op>(table);
                 if (compare(group_, row_)) {
                     return group_;
                 }
@@ -132,10 +124,10 @@ class ProbeState {
     static constexpr uint8_t kNotSet = 0xff;
     template <Operation op, typename Table>
     inline void
-    loadNextHit(Table& table, int32_t firstKey) {
+    loadNextHit(Table& table) {
         const int32_t hit = milvus::bits::getAndClearLastSetBit(hits_);
         group_ = table.row(bucketOffset_, hit);
-        __builtin_prefetch(group_ + firstKey);
+        __builtin_prefetch(group_);
     }
 
     char* group_;
@@ -236,19 +228,16 @@ HashTable::insertEntry(milvus::exec::HashLookup& lookup,
 
 FOLLY_ALWAYS_INLINE void
 HashTable::fullProbe(HashLookup& lookup,
-                                     ProbeState& state,
-                                     bool extraCheck) {
+                                     ProbeState& state) {
     constexpr ProbeState::Operation op = ProbeState::Operation::kInsert;
     lookup.hits_[state.row()] = state.fullProbe<op>(
         *this,
-        0,
         [&](char* group, int32_t row) {
             return compareKeys(group, lookup, row);
         },
         [&](int32_t row, uint64_t index) {
             return insertEntry(lookup, index, row);
-        },
-        extraCheck);
+        });
 }
 
 void
@@ -258,8 +247,8 @@ HashTable::groupProbe(milvus::exec::HashLookup& lookup) {
     ProbeState state;
     for (int32_t idx = 0; idx < lookup.hashes_.size(); idx++) {
         state.preProbe(*this, lookup.hashes_[idx], idx);
-        state.firstProbe<ProbeState::Operation::kInsert>(*this, 0);
-        fullProbe(lookup, state, false);
+        state.firstProbe<ProbeState::Operation::kInsert>(*this);
+        fullProbe(lookup, state);
         if (lookup.group_enough()) {
             // group count has reached group limit, exit early
             break;

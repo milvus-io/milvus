@@ -38,7 +38,6 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
 
     void
     addRawInput(char** groups,
-                const TargetBitmapView& activeRows,
                 const std::vector<VectorPtr>& input) override {
         ColumnVectorPtr input_column = nullptr;
         AssertInfo(input.empty() || input.size() == 1,

@@ -44,7 +44,6 @@ AggregationNode::AggregationNode(
     std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
     std::vector<std::string>&& aggNames,
     std::vector<Aggregate>&& aggregates,
-    bool ignoreNullKeys,
     int64_t group_limit,
     std::vector<PlanNodePtr> sources)
     : PlanNode(id),
@@ -55,7 +54,6 @@ AggregationNode::AggregationNode(
       sources_(std::move(sources)),
       output_type_(getAggregationOutputType(
           groupingKeys_, aggregateNames_, aggregates_)),
-      ignoreNullKeys_(ignoreNullKeys),
       group_limit_(group_limit) {
 }
 
