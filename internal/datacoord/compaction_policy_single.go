@@ -24,7 +24,9 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
@@ -52,6 +54,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
 	sortViews := make([]CompactionView, 0)
+	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
 		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
@@ -59,10 +62,15 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			log.Warn("fail to trigger single compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
 		views = append(views, collectionViews...)
-		sortViews = append(sortViews, collectionSortViews...)
+		if IsPartitionKeySortCompactionEnabled(collection.Schema) {
+			partitionKeySortViews = append(partitionKeySortViews, collectionSortViews...)
+		} else {
+			sortViews = append(sortViews, collectionSortViews...)
+		}
 	}
 	events[TriggerTypeSingle] = views
 	events[TriggerTypeSort] = sortViews
+	events[TriggerTypePartitionKeySort] = partitionKeySortViews
 	return events, nil
 }
 
@@ -80,7 +88,10 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, segment not healthy")
 		return nil
 	}
-	if !canTriggerSortCompaction(segment) {
+
+	collection := policy.meta.GetCollection(segment.GetCollectionID())
+	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
+	if !canTriggerSortCompaction(segment, isPartitionIsolationEnabled) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
 			zap.String("state", segment.GetState().String()),
 			zap.String("level", segment.GetLevel().String()),
@@ -126,6 +137,11 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	return view
 }
 
+func IsPartitionKeySortCompactionEnabled(schema *schemapb.CollectionSchema) bool {
+	iso, _ := common.IsPartitionKeyIsolationKvEnabled(schema.Properties...)
+	return Params.CommonCfg.EnableNamespace.GetAsBool() && iso
+}
+
 func (policy *singleCompactionPolicy) triggerSortCompaction(
 	ctx context.Context,
 	triggerID int64,
@@ -139,9 +155,11 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	}
 	views := make([]CompactionView, 0)
 
+	collection := policy.meta.GetCollection(collectionID)
+	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg)
+			return canTriggerSortCompaction(seg, isPartitionIsolationEnabled)
 		}))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")
