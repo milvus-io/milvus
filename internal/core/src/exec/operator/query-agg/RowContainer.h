@@ -202,26 +202,19 @@ class RowContainer {
         return equalsNoNulls<Type>(row, offset, column, index);
     }
 
-    template <bool mayHaveNulls>
     inline bool
     equals(const char* row,
            RowColumn column,
            const ColumnVectorPtr& column_data,
            vector_size_t index) {
-        auto type = column_data->type();
-        if constexpr (mayHaveNulls) {
-            return MILVUS_DYNAMIC_TYPE_DISPATCH(equalsWithNulls,
-                                                type,
-                                                row,
-                                                column.offset(),
-                                                column.nullByte(),
-                                                column.nullMask(),
-                                                column_data,
-                                                index);
-        } else {
-            return MILVUS_DYNAMIC_TYPE_DISPATCH(
-                equalsNoNulls, type, row, column.offset(), column_data, index);
-        }
+        return MILVUS_DYNAMIC_TYPE_DISPATCH(equalsWithNulls,
+                                            column_data->type(),
+                                            row,
+                                            column.offset(),
+                                            column.nullByte(),
+                                            column.nullMask(),
+                                            column_data,
+                                            index);
     }
 
     /// Stores the 'index'th value in 'columnVector' into 'row' at 'columnIndex'.

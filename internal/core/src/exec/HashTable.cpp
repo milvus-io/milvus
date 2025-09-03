@@ -147,9 +147,8 @@ class ProbeState {
     //uint8_t indexInTags_ = kNotSet;
 };
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::allocateTables(uint64_t size) {
+HashTable::allocateTables(uint64_t size) {
     AssertInfo(milvus::bits::isPowerOfTwo(size),
                "Size:{} for allocating tables must be a power of two",
                size);
@@ -174,9 +173,8 @@ HashTable<ignoreNullKeys>::allocateTables(uint64_t size) {
     memset(table_, 0, capacity_ * sizeof(char*));
 }
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::checkSizeAndAllocateTable(int32_t numNew) {
+HashTable::checkSizeAndAllocateTable(int32_t numNew) {
     AssertInfo(capacity_ == 0 || capacity_ > numDistinct_,
                "capacity_ {}, numDistinct {}",
                capacity_,
@@ -187,16 +185,15 @@ HashTable<ignoreNullKeys>::checkSizeAndAllocateTable(int32_t numNew) {
     }
 }
 
-template <bool ignoreNullKeys>
 bool
-HashTable<ignoreNullKeys>::compareKeys(const char* group,
+HashTable::compareKeys(const char* group,
                                        milvus::exec::HashLookup& lookup,
                                        milvus::vector_size_t row) {
     int32_t numKeys = lookup.hashers_.size();
     int32_t i = 0;
     do {
         auto& hasher = lookup.hashers_[i];
-        if (!rows_->equals<!ignoreNullKeys>(
+        if (!rows_->equals(
                 group, rows()->columnAt(i), hasher->columnData(), row)) {
             return false;
         }
@@ -204,9 +201,8 @@ HashTable<ignoreNullKeys>::compareKeys(const char* group,
     return true;
 }
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::storeKeys(milvus::exec::HashLookup& lookup,
+HashTable::storeKeys(milvus::exec::HashLookup& lookup,
                                      milvus::vector_size_t row) {
     for (int32_t i = 0; i < hashers_.size(); i++) {
         auto& hasher = hashers_[i];
@@ -214,9 +210,8 @@ HashTable<ignoreNullKeys>::storeKeys(milvus::exec::HashLookup& lookup,
     }
 }
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::storeRowPointer(uint64_t index,
+HashTable::storeRowPointer(uint64_t index,
                                            uint64_t hash,
                                            char* row) {
     const int64_t bktOffset = bucketOffset(index);
@@ -226,9 +221,8 @@ HashTable<ignoreNullKeys>::storeRowPointer(uint64_t index,
     bucket->setPointer(slotIndex, row);
 }
 
-template <bool ignoreNullKeys>
 char*
-HashTable<ignoreNullKeys>::insertEntry(milvus::exec::HashLookup& lookup,
+HashTable::insertEntry(milvus::exec::HashLookup& lookup,
                                        uint64_t index,
                                        milvus::vector_size_t row) {
     char* group = rows_->newRow();
@@ -240,9 +234,8 @@ HashTable<ignoreNullKeys>::insertEntry(milvus::exec::HashLookup& lookup,
     return group;
 }
 
-template <bool ignoreNullKeys>
 FOLLY_ALWAYS_INLINE void
-HashTable<ignoreNullKeys>::fullProbe(HashLookup& lookup,
+HashTable::fullProbe(HashLookup& lookup,
                                      ProbeState& state,
                                      bool extraCheck) {
     constexpr ProbeState::Operation op = ProbeState::Operation::kInsert;
@@ -258,9 +251,8 @@ HashTable<ignoreNullKeys>::fullProbe(HashLookup& lookup,
         extraCheck);
 }
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::groupProbe(milvus::exec::HashLookup& lookup) {
+HashTable::groupProbe(milvus::exec::HashLookup& lookup) {
     AssertInfo(hashMode_ == HashMode::kHash, "Only support kHash mode for now");
     checkSizeAndAllocateTable(lookup.group_limit_);
     ProbeState state;
@@ -275,9 +267,8 @@ HashTable<ignoreNullKeys>::groupProbe(milvus::exec::HashLookup& lookup) {
     }
 }
 
-template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::setHashMode(HashMode mode, int32_t numNew) {
+HashTable::setHashMode(HashMode mode, int32_t numNew) {
     // TODO set hash mode kArray/kHash/kNormalizedKey
 }
 
