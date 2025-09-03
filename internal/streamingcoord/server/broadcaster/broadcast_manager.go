@@ -138,7 +138,8 @@ func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 		return err
 	}
 	if b.ReplicateRole() != replicateutil.RolePrimary {
-		return status.NewReplicateViolation("cluster is not primary, cannot do any DDL/DCL")
+		// a non-primary cluster cannot do any broadcast operation.
+		return ErrNotPrimary
 	}
 	return nil
 }
