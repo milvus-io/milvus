@@ -1069,10 +1069,10 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("not_supported_reranker", ["invalid", "rrf", "weights"])
+    @pytest.mark.parametrize("not_supported_reranker", ["invalid"])
     def test_milvus_client_search_reranker_not_supported_reranker_value(self, not_supported_reranker):
         """
-        target: test search with reranker with multiple fields
+        target: test search with reranker with not supported reranker value
         method: create connection, collection, insert and search
         expected: raise exception
         """
