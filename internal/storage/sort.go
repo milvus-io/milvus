@@ -24,11 +24,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
-	rw RecordWriter, predicate func(r Record, ri, i int) bool,
+	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
 ) (int, error) {
 	records := make([]Record, 0)
 
@@ -69,24 +70,55 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return 0, nil
 	}
 
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return 0, err
-	}
-	pkFieldId := pkField.FieldID
+	if len(sortByFieldIDs) > 0 {
+		type keyCmp func(x, y *index) int
+		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
+		for _, fid := range sortByFieldIDs {
+			switch records[0].Column(fid).(type) {
+			case *array.Int64:
+				f := func(x, y *index) int {
+					xVal := records[x.ri].Column(fid).(*array.Int64).Value(x.i)
+					yVal := records[y.ri].Column(fid).(*array.Int64).Value(y.i)
+					if xVal < yVal {
+						return -1
+					}
+					if xVal > yVal {
+						return 1
+					}
+					return 0
+				}
+				comparators = append(comparators, f)
+			case *array.String:
+				f := func(x, y *index) int {
+					xVal := records[x.ri].Column(fid).(*array.String).Value(x.i)
+					yVal := records[y.ri].Column(fid).(*array.String).Value(y.i)
+					if xVal < yVal {
+						return -1
+					}
+					if xVal > yVal {
+						return 1
+					}
+					return 0
+				}
+				comparators = append(comparators, f)
+			default:
+				return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+			}
+		}
 
-	switch records[0].Column(pkFieldId).(type) {
-	case *array.Int64:
 		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkFieldId).(*array.Int64).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkFieldId).(*array.Int64).Value(indices[j].i)
-			return pki < pkj
-		})
-	case *array.String:
-		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkFieldId).(*array.String).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkFieldId).(*array.String).Value(indices[j].i)
-			return pki < pkj
+			x := indices[i]
+			y := indices[j]
+			for _, cmp := range comparators {
+				c := cmp(x, y)
+				if c < 0 {
+					return true
+				}
+				if c > 0 {
+					return false
+				}
+			}
+			return false
 		})
 	}
 
