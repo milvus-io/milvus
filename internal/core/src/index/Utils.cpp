@@ -356,8 +356,8 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             // build index skip null value, so not need to set nullable == true
-            auto new_field_data =
-                storage::CreateFieldData(DataType::INT8, false, 1, total_len);
+            auto new_field_data = storage::CreateFieldData(
+                DataType::INT8, DataType::NONE, false, 1, total_len);
 
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);

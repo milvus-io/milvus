@@ -177,7 +177,7 @@ class NGRAM:
                 "max_gram": 3,
                 "json_path": "json_field['body']"
             },
-            "expected": {"err_code": 999, "err_msg": "json_cast_type not found"}
+            "expected": {"err_code": 999, "err_msg": "JSON field with ngram index must specify json_cast_type"}
         },
         {
             "description": "JSON field missing json_path",

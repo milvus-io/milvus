@@ -150,31 +150,43 @@ class TestVectorArrayStorageV2 : public testing::Test {
                     EXPECT_TRUE(status.ok());
                     arrays.push_back(array);
                 } else {
-                    // vector array
-                    arrow::BinaryBuilder builder;
+                    // vector array - using ListArray
+                    // Get field meta to determine element type
+                    auto vector_array_field_id = fields_["vector_array"];
+                    auto& field_meta =
+                        schema_->operator[](vector_array_field_id);
+                    auto element_type = field_meta.get_element_type();
+
+                    // Create appropriate value builder based on element type
+                    std::shared_ptr<arrow::ArrayBuilder> value_builder;
+                    if (element_type == DataType::VECTOR_FLOAT) {
+                        value_builder = std::make_shared<arrow::FloatBuilder>();
+                    } else {
+                        FAIL() << "Unsupported element type for VECTOR_ARRAY "
+                                  "in test";
+                    }
+
+                    auto list_builder = std::make_shared<arrow::ListBuilder>(
+                        arrow::default_memory_pool(), value_builder);
 
                     for (int row = 0; row < test_data_count_; row++) {
-                        milvus::proto::schema::VectorField
-                            field_float_vector_array;
-                        field_float_vector_array.set_dim(DIM);
-
-                        auto data = generate_float_vector(10, DIM);
-                        field_float_vector_array.mutable_float_vector()
-                            ->mutable_data()
-                            ->Add(data.begin(), data.end());
-
-                        std::string serialized_data;
-                        bool success =
-                            field_float_vector_array.SerializeToString(
-                                &serialized_data);
-                        EXPECT_TRUE(success);
-
-                        auto status = builder.Append(serialized_data);
+                        // Each row contains 10 vectors of dimension DIM
+                        auto status = list_builder->Append();
                         EXPECT_TRUE(status.ok());
+
+                        // Generate 10 vectors for this row
+                        auto data = generate_float_vector(10, DIM);
+                        auto float_builder =
+                            std::static_pointer_cast<arrow::FloatBuilder>(
+                                value_builder);
+                        for (const auto& value : data) {
+                            status = float_builder->Append(value);
+                            EXPECT_TRUE(status.ok());
+                        }
                     }
 
                     std::shared_ptr<arrow::Array> array;
-                    auto status = builder.Finish(&array);
+                    auto status = list_builder->Finish(&array);
                     EXPECT_TRUE(status.ok());
                     arrays.push_back(array);
                 }
@@ -297,6 +309,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         test_data_count_ * chunk_num_;  // Important: set row count
     config[STORAGE_VERSION_KEY] = 2;    // Use storage v2
     config[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
+    config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
 
     // For storage v2, we need to provide segment insert files instead of individual binlog files
     milvus::SegmentInsertFiles segment_insert_files;

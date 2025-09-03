@@ -257,10 +257,17 @@ BaseEventData::Serialize() {
         auto field_data = payload_reader->get_field_data();
         auto data_type = field_data->get_data_type();
         std::shared_ptr<PayloadWriter> payload_writer;
-        if (IsVectorDataType(data_type) &&
-            // each element will be serialized as bytes so no need dim info
-            data_type != DataType::VECTOR_ARRAY &&
-            !IsSparseFloatVectorDataType(data_type)) {
+
+        if (data_type == DataType::VECTOR_ARRAY) {
+            auto vector_array_field =
+                std::dynamic_pointer_cast<FieldData<VectorArray>>(field_data);
+            AssertInfo(vector_array_field != nullptr,
+                       "Failed to cast to FieldData<VectorArray>");
+            auto element_type = vector_array_field->get_element_type();
+            payload_writer = std::make_unique<PayloadWriter>(
+                data_type, field_data->get_dim(), element_type);
+        } else if (IsVectorDataType(data_type) &&
+                   !IsSparseFloatVectorDataType(data_type)) {
             payload_writer = std::make_unique<PayloadWriter>(
                 data_type, field_data->get_dim(), field_data->IsNullable());
         } else {
@@ -324,19 +331,14 @@ BaseEventData::Serialize() {
                 break;
             }
             case DataType::VECTOR_ARRAY: {
-                for (size_t offset = 0; offset < field_data->get_num_rows();
-                     ++offset) {
-                    auto array = static_cast<const VectorArray*>(
-                        field_data->RawValue(offset));
-                    auto array_string =
-                        array->output_data().SerializeAsString();
-                    auto size = array_string.size();
-
-                    // todo(SapdeA): it maybe better to serialize vectors one by one
-                    payload_writer->add_one_binary_payload(
-                        reinterpret_cast<const uint8_t*>(array_string.c_str()),
-                        size);
-                }
+                auto payload =
+                    Payload{data_type,
+                            static_cast<const uint8_t*>(field_data->Data()),
+                            field_data->ValidData(),
+                            field_data->get_num_rows(),
+                            field_data->get_dim(),
+                            field_data->IsNullable()};
+                payload_writer->add_payload(payload);
                 break;
             }
             default: {

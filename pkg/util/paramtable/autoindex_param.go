@@ -35,16 +35,18 @@ type AutoIndexConfig struct {
 	EnableOptimize         ParamItem `refreshable:"true"`
 	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
-	IndexParams           ParamItem  `refreshable:"true"`
-	SparseIndexParams     ParamItem  `refreshable:"true"`
-	BinaryIndexParams     ParamItem  `refreshable:"true"`
-	PrepareParams         ParamItem  `refreshable:"true"`
-	LoadAdaptParams       ParamItem  `refreshable:"true"`
-	ExtraParams           ParamItem  `refreshable:"true"`
-	IndexType             ParamItem  `refreshable:"true"`
-	AutoIndexTypeName     ParamItem  `refreshable:"true"`
-	AutoIndexSearchConfig ParamItem  `refreshable:"true"`
-	AutoIndexTuningConfig ParamGroup `refreshable:"true"`
+	IndexParams            ParamItem  `refreshable:"true"`
+	SparseIndexParams      ParamItem  `refreshable:"true"`
+	BinaryIndexParams      ParamItem  `refreshable:"true"`
+	DeduplicateIndexParams ParamItem  `refreshable:"true"`
+	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
+	PrepareParams          ParamItem  `refreshable:"true"`
+	LoadAdaptParams        ParamItem  `refreshable:"true"`
+	ExtraParams            ParamItem  `refreshable:"true"`
+	IndexType              ParamItem  `refreshable:"true"`
+	AutoIndexTypeName      ParamItem  `refreshable:"true"`
+	AutoIndexSearchConfig  ParamItem  `refreshable:"true"`
+	AutoIndexTuningConfig  ParamGroup `refreshable:"true"`
 
 	ScalarAutoIndexEnable  ParamItem `refreshable:"true"`
 	ScalarAutoIndexParams  ParamItem `refreshable:"true"`
@@ -107,6 +109,23 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BinaryIndexParams.Init(base.mgr)
+
+	p.DeduplicateIndexParams = ParamItem{
+		Key:          "autoIndex.params.deduplicate.build",
+		Version:      "2.5.18",
+		DefaultValue: `{"index_type": "MINHASH_LSH", "metric_type": "MHJACCARD"}`,
+		Formatter:    GetBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.deduplicate.build"),
+		Export:       true,
+	}
+	p.DeduplicateIndexParams.Init(base.mgr)
+
+	p.EnableDeduplicateIndex = ParamItem{
+		Key:          "autoIndex.params.deduplicate.enable",
+		Version:      "2.5.18",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+	}
+	p.EnableDeduplicateIndex.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",

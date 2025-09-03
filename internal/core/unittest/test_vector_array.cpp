@@ -133,3 +133,77 @@ TEST(VectorArray, TestConstructVectorArray) {
 
     // todo: add other vector types
 }
+
+TEST(VectorArray, TestConstructorWithData) {
+    using namespace milvus;
+
+    int N = 10;  // number of vectors
+    int64_t dim = 128;
+
+    // Generate test data
+    auto data = generate_float_vector(42, N, dim);
+
+    // Test 1: Direct construction from raw float data
+    {
+        milvus::VectorArray va(data.data(), N, dim, DataType::VECTOR_FLOAT);
+
+        ASSERT_EQ(va.length(), N);
+        ASSERT_EQ(va.dim(), dim);
+        ASSERT_EQ(va.get_element_type(), DataType::VECTOR_FLOAT);
+        ASSERT_EQ(va.byte_size(), N * dim * sizeof(float));
+
+        // Verify data integrity
+        for (int i = 0; i < N; ++i) {
+            auto vec_data = va.get_data<float>(i);
+            for (int j = 0; j < dim; ++j) {
+                ASSERT_FLOAT_EQ(vec_data[j], data[i * dim + j]);
+            }
+        }
+    }
+
+    // Test 2: Compare with protobuf-based constructor
+    {
+        // Create via protobuf
+        milvus::proto::schema::VectorField field_proto;
+        field_proto.set_dim(dim);
+        field_proto.mutable_float_vector()->mutable_data()->Add(data.begin(),
+                                                                data.end());
+        milvus::VectorArray va_proto(field_proto);
+
+        // Create via data constructor
+        milvus::VectorArray va_direct(
+            data.data(), N, dim, DataType::VECTOR_FLOAT);
+
+        // Both should be equal
+        ASSERT_EQ(va_proto.length(), va_direct.length());
+        ASSERT_EQ(va_proto.dim(), va_direct.dim());
+        ASSERT_EQ(va_proto.byte_size(), va_direct.byte_size());
+        ASSERT_EQ(va_proto.get_element_type(), va_direct.get_element_type());
+
+        // Compare data
+        for (int i = 0; i < N; ++i) {
+            auto proto_vec = va_proto.get_data<float>(i);
+            auto direct_vec = va_direct.get_data<float>(i);
+            for (int j = 0; j < dim; ++j) {
+                ASSERT_FLOAT_EQ(proto_vec[j], direct_vec[j]);
+            }
+        }
+    }
+
+    // Test 3: Test with edge cases
+    {
+        // Single vector
+        milvus::VectorArray va_single(
+            data.data(), 1, dim, DataType::VECTOR_FLOAT);
+        ASSERT_EQ(va_single.length(), 1);
+        ASSERT_EQ(va_single.byte_size(), dim * sizeof(float));
+
+        // Small dimension
+        int64_t small_dim = 4;
+        auto small_data = generate_float_vector(123, 5, small_dim);
+        milvus::VectorArray va_small(
+            small_data.data(), 5, small_dim, DataType::VECTOR_FLOAT);
+        ASSERT_EQ(va_small.length(), 5);
+        ASSERT_EQ(va_small.dim(), small_dim);
+    }
+}

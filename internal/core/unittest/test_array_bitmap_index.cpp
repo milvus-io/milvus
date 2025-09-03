@@ -186,7 +186,8 @@ class ArrayBitmapIndexTest : public testing::Test {
             segment_id, field_id, index_build_id, index_version};
 
         data_ = GenerateArrayData(element_type, cardinality_, nb_, 10);
-        auto field_data = storage::CreateFieldData(DataType::ARRAY, nullable_);
+        auto field_data = storage::CreateFieldData(
+            DataType::ARRAY, DataType::NONE, nullable_);
         if (nullable_) {
             valid_data_.reserve(nb_);
             uint8_t* ptr = new uint8_t[(nb_ + 7) / 8];
