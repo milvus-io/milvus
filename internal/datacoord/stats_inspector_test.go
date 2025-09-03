@@ -217,7 +217,7 @@ func (s *statsInspectorSuite) TestStart() {
 	time.Sleep(10 * time.Millisecond) // Give goroutines some time to start
 
 	s.inspector.Stop()
-	s.False(s.inspector.ctx.Done() == nil, "Context should be canceled")
+	s.False(s.inspector.ctx.Done() == nil, "Context should be cancelled")
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTask() {
