@@ -8,6 +8,7 @@ from utils.util_pymilvus import *
 import pandas as pd
 import numpy as np
 import random
+from pymilvus import Function, FunctionType
 
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
@@ -432,10 +433,10 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_partition_without_loading(self):
+    def test_milvus_client_query_partition_without_loading_collection(self):
         """
-        target: test query on partition without loading
-        method: query on partition and no loading
+        target: test query on partition without loading collection
+        method: query on partition and no loading collection
         expected: raise exception
         """
         client = self._client()
@@ -453,11 +454,43 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
         assert partition_info['row_count'] == default_nb, f"Expected {default_nb} entities in partition, got {partition_info['row_count']}"
-        # 5. query on partition without loading (should raise exception)
+        # 5. query on partition without loading collection
         error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_name],
                    check_task=CheckTasks.err_res, check_items=error)
         # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_partition_without_loading_partiton(self):
+        """
+        target: Verify that querying an unloaded partition raises an exception.
+        method: 1. Create a collection and two partitions.
+                2. Insert data into both partitions.
+                3. Load only one partition.
+                4. Attempt to query the other partition that is not loaded.
+        expected: The query should fail with an error indicating the partition is not loaded.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        # 2. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_names=[partition_name1, partition_name2])
+        self.flush(client, collection_name)
+        self.load_partitions(client, collection_name, partition_name1)
+        # 3. query on partition without loading
+        error = {ct.err_code: 65535, ct.err_msg: f"partition name {partition_name2} not found"}
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name2],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 4. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -497,6 +530,48 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=term_expr, partition_names=[],
                    check_task=CheckTasks.check_query_results,
                    check_items={"exp_res": exp_res, "with_vec": True, "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_on_specific_partition(self):
+        """
+        Target: Verify that querying a specific partition only returns data from that partition.
+        Method:
+        1. Create a collection and two partitions (partition1 and partition2).
+        2. Insert the first half of the data into partition1 and the second half into partition2.
+        3. Create an index and load both partitions.
+        4. Query only partition1 and check that the returned results only contain data from partition1.
+        5. Clean up the collection.
+        Expected: Only data from partition1 is returned and matches the inserted data.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data to partition
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on partition
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name1],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows_partition1, "with_vec": True, "pk_name": default_primary_key_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -548,9 +623,9 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 3. query on non-existent partition
-        partition_names = cf.gen_unique_str()
-        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_names} not found'}
-        self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_names],
+        partition_name = cf.gen_unique_str()
+        error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_name} not found'}
+        self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_name],
                    check_task=CheckTasks.err_res, check_items=error)
         # 4. clean up
         self.drop_collection(client, collection_name)
@@ -2467,6 +2542,67 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={"exp_res": exp_res, "with_vec": True, "pk_name": ct.default_int64_field_name})
         # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_output_multi_sparse_vec_field(self):
+        """
+        target: test query and output multi sparse vec fields
+        method: a.specify multi vec field as output
+                b.specify output_fields with wildcard %
+        expected: verify query result
+        """
+        from faker import Faker
+        fake = Faker()
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with two float vector fields
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field("document", DataType.VARCHAR, max_length=10000, enable_analyzer=True)
+        schema.add_field("sparse1", DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field("sparse2", DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field("bm25", DataType.SPARSE_FLOAT_VECTOR)
+        # add bm25 function
+        bm25_function = Function(
+            name="bm25",
+            input_field_names=["document"],
+            output_field_names="bm25",
+            function_type=FunctionType.BM25,
+        )
+        schema.add_function(bm25_function)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = []
+        data_size = 3000
+        for i in range(data_size):
+            rows.append({
+                ct.default_int64_field_name: i,
+                "sparse1": {random.randint(1, 10000): random.random() for _ in range(100)},
+                "sparse2": {random.randint(1, 10000): random.random() for _ in range(100)},
+                "document": fake.text(),
+            })
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="sparse1", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        index_params.add_index(field_name="sparse2", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        index_params.add_index(field_name="bm25", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25",
+                               params={"bm25_k1": 1.2, "bm25_b": 0.75})
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with multi vec output_fields
+        output_fields = [ct.default_int64_field_name, "sparse1", "sparse2"]
+        exp_res = []
+        for i in range(2):
+            result_item = {}
+            for field_name in output_fields:
+                result_item[field_name] = rows[i][field_name]
+            exp_res.append(result_item)
+        self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "with_vec": True, "pk_name": ct.default_int64_field_name})[0]
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
