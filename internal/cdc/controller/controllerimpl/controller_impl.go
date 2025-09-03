@@ -45,11 +45,11 @@ func NewController() *controller {
 
 func (c *controller) Start() {
 	log.Ctx(c.ctx).Info("CDC controller started")
-	timer := time.NewTicker(checkInterval)
-	defer timer.Stop()
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+		timer := time.NewTicker(checkInterval)
+		defer timer.Stop()
 		for {
 			select {
 			case <-c.stopChan:

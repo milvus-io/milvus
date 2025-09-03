@@ -109,6 +109,7 @@ func (r *replicateStreamClient) startInternal() {
 				time.Sleep(backoff.NextBackOff())
 				continue
 			}
+			logger.Info("replicate stream client service started")
 
 			// reset client and pending messages
 			if oldClient := r.client; oldClient != nil {

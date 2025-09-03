@@ -97,6 +97,7 @@ func (r *channelReplicator) StartReplicate() {
 			}
 			break
 		}
+		logger.Info("stop replicate channel")
 	}()
 }
 
@@ -111,8 +112,14 @@ func (r *channelReplicator) replicateLoop() error {
 		return err
 	}
 	ch := make(adaptor.ChanMessageHandler, scannerHandlerChanSize)
-	// deliverPolicy := options.DeliverPolicyStartFrom(startFrom)
-	deliverPolicy := options.DeliverPolicyAll() // TODO: sheep, remove this after get the correct startFrom in milvus
+	var deliverPolicy options.DeliverPolicy
+	if startFrom == nil {
+		// No checkpoint found, seek from the earliest position
+		deliverPolicy = options.DeliverPolicyAll()
+	} else {
+		// Seek from the checkpoint
+		deliverPolicy = options.DeliverPolicyStartFrom(startFrom)
+	}
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
 		PChannel:       r.replicateInfo.GetSourceChannelName(),
 		DeliverPolicy:  deliverPolicy,
@@ -141,14 +148,21 @@ func (r *channelReplicator) replicateLoop() error {
 }
 
 func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, error) {
-	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, r.replicateInfo.GetTargetCluster())
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
+
+	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
+	defer cancel()
+	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(ctx, r.replicateInfo.GetTargetCluster())
 	if err != nil {
 		return nil, err
 	}
-	defer milvusClient.Close(r.ctx)
+	defer milvusClient.Close(ctx)
 
 	sourceClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	replicateInfo, err := milvusClient.GetReplicateInfo(r.ctx, sourceClusterID)
+	replicateInfo, err := milvusClient.GetReplicateInfo(ctx, sourceClusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,14 +175,12 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		}
 	}
 	if checkpoint == nil {
-		return nil, fmt.Errorf("channel %s not found in replicate info in cluster %s",
-			r.replicateInfo.GetTargetChannelName(), r.replicateInfo.GetTargetCluster().GetClusterId())
+		logger.Info("channel not found in replicate info, will start from the beginning")
+		return nil, nil
 	}
 
 	startFrom := message.MustUnmarshalMessageID(checkpoint.GetMessageId())
-	log.Info("replicate messages from position",
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	logger.Info("replicate messages from position",
 		zap.Any("checkpoint", checkpoint),
 		zap.Any("startFromMessageID", startFrom),
 	)

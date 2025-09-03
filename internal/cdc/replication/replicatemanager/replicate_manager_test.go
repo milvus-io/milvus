@@ -23,23 +23,19 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestReplicateManager_CreateReplicator(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "test-source")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.ClusterPrefix.Key)
+
 	mockMilvusClient := cluster.NewMockMilvusClient(t)
 	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
-		Return(&milvuspb.GetReplicateInfoResponse{
-			Checkpoints: []*commonpb.ReplicateCheckpoint{
-				{
-					Pchannel:  "test-source-channel",
-					MessageId: newMockPulsarMessageID(),
-				},
-			},
-		}, nil).Maybe()
+		Return(nil, assert.AnError).Maybe()
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil).Maybe()
 
 	mockClusterClient := cluster.NewMockClusterClient(t)

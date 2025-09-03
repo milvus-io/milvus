@@ -368,6 +368,7 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, conf
 	cm.cond.LockAndBroadcast()
 	defer cm.cond.L.Unlock()
 	cm.replicateConfig = config
+	cm.version.Local++
 }
 
 // applyAssignments applies the assignments.
