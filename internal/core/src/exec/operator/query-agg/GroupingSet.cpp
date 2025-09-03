@@ -188,9 +188,6 @@ GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
     }
     ensureInputFits(input);
     hash_table_->prepareForGroupProbe(*lookup_, input);
-    if (lookup_->rows_.empty()) {
-        return;
-    }
     hash_table_->groupProbe(*lookup_);
     auto* groups = lookup_->hits_.data();
     const auto& newGroups = lookup_->newGroups_;

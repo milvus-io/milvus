@@ -21,27 +21,6 @@
 
 namespace milvus {
 namespace exec {
-
-void
-populateLookupRows(const TargetBitmapView& activeRows,
-                   std::vector<vector_size_t>& lookupRows) {
-    if (activeRows.all()) {
-        std::iota(lookupRows.begin(), lookupRows.end(), 0);
-    } else {
-        auto start = -1;
-        lookupRows.clear();
-        lookupRows.reserve(activeRows.count());
-        do {
-            auto next_active = activeRows.find_next(start);
-            if (!next_active.has_value())
-                break;
-            auto next_active_row = next_active.value();
-            lookupRows.emplace_back(next_active_row);
-            start = next_active_row;
-        } while (true);
-    }
-}
-
 void
 BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
                                     const RowVectorPtr& input) {
@@ -62,16 +41,13 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
     const auto mode = hashMode();
     for (auto i = 0; i < hashers.size(); i++) {
         if (mode == BaseHashTable::HashMode::kHash) {
-            TargetBitmapView tmp_views(activeRows);//hc--activeRows is necessary?
-            hashers[i]->hash(i > 0, tmp_views, lookup.hashes_);
+            hashers[i]->hash(i > 0, lookup.hashes_);
         } else {
             ThrowInfo(
                 milvus::OpTypeInvalid,
                 "Not support target hashMode, only support kHash for now");
         }
     }
-    TargetBitmapView active_views(activeRows);
-    populateLookupRows(active_views, lookup.rows_);
 }
 
 class ProbeState {
