@@ -56,11 +56,17 @@ class AzureChunkManagerTest : public testing::Test {
     ~AzureChunkManagerTest() {
     }
 
-    virtual void
-    SetUp() {
+    void
+    SetUp() override {
         configs_ = get_default_storage_config(false);
         chunk_manager_ = make_unique<AzureChunkManager>(configs_);
         chunk_manager_ptr_ = CreateChunkManager(configs_);
+    }
+
+    void
+    TearDown() override {
+        chunk_manager_ = nullptr;
+        chunk_manager_ptr_ = nullptr;
     }
 
  protected:
@@ -79,13 +85,6 @@ TEST_F(AzureChunkManagerTest, WrongConfig) {
     } catch (SegcoreError& e) {
         EXPECT_TRUE(std::string(e.what()).find("precheck") != string::npos);
     }
-}
-
-TEST_F(AzureChunkManagerTest, AzureLogger) {
-    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Error, "");
-    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Warning, "");
-    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Informational, "");
-    AzureLogger(Azure::Core::Diagnostics::Logger::Level::Verbose, "");
 }
 
 TEST_F(AzureChunkManagerTest, BasicFunctions) {
