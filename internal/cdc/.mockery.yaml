@@ -15,7 +15,6 @@ packages:
       ReplicateManagerClient:
   github.com/milvus-io/milvus/internal/cdc/replication/replicatestream:
     interfaces:
-      ReplicateStreamClientManager:
       ReplicateStreamClient:
   github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager:
     interfaces:

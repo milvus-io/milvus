@@ -56,7 +56,7 @@ var _ Replicator = (*channelReplicator)(nil)
 // channelReplicator is the implementation of ChannelReplicator.
 type channelReplicator struct {
 	replicateInfo *streamingpb.ReplicatePChannelMeta
-	rsm           replicatestream.ReplicateStreamClientManager
+	createRscFunc replicatestream.CreateReplicateStreamClientFunc
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -66,10 +66,10 @@ type channelReplicator struct {
 // NewChannelReplicator creates a new ChannelReplicator.
 func NewChannelReplicator(replicateMeta *streamingpb.ReplicatePChannelMeta) Replicator {
 	ctx, cancel := context.WithCancel(context.Background())
-	rsm := replicatestream.NewReplicateStreamClientManager()
+	createRscFunc := replicatestream.NewReplicateStreamClient
 	return &channelReplicator{
 		replicateInfo: replicateMeta,
-		rsm:           rsm,
+		createRscFunc: createRscFunc,
 		ctx:           ctx,
 		cancel:        cancel,
 		lifetime:      typeutil.NewLifetime(),
@@ -121,7 +121,7 @@ func (r *channelReplicator) replicateLoop() error {
 	})
 	defer scanner.Close()
 
-	rsc := r.rsm.CreateReplicateStreamClient(r.ctx, r.replicateInfo)
+	rsc := r.createRscFunc(r.ctx, r.replicateInfo)
 	defer rsc.Close()
 
 	logger.Info("start replicate channel loop", zap.Any("startFrom", startFrom))
