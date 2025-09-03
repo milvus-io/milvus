@@ -81,12 +81,13 @@ type queryTask struct {
 }
 
 type queryParams struct {
-	limit        int64
-	offset       int64
-	reduceType   reduce.IReduceType
-	isIterator   bool
-	collectionID int64
-	timezone     string
+	limit             int64
+	offset            int64
+	reduceType        reduce.IReduceType
+	isIterator        bool
+	collectionID      int64
+	timezone          string
+	extractTimeFields []string
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -170,6 +171,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		err               error
 		collectionID      int64
 		timezone          string
+		extractTimeFields []string
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
 	// if reduce_stop_for_best is provided
@@ -233,18 +235,26 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		timezone = timezoneStr
 	}
 
+	extractTimeFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, queryParamsPair)
+	if err == nil {
+		extractTimeFields = strings.FieldsFunc(extractTimeFieldsStr, func(r rune) bool {
+			return r == ',' || r == ' '
+		})
+	}
+
 	// validate max result window.
 	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 
 	return &queryParams{
-		limit:        limit,
-		offset:       offset,
-		reduceType:   reduceType,
-		isIterator:   isIterator,
-		collectionID: collectionID,
-		timezone:     timezone,
+		limit:             limit,
+		offset:            offset,
+		reduceType:        reduceType,
+		isIterator:        isIterator,
+		collectionID:      collectionID,
+		timezone:          timezone,
+		extractTimeFields: extractTimeFields,
 	}, nil
 }
 
@@ -720,11 +730,20 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	_, colTimezone := getColTimezone(colInfo)
 	_, dbTimezone := getDbTimezone(dbInfo)
 	if !t.reQuery {
-		log.Debug("translate timstamp to ISO string", zap.String("user define timezone", t.queryParams.timezone), zap.Any("result", t.result.GetFieldsData()))
-		err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone, dbTimezone)
-		if err != nil {
-			log.Warn("fail to convert timestamp", zap.Error(err))
-			return err
+		if len(t.queryParams.extractTimeFields) > 0 {
+			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
+			err = extractFieldsFromResults(t.result.GetFieldsData(), []string{t.queryParams.timezone, colTimezone, dbTimezone}, t.queryParams.extractTimeFields)
+			if err != nil {
+				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+				return err
+			}
+		} else {
+			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
+			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone, dbTimezone)
+			if err != nil {
+				log.Warn("fail to translate timestamp", zap.Error(err))
+				return err
+			}
 		}
 	}
 	log.Debug("Query PostExecute done")

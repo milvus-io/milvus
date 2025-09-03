@@ -2870,3 +2870,98 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, userDefineTimezone str
 	}
 	return nil
 }
+
+// extractFields is a helper function to extract specific integer fields from a time.Time object.
+// Supported fields are: "year", "month", "day", "hour", "minute", "second", "microsecond", "nanosecond".
+func extractFields(t time.Time, fieldList []string) ([]int64, error) {
+	extractedValues := make([]int64, 0, len(fieldList))
+	for _, field := range fieldList {
+		var val int64
+		switch strings.ToLower(field) {
+		case common.TszYear:
+			val = int64(t.Year())
+		case common.TszMonth:
+			val = int64(t.Month())
+		case common.TszDay:
+			val = int64(t.Day())
+		case common.TszHour:
+			val = int64(t.Hour())
+		case common.TszMinute:
+			val = int64(t.Minute())
+		case common.TszSecond:
+			val = int64(t.Second())
+		case common.TszMicrosecond:
+			val = int64(t.Nanosecond() / 1000)
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported field for extraction: %s, fields should be seprated by ',' or ' '", field)
+		}
+		extractedValues = append(extractedValues, val)
+	}
+	return extractedValues, nil
+}
+
+func extractFieldsFromResults(results []*schemapb.FieldData, precedenceTimezone []string, fieldList []string) error {
+	var targetLocation *time.Location
+
+	for _, tz := range precedenceTimezone {
+		if tz != "" {
+			loc, err := time.LoadLocation(tz)
+			if err != nil {
+				log.Error("invalid timezone provided in precedence list", zap.String("timezone", tz), zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("got invalid timezone: %s", tz)
+			}
+			targetLocation = loc
+			break // Use the first valid timezone found.
+		}
+	}
+
+	if targetLocation == nil {
+		targetLocation = time.UTC
+	}
+
+	for _, fieldData := range results {
+		if fieldData.GetType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+
+		scalarField := fieldData.GetScalars()
+		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
+			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
+				log.Warn("field data is not Timestamptz data, but found LongData instead", zap.String("fieldName", fieldData.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
+			}
+			continue
+		}
+
+		utcTimestamps := scalarField.GetTimestamptzData().GetData()
+		extractedResults := make([]*schemapb.ScalarField, 0, len(fieldList))
+
+		for _, ts := range utcTimestamps {
+			t := time.UnixMicro(ts).UTC()
+			localTime := t.In(targetLocation)
+
+			values, err := extractFields(localTime, fieldList)
+			if err != nil {
+				return err
+			}
+			valuesScalarField := &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{
+					Data: values,
+				},
+			}
+			extractedResults = append(extractedResults, &schemapb.ScalarField{
+				Data: valuesScalarField,
+			})
+		}
+
+		fieldData.GetScalars().Data = &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{
+				Data:        extractedResults,
+				ElementType: schemapb.DataType_Int64,
+			},
+		}
+		fieldData.Type = schemapb.DataType_Array
+	}
+
+	return nil
+}

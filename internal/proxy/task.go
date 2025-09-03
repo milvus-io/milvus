@@ -72,8 +72,10 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 	// offsets for embedding list search
-	LimsKey     = "lims"
-	TimezoneKey = "timezone"
+	LimsKey = "lims"
+	// key for timestamptz translation
+	TimezoneKey   = "timezone"
+	TimefieldsKey = "time_fields"
 
 	SearchIterV2Key        = "search_iter_v2"
 	SearchIterBatchSizeKey = "search_iter_batch_size"
