@@ -1651,3 +1651,152 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestNamespaceProperty(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
+	ctx := context.Background()
+	prefix := "TestNamespaceProperty"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	initSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field1",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: strconv.Itoa(1024),
+						},
+					},
+				},
+			},
+		}
+	}
+	hasNamespaceField := func(schema *schemapb.CollectionSchema) bool {
+		for _, f := range schema.Fields {
+			if f.Name == common.NamespaceFieldName {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("test namespace enabled", func(t *testing.T) {
+		schema := initSchema()
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.NamespaceEnabledKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err = task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.True(t, hasNamespaceField(schema))
+	})
+
+	t.Run("test namespace disabled with isolation and partition key", func(t *testing.T) {
+		schema := initSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:        102,
+			Name:           "field2",
+			DataType:       schemapb.DataType_Int64,
+			IsPartitionKey: true,
+		})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.PartitionKeyIsolationKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err = task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.False(t, hasNamespaceField(schema))
+	})
+
+	t.Run("test namespace enabled with isolation", func(t *testing.T) {
+		schema := initSchema()
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.NamespaceEnabledKey,
+						Value: "true",
+					},
+					{
+						Key:   common.PartitionKeyIsolationKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err = task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.True(t, hasNamespaceField(schema))
+	})
+
+	t.Run("test namespace enabled with partition key", func(t *testing.T) {
+		schema := initSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:        102,
+			Name:           "field2",
+			DataType:       schemapb.DataType_Int64,
+			IsPartitionKey: true,
+		})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.NamespaceEnabledKey,
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		err = task.handleNamespaceField(ctx, schema)
+		assert.Error(t, err)
+	})
+}
