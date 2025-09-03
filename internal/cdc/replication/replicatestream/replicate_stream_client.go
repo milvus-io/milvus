@@ -35,19 +35,4 @@ type ReplicateStreamClient interface {
 	Close()
 }
 
-// ReplicateStreamClientManager is the manager to create.
-type ReplicateStreamClientManager interface {
-	// CreateReplicateStreamClient creates a new ReplicateStreamClient.
-	CreateReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient
-}
-
-type replicateStreamClientManager struct{}
-
-func NewReplicateStreamClientManager() ReplicateStreamClientManager {
-	return &replicateStreamClientManager{}
-}
-
-func (m *replicateStreamClientManager) CreateReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient {
-	rsc := NewReplicateStreamClient(ctx, replicateInfo)
-	return rsc
-}
+type CreateReplicateStreamClientFunc func(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient

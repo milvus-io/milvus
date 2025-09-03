@@ -17,6 +17,7 @@
 package replicatemanager
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -72,8 +73,6 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 
 	rs := replicatestream.NewMockReplicateStreamClient(t)
 	rs.EXPECT().Close().Return()
-	rsm := replicatestream.NewMockReplicateStreamClientManager(t)
-	rsm.EXPECT().CreateReplicateStreamClient(mock.Anything, mock.Anything).Return(rs)
 
 	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
@@ -82,7 +81,11 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 		TargetCluster:     cluster,
 	}
 	replicator := NewChannelReplicator(replicateInfo)
-	replicator.(*channelReplicator).rsm = rsm
+	replicator.(*channelReplicator).createRscFunc = func(ctx context.Context,
+		replicateInfo *streamingpb.ReplicatePChannelMeta,
+	) replicatestream.ReplicateStreamClient {
+		return rs
+	}
 	assert.NotNil(t, replicator)
 
 	replicator.StartReplicate()
