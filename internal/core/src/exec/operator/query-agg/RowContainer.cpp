@@ -22,11 +22,9 @@ namespace milvus {
 namespace exec {
 
 RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
-                           const std::vector<Accumulator>& accumulators,
-                           bool ignoreNullKeys)
+                           const std::vector<Accumulator>& accumulators)
     : keyTypes_(keyTypes),
-      accumulators_(accumulators),
-      ignoreNullKeys_(ignoreNullKeys) {
+      accumulators_(accumulators) {
     int32_t offset = 0;
     int32_t nullOffset = 0;
     bool isVariableWidth = false;
@@ -45,9 +43,7 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
             offset += GetDataTypeSize(type, 1);
         }
         nullOffsets_.push_back(nullOffset);
-        if (!ignoreNullKeys_) {
-            ++nullOffset;
-        }
+        ++nullOffset;
         idx++;
     }
     // Make offset at least sizeof pointer so that there is space for a
@@ -105,7 +101,7 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
     uint16_t column_sum = keyTypes_.size() + accumulators.size();
     for (auto i = 0; i < offsets_.size(); i++) {
         rowColumns_.emplace_back(offsets_[i],
-                                 (!ignoreNullKeys_ || i >= keyTypes_.size())
+                                 (i >= keyTypes_.size())
                                      ? nullOffsets_[nullOffsetsPos]
                                      : RowColumn::kNotNullOffset);
         // offsets_ contains the offsets for keys, then accumulators
@@ -142,7 +138,7 @@ RowContainer::store(const milvus::ColumnVectorPtr& column_data,
                     int32_t column_index) {
     auto numKeys = keyTypes_.size();
     bool isKey = column_index < numKeys;
-    if (isKey && ignoreNullKeys_) {
+    if (isKey) {
         MILVUS_DYNAMIC_TYPE_DISPATCH(storeNoNulls,
                                      keyTypes_[column_index],
                                      column_data,

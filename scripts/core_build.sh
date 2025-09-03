@@ -30,7 +30,7 @@ if [[ ! ${jobs+1} ]]; then
         jobs=4
     fi
 fi
-
+jobs=6
 function get_cpu_arch {
   local CPU_ARCH=$1
 

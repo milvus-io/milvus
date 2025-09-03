@@ -176,7 +176,7 @@ HashTable<ignoreNullKeys>::allocateTables(uint64_t size) {
 
 template <bool ignoreNullKeys>
 void
-HashTable<ignoreNullKeys>::checkSize(int32_t numNew) {
+HashTable<ignoreNullKeys>::checkSizeAndAllocateTable(int32_t numNew) {
     AssertInfo(capacity_ == 0 || capacity_ > numDistinct_,
                "capacity_ {}, numDistinct {}",
                capacity_,
@@ -262,13 +262,10 @@ template <bool ignoreNullKeys>
 void
 HashTable<ignoreNullKeys>::groupProbe(milvus::exec::HashLookup& lookup) {
     AssertInfo(hashMode_ == HashMode::kHash, "Only support kHash mode for now");
-    checkSize(lookup.group_limit_);
+    checkSizeAndAllocateTable(lookup.group_limit_);
     ProbeState state;
-    int32_t numProbes = lookup.rows_.size();
-    auto rows = lookup.rows_.data();
-    for (int32_t probeIdx = 0; probeIdx < numProbes; probeIdx++) {
-        int32_t row = rows[probeIdx];
-        state.preProbe(*this, lookup.hashes_[row], row);
+    for (int32_t idx = 0; idx < lookup.hashes_.size(); idx++) {
+        state.preProbe(*this, lookup.hashes_[idx], idx);
         state.firstProbe<ProbeState::Operation::kInsert>(*this, 0);
         fullProbe(lookup, state, false);
         if (lookup.group_enough()) {

@@ -108,8 +108,7 @@ class RowColumn {
 class RowContainer {
  public:
     RowContainer(const std::vector<DataType>& keyTypes,
-                 const std::vector<Accumulator>& accumulators,
-                 bool ignoreNullKeys);
+                 const std::vector<Accumulator>& accumulators);
 
     // The number of flags (bits) per accumulator, one for null and one for
     // initialized.
@@ -475,7 +474,6 @@ class RowContainer {
     const std::vector<DataType> keyTypes_;
     std::vector<int> variable_offsets{};
     std::vector<int> variable_idxes{};
-    const bool ignoreNullKeys_;
     std::vector<uint32_t> offsets_;
     std::vector<uint32_t> nullOffsets_;
 

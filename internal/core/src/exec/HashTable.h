@@ -161,7 +161,6 @@ class BaseHashTable {
 
 class ProbeState;
 
-template <bool ignoreNullKeys>
 class HashTable : public BaseHashTable {
  public:
     HashTable(std::vector<std::unique_ptr<VectorHasher>>&& hashers,
@@ -172,8 +171,7 @@ class HashTable : public BaseHashTable {
             keyTypes.push_back(hasher->ChannelDataType());
         }
         hashMode_ = HashMode::kHash;
-        rows_ = std::make_unique<RowContainer>(
-            keyTypes, accumulators, ignoreNullKeys);
+        rows_ = std::make_unique<RowContainer>(keyTypes, accumulators);
     };
 
     ~HashTable() override {
@@ -294,7 +292,7 @@ class HashTable : public BaseHashTable {
     clear(bool freeTable = false) override;
 
     void
-    checkSize(int32_t numNew);
+    checkSizeAndAllocateTable(int32_t numNew);
 
     // Returns the number of entries after which the table gets rehashed.
     static uint64_t
