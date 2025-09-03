@@ -73,8 +73,9 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, channel
 	}
 	defer hc.lifetime.Done()
 
+	return nil, nil
+
 	// TODO: sheep, implement it.
-	panic("not implemented")
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.

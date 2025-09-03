@@ -6467,7 +6467,8 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 }
 
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
-func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
+// TODO: sheep, only get target checkpoint
+func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (resp *milvuspb.GetReplicateInfoResponse, err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateInfo")
 	defer sp.End()
 
@@ -6475,7 +6476,15 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	log.Ctx(ctx).Info("GetReplicateInfo received", zap.String("sourceClusterID", req.GetSourceClusterId()))
+	logger := log.Ctx(ctx).With(zap.String("sourceClusterID", req.GetSourceClusterId()))
+	logger.Info("GetReplicateInfo received")
+	defer func() {
+		if err != nil {
+			logger.Warn("GetReplicateInfo fail", zap.Error(err))
+		} else {
+			logger.Info("GetReplicateInfo success", zap.Any("checkpoints", resp.GetCheckpoints()))
+		}
+	}()
 	config, err := streaming.WAL().GetReplicateConfiguration(ctx)
 	if err != nil {
 		return nil, err

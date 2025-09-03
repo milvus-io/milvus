@@ -18,11 +18,13 @@ package replicatemanager
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.
@@ -41,15 +43,22 @@ func NewReplicateManager() *replicateManager {
 }
 
 func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
+	logger := log.With(
+		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", replicateInfo.GetTargetChannelName()),
+	)
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	if !strings.Contains(replicateInfo.GetSourceChannelName(), currentClusterID) {
+		// current cluster is not source cluster, skip create replicator
+		return
+	}
 	_, ok := r.replicators[replicateInfo.GetSourceChannelName()]
 	if ok {
+		logger.Debug("replicator already exists, skip create replicator")
 		return
 	}
 	replicator := NewChannelReplicator(replicateInfo)
 	replicator.StartReplicate()
 	r.replicators[replicateInfo.GetSourceChannelName()] = replicator
-	log.Ctx(r.ctx).Info("created replicator for replicate pchannel",
-		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", replicateInfo.GetTargetChannelName()),
-	)
+	logger.Info("created replicator for replicate pchannel")
 }
