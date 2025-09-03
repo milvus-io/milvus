@@ -85,6 +85,11 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto data_type = DataType(schema_proto.data_type());
     auto element_type = DataType(schema_proto.element_type());
 
+    if (data_type == DataType::VECTOR_ARRAY) {
+        AssertInfo(element_type != DataType::NONE,
+                   "element_type must be specified for VECTOR_ARRAY");
+    }
+
     auto default_value = [&]() -> std::optional<DefaultValueType> {
         if (!schema_proto.has_default_value()) {
             return std::nullopt;
