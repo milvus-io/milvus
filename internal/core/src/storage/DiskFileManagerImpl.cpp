@@ -534,7 +534,11 @@ template <typename T>
 std::string
 DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
+    auto element_type =
+        index::GetValueFromConfig<DataType>(config, ELEMENT_TYPE_KEY);
     AssertInfo(data_type.has_value(), "data type is empty when build index");
+    AssertInfo(element_type.has_value(),
+               "element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
@@ -560,6 +564,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto field_datas = GetFieldDatasFromStorageV2(all_remote_files,
                                                   GetFieldDataMeta().field_id,
                                                   data_type.value(),
+                                                  element_type.value(),
                                                   dim,
                                                   fs_);
     for (auto& field_data : field_datas) {
@@ -776,14 +781,19 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
+        const auto& element_type = std::get<2>(tup);
 
         std::vector<FieldDataPtr> field_datas;
         // fetch scalar data from storage v2
         if (storage_version == STORAGE_V2) {
-            field_datas = GetFieldDatasFromStorageV2(
-                remote_files_storage_v2, field_id, field_type, 1, fs_);
+            field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
+                                                     field_id,
+                                                     field_type,
+                                                     element_type,
+                                                     1,
+                                                     fs_);
         } else {  // original way
-            auto& field_paths = std::get<2>(tup);
+            auto& field_paths = std::get<3>(tup);
             if (0 == field_paths.size()) {
                 LOG_WARN("optional field {} has no data", field_id);
                 return "";

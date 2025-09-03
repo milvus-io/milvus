@@ -25,7 +25,6 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
-#include "exec/expression/VectorFunction.h"
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
@@ -62,21 +61,9 @@ class Expr {
     Expr(DataType type,
          const std::vector<std::shared_ptr<Expr>>&& inputs,
          const std::string& name)
-        : type_(type),
-          inputs_(std::move(inputs)),
-          name_(name),
-          vector_func_(nullptr) {
+        : type_(type), inputs_(std::move(inputs)), name_(name) {
     }
 
-    Expr(DataType type,
-         const std::vector<std::shared_ptr<Expr>>&& inputs,
-         std::shared_ptr<VectorFunction> vec_func,
-         const std::string& name)
-        : type_(type),
-          inputs_(std::move(inputs)),
-          name_(name),
-          vector_func_(vec_func) {
-    }
     virtual ~Expr() = default;
 
     const DataType&
@@ -133,8 +120,6 @@ class Expr {
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
-    // NOTE: unused
-    std::shared_ptr<VectorFunction> vector_func_;
 
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data

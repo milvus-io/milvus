@@ -250,66 +250,135 @@ ArrayChunkWriter::finish() {
                                         std::move(mmap_file_raii));
 }
 
-// 1. Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
-// where VectorFieldProto is vector array and each element it self is a VectorFieldProto.
-// 2. Transform this vector of VectorFieldProto to vector of our local representation of VectorArray.
-// 3. the contents of these VectorArray are concatenated in some format in target_.
-// See more details for the format in the comments of VectorArrayChunk.
+// Read vector array data from arrow::ArrayVector and write to target_
 void
-VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
-    auto size = 0;
-    std::vector<VectorArray> vector_arrays;
-    vector_arrays.reserve(arrow_array_vec.size());
+VectorArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
+    size_t total_size = calculateTotalSize(array_vec);
+    row_nums_ = 0;
 
-    for (const auto& data : arrow_array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (size_t i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            VectorFieldProto vector_field;
-            vector_field.ParseFromArray(str.data(), str.size());
-            auto arr = VectorArray(vector_field);
-            size += arr.byte_size();
-            vector_arrays.push_back(std::move(arr));
-        }
-        row_nums_ += array->length();
+    for (const auto& array_data : array_vec) {
+        row_nums_ += array_data->length();
     }
 
-    // offsets + lens
-    size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     if (!file_path_.empty()) {
         target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
-        target_ = std::make_shared<MemChunkTarget>(size);
+        target_ = std::make_shared<MemChunkTarget>(total_size);
     }
 
-    int offsets_num = row_nums_ + 1;
-    int len_num = row_nums_;
-    uint32_t offset_start_pos =
-        target_->tell() + sizeof(uint32_t) * (offsets_num + len_num);
-    std::vector<uint32_t> offsets(offsets_num);
-    std::vector<uint32_t> lens(len_num);
-    for (size_t i = 0; i < vector_arrays.size(); i++) {
-        auto& arr = vector_arrays[i];
-        offsets[i] = offset_start_pos;
-        lens[i] = arr.length();
-        offset_start_pos += arr.byte_size();
-    }
-    if (offsets_num > 0) {
-        offsets[offsets_num - 1] = offset_start_pos;
-    }
-
-    for (int i = 0; i < offsets.size(); i++) {
-        if (i == offsets.size() - 1) {
-            target_->write(&offsets[i], sizeof(uint32_t));
+    switch (element_type_) {
+        case milvus::DataType::VECTOR_FLOAT:
+            writeFloatVectorArray(array_vec);
             break;
+        case milvus::DataType::VECTOR_BINARY:
+            ThrowInfo(NotImplemented,
+                      "BinaryVector in VectorArray not implemented yet");
+        case milvus::DataType::VECTOR_FLOAT16:
+            ThrowInfo(NotImplemented,
+                      "Float16Vector in VectorArray not implemented yet");
+        case milvus::DataType::VECTOR_BFLOAT16:
+            ThrowInfo(NotImplemented,
+                      "BFloat16Vector in VectorArray not implemented yet");
+        case milvus::DataType::VECTOR_INT8:
+            ThrowInfo(NotImplemented,
+                      "Int8Vector in VectorArray not implemented yet");
+        default:
+            ThrowInfo(NotImplemented,
+                      "Unsupported element type in VectorArray: {}",
+                      static_cast<int>(element_type_));
+    }
+}
+
+void
+VectorArrayChunkWriter::writeFloatVectorArray(
+    const arrow::ArrayVector& array_vec) {
+    std::vector<uint32_t> offsets_lens;
+    std::vector<const float*> float_data_ptrs;
+    std::vector<size_t> data_sizes;
+
+    uint32_t current_offset =
+        sizeof(uint32_t) * (row_nums_ * 2 + 1) + target_->tell();
+
+    for (const auto& array_data : array_vec) {
+        auto list_array =
+            std::static_pointer_cast<arrow::ListArray>(array_data);
+        auto float_values =
+            std::static_pointer_cast<arrow::FloatArray>(list_array->values());
+        const float* raw_floats = float_values->raw_values();
+        const int32_t* list_offsets = list_array->raw_value_offsets();
+
+        // Generate offsets and lengths for each row
+        // Each list contains multiple float vectors which are flattened, so the float count
+        // in each list is vector count * dim.
+        for (int64_t i = 0; i < list_array->length(); i++) {
+            auto start_idx = list_offsets[i];
+            auto end_idx = list_offsets[i + 1];
+            auto vector_count = (end_idx - start_idx) / dim_;
+            auto byte_size = (end_idx - start_idx) * sizeof(float);
+
+            offsets_lens.push_back(current_offset);
+            offsets_lens.push_back(static_cast<uint32_t>(vector_count));
+
+            float_data_ptrs.push_back(raw_floats + start_idx);
+            data_sizes.push_back(byte_size);
+
+            current_offset += byte_size;
         }
-        target_->write(&offsets[i], sizeof(uint32_t));
-        target_->write(&lens[i], sizeof(uint32_t));
     }
 
-    for (auto& arr : vector_arrays) {
-        target_->write(arr.data(), arr.byte_size());
+    // Add final offset
+    offsets_lens.push_back(current_offset);
+
+    // Write offset and length arrays
+    for (size_t i = 0; i < offsets_lens.size() - 1; i += 2) {
+        target_->write(&offsets_lens[i], sizeof(uint32_t));      // offset
+        target_->write(&offsets_lens[i + 1], sizeof(uint32_t));  // length
     }
+    target_->write(&offsets_lens.back(), sizeof(uint32_t));  // final offset
+
+    for (size_t i = 0; i < float_data_ptrs.size(); i++) {
+        target_->write(float_data_ptrs[i], data_sizes[i]);
+    }
+}
+
+size_t
+VectorArrayChunkWriter::calculateTotalSize(
+    const arrow::ArrayVector& array_vec) {
+    size_t total_size = 0;
+    size_t total_rows = 0;
+
+    // Calculate total size for vector data and count rows
+    for (const auto& array_data : array_vec) {
+        total_rows += array_data->length();
+        auto list_array =
+            std::static_pointer_cast<arrow::ListArray>(array_data);
+
+        switch (element_type_) {
+            case milvus::DataType::VECTOR_FLOAT: {
+                auto float_values = std::static_pointer_cast<arrow::FloatArray>(
+                    list_array->values());
+                total_size += float_values->length() * sizeof(float);
+                break;
+            }
+            case milvus::DataType::VECTOR_BINARY:
+            case milvus::DataType::VECTOR_FLOAT16:
+            case milvus::DataType::VECTOR_BFLOAT16:
+            case milvus::DataType::VECTOR_INT8:
+                ThrowInfo(NotImplemented,
+                          "Element type {} in VectorArray not implemented yet",
+                          static_cast<int>(element_type_));
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid element type {} for VectorArray",
+                          static_cast<int>(element_type_));
+        }
+    }
+
+    // Add space for offset and length arrays
+    total_size += sizeof(uint32_t) * (total_rows * 2 + 1 /* final offset */) +
+                  MMAP_ARRAY_PADDING;
+
+    return total_size;
 }
 
 std::unique_ptr<Chunk>

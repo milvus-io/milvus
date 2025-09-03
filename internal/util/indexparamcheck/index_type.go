@@ -64,7 +64,8 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 	return indexType == IndexINVERTED ||
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
-		indexType == IndexTrie
+		indexType == IndexTrie ||
+		indexType == IndexNGRAM
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {

@@ -541,7 +541,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if typeutil.IsVectorType(t.fieldSchema.DataType) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add vector field, field name = %s", t.fieldSchema.Name))
 	}
-	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName}, t.fieldSchema.GetName()) {
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, t.fieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.fieldSchema.Name))
 	}
 	if t.fieldSchema.IsPrimaryKey {

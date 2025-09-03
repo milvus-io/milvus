@@ -234,11 +234,16 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
+		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
+		if err != nil {
+			return merr.Status(err), err
+		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
 			compactionParams,
+			[]int64{pk.GetFieldID()},
 		)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))

@@ -46,4 +46,7 @@ const (
 
 	// MetaFieldName name of the dynamic schema field
 	MetaFieldName = common.MetaFieldName
+
+	// NamespaceFieldName name of the namespace field
+	NamespaceFieldName = common.NamespaceFieldName
 )
