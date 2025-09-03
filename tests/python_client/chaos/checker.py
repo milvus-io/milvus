@@ -1259,8 +1259,6 @@ class PartialUpdateChecker(Checker):
             self.run_task(count)
             count += 1
             sleep(constants.WAIT_PER_OP * 6)
-            if count >= 5:
-                break
 
 class CollectionCreateChecker(Checker):
     """check collection create operations in a dependent thread"""
