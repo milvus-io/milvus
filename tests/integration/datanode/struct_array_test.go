@@ -315,9 +315,9 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
+	params := integration.GetSearchParams(integration.IndexEmbListHNSW, metric.MaxSim)
 	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, expr,
-		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, nil, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)
+		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 

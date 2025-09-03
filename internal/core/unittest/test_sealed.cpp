@@ -2345,7 +2345,7 @@ TEST(Sealed, SearchVectorArray) {
     int64_t dim = 32;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
