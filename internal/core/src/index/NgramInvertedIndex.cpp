@@ -12,6 +12,7 @@
 #include "index/NgramInvertedIndex.h"
 #include "exec/expression/Expr.h"
 #include "index/JsonIndexBuilder.h"
+#include <cstring>
 
 namespace milvus::index {
 
@@ -331,28 +332,50 @@ split_by_wildcard(const std::string& literal) {
     std::vector<std::string> result;
     std::string r;
     r.reserve(literal.size());
-    bool escape_mode = false;
-    for (char c : literal) {
-        if (escape_mode) {
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                // consider case "\\%", we should reserve %
-                escape_mode = true;
-            } else if (c == '%' || c == '_') {
-                if (r.length() > 0) {
-                    result.push_back(r);
+
+    const char* data = literal.data();
+    const size_t len = literal.length();
+
+    // Pre-defined patterns for fast comparison
+    static const char pattern1[] = "[\\s\\S]*";  // 7 chars
+    static const char pattern2[] = "[\\s\\S]";   // 6 chars
+
+    for (size_t i = 0; i < len; ++i) {
+        // Fast check: only proceed if current character is '['
+        if (data[i] == '[') {
+            // Check for "[\s\S]*" pattern (7 chars)
+            if (i + 7 <= len && std::memcmp(data + i, pattern1, 7) == 0) {
+                // Found "[\s\S]*" pattern (equivalent to %)
+                if (!r.empty()) {
+                    result.push_back(std::move(r));
                     r.clear();
+                    r.reserve(len - i);  // Reserve space for remaining chars
                 }
-            } else {
-                r += c;
+                i += 6;  // Skip the remaining characters of "[\s\S]*"
             }
+            // Check for "[\s\S]" pattern (6 chars)
+            else if (i + 6 <= len && std::memcmp(data + i, pattern2, 6) == 0) {
+                // Found "[\s\S]" pattern (equivalent to _)
+                if (!r.empty()) {
+                    result.push_back(std::move(r));
+                    r.clear();
+                    r.reserve(len - i);  // Reserve space for remaining chars
+                }
+                i += 5;  // Skip the remaining characters of "[\s\S]"
+            } else {
+                // '[' but not our patterns, keep as regular character
+                r += data[i];
+            }
+        } else {
+            // Keep all other characters including escape characters
+            r += data[i];
         }
     }
-    if (r.length() > 0) {
-        result.push_back(r);
+
+    if (!r.empty()) {
+        result.push_back(std::move(r));
     }
+
     return result;
 }
 

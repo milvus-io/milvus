@@ -83,7 +83,7 @@ TEST(PatternMatchTranslatorTest, StringTypeTest) {
 
     std::string pattern1 = "abc";
     std::string pattern2 = "xyz";
-    std::string pattern3 = "%a_b%";
+    std::string pattern3 = "[\\s\\S]*a[\\s\\S]b[\\s\\S]*";
 
     EXPECT_EQ(translator(pattern1), "abc");
     EXPECT_EQ(translator(pattern2), "xyz");
@@ -144,10 +144,8 @@ TEST(RegexMatcherTest, NewLine) {
 
 TEST(RegexMatcherTest, PatternMatchWithNewLine) {
     using namespace milvus;
-    std::string pattern("Hello%");
-    PatternMatchTranslator translator;
-    auto rp = translator(pattern);
-    RegexMatcher matcher(rp);
+    std::string pattern("Hello[\\s\\S]*");
+    RegexMatcher matcher(pattern);
 
     EXPECT_TRUE(matcher(std::string("Hello\n")));
 }

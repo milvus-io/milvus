@@ -301,7 +301,7 @@ TEST_F(JsonFlatIndexTest, TestPatternMatchQuery) {
 
     std::string json_path = "/profile/name/first";
     auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->PatternMatch("A%e", proto::plan::Match);
+    auto result = executor->PatternMatch("A[\\s\\S]*e", proto::plan::Match);
     ASSERT_EQ(result.size(), json_data_.size());
     ASSERT_TRUE(result[0]);   // Alice matches A%e
     ASSERT_FALSE(result[1]);  // Bob doesn't match A%e
