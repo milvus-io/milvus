@@ -58,7 +58,7 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	wktArray := make([]string, len(wkbArray))
 	validData := (*fieldData).GetValidData()
 	for i, data := range wkbArray {
-		if validData == nil || !validData[i] {
+		if validData != nil && !validData[i] {
 			continue
 		}
 		geomT, err := wkb.Unmarshal(data)
