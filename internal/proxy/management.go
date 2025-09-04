@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/samber/lo"
 
@@ -488,29 +489,65 @@ func (node *Proxy) GetStreamingNodeDistribution(w http.ResponseWriter, req *http
 		return
 	}
 
-	// Call the internal method to get the streaming node assignment.
-	resp, err := streaming.WAL().Balancer().GetWALDistribution(req.Context(), nodeID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	// Extract the channel names from the map keys.
-	channelNames := make([]string, 0, len(resp.Channels))
-	for name := range resp.Channels {
-		channelNames = append(channelNames, name)
-	}
-
 	// Define the custom response struct to match the desired format.
 	type distributionResponse struct {
 		ChannelNames     []string `json:"channel_names"`
 		SealedSegmentIDs []string `json:"sealed_segmentIDs"`
 	}
 
-	// Create the response object. sealed_segmentIDs is empty because GetWALDistribution doesn't provide this data.
-	dist := distributionResponse{
-		ChannelNames:     channelNames,
-		SealedSegmentIDs: []string{},
+	var dist distributionResponse
+
+	// First, try to get the streaming node assignment.
+	streamingResp, streamingErr := streaming.WAL().Balancer().GetWALDistribution(req.Context(), nodeID)
+
+	if streamingErr != nil {
+		// If streaming node is not found, try to get the batch node distribution.
+		if errors.Is(streamingErr, merr.ErrNodeNotFound) {
+			batchResp, batchErr := node.mixCoord.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
+				Base:   commonpbutil.NewMsgBase(),
+				NodeID: nodeID,
+			})
+
+			// If batch fails or returns a non-OK status, check the reason.
+			if batchErr != nil || !merr.Ok(batchResp.GetStatus()) {
+				// If the status is specifically a node not found error, return an empty distribution.
+				if errors.Is(batchErr, merr.ErrNodeNotFound) {
+					// Both streaming and batch nodes were not found.
+					dist = distributionResponse{
+						ChannelNames:     []string{},
+						SealedSegmentIDs: []string{},
+					}
+				} else {
+					// Batch returned an error other than "NodeNotFound".
+					if batchErr != nil {
+						http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, batchErr.Error()), http.StatusInternalServerError)
+					} else {
+						http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, batchResp.GetStatus().GetReason()), http.StatusInternalServerError)
+					}
+					return
+				}
+			} else {
+				// Batch call succeeded. Populate with channel names and an empty sealed_segmentIDs.
+				dist = distributionResponse{
+					ChannelNames:     batchResp.ChannelNames,
+					SealedSegmentIDs: []string{},
+				}
+			}
+		} else {
+			// Streaming returned an error other than "NodeNotFound".
+			http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, %s"}`, streamingErr.Error()), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Streaming call succeeded. Populate with channel names and an empty sealed_segmentIDs.
+		channelNames := make([]string, 0, len(streamingResp.Channels))
+		for name := range streamingResp.Channels {
+			channelNames = append(channelNames, name)
+		}
+		dist = distributionResponse{
+			ChannelNames:     channelNames,
+			SealedSegmentIDs: []string{},
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
