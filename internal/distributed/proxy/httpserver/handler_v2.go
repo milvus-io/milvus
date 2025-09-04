@@ -81,6 +81,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+RefreshLoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.refreshLoadCollection))))
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 	router.POST(CollectionCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReqWithProperties{} }, wrapperTraceLog(h.alterCollectionProperties))))
+	router.POST(CollectionCategory+AddFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunction{} }, wrapperTraceLog(h.addCollectionFunction))))
+	router.POST(CollectionCategory+AlterFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAlterFunction{} }, wrapperTraceLog(h.alterCollectionFunction))))
+	router.POST(CollectionCategory+DropFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunction{} }, wrapperTraceLog(h.dropCollectionFunction))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
 	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
 	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
@@ -678,6 +681,74 @@ func (h *HandlersV2) alterCollectionProperties(ctx context.Context, c *gin.Conte
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterCollection(reqCtx, req.(*milvuspb.AlterCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAddFunction)
+	req := &milvuspb.AddCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+	}
+
+	req.FunctionSchema = fSchema
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionFunction(reqCtx, req.(*milvuspb.AddCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAlterFunction)
+	req := &milvuspb.AlterCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		FunctionName:   httpReq.FunctionName,
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+	}
+
+	req.FunctionSchema = fSchema
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterCollectionFunction(reqCtx, req.(*milvuspb.AlterCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDropFunction)
+	req := &milvuspb.DropCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		FunctionName:   httpReq.FunctionName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropCollectionFunction(reqCtx, req.(*milvuspb.DropCollectionFunctionRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())

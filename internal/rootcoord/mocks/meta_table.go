@@ -173,17 +173,17 @@ func (_c *IMetaTable_AlterAlias_Call) RunAndReturn(run func(context.Context, mes
 	return _c
 }
 
-// AlterCollection provides a mock function with given fields: ctx, oldColl, newColl, ts, fieldModify
-func (_m *IMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool) error {
-	ret := _m.Called(ctx, oldColl, newColl, ts, fieldModify)
+// AlterCollection provides a mock function with given fields: ctx, oldColl, newColl, ts, fieldModify, functionModify
+func (_m *IMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool, functionModify bool) error {
+	ret := _m.Called(ctx, oldColl, newColl, ts, fieldModify, functionModify)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AlterCollection")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, uint64, bool) error); ok {
-		r0 = rf(ctx, oldColl, newColl, ts, fieldModify)
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, uint64, bool, bool) error); ok {
+		r0 = rf(ctx, oldColl, newColl, ts, fieldModify, functionModify)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -202,13 +202,14 @@ type IMetaTable_AlterCollection_Call struct {
 //   - newColl *model.Collection
 //   - ts uint64
 //   - fieldModify bool
-func (_e *IMetaTable_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}, fieldModify interface{}) *IMetaTable_AlterCollection_Call {
-	return &IMetaTable_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, ts, fieldModify)}
+//   - functionModify bool
+func (_e *IMetaTable_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}, fieldModify interface{}, functionModify interface{}) *IMetaTable_AlterCollection_Call {
+	return &IMetaTable_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, ts, fieldModify, functionModify)}
 }
 
-func (_c *IMetaTable_AlterCollection_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool)) *IMetaTable_AlterCollection_Call {
+func (_c *IMetaTable_AlterCollection_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool, functionModify bool)) *IMetaTable_AlterCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64), args[4].(bool))
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64), args[4].(bool), args[5].(bool))
 	})
 	return _c
 }
@@ -218,7 +219,7 @@ func (_c *IMetaTable_AlterCollection_Call) Return(_a0 error) *IMetaTable_AlterCo
 	return _c
 }
 
-func (_c *IMetaTable_AlterCollection_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, uint64, bool) error) *IMetaTable_AlterCollection_Call {
+func (_c *IMetaTable_AlterCollection_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, uint64, bool, bool) error) *IMetaTable_AlterCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -274,6 +274,18 @@ func (m *GrpcRootCoordClient) AlterCollectionField(ctx context.Context, in *milv
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

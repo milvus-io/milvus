@@ -74,6 +74,13 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
+	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
+	err = checkGeneralCapacity(ctx, 1, 2, 256, core)
+	assert.NoError(t, err)
+
+	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionCreated, typeutil.MaxTimestamp)
+	assert.NoError(t, err)
 	assert.Equal(t, 512, meta.GetGeneralCount(ctx))
 	err = checkGeneralCapacity(ctx, 1, 1, 1, core)
 	assert.Error(t, err)

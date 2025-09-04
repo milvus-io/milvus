@@ -224,6 +224,7 @@ func (s *AlterDynamicSchemaTaskSuite) TestExecute() {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		s.meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
 

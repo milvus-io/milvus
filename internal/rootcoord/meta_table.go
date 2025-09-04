@@ -107,8 +107,8 @@ type IMetaTable interface {
 	DropAlias(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
 	DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error)
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
+	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool, functionModify bool) error
 
-	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
 	GetGeneralCount(ctx context.Context) int
 
@@ -552,7 +552,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	clone := coll.Clone()
 	clone.State = pb.CollectionState_CollectionDropping
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false, false); err != nil {
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
@@ -923,12 +923,12 @@ func (mt *MetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[typ
 	return chanMap
 }
 
-func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
+func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool, functionModify bool) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, fieldModify); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, fieldModify, functionModify); err != nil {
 		return err
 	}
 	mt.collID2Meta[oldColl.CollectionID] = newColl
@@ -978,7 +978,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	newColl.DBName = dbName
 	newColl.DBID = targetDB.ID
 	if oldColl.DBID == newColl.DBID {
-		if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false); err != nil {
+		if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false, false); err != nil {
 			log.Warn("alter collection by catalog failed", zap.Error(err))
 			return err
 		}
