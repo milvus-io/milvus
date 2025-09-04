@@ -10,7 +10,6 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -20,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 )
 
@@ -55,12 +53,12 @@ func TestReplicateStreamServer_Execute(t *testing.T) {
 	}()
 
 	const msgCount = replicateRespChanLength * 10
-	mockWAL.EXPECT().RawAppend(mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
-			return &types.AppendResult{
-				TimeTick: msgs.TimeTick(),
-			}, nil
-		})
+	// mockWAL.EXPECT().RawAppend(mock.Anything, mock.Anything).
+	// 	RunAndReturn(func(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
+	// 		return &types.AppendResult{
+	// 			TimeTick: msgs.TimeTick(),
+	// 		}, nil
+	// 	})
 
 	wg.Add(1)
 	go func() {
