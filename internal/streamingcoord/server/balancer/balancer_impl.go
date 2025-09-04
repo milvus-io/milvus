@@ -220,6 +220,8 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 				return // nodeChanged is only closed if context cancel.
 				// in other word, balancer is closed.
 			}
+			// trigger the watch update.
+			b.channelMetaManager.TriggerWatchUpdate()
 			// balance triggered by new streaming node changed.
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.

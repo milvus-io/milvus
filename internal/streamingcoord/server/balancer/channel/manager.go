@@ -152,6 +152,17 @@ func (cm *ChannelManager) IsStreamingEnabledOnce() bool {
 	return cm.streamingVersion != nil
 }
 
+// TriggerWatchUpdate triggers the watch update.
+// Because current watch must see new incoming streaming node right away,
+// so a watch updating trigger will be called if there's new incoming streaming node.
+func (cm *ChannelManager) TriggerWatchUpdate() {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	cm.version.Local++
+	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+}
+
 // MarkStreamingHasEnabled marks the streaming service has been enabled.
 func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	cm.cond.L.Lock()
