@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -31,6 +30,56 @@ func TestMain(m *testing.M) {
 	streamingutil.SetStreamingServiceEnabled()
 	paramtable.Init()
 	m.Run()
+}
+
+func TestReplicate(t *testing.T) {
+	t.Skip("cat not running without streaming service at background")
+
+	streaming.Init()
+	defer streaming.Release()
+
+	pchannels1 := make([]string, 0, len(vChannels))
+	pchannels2 := make([]string, 0, len(vChannels))
+	for idx := 0; idx < 16; idx++ {
+		pchannels1 = append(pchannels1, fmt.Sprintf("primary-rootcoord-dml_%d", idx))
+		pchannels2 = append(pchannels2, fmt.Sprintf("by-dev-rootcoord-dml_%d", idx))
+	}
+
+	ctx := context.Background()
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "primary",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: pchannels1,
+			},
+			{
+				ClusterId: "by-dev",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19531",
+					Token: "test-token",
+				},
+				Pchannels: pchannels2,
+			},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{
+				SourceClusterId: "by-dev",
+				TargetClusterId: "primary",
+			},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	cfg, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+	if err != nil {
+		panic(err)
+	}
+	t.Logf("cfg: %+v\n", cfg)
 }
 
 func TestStreamingBroadcast(t *testing.T) {

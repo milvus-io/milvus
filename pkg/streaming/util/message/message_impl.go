@@ -155,6 +155,30 @@ func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
 	return m
 }
 
+// OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
+func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) {
+	if !m.properties.Exist(messageVChannel) {
+		panic("vchannel not set in properties of message")
+	}
+	m.properties.Set(messageVChannel, vchannel)
+	if !m.properties.Exist(messageBroadcastHeader) {
+		return
+	}
+	if len(broadcastVChannels) == 0 {
+		panic("broadcast vchannels not set when overwrite replicate vchannel")
+	}
+	bh := m.broadcastHeader()
+	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
+		panic("broadcast vchannels length mismatch")
+	}
+	bh.Vchannels = broadcastVChannels[0]
+	bhVal, err := EncodeProto(bh)
+	if err != nil {
+		panic("should not happen on broadcast header proto")
+	}
+	m.properties.Set(messageBroadcastHeader, bhVal)
+}
+
 // IntoImmutableMessage converts current message to immutable message.
 func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	// payload and id is always immutable, so we only clone the prop here is ok.
@@ -220,6 +244,28 @@ func (m *messageImpl) VChannel() string {
 		return ""
 	}
 	return value
+}
+
+// ReplicateHeader returns the replicate header of current message.
+// If the replicate header is set, it is a replicated message.
+func (m *messageImpl) ReplicateHeader() *ReplicateHeader {
+	value, ok := m.properties.Get(messageReplicateMesssageHeader)
+	if !ok {
+		return nil
+	}
+	header := &messagespb.ReplicateHeader{}
+	if err := DecodeProto(value, header); err != nil {
+		panic("can not decode replicate header")
+	}
+	messageID := MustUnmarshalMessageID(header.MessageId)
+	lastConfirmedMessageID := MustUnmarshalMessageID(header.LastConfirmedMessageId)
+	return &ReplicateHeader{
+		ClusterID:              header.ClusterId,
+		MessageID:              messageID,
+		LastConfirmedMessageID: lastConfirmedMessageID,
+		TimeTick:               header.TimeTick,
+		VChannel:               header.Vchannel,
+	}
 }
 
 // BroadcastHeader returns the broadcast header of current message.

@@ -9,13 +9,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -79,14 +79,18 @@ type balancerImpl struct {
 	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 }
 
-// GetPChannels returns all pchannels.
-func (b *balancerImpl) GetPChannels() []string {
-	return b.channelMetaManager.GetPChannels()
-}
-
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
+}
+
+func (b *balancerImpl) GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error) {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	return b.channelMetaManager.GetLatestChannelAssignment()
 }
 
 // GetAllStreamingNodes fetches all streaming node info.
@@ -112,15 +116,19 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 }
 
 // UpdateReplicateConfiguration updates the replicate configuration.
-func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) {
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
+		return status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
 
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
-	b.channelMetaManager.UpdateReplicateConfiguration(ctx, config)
+
+	if err := b.channelMetaManager.UpdateReplicateConfiguration(ctx, msgs...); err != nil {
+		return err
+	}
+	return nil
 }
 
 // UpdateBalancePolicy update the balance policy.
