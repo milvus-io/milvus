@@ -455,8 +455,6 @@ class RowContainer {
     std::vector<int> variable_offsets_{};
     std::vector<int> variable_idxes_{};
     std::vector<uint32_t> offsets_;
-    std::vector<uint32_t> nullOffsets_;
-
     std::vector<RowColumn> rowColumns_;
 
     // How many bytes do the flags (null, free) occupy.

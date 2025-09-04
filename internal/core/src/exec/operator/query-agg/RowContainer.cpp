@@ -26,7 +26,6 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
     : keyTypes_(keyTypes),
       accumulators_(accumulators) {
     int32_t offset = 0;
-    int32_t nullOffset = 0;
     bool isVariableWidth = false;
     int idx = 0;
     for (auto type : keyTypes_) {
@@ -42,24 +41,17 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         } else {
             offset += GetDataTypeSize(type, 1);
         }
-        nullOffsets_.push_back(nullOffset);
-        ++nullOffset;
         idx++;
     }
     const int32_t firstAggregateOffset = offset;
     for (const auto& accumulator : accumulators) {
-        // Null bit.
-        nullOffsets_.push_back(nullOffset);
-        ++nullOffset;
         isVariableWidth |= !accumulator.isFixedSize();
         alignment_ = combineAlignments(accumulator.alignment(), alignment_);
     }
 
     // Add 1 to the last null offset to get the number of bits.
-    flagBytes_ = milvus::bits::nBytes(nullOffsets_.back() + 1);
-    for (auto i = 0; i < nullOffsets_.size(); i++) {
-        nullOffsets_[i] += firstAggregateOffset * 8;
-    }
+    auto null_bit_count = keyTypes_.size() + accumulators.size();
+    flagBytes_ = milvus::bits::nBytes(null_bit_count);
     offset += flagBytes_;
 
     for (const auto& accumulator : accumulators) {
@@ -67,16 +59,15 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         offsets_.push_back(offset);
         offset += accumulator.fixedWidthSize();
     }
+    AssertInfo(offsets_.size() == keyTypes_.size() + accumulators.size(), 
+        "wrong size of offsets in RowContainer");   
     if (isVariableWidth) {
         rowSizeOffset_ = offset;
         offset += sizeof(uint32_t);
     }
     fixedRowSize_ = milvus::bits::roundUp(offset, alignment_);
-    // add null offsets to offsets
-    size_t nullOffsetsPos = 0;
     for (auto i = 0; i < offsets_.size(); i++) {
-        rowColumns_.emplace_back(offsets_[i], nullOffsets_[nullOffsetsPos]);
-        ++nullOffsetsPos;
+        rowColumns_.emplace_back(offsets_[i], firstAggregateOffset * 8 + i);
     }
 }
 
