@@ -1038,6 +1038,475 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
 
         return expressions
 
+    def generate_json_records_with_key_categories(self, num_records: int, typed_threshold: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        Generate JSON objects exhibiting three key categories across the dataset:
+          - Typed keys: a single data type dominates (>= typed_threshold). Example keys: 'a', 'f' (ints)
+          - Dynamic keys: multiple data types appear with meaningful proportions. Example keys: 'b', 'd'
+          - Shared keys: everything else (appear infrequently or below threshold). Example keys: 'e', nested 'd.e'
+
+        Args:
+            num_records: Number of JSON records to generate
+            typed_threshold: Proportion threshold to qualify a key as a typed key
+
+        Returns:
+            List of JSON documents (dict) containing the keys described above
+        """
+        if num_records <= 0:
+            return []
+
+        # keeps all generated json in records
+        records: List[Dict[str, Any]] = []
+
+        for i in range(num_records):
+            doc: Dict[str, Any] = {}
+
+            # Typed keys: 'a' is either int or string
+            if random.random() < typed_threshold:
+                doc['a'] = (i + 1) * 10  # e.g., 10, 20, 30, ...
+            else:
+                doc['a'] = "string type:" +str((i + 1) * 10)
+
+            # Typed keys: 'f' is either int or None
+            if random.random() < typed_threshold:
+                doc['f'] = (i % 5) + 1  # e.g., 1, 2, 3, 4, 5
+            else:
+                doc['f'] = None
+
+            # Dynamic key 'b': mix ints and strings with comparable shares
+            if random.random() < 0.5:
+                doc['b'] = f"string type:{(i % 5) + 1}"
+            else:
+                doc['b'] = (i % 7) + 1
+
+            # Dynamic key 'd': rotate among string, array-of-strings, and object-with-e
+            roll = random.random()
+            if roll < 1.0 / 3.0:
+                doc['d'] = str(40 + (i % 10))  # e.g., "40", "41", ...
+            elif roll < 2.0 / 3.0:
+                base = 20 + (i % 10)
+                doc['d'] = [str(base), str(base + 1)]
+            else:
+                doc['d'] = {"e": "fanta" if (i % 2 == 0) else "stick"}
+
+            # Shared key 'e': appear infrequently with a string value
+            if random.random() < 0.25:  # keep well below typed threshold
+                doc['e'] = str(1234 + (i % 3))  # e.g., "1234", "1235", "1236"
+
+            # Shared complex key 'g': deep, mixed structures with low frequency
+            if random.random() < 0.3:
+                doc['g'] = self._generate_complex_shared_g(i)
+
+            records.append(doc)
+
+        return records
+
+    def _generate_complex_shared_g(self, seed_index: int) -> Any:
+        """
+        Generate a complex, mixed-type structure for shared key 'g'.
+        Shapes include mixed lists, nested dicts, nested lists of dicts, and scalars.
+        """
+        variant = random.randint(0, 4)
+        if variant == 0:
+            # Example: [{h:{i:10}}, {j:1234}, "abcd"]
+            return [
+                {"h": {"i": 10 + (seed_index % 10)}},
+                {"j": 1234 if seed_index % 3 == 0 else 1000 + (seed_index % 100)},
+                "abcd"
+            ]
+        elif variant == 1:
+            # Example: {h:[{i:10}, None, {k:[1, 2, "x_val"]}], meta:{ok:True, id:"m_0"}}
+            return {
+                "h": [
+                    {"i": (seed_index % 12)},
+                    None,
+                    {"k": [1, 2, "x_val"]}
+                ],
+                "meta": {"ok": True, "id": f"m_{seed_index}"}
+            }
+        elif variant == 2:
+            # Example: [[{h:{i:1}},{m:[{"n":"N"}, {"flag":True}]}], "foo", 123.45, None]
+            return [
+                [
+                    {"h": {"i": (seed_index % 5) + 1}},
+                    {"m": [{"n": "N"}, {"flag": seed_index % 2 == 0}]}
+                ],
+                "foo",
+                123.45,
+                None
+            ]
+        elif variant == 3:
+            # Example: {h:{i:None}, alt:[{j:1234}, "abzz"], flag:False}
+            return {
+                "h": {"i": None},
+                "alt": [{"j": 1234}, "abzz"],
+                "flag": False
+            }
+        else:
+            # Example: [{h:{i:42}}, {j:5678}, "abcxyz"]
+            return [
+                {"h": {"h": ["milvus", "rocks", "stick"]},},
+                ["fanta", "stick"],
+                "abcxyz"
+            ]
+
+    def generate_expressions_for_json_key_categories(self, json_field_name: str) -> List[Tuple[str, Callable]]:
+        """
+        Produce filter expressions and validators that target the three JSON key categories
+        created by generate_json_records_with_key_categories.
+
+        The expressions intentionally exercise:
+          - Typed keys: numeric comparisons and membership tests (keys 'a', 'f')
+          - Dynamic keys: type-specific predicates covering different shapes of 'b' and 'd'
+          - Shared keys: existence and value checks on 'e' and nested 'd.e' and so on.
+
+        Args:
+            json_field_name: The Milvus field name that stores the JSON value
+
+        Returns:
+            List of (expression, validator) where validator(json_obj) -> bool
+        """
+        expressions: List[Tuple[str, Callable]] = []
+
+        # --- Typed keys ('a', 'f') ---
+        # a >= 30
+        expr = f"{json_field_name}['a'] >= 30"
+        def _v_a_ge_30(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('a')
+            if value is None:
+                return False
+            # Only numeric types participate in numeric comparison; do not coerce strings
+            if isinstance(value, int):
+                return value >= 30
+            return False
+        expressions.append((expr, _v_a_ge_30))
+        
+        # a LIKE "string type:%"
+        expr = f"{json_field_name}['a'] LIKE \"string type:%\""
+        def _v_a_eq_str(json_obj: Any, pattern="string type:%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('a')
+            if not isinstance(value, str):
+                return False
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, value))
+            except Exception:
+                return False
+        expressions.append((expr, _v_a_eq_str))
+
+        # f IN [1, 2, 3, 4, 5]
+        f_values = [1, 2, 3, 4, 5]
+        expr = f"{json_field_name}['f'] IN {f_values}"
+        def _v_f_in(json_obj: Any, allowed=f_values) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('f')
+            return value in allowed
+        expressions.append((expr, _v_f_in))
+
+        # f IS NULL
+        expr = f"{json_field_name}['f'] IS NULL"
+        def _v_f_in_none(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('f')
+            return value is None
+        expressions.append((expr, _v_f_in_none))
+
+        # --- Dynamic key 'b' (string or int) ---
+        # b LIKE 'str%'
+        expr = f"{json_field_name}['b'] LIKE \"str%\""
+        def _v_b_like_str(json_obj: Any, pattern="str%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('b')
+            if not isinstance(value, str):
+                return False
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, value))
+            except Exception:
+                return False
+        expressions.append((expr, _v_b_like_str))
+
+        # b IN [1, 2, 3, 4, 5, 6, 7]
+        b_ints = [1, 2, 3, 4, 5, 6, 7]
+        expr = f"{json_field_name}['b'] IN {b_ints}"
+        def _v_b_in_ints(json_obj: Any, allowed=b_ints) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('b')
+            return value in allowed
+        expressions.append((expr, _v_b_in_ints))
+
+        # --- Dynamic key 'd' (string | array[str] | object{"e": str}) ---
+        # d LIKE '4%'
+        expr = f"{json_field_name}['d'] LIKE \"4%\""
+        def _v_d_like_4(json_obj: Any, pattern="4%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('d')
+            if not isinstance(value, str):
+                return False
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, value))
+            except Exception:
+                return False
+        expressions.append((expr, _v_d_like_4))
+
+        # d[0] IN ["23", "24"]
+        d_head = ["23", "24"]
+        expr = f"{json_field_name}['d'][0] IN {d_head}"
+        def _v_d0_in(json_obj: Any, allowed=d_head) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('d')
+            if not isinstance(value, list) or len(value) == 0:
+                return False
+            return value[0] in allowed
+        expressions.append((expr, _v_d0_in))
+
+        # d['e'] == 'fanta'
+        expr = f"{json_field_name}['d']['e'] == 'fanta'"
+        def _v_d_e_fanta(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('d')
+            if not isinstance(value, dict):
+                return False
+            return value.get('e') == 'fanta'
+        expressions.append((expr, _v_d_e_fanta))
+
+        # --- Shared keys ---
+        # e LIKE '4%'
+        expr = f"{json_field_name}['e'] LIKE \"4%\""
+        def _v_e_like_4(json_obj: Any, pattern="4%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('e')
+            if value is None:
+                return False
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, str(value)))
+            except Exception:
+                return False
+        expressions.append((expr, _v_e_like_4))
+
+        # existence of nested shared key d.e via equality check to 'stick'
+        expr = f"{json_field_name}['d']['e'] == 'stick'"
+        def _v_d_e_stick(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            value = json_obj.get('d')
+            if not isinstance(value, dict):
+                return False
+            return value.get('e') == 'stick'
+        expressions.append((expr, _v_d_e_stick))
+
+        # --- Additional complex shared key 'g' expressions ---
+        # g[0]['h']['i'] >= 10 variant 0
+        expr = f"{json_field_name}['g'][0]['h']['i'] >= 10"
+        def _v_g0_h_i_ge_10(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) == 0:
+                return False
+            first = g_val[0]
+            if not isinstance(first, dict):
+                return False
+            h = first.get('h')
+            if not isinstance(h, dict):
+                return False
+            i_val = h.get('i')
+            try:
+                return float(i_val) >= 10
+            except Exception:
+                return False
+        expressions.append((expr, _v_g0_h_i_ge_10))
+
+        # g[1]['j'] IN [1234, 5678] variant 0
+        gj_allowed = [1234, 5678]
+        expr = f"{json_field_name}['g'][1]['j'] IN {gj_allowed}"
+        def _v_g1_j_in(json_obj: Any, allowed=gj_allowed) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) < 2:
+                return False
+            second = g_val[1]
+            if not isinstance(second, dict):
+                return False
+            return second.get('j') in allowed
+        expressions.append((expr, _v_g1_j_in))
+
+        # g[2] LIKE 'ab%' variant 0
+        expr = f"{json_field_name}['g'][2] LIKE \"ab%\""
+        def _v_g2_like_ab(json_obj: Any, pattern="ab%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) < 3:
+                return False
+            third = g_val[2]
+            if not isinstance(third, str):
+                return False
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, third))
+            except Exception:
+                return False
+        expressions.append((expr, _v_g2_like_ab))
+
+        # g['h'][0]['i'] >= 5 variant 1
+        expr = f"{json_field_name}['g']['h'][0]['i'] >= 5"
+        def _v_gh0_i_ge_5(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, dict):
+                return False
+            h_list = g_val.get('h')
+            if not isinstance(h_list, list) or len(h_list) == 0:
+                return False
+            h0 = h_list[0]
+            if not isinstance(h0, dict):
+                return False
+            i_val = h0.get('i')
+            try:
+                return float(i_val) >= 5
+            except Exception:
+                return False
+        expressions.append((expr, _v_gh0_i_ge_5))
+
+        # g['h'][2]['k'][2] LIKE '%x%' variant 1
+        expr = f"{json_field_name}['g']['h'][2]['k'][2] LIKE \"%x%\""
+        def _v_gh2_k2_like_x(json_obj: Any, pattern="%x%") -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, dict):
+                return False
+            h_list = g_val.get('h')
+            if not isinstance(h_list, list) or len(h_list) < 3:
+                return False
+            h2 = h_list[2]
+            if not isinstance(h2, dict):
+                return False
+            k_list = h2.get('k')
+            if not isinstance(k_list, list) or len(k_list) < 3:
+                return False
+            target = k_list[2]
+            regex = self._convert_like_to_regex(pattern)
+            try:
+                return bool(re.match(regex, str(target)))
+            except Exception:
+                return False
+        expressions.append((expr, _v_gh2_k2_like_x))
+
+        # g[0][0]['h']['i'] >= 1 (handles nested list at g[0]) variant 2
+        expr = f"{json_field_name}['g'][0][0]['h']['i'] >= 1"
+        def _v_g000_h_i_ge_1(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) == 0:
+                return False
+            first = g_val[0]
+            if not isinstance(first, list) or len(first) == 0:
+                return False
+            first0 = first[0]
+            if not isinstance(first0, dict):
+                return False
+            h = first0.get('h')
+            if not isinstance(h, dict):
+                return False
+            i_val = h.get('i')
+            try:
+                return float(i_val) >= 1
+            except Exception:
+                return False
+        expressions.append((expr, _v_g000_h_i_ge_1))
+
+        # g["alt"][0]["j"] == 1234 variant 3
+        expr = f"{json_field_name}['g']['alt'][0]['j'] == 1234"
+        def _v_g_alt0_j_eq_1234(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, dict):
+                return False
+            alt_list = g_val.get('alt')
+            if not isinstance(alt_list, list) or len(alt_list) == 0:
+                return False
+            alt0 = alt_list[0]
+            if not isinstance(alt0, dict):
+                return False
+            j_val = alt0.get('j')
+            return j_val == 1234
+        expressions.append((expr, _v_g_alt0_j_eq_1234))
+
+        # g CONTAINS "stick" variant 4
+        expr = f"json_contains({json_field_name}, \"stick\")"
+        def _v_g_contains_stick(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list):
+                return False
+            return 'stick' in g_val
+        expressions.append((expr, _v_g_contains_stick))
+
+        # g[1] CONTAINS "fanta" variant 4
+        expr = f"json_contains({json_field_name}['g'][1], \"fanta\") "
+        def _v_g1_contains_fanta(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) < 2:
+                return False
+            second = g_val[1]
+            if not isinstance(second, list):
+                return False
+            return 'fanta' in second
+        expressions.append((expr, _v_g1_contains_fanta))
+
+        # g[0]["h"] CONTAINS_ALL ["milvus", "rocks", "stick"] variant 4
+        expr = f"json_contains_all({json_field_name}['g'][0]['h'], [\"milvus\", \"rocks\", \"stick\"]) "
+        def _v_g0_h_contains_all(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list) or len(g_val) == 0:
+                return False
+            first = g_val[0]
+            if not isinstance(first, dict):
+                return False
+            h_val = first.get('h')  
+            if not isinstance(h_val, list):
+                return False
+            return 'milvus' in h_val and 'rocks' in h_val and 'stick' in h_val
+        expressions.append((expr, _v_g0_h_contains_all))
+
+        # g[1] CONTAINS_ANY ["milvus", "fanta"] variant 4
+        expr = f"json_contains_any({json_field_name}['g'][0], [\"fanta\", \"milvus\"]) "
+        def _v_g_contains_any(json_obj: Any) -> bool:
+            if not isinstance(json_obj, dict):
+                return False
+            g_val = json_obj.get('g')
+            if not isinstance(g_val, list):
+                return False
+            return 'fanta' in g_val[0]
+        expressions.append((expr, _v_g_contains_any))
+
+        return expressions
+
     def _generate_field_calculation_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> \
     List[Tuple[str, Callable]]:
         """Generate expressions with field arithmetic calculations."""
@@ -1539,3 +2008,150 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     continue
 
         return stats
+
+    def create_json_only_schema_with_index_types(self, client):
+        """
+        Create a schema containing only JSON fields, each repeated with different index types
+        to verify index consistency for JSON key-category expressions.
+
+        Returns: (schema, field_mapping, index_configs)
+        """
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        field_mapping: Dict[str, Any] = {}
+        index_configs: Dict[str, str] = {}
+
+        supported_indexes = ["no_index", "inverted", "ngram", "autoindex"]
+        for index_type in supported_indexes:
+            field_name = f"json_{index_type}"
+            schema.add_field(field_name, DataType.JSON, nullable=True)
+            field_mapping[field_name] = DataType.JSON
+            index_configs[field_name] = index_type
+
+        return schema, field_mapping, index_configs
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("num_records", [10000])
+    def test_json_key_category_expressions(self, num_records):
+        """
+        JSON-only test that validates all generated JSON key-category expressions across
+        multiple index types for index consistency and correctness vs. ground truth.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        try:
+            # Schema: JSON-only with multiple index types
+            schema, field_mapping, index_configs = self.create_json_only_schema_with_index_types(client)
+            self.create_collection(client, collection_name, schema=schema)
+
+            # Data: generate JSON docs and populate into each JSON field
+            json_docs = self.generate_json_records_with_key_categories(num_records)
+            vectors = cf.gen_vectors(num_records, default_dim)
+
+            test_data: List[Dict] = []
+            json_field_names = [name for name, _ in field_mapping.items()]
+            for i in range(num_records):
+                record: Dict[str, Any] = {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: vectors[i]
+                }
+                for json_field in json_field_names:
+                    record[json_field] = json_docs[i]
+                test_data.append(record)
+
+            # Insert and index
+            self.insert_data_in_batches(client, collection_name, test_data, ct.default_nb)
+            self._create_all_indexes(client, collection_name, index_configs)
+            self.load_collection(client, collection_name)
+
+            # Run generated expressions for each JSON field, verify results
+            failed: List[str] = []
+            not_supported: List[str] = []
+            total_checked: List[str] = []
+
+            # Expressions are the same per JSON field; generate once and reuse across fields
+            sample_field = json_field_names[0]
+            expressions = self.generate_expressions_for_json_key_categories(sample_field)
+
+            for expression, validator in expressions:
+                # For consistency check across different index types
+                field_results: Dict[str, Any] = {}
+
+                for field_name in json_field_names:
+                    test_expression = expression.replace(sample_field, field_name)
+                    expression_info = f"{field_name} ({index_configs[field_name]}): {test_expression}"
+                    total_checked.append(expression_info)
+
+                    try:
+                        res = self.query(
+                            client, collection_name=collection_name,
+                            filter=test_expression, output_fields=["*"],
+                            check_task=CheckTasks.check_nothing
+                        )[0]
+                        print(f"res_len={len(res)}") 
+
+                        if isinstance(res, Error):
+                            if self.is_parsing_error(res):
+                                log.warning(f"⚠️ JSON expr cannot be parsed, skipping: {expression_info} -> {str(res)}")
+                                not_supported.append(f"{expression_info}: {str(res)}")
+                                continue
+                            else:
+                                log.error(f"✗ JSON expr failed: {expression_info} -> {str(res)}")
+                                failed.append(f"{expression_info}: {str(res)}")
+                                continue
+
+                        # Store for consistency check
+                        field_results[field_name] = res
+
+                        # Ground truth
+                        expected_ids = []
+                        for rec in test_data:
+                            try:
+                                if validator(rec.get(field_name)):
+                                    expected_ids.append(rec[default_primary_key_field_name])
+                            except Exception:
+                                # If validator errors, treat as non-match
+                                pass
+
+                        result_ids = [row[default_primary_key_field_name] for row in res]
+                        if len(result_ids) != len(expected_ids):
+                            log.error(
+                                f"✗ Mismatch count for {expression_info}: got {len(result_ids)} expected {len(expected_ids)}")
+                            failed.append(
+                                f"Count mismatch: {expression_info}: got {len(result_ids)} expected {len(expected_ids)}")
+                            continue
+
+                    except Exception as e:
+                        log.error(f"✗ Exception evaluating {expression_info}: {str(e)}")
+                        failed.append(f"{expression_info}: exception {str(e)}")
+                        continue
+
+                # Verify index consistency if we have more than one result set
+                if len(field_results) > 1:
+                    try:
+                        self._verify_index_consistency(field_results, "JSON_EXPR", json_field_names, {
+                            "failed": failed
+                        })
+                    except Exception:
+                        # _verify_index_consistency appends to stats["failed"], we already passed that reference
+                        pass
+
+            # Assert outcome
+            if failed:
+                # Save debug info to reproduce
+                self.save_failure_debug_info(
+                    test_data=test_data,
+                    schema=schema,
+                    field_mapping=field_mapping,
+                    index_configs=index_configs,
+                    failed_expressions=failed,
+                    collection_name=collection_name
+                )
+                raise AssertionError(f"JSON key-category expression tests failed: {failed}")
+
+        finally:
+            # Optionally drop the collection if needed
+            pass

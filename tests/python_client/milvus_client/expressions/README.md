@@ -14,6 +14,7 @@ This directory contains comprehensive test modules for Milvus client expression 
 - Index consistency verification (same results for indexed vs non-indexed fields)
 - Comprehensive error handling and failure debugging
 - Automatic reproduction script generation
+- Test complex Json expression (JSON[JSON], JSON[LIST[JSON]], JSON[JSON[LIST]], etc)
 
 **Key Design:**
 - One collection containing all data types
