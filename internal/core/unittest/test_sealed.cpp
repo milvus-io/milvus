@@ -573,8 +573,8 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
@@ -654,9 +654,6 @@ TEST(Sealed, LoadFieldData) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
-
-    segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, ClearData) {
@@ -737,8 +734,8 @@ TEST(Sealed, ClearData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
@@ -842,8 +839,8 @@ TEST(Sealed, LoadFieldDataMmap) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
@@ -861,9 +858,6 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
-
-    segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadPkScalarIndex) {
@@ -1214,8 +1208,8 @@ TEST(Sealed, BF) {
         schema, dataset, false, {fake_id.get()});
 
     auto vec_data = GenRandomFloatVecs(N, dim);
-    auto field_data =
-        storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -1278,8 +1272,8 @@ TEST(Sealed, BF_Overflow) {
         GetExcludedFieldIds(schema, {0, 1, i64_fid.get()}));
 
     auto vec_data = GenMaxFloatVecs(N, dim);
-    auto field_data =
-        storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -1583,7 +1577,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     //test for int64
     std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, false, 1, 10);
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
@@ -1630,7 +1624,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     //test for int32
     std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
     auto int32_field_data =
-        storage::CreateFieldData(DataType::INT32, false, 1, 10);
+        storage::CreateFieldData(DataType::INT32, DataType::NONE, false, 1, 10);
     int32_field_data->FillFieldData(int32s.data(), N);
     load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                kPartitionID,
@@ -1646,7 +1640,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     //test for int16
     std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
     auto int16_field_data =
-        storage::CreateFieldData(DataType::INT16, false, 1, 10);
+        storage::CreateFieldData(DataType::INT16, DataType::NONE, false, 1, 10);
     int16_field_data->FillFieldData(int16s.data(), N);
     load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                kPartitionID,
@@ -1662,7 +1656,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     //test for int8
     std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
     auto int8_field_data =
-        storage::CreateFieldData(DataType::INT8, false, 1, 10);
+        storage::CreateFieldData(DataType::INT8, DataType::NONE, false, 1, 10);
     int8_field_data->FillFieldData(int8s.data(), N);
     load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                kPartitionID,
@@ -1679,7 +1673,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     std::vector<float> floats = {
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
     auto float_field_data =
-        storage::CreateFieldData(DataType::FLOAT, false, 1, 10);
+        storage::CreateFieldData(DataType::FLOAT, DataType::NONE, false, 1, 10);
     float_field_data->FillFieldData(floats.data(), N);
     load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                kPartitionID,
@@ -1695,8 +1689,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     // test for double
     std::vector<double> doubles = {
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto double_field_data =
-        storage::CreateFieldData(DataType::DOUBLE, false, 1, 10);
+    auto double_field_data = storage::CreateFieldData(
+        DataType::DOUBLE, DataType::NONE, false, 1, 10);
     double_field_data->FillFieldData(doubles.data(), N);
     load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                kPartitionID,
@@ -1727,7 +1721,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     //test for int64
     std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, false, 1, 10);
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
@@ -1770,7 +1764,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
     std::array<uint8_t, 1> valid_data = {0x03};
     auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, true, 1, 5);
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
 
     int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
@@ -1841,7 +1835,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
     std::array<uint8_t, 1> valid_data = {0x03};
     auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, true, 1, 5);
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
 
     int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
@@ -1882,8 +1876,8 @@ TEST(Sealed, SkipIndexSkipStringRange) {
 
     //test for string
     std::vector<std::string> strings = {"e", "f", "g", "g", "j"};
-    auto string_field_data =
-        storage::CreateFieldData(DataType::VARCHAR, false, 1, N);
+    auto string_field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -2283,7 +2277,7 @@ TEST(Sealed, SearchSortedPk) {
 
 TEST(Sealed, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
@@ -2342,12 +2336,13 @@ TEST(Sealed, SearchVectorArray) {
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
     int64_t index_id = 5000;
+    int64_t dim = 32;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
+    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     auto field_meta = milvus::segcore::gen_field_meta(collection_id,
@@ -2365,7 +2360,6 @@ TEST(Sealed, SearchVectorArray) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto emb_list_len = 10;
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
@@ -2378,7 +2372,8 @@ TEST(Sealed, SearchVectorArray) {
     for (auto& v : vec_array_col) {
         vector_arrays.push_back(milvus::VectorArray(v));
     }
-    auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY, false);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim);
     field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
 
     // create sealed segment
@@ -2459,7 +2454,7 @@ TEST(Sealed, SearchVectorArray) {
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = 5;
-    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
     vec_index->Query(query_dataset, searchInfo, nullptr, result);

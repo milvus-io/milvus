@@ -11,6 +11,7 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -20,10 +21,17 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
-add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
+add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
+
+# Collect test files from source directories using glob pattern
+file(GLOB_RECURSE SOURCE_TEST_FILES
+    "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
+    "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
+)
 
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
+        ${SOURCE_TEST_FILES}
         init_gtest.cpp
         test_packed_c.cpp
         test_arrow_fs_c.cpp
@@ -35,7 +43,6 @@ set(MILVUS_TEST_FILES
         test_bf_sparse.cpp
         test_binary.cpp
         test_binlog_index.cpp
-        test_bitmap_index.cpp
         test_bool_index.cpp
         test_c_api.cpp
         test_chunk.cpp
@@ -74,8 +81,6 @@ set(MILVUS_TEST_FILES
         test_plan_proto.cpp
         test_query.cpp
         test_range_search_sort.cpp
-        test_reduce_c.cpp
-        test_reduce.cpp
         test_regex_query.cpp
         test_regex_query_util.cpp
         test_relational.cpp
@@ -84,20 +89,17 @@ set(MILVUS_TEST_FILES
         test_sealed.cpp
         test_segcore.cpp
         test_similarity_corelation.cpp
-        test_span.cpp
         test_storage.cpp
         test_string_expr.cpp
         test_text_match.cpp
         test_timestamp_index.cpp
         test_tracer.cpp
-        test_utils.cpp
         test_chunked_segment.cpp
         test_chunked_column.cpp
         test_rust_result.cpp
         test_cached_search_iterator.cpp
         test_random_sample.cpp
         test_json_index.cpp
-        test_json_key_stats_index.cpp
         test_types.cpp
         test_growing_storage_v2.cpp
         test_memory_planner.cpp
@@ -106,13 +108,13 @@ set(MILVUS_TEST_FILES
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
         test_expr_cache.cpp
-        test_thread_pool.cpp
         test_json_flat_index.cpp
         test_vector_array.cpp
         test_ngram_query.cpp
         test_stlsort_index.cpp
         test_vector_array_storage_v2.cpp
         test_rescore.cpp
+        test_vector_array_chunk.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -202,6 +204,7 @@ target_link_libraries(all_tests
 install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
+add_subdirectory(test_json_stats)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

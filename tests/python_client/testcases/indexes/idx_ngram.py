@@ -87,6 +87,11 @@ class NGRAM:
             "expected": success
         },  
         {
+            "description": "max_gram equals a large value",
+            "params": {"min_gram": 2, "max_gram": 1000000000},
+            "expected": success
+        },  
+        {
             "description": "min_gram greater than max_gram",
             "params": {"min_gram": 5, "max_gram": 3},
             "expected": {"err_code": 999, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
@@ -134,6 +139,26 @@ class NGRAM:
             },
             "expected": success
         },
+        {
+            "description": "JSON field with enteir json field",
+            "params": {
+                "min_gram": 2, 
+                "max_gram": 3,
+                "json_path": "json_field",
+                "json_cast_type": "varchar"
+            },
+            "expected": success
+        },
+        {
+            "description": "JSON field with not existing path",
+            "params": {
+                "min_gram": 2, 
+                "max_gram": 3,
+                "json_path": "json_field['not_existing_path']",
+                "json_cast_type": "varchar"
+            },
+            "expected": success
+        },
         # skip for https://github.com/milvus-io/milvus/issues/43934
         # {
         #     "description": "JSON field with invalid json_cast_type",
@@ -152,7 +177,7 @@ class NGRAM:
                 "max_gram": 3,
                 "json_path": "json_field['body']"
             },
-            "expected": {"err_code": 999, "err_msg": "json_cast_type not found"}
+            "expected": {"err_code": 999, "err_msg": "JSON field with ngram index must specify json_cast_type"}
         },
         {
             "description": "JSON field missing json_path",

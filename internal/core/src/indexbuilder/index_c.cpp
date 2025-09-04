@@ -36,7 +36,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Util.h"
 #include "index/Meta.h"
-#include "index/JsonKeyStatsInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "monitor/scope_metric.h"
 
@@ -125,10 +125,11 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
             opt_fields_map[field_id] = {
                 field_info.field_name(),
                 static_cast<milvus::DataType>(field_info.field_type()),
+                static_cast<milvus::DataType>(field_info.element_type()),
                 {}};
         }
         for (const auto& str : field_info.data_paths()) {
-            std::get<2>(opt_fields_map[field_id]).emplace_back(str);
+            std::get<3>(opt_fields_map[field_id]).emplace_back(str);
         }
     }
 
@@ -179,6 +180,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     }
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
+    config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
 
     return config;
 }
@@ -298,8 +300,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             build_index_info->ParseFromArray(serialized_build_index_info, len);
         AssertInfo(res, "Unmarshall build index info failed");
 
-        auto field_type =
-            static_cast<DataType>(build_index_info->field_schema().data_type());
+        auto field_type = static_cast<milvus::DataType>(
+            build_index_info->field_schema().data_type());
 
         auto storage_config =
             get_storage_config(build_index_info->storage_config());
@@ -353,10 +355,12 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
-        auto index = std::make_unique<index::JsonKeyStatsInvertedIndex>(
+        auto index = std::make_unique<index::JsonKeyStats>(
             fileManagerContext,
             false,
-            build_index_info->json_key_stats_tantivy_memory(),
+            build_index_info->json_stats_max_shredding_columns(),
+            build_index_info->json_stats_shredding_ratio_threshold(),
+            build_index_info->json_stats_write_batch_size(),
             tantivy_index_version);
         index->Build(config);
         auto create_index_result = index->Upload(config);
@@ -392,8 +396,8 @@ BuildTextIndex(ProtoLayoutInterface result,
             build_index_info->ParseFromArray(serialized_build_index_info, len);
         AssertInfo(res, "Unmarshal build index info failed");
 
-        auto field_type =
-            static_cast<DataType>(build_index_info->field_schema().data_type());
+        auto field_type = static_cast<milvus::DataType>(
+            build_index_info->field_schema().data_type());
 
         auto storage_config =
             get_storage_config(build_index_info->storage_config());

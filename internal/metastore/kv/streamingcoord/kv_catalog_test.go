@@ -61,6 +61,16 @@ func TestCatalog(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, v.Version, int64(1))
 
+	// CChannel test
+	err = catalog.SaveCChannel(context.Background(), &streamingpb.CChannelMeta{
+		Pchannel: "test",
+	})
+	assert.NoError(t, err)
+
+	assignments, err := catalog.GetCChannel(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, assignments.Pchannel, "test")
+
 	// PChannel test
 	err = catalog.SavePChannels(context.Background(), []*streamingpb.PChannelMeta{
 		{

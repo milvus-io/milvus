@@ -45,6 +45,10 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         const char* file_path);
 
 void
+AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                   CacheWarmupPolicy warmup_policy);
+
+void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version);
 

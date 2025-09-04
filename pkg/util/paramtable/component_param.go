@@ -238,6 +238,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
+	EnableNamespace                     ParamItem `refreshable:"false"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -317,6 +318,8 @@ type commonConfig struct {
 	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
 
 	EnablePosixMode ParamItem `refreshable:"false"`
+
+	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -621,6 +624,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.EnableNamespace = ParamItem{
+		Key:          "common.namespace.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.",
+		Export:       true,
+	}
+	p.EnableNamespace.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
@@ -1130,6 +1142,15 @@ This helps Milvus-CDC synchronize incremental data`,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
 
+	p.UsingJSONStatsForQuery = ParamItem{
+		Key:          "common.UsingJSONStatsForQuery",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to use json stats when query",
+		Export:       true,
+	}
+	p.UsingJSONStatsForQuery.Init(base.mgr)
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -1616,40 +1637,42 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval             ParamItem `refreshable:"false"`
-	HealthCheckTimeout           ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
-	MaxNameLength                ParamItem `refreshable:"true"`
-	MaxUsernameLength            ParamItem `refreshable:"true"`
-	MinPasswordLength            ParamItem `refreshable:"true"`
-	MaxPasswordLength            ParamItem `refreshable:"true"`
-	MaxFieldNum                  ParamItem `refreshable:"true"`
-	MaxVectorFieldNum            ParamItem `refreshable:"true"`
-	MaxShardNum                  ParamItem `refreshable:"true"`
-	MaxDimension                 ParamItem `refreshable:"true"`
-	GinLogging                   ParamItem `refreshable:"false"`
-	GinLogSkipPaths              ParamItem `refreshable:"false"`
-	MaxUserNum                   ParamItem `refreshable:"true"`
-	MaxRoleNum                   ParamItem `refreshable:"true"`
-	MaxTaskNum                   ParamItem `refreshable:"false"`
-	DDLConcurrency               ParamItem `refreshable:"true"`
-	DCLConcurrency               ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
-	CostMetricsExpireTime        ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum      ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor      ParamItem `refreshable:"false"`
-	RetryTimesOnReplica          ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
-	PartitionNameRegexp          ParamItem `refreshable:"true"`
-	MustUsePartitionKey          ParamItem `refreshable:"true"`
-	SkipAutoIDCheck              ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	MaxVarCharLength             ParamItem `refreshable:"false"`
-	MaxTextLength                ParamItem `refreshable:"false"`
-	MaxResultEntries             ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
+	TimeTickInterval               ParamItem `refreshable:"false"`
+	HealthCheckTimeout             ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
+	MaxNameLength                  ParamItem `refreshable:"true"`
+	MaxUsernameLength              ParamItem `refreshable:"true"`
+	MinPasswordLength              ParamItem `refreshable:"true"`
+	MaxPasswordLength              ParamItem `refreshable:"true"`
+	MaxFieldNum                    ParamItem `refreshable:"true"`
+	MaxVectorFieldNum              ParamItem `refreshable:"true"`
+	MaxShardNum                    ParamItem `refreshable:"true"`
+	MaxDimension                   ParamItem `refreshable:"true"`
+	GinLogging                     ParamItem `refreshable:"false"`
+	GinLogSkipPaths                ParamItem `refreshable:"false"`
+	MaxUserNum                     ParamItem `refreshable:"true"`
+	MaxRoleNum                     ParamItem `refreshable:"true"`
+	NameValidationAllowedChars     ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
+	MaxTaskNum                     ParamItem `refreshable:"false"`
+	DDLConcurrency                 ParamItem `refreshable:"true"`
+	DCLConcurrency                 ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
+	CostMetricsExpireTime          ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor        ParamItem `refreshable:"false"`
+	RetryTimesOnReplica            ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck        ParamItem `refreshable:"true"`
+	PartitionNameRegexp            ParamItem `refreshable:"true"`
+	MustUsePartitionKey            ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
+	MaxVarCharLength               ParamItem `refreshable:"false"`
+	MaxTextLength                  ParamItem `refreshable:"false"`
+	MaxResultEntries               ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1843,6 +1866,22 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 	}
 	p.MaxRoleNum.Init(base.mgr)
+
+	p.NameValidationAllowedChars = ParamItem{
+		Key:          "proxy.nameValidation.allowedChars",
+		DefaultValue: "$",
+		Doc:          "Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.",
+		Export:       true,
+	}
+	p.NameValidationAllowedChars.Init(base.mgr)
+
+	p.RoleNameValidationAllowedChars = ParamItem{
+		Key:          "proxy.roleNameValidation.allowedChars",
+		DefaultValue: "$",
+		Doc:          "Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.",
+		Export:       true,
+	}
+	p.RoleNameValidationAllowedChars.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "proxy.soPath",
@@ -2946,6 +2985,7 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -3025,7 +3065,6 @@ type queryNodeConfig struct {
 	WorkerPoolingSize ParamItem `refreshable:"false"`
 
 	// Json Key Stats
-	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
@@ -3627,6 +3666,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.MmapScalarIndex.Init(base.mgr)
 
+	p.MmapJSONStats = ParamItem{
+		Key:          "queryNode.mmap.jsonStats",
+		Version:      "2.6.1",
+		DefaultValue: "true",
+		Doc:          "Enable mmap for loading json stats",
+		Export:       true,
+	}
+	p.MmapJSONStats.Init(base.mgr)
+
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
@@ -4031,15 +4079,6 @@ user-task-polling:
 	}
 	p.ExprResCacheCapacityBytes.Init(base.mgr)
 
-	p.JSONKeyStatsCommitInterval = ParamItem{
-		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
-		Version:      "2.5.0",
-		DefaultValue: "200",
-		Doc:          "the commit interval for the JSON key Stats to commit",
-		Export:       true,
-	}
-	p.JSONKeyStatsCommitInterval.Init(base.mgr)
-
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -4271,12 +4310,14 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableSortCompaction              ParamItem `refreshable:"true"`
-	TaskCheckInterval                 ParamItem `refreshable:"true"`
-	SortCompactionTriggerCount        ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
-	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
-	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+	EnableSortCompaction             ParamItem `refreshable:"true"`
+	TaskCheckInterval                ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount       ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount            ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval         ParamItem `refreshable:"true"`
+	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
+	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
+	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -5364,14 +5405,32 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
 
-	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
-		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
-		Version:      "2.5.5",
-		DefaultValue: "16777216",
-		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+	p.JSONStatsMaxShreddingColumns = ParamItem{
+		Key:          "dataCoord.jsonStatsMaxShreddingColumns",
+		Version:      "2.6.1",
+		DefaultValue: "1024",
+		Doc:          "the max number of columns to shred",
 		Export:       true,
 	}
-	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
+
+	p.JSONStatsShreddingRatioThreshold = ParamItem{
+		Key:          "dataCoord.jsonStatsShreddingRatioThreshold",
+		Version:      "2.6.1",
+		DefaultValue: "0.3",
+		Doc:          "the ratio threshold to shred",
+		Export:       true,
+	}
+	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
+
+	p.JSONStatsWriteBatchSize = ParamItem{
+		Key:          "dataCoord.jsonStatsWriteBatchSize",
+		Version:      "2.6.1",
+		DefaultValue: "81920",
+		Doc:          "the batch size to write",
+		Export:       true,
+	}
+	p.JSONStatsWriteBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

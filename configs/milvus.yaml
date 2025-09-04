@@ -259,6 +259,7 @@ pulsar:
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
 #   readTimeout: 10
+#   queuedmaxkbytes: 100000
 
 rocksmq:
   # Prefix of the key to where Milvus stores data in RocksMQ.
@@ -315,6 +316,10 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
+  nameValidation:
+    allowedChars: $ # Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.
+  roleNameValidation:
+    allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
@@ -501,7 +506,6 @@ queryNode:
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
-    jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -513,6 +517,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
+    jsonStats: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -732,7 +737,9 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
+  jsonStatsMaxShreddingColumns: 1024 # the max number of columns to shred
+  jsonStatsShreddingRatioThreshold: 0.3 # the ratio threshold to shred
+  jsonStatsWriteBatchSize: 819200 # the batch size to write
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -920,6 +927,8 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
+  namespace:
+    enabled: false # whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -1017,6 +1026,7 @@ common:
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
+  UsingJSONStatsForQuery: true # Indicates whether to use json stats when query
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

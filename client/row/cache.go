@@ -14,34 +14,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package row
 
-#include <functional>
-#include <memory>
-#include <string>
-#include <vector>
+import (
+	"reflect"
 
-#include "common/Vector.h"
-#include "exec/QueryContext.h"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
 
-namespace milvus {
-namespace exec {
+var cachedCandidates *typeutil.ConcurrentMap[reflect.Type, *ReceiverCandidate]
 
-class VectorFunction {
- public:
-    virtual ~VectorFunction() = default;
+func init() {
+	cachedCandidates = typeutil.NewConcurrentMap[reflect.Type, *ReceiverCandidate]()
+}
 
-    virtual void
-    Apply(std::vector<VectorPtr>& args,
-          DataType output_type,
-          EvalCtx& context,
-          VectorPtr& result) const = 0;
-};
+func GetReceiverCandidate(v reflect.Type) *ReceiverCandidate {
+	rc, ok := cachedCandidates.Get(v)
+	if ok {
+		return rc
+	}
 
-std::shared_ptr<VectorFunction>
-GetVectorFunction(const std::string& name,
-                  const std::vector<DataType>& input_types,
-                  const QueryConfig& config);
+	// reflect.Type.String() cannot work as unique identifier for singleflight
+	// accept multiple parse for now
+	rc = &ReceiverCandidate{
+		name2Index: parseCandidate(v),
+	}
+	cachedCandidates.Insert(v, rc)
 
-}  // namespace exec
-}  // namespace milvus
+	return rc
+}

@@ -592,6 +592,10 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		return fmt.Errorf("Nested array is not supported %s", field.Name)
 	}
 
+	if field.ElementType == schemapb.DataType_JSON {
+		return fmt.Errorf("JSON is not supported for fields in struct, fieldName = %s", field.Name)
+	}
+
 	if field.DataType == schemapb.DataType_Array {
 		if typeutil.IsVectorType(field.GetElementType()) {
 			return fmt.Errorf("Inconsistent schema: element type of array field %s is a vector type", field.Name)
@@ -1283,6 +1287,10 @@ func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Tim
 }
 
 func validateName(entity string, nameType string) error {
+	return validateNameWithCustomChars(entity, nameType, Params.ProxyCfg.NameValidationAllowedChars.GetValue())
+}
+
+func validateNameWithCustomChars(entity string, nameType string, allowedChars string) error {
 	entity = strings.TrimSpace(entity)
 
 	if entity == "" {
@@ -1305,15 +1313,15 @@ func validateName(entity string, nameType string) error {
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("%s can only contain numbers, letters, dollars and underscores, found %c at %d", nameType, c, i)
+		if c != '_' && !isAlpha(c) && !isNumber(c) && !strings.ContainsRune(allowedChars, rune(c)) {
+			return merr.WrapErrParameterInvalidMsg("%s can only contain numbers, letters, underscores, and allowed characters (%s), found %c at %d", nameType, allowedChars, c, i)
 		}
 	}
 	return nil
 }
 
 func ValidateRoleName(entity string) error {
-	return validateName(entity, "role name")
+	return validateNameWithCustomChars(entity, "role name", Params.ProxyCfg.RoleNameValidationAllowedChars.GetValue())
 }
 
 func IsDefaultRole(roleName string) bool {

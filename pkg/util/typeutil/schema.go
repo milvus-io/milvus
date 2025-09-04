@@ -754,8 +754,27 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 	return result
 }
 
-// AppendFieldData appends fields data of specified index from src to dst
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
+	return AppendFieldDataWithNullData(dst, src, idx, false)
+}
+
+// AppendFieldData appends field data of specified index from src to dst
+//
+// Note: The field data in src may have two different nullable formats, so the caller
+// must specify how to handle null values using the skipAppendNullData parameter.
+//
+// Two nullable data formats are supported:
+//
+//	Case 1: Before validateUtil.fillWithValue processing
+//		Data: [1, null, 2] = [1, 2] + [true, false, true]
+//		Set skipAppendNullData = true to skip appending values to data array of dst
+//
+//	Case 2: After validateUtil.fillWithValue processing
+//		Data: [1, null, 2] = [1, 0, 2] + [true, false, true]
+//		Set skipAppendNullData = false to append zero values to data array of dst
+//
+// TODO: Unify nullable format - SDK uses Case 1, Milvus uses Case 2
+func AppendFieldDataWithNullData(dst, src []*schemapb.FieldData, idx int64, skipAppendNullData bool) (appendSize int64) {
 	dstMap := make(map[int64]*schemapb.FieldData)
 	for _, fieldData := range dst {
 		if fieldData != nil {
@@ -780,6 +799,10 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 			}
 			valid := fieldData.ValidData[idx]
 			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
+
+			if !valid && skipAppendNullData {
+				continue
+			}
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1092,7 +1115,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateFieldIdx]
 			}
 
-			// update field data to null,only modify valid data
+			// update field data to null, only modify valid data
 			if !updateFieldData.ValidData[updateFieldIdx] {
 				continue
 			}

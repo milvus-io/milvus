@@ -58,10 +58,11 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
         int64_t index_build_id;
         int64_t index_version;
     };
-    std::unique_ptr<milvus::index::IndexBase>
+
+    index::IndexBasePtr
     LoadVecIndex();
 
-    std::unique_ptr<milvus::index::IndexBase>
+    index::IndexBasePtr
     LoadScalarIndex();
 
     std::string key_;

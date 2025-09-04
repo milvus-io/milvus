@@ -179,7 +179,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
-		if field.Name == common.MetaFieldName {
+		if field.Name == common.MetaFieldName || field.Name == common.NamespaceFieldName {
 			continue
 		}
 		fieldDetail := printFieldDetail(field, true)
@@ -191,7 +191,7 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
 	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
-		if field.Name == common.MetaFieldName {
+		if field.Name == common.MetaFieldName || field.Name == common.NamespaceFieldName {
 			continue
 		}
 		fieldDetail := printFieldDetail(field, false)

@@ -3,8 +3,10 @@ package indexparamcheck
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -25,6 +27,19 @@ func newNgramIndexChecker() *NgramIndexChecker {
 func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_JSON {
 		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR or JSON field")
+	}
+
+	// For JSON field with ngram index, json_cast_type must be VARCHAR
+	if dataType == schemapb.DataType_JSON {
+		castType, exists := params[common.JSONCastTypeKey]
+		if !exists {
+			return merr.WrapErrParameterInvalidMsg("JSON field with ngram index must specify json_cast_type")
+		}
+		// Normalize cast type to uppercase for comparison
+		castType = strings.ToUpper(strings.TrimSpace(castType))
+		if castType != "VARCHAR" {
+			return merr.WrapErrParameterInvalidMsg("JSON field with ngram index only supports VARCHAR cast type, got: %s", castType)
+		}
 	}
 
 	minGramStr, minGramExist := params[MinGramKey]

@@ -90,9 +90,19 @@ Schema::ConvertToArrowSchema() const {
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
                       : 1;
+
+        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
+        auto data_type = meta.get_data_type();
+        if (data_type == DataType::VECTOR_ARRAY) {
+            arrow_data_type =
+                GetArrowDataTypeForVectorArray(meta.get_element_type());
+        } else {
+            arrow_data_type = GetArrowDataType(data_type, dim);
+        }
+
         auto arrow_field = std::make_shared<arrow::Field>(
             meta.get_name().get(),
-            GetArrowDataType(meta.get_data_type(), dim),
+            arrow_data_type,
             meta.is_nullable(),
             arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
                                       {std::to_string(meta.get_id().get())}));

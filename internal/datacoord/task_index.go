@@ -346,10 +346,11 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 		partitionKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 		if partitionKeyField != nil && typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
 			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-				FieldID:   partitionKeyField.FieldID,
-				FieldName: partitionKeyField.Name,
-				FieldType: int32(partitionKeyField.DataType),
-				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+				FieldID:     partitionKeyField.FieldID,
+				FieldName:   partitionKeyField.Name,
+				FieldType:   int32(partitionKeyField.DataType),
+				ElementType: int32(partitionKeyField.GetElementType()),
+				DataIds:     getBinLogIDs(segment, partitionKeyField.FieldID),
 			})
 
 			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)

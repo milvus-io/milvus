@@ -56,6 +56,9 @@ const (
 	// TimeStampFieldName defines the name of the Timestamp field
 	TimeStampFieldName = "Timestamp"
 
+	// NamespaceFieldName defines the name of the Namespace field
+	NamespaceFieldName = "$namespace_id"
+
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
 
@@ -121,6 +124,13 @@ const (
 
 	// JSONIndexPath storage path const for json index
 	JSONIndexPath = "json_key_index_log"
+
+	// JSONStatsPath storage path const for json stats
+	JSONStatsPath = "json_stats"
+)
+
+const (
+	JSONStatsDataFormatVersion = 2
 )
 
 // Search, Index parameter keys
@@ -154,6 +164,11 @@ const (
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+)
+
+// expr query params
+const (
+	ExprUseJSONStatsKey = "expr_use_json_stats"
 )
 
 // Doc-in-doc-out
@@ -217,6 +232,8 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
+	EnableDynamicSchemaKey     = `dynamicfield.enabled`
+	NamespaceEnabledKey        = "namespace.enabled"
 )
 
 const (
@@ -462,6 +479,16 @@ func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (found bool, value bool, err error) {
+	for _, kv := range kvs {
+		if kv.GetKey() == EnableDynamicSchemaKey {
+			value, err = strconv.ParseBool(kv.GetValue())
+			return true, value, err
+		}
+	}
+	return false, false, nil
 }
 
 func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, indexParams map[string]string) error {

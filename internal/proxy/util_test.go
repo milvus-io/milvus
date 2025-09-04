@@ -708,6 +708,23 @@ func TestValidateName(t *testing.T) {
 	assert.Nil(t, ValidateObjectName("*"))
 }
 
+func TestValidateRoleName_HyphenToggle(t *testing.T) {
+	pt := paramtable.Get()
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$-")
+	assert.Nil(t, ValidateRoleName("Admin-1"))
+	assert.Nil(t, ValidateRoleName("_a-bc$1"))
+	assert.NotNil(t, ValidateRoleName("-bad"))
+	assert.NotNil(t, ValidateRoleName("1leading"))
+	assert.NotNil(t, ValidateRoleName(""))
+	assert.NotNil(t, ValidateRoleName("*"))
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$")
+	assert.Nil(t, ValidateRoleName("Admin_1"))
+	assert.Nil(t, ValidateRoleName("Admin$1"))
+	assert.NotNil(t, ValidateRoleName("Admin-1"))
+}
+
 func TestIsDefaultRole(t *testing.T) {
 	assert.Equal(t, true, IsDefaultRole(util.RoleAdmin))
 	assert.Equal(t, true, IsDefaultRole(util.RolePublic))
@@ -3882,6 +3899,17 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+	})
+
+	t.Run("JSON not supported in struct", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "json_field",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_JSON,
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "JSON is not supported for fields in struct")
 	})
 
 	t.Run("nested array not supported", func(t *testing.T) {

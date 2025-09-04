@@ -629,6 +629,54 @@ func (x *PChannelMeta) GetLastAssignTimestampSeconds() uint64 {
 	return 0
 }
 
+// CChannelMeta is the meta information of a control channel.
+type CChannelMeta struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Pchannel string `protobuf:"bytes,1,opt,name=pchannel,proto3" json:"pchannel,omitempty"` // the pchannel that control channel locate on.
+}
+
+func (x *CChannelMeta) Reset() {
+	*x = CChannelMeta{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_streaming_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CChannelMeta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CChannelMeta) ProtoMessage() {}
+
+func (x *CChannelMeta) ProtoReflect() protoreflect.Message {
+	mi := &file_streaming_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CChannelMeta.ProtoReflect.Descriptor instead.
+func (*CChannelMeta) Descriptor() ([]byte, []int) {
+	return file_streaming_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CChannelMeta) GetPchannel() string {
+	if x != nil {
+		return x.Pchannel
+	}
+	return ""
+}
+
 // StreamingVersion is the version of the streaming service.
 type StreamingVersion struct {
 	state         protoimpl.MessageState
@@ -641,7 +689,7 @@ type StreamingVersion struct {
 func (x *StreamingVersion) Reset() {
 	*x = StreamingVersion{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[3]
+		mi := &file_streaming_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -654,7 +702,7 @@ func (x *StreamingVersion) String() string {
 func (*StreamingVersion) ProtoMessage() {}
 
 func (x *StreamingVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[3]
+	mi := &file_streaming_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +715,7 @@ func (x *StreamingVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingVersion.ProtoReflect.Descriptor instead.
 func (*StreamingVersion) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{3}
+	return file_streaming_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StreamingVersion) GetVersion() int64 {
@@ -690,7 +738,7 @@ type VersionPair struct {
 func (x *VersionPair) Reset() {
 	*x = VersionPair{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[4]
+		mi := &file_streaming_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -703,7 +751,7 @@ func (x *VersionPair) String() string {
 func (*VersionPair) ProtoMessage() {}
 
 func (x *VersionPair) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[4]
+	mi := &file_streaming_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +764,7 @@ func (x *VersionPair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VersionPair.ProtoReflect.Descriptor instead.
 func (*VersionPair) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{4}
+	return file_streaming_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *VersionPair) GetGlobal() int64 {
@@ -747,7 +795,7 @@ type BroadcastTask struct {
 func (x *BroadcastTask) Reset() {
 	*x = BroadcastTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[5]
+		mi := &file_streaming_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -760,7 +808,7 @@ func (x *BroadcastTask) String() string {
 func (*BroadcastTask) ProtoMessage() {}
 
 func (x *BroadcastTask) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[5]
+	mi := &file_streaming_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -773,7 +821,7 @@ func (x *BroadcastTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BroadcastTask.ProtoReflect.Descriptor instead.
 func (*BroadcastTask) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{5}
+	return file_streaming_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BroadcastTask) GetMessage() *messagespb.Message {
@@ -809,7 +857,7 @@ type BroadcastRequest struct {
 func (x *BroadcastRequest) Reset() {
 	*x = BroadcastRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[6]
+		mi := &file_streaming_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -822,7 +870,7 @@ func (x *BroadcastRequest) String() string {
 func (*BroadcastRequest) ProtoMessage() {}
 
 func (x *BroadcastRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[6]
+	mi := &file_streaming_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +883,7 @@ func (x *BroadcastRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BroadcastRequest.ProtoReflect.Descriptor instead.
 func (*BroadcastRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{6}
+	return file_streaming_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BroadcastRequest) GetMessage() *messagespb.Message {
@@ -858,7 +906,7 @@ type BroadcastResponse struct {
 func (x *BroadcastResponse) Reset() {
 	*x = BroadcastResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[7]
+		mi := &file_streaming_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -871,7 +919,7 @@ func (x *BroadcastResponse) String() string {
 func (*BroadcastResponse) ProtoMessage() {}
 
 func (x *BroadcastResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[7]
+	mi := &file_streaming_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +932,7 @@ func (x *BroadcastResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BroadcastResponse.ProtoReflect.Descriptor instead.
 func (*BroadcastResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{7}
+	return file_streaming_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BroadcastResponse) GetResults() map[string]*ProduceMessageResponseResult {
@@ -906,14 +954,17 @@ type BroadcastAckRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// Deprecated: Marked as deprecated in streaming.proto.
 	BroadcastId uint64 `protobuf:"varint,1,opt,name=broadcast_id,json=broadcastId,proto3" json:"broadcast_id,omitempty"` // broadcast id.
-	Vchannel    string `protobuf:"bytes,2,opt,name=vchannel,proto3" json:"vchannel,omitempty"`                           // the vchannel that acked the message.
+	// Deprecated: Marked as deprecated in streaming.proto.
+	Vchannel string                       `protobuf:"bytes,2,opt,name=vchannel,proto3" json:"vchannel,omitempty"` // the vchannel that acked the message.
+	Message  *messagespb.ImmutableMessage `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`   // the message that to be acked.
 }
 
 func (x *BroadcastAckRequest) Reset() {
 	*x = BroadcastAckRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[8]
+		mi := &file_streaming_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -926,7 +977,7 @@ func (x *BroadcastAckRequest) String() string {
 func (*BroadcastAckRequest) ProtoMessage() {}
 
 func (x *BroadcastAckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[8]
+	mi := &file_streaming_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -939,9 +990,10 @@ func (x *BroadcastAckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BroadcastAckRequest.ProtoReflect.Descriptor instead.
 func (*BroadcastAckRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{8}
+	return file_streaming_proto_rawDescGZIP(), []int{9}
 }
 
+// Deprecated: Marked as deprecated in streaming.proto.
 func (x *BroadcastAckRequest) GetBroadcastId() uint64 {
 	if x != nil {
 		return x.BroadcastId
@@ -949,11 +1001,19 @@ func (x *BroadcastAckRequest) GetBroadcastId() uint64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in streaming.proto.
 func (x *BroadcastAckRequest) GetVchannel() string {
 	if x != nil {
 		return x.Vchannel
 	}
 	return ""
+}
+
+func (x *BroadcastAckRequest) GetMessage() *messagespb.ImmutableMessage {
+	if x != nil {
+		return x.Message
+	}
+	return nil
 }
 
 type BroadcastAckResponse struct {
@@ -965,7 +1025,7 @@ type BroadcastAckResponse struct {
 func (x *BroadcastAckResponse) Reset() {
 	*x = BroadcastAckResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[9]
+		mi := &file_streaming_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -978,7 +1038,7 @@ func (x *BroadcastAckResponse) String() string {
 func (*BroadcastAckResponse) ProtoMessage() {}
 
 func (x *BroadcastAckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[9]
+	mi := &file_streaming_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,7 +1051,7 @@ func (x *BroadcastAckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BroadcastAckResponse.ProtoReflect.Descriptor instead.
 func (*BroadcastAckResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{9}
+	return file_streaming_proto_rawDescGZIP(), []int{10}
 }
 
 // UpdateWALBalancePolicyRequest is the request to update the WAL balance policy.
@@ -1008,7 +1068,7 @@ type UpdateWALBalancePolicyRequest struct {
 func (x *UpdateWALBalancePolicyRequest) Reset() {
 	*x = UpdateWALBalancePolicyRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[10]
+		mi := &file_streaming_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1021,7 +1081,7 @@ func (x *UpdateWALBalancePolicyRequest) String() string {
 func (*UpdateWALBalancePolicyRequest) ProtoMessage() {}
 
 func (x *UpdateWALBalancePolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[10]
+	mi := &file_streaming_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1094,7 @@ func (x *UpdateWALBalancePolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateWALBalancePolicyRequest.ProtoReflect.Descriptor instead.
 func (*UpdateWALBalancePolicyRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{10}
+	return file_streaming_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UpdateWALBalancePolicyRequest) GetConfig() *WALBalancePolicyConfig {
@@ -1069,7 +1129,7 @@ type WALBalancePolicyConfig struct {
 func (x *WALBalancePolicyConfig) Reset() {
 	*x = WALBalancePolicyConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[11]
+		mi := &file_streaming_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1082,7 +1142,7 @@ func (x *WALBalancePolicyConfig) String() string {
 func (*WALBalancePolicyConfig) ProtoMessage() {}
 
 func (x *WALBalancePolicyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[11]
+	mi := &file_streaming_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1095,7 +1155,7 @@ func (x *WALBalancePolicyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WALBalancePolicyConfig.ProtoReflect.Descriptor instead.
 func (*WALBalancePolicyConfig) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{11}
+	return file_streaming_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *WALBalancePolicyConfig) GetAllowRebalance() bool {
@@ -1117,7 +1177,7 @@ type WALBalancePolicyNodes struct {
 func (x *WALBalancePolicyNodes) Reset() {
 	*x = WALBalancePolicyNodes{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[12]
+		mi := &file_streaming_proto_msgTypes[13]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1130,7 +1190,7 @@ func (x *WALBalancePolicyNodes) String() string {
 func (*WALBalancePolicyNodes) ProtoMessage() {}
 
 func (x *WALBalancePolicyNodes) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[12]
+	mi := &file_streaming_proto_msgTypes[13]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1203,7 @@ func (x *WALBalancePolicyNodes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WALBalancePolicyNodes.ProtoReflect.Descriptor instead.
 func (*WALBalancePolicyNodes) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{12}
+	return file_streaming_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *WALBalancePolicyNodes) GetFreezeNodeIds() []int64 {
@@ -1172,7 +1232,7 @@ type UpdateWALBalancePolicyResponse struct {
 func (x *UpdateWALBalancePolicyResponse) Reset() {
 	*x = UpdateWALBalancePolicyResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[13]
+		mi := &file_streaming_proto_msgTypes[14]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1185,7 +1245,7 @@ func (x *UpdateWALBalancePolicyResponse) String() string {
 func (*UpdateWALBalancePolicyResponse) ProtoMessage() {}
 
 func (x *UpdateWALBalancePolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[13]
+	mi := &file_streaming_proto_msgTypes[14]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1198,7 +1258,7 @@ func (x *UpdateWALBalancePolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateWALBalancePolicyResponse.ProtoReflect.Descriptor instead.
 func (*UpdateWALBalancePolicyResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{13}
+	return file_streaming_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UpdateWALBalancePolicyResponse) GetConfig() *WALBalancePolicyConfig {
@@ -1231,7 +1291,7 @@ type AssignmentDiscoverRequest struct {
 func (x *AssignmentDiscoverRequest) Reset() {
 	*x = AssignmentDiscoverRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[14]
+		mi := &file_streaming_proto_msgTypes[15]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1244,7 +1304,7 @@ func (x *AssignmentDiscoverRequest) String() string {
 func (*AssignmentDiscoverRequest) ProtoMessage() {}
 
 func (x *AssignmentDiscoverRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[14]
+	mi := &file_streaming_proto_msgTypes[15]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1257,7 +1317,7 @@ func (x *AssignmentDiscoverRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignmentDiscoverRequest.ProtoReflect.Descriptor instead.
 func (*AssignmentDiscoverRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{14}
+	return file_streaming_proto_rawDescGZIP(), []int{15}
 }
 
 func (m *AssignmentDiscoverRequest) GetCommand() isAssignmentDiscoverRequest_Command {
@@ -1311,7 +1371,7 @@ type ReportAssignmentErrorRequest struct {
 func (x *ReportAssignmentErrorRequest) Reset() {
 	*x = ReportAssignmentErrorRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[15]
+		mi := &file_streaming_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1324,7 +1384,7 @@ func (x *ReportAssignmentErrorRequest) String() string {
 func (*ReportAssignmentErrorRequest) ProtoMessage() {}
 
 func (x *ReportAssignmentErrorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[15]
+	mi := &file_streaming_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1337,7 +1397,7 @@ func (x *ReportAssignmentErrorRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportAssignmentErrorRequest.ProtoReflect.Descriptor instead.
 func (*ReportAssignmentErrorRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{15}
+	return file_streaming_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReportAssignmentErrorRequest) GetPchannel() *PChannelInfo {
@@ -1364,7 +1424,7 @@ type CloseAssignmentDiscoverRequest struct {
 func (x *CloseAssignmentDiscoverRequest) Reset() {
 	*x = CloseAssignmentDiscoverRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[16]
+		mi := &file_streaming_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1377,7 +1437,7 @@ func (x *CloseAssignmentDiscoverRequest) String() string {
 func (*CloseAssignmentDiscoverRequest) ProtoMessage() {}
 
 func (x *CloseAssignmentDiscoverRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[16]
+	mi := &file_streaming_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1390,7 +1450,7 @@ func (x *CloseAssignmentDiscoverRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseAssignmentDiscoverRequest.ProtoReflect.Descriptor instead.
 func (*CloseAssignmentDiscoverRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{16}
+	return file_streaming_proto_rawDescGZIP(), []int{17}
 }
 
 // AssignmentDiscoverResponse is the response of Discovery
@@ -1409,7 +1469,7 @@ type AssignmentDiscoverResponse struct {
 func (x *AssignmentDiscoverResponse) Reset() {
 	*x = AssignmentDiscoverResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[17]
+		mi := &file_streaming_proto_msgTypes[18]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1422,7 +1482,7 @@ func (x *AssignmentDiscoverResponse) String() string {
 func (*AssignmentDiscoverResponse) ProtoMessage() {}
 
 func (x *AssignmentDiscoverResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[17]
+	mi := &file_streaming_proto_msgTypes[18]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1435,7 +1495,7 @@ func (x *AssignmentDiscoverResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignmentDiscoverResponse.ProtoReflect.Descriptor instead.
 func (*AssignmentDiscoverResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{17}
+	return file_streaming_proto_rawDescGZIP(), []int{18}
 }
 
 func (m *AssignmentDiscoverResponse) GetResponse() isAssignmentDiscoverResponse_Response {
@@ -1485,12 +1545,13 @@ type FullStreamingNodeAssignmentWithVersion struct {
 
 	Version     *VersionPair               `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
 	Assignments []*StreamingNodeAssignment `protobuf:"bytes,2,rep,name=assignments,proto3" json:"assignments,omitempty"`
+	Cchannel    *CChannelAssignment        `protobuf:"bytes,3,opt,name=cchannel,proto3" json:"cchannel,omitempty"` // Where the control channel located.
 }
 
 func (x *FullStreamingNodeAssignmentWithVersion) Reset() {
 	*x = FullStreamingNodeAssignmentWithVersion{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[18]
+		mi := &file_streaming_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1503,7 +1564,7 @@ func (x *FullStreamingNodeAssignmentWithVersion) String() string {
 func (*FullStreamingNodeAssignmentWithVersion) ProtoMessage() {}
 
 func (x *FullStreamingNodeAssignmentWithVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[18]
+	mi := &file_streaming_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1516,7 +1577,7 @@ func (x *FullStreamingNodeAssignmentWithVersion) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use FullStreamingNodeAssignmentWithVersion.ProtoReflect.Descriptor instead.
 func (*FullStreamingNodeAssignmentWithVersion) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{18}
+	return file_streaming_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *FullStreamingNodeAssignmentWithVersion) GetVersion() *VersionPair {
@@ -1533,6 +1594,61 @@ func (x *FullStreamingNodeAssignmentWithVersion) GetAssignments() []*StreamingNo
 	return nil
 }
 
+func (x *FullStreamingNodeAssignmentWithVersion) GetCchannel() *CChannelAssignment {
+	if x != nil {
+		return x.Cchannel
+	}
+	return nil
+}
+
+// CChannelAssignment is the assignment info of a control channel.
+type CChannelAssignment struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Meta *CChannelMeta `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+}
+
+func (x *CChannelAssignment) Reset() {
+	*x = CChannelAssignment{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_streaming_proto_msgTypes[20]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CChannelAssignment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CChannelAssignment) ProtoMessage() {}
+
+func (x *CChannelAssignment) ProtoReflect() protoreflect.Message {
+	mi := &file_streaming_proto_msgTypes[20]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CChannelAssignment.ProtoReflect.Descriptor instead.
+func (*CChannelAssignment) Descriptor() ([]byte, []int) {
+	return file_streaming_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *CChannelAssignment) GetMeta() *CChannelMeta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
 type CloseAssignmentDiscoverResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1542,7 +1658,7 @@ type CloseAssignmentDiscoverResponse struct {
 func (x *CloseAssignmentDiscoverResponse) Reset() {
 	*x = CloseAssignmentDiscoverResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[19]
+		mi := &file_streaming_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1555,7 +1671,7 @@ func (x *CloseAssignmentDiscoverResponse) String() string {
 func (*CloseAssignmentDiscoverResponse) ProtoMessage() {}
 
 func (x *CloseAssignmentDiscoverResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[19]
+	mi := &file_streaming_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1568,7 +1684,7 @@ func (x *CloseAssignmentDiscoverResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseAssignmentDiscoverResponse.ProtoReflect.Descriptor instead.
 func (*CloseAssignmentDiscoverResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{19}
+	return file_streaming_proto_rawDescGZIP(), []int{21}
 }
 
 // StreamingNodeInfo is the information of a streaming node.
@@ -1584,7 +1700,7 @@ type StreamingNodeInfo struct {
 func (x *StreamingNodeInfo) Reset() {
 	*x = StreamingNodeInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[20]
+		mi := &file_streaming_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1597,7 +1713,7 @@ func (x *StreamingNodeInfo) String() string {
 func (*StreamingNodeInfo) ProtoMessage() {}
 
 func (x *StreamingNodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[20]
+	mi := &file_streaming_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1610,7 +1726,7 @@ func (x *StreamingNodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeInfo.ProtoReflect.Descriptor instead.
 func (*StreamingNodeInfo) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{20}
+	return file_streaming_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *StreamingNodeInfo) GetServerId() int64 {
@@ -1640,7 +1756,7 @@ type StreamingNodeAssignment struct {
 func (x *StreamingNodeAssignment) Reset() {
 	*x = StreamingNodeAssignment{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[21]
+		mi := &file_streaming_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1653,7 +1769,7 @@ func (x *StreamingNodeAssignment) String() string {
 func (*StreamingNodeAssignment) ProtoMessage() {}
 
 func (x *StreamingNodeAssignment) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[21]
+	mi := &file_streaming_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1666,7 +1782,7 @@ func (x *StreamingNodeAssignment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeAssignment.ProtoReflect.Descriptor instead.
 func (*StreamingNodeAssignment) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{21}
+	return file_streaming_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StreamingNodeAssignment) GetNode() *StreamingNodeInfo {
@@ -1701,7 +1817,7 @@ type DeliverPolicy struct {
 func (x *DeliverPolicy) Reset() {
 	*x = DeliverPolicy{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[22]
+		mi := &file_streaming_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1714,7 +1830,7 @@ func (x *DeliverPolicy) String() string {
 func (*DeliverPolicy) ProtoMessage() {}
 
 func (x *DeliverPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[22]
+	mi := &file_streaming_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1727,7 +1843,7 @@ func (x *DeliverPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverPolicy.ProtoReflect.Descriptor instead.
 func (*DeliverPolicy) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{22}
+	return file_streaming_proto_rawDescGZIP(), []int{24}
 }
 
 func (m *DeliverPolicy) GetPolicy() isDeliverPolicy_Policy {
@@ -1810,7 +1926,7 @@ type DeliverFilter struct {
 func (x *DeliverFilter) Reset() {
 	*x = DeliverFilter{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[23]
+		mi := &file_streaming_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1823,7 +1939,7 @@ func (x *DeliverFilter) String() string {
 func (*DeliverFilter) ProtoMessage() {}
 
 func (x *DeliverFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[23]
+	mi := &file_streaming_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1836,7 +1952,7 @@ func (x *DeliverFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverFilter.ProtoReflect.Descriptor instead.
 func (*DeliverFilter) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{23}
+	return file_streaming_proto_rawDescGZIP(), []int{25}
 }
 
 func (m *DeliverFilter) GetFilter() isDeliverFilter_Filter {
@@ -1902,7 +2018,7 @@ type DeliverFilterTimeTickGT struct {
 func (x *DeliverFilterTimeTickGT) Reset() {
 	*x = DeliverFilterTimeTickGT{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[24]
+		mi := &file_streaming_proto_msgTypes[26]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1915,7 +2031,7 @@ func (x *DeliverFilterTimeTickGT) String() string {
 func (*DeliverFilterTimeTickGT) ProtoMessage() {}
 
 func (x *DeliverFilterTimeTickGT) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[24]
+	mi := &file_streaming_proto_msgTypes[26]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1928,7 +2044,7 @@ func (x *DeliverFilterTimeTickGT) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverFilterTimeTickGT.ProtoReflect.Descriptor instead.
 func (*DeliverFilterTimeTickGT) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{24}
+	return file_streaming_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeliverFilterTimeTickGT) GetTimeTick() uint64 {
@@ -1951,7 +2067,7 @@ type DeliverFilterTimeTickGTE struct {
 func (x *DeliverFilterTimeTickGTE) Reset() {
 	*x = DeliverFilterTimeTickGTE{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[25]
+		mi := &file_streaming_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1964,7 +2080,7 @@ func (x *DeliverFilterTimeTickGTE) String() string {
 func (*DeliverFilterTimeTickGTE) ProtoMessage() {}
 
 func (x *DeliverFilterTimeTickGTE) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[25]
+	mi := &file_streaming_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1977,7 +2093,7 @@ func (x *DeliverFilterTimeTickGTE) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverFilterTimeTickGTE.ProtoReflect.Descriptor instead.
 func (*DeliverFilterTimeTickGTE) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{25}
+	return file_streaming_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DeliverFilterTimeTickGTE) GetTimeTick() uint64 {
@@ -1999,7 +2115,7 @@ type DeliverFilterMessageType struct {
 func (x *DeliverFilterMessageType) Reset() {
 	*x = DeliverFilterMessageType{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[26]
+		mi := &file_streaming_proto_msgTypes[28]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2012,7 +2128,7 @@ func (x *DeliverFilterMessageType) String() string {
 func (*DeliverFilterMessageType) ProtoMessage() {}
 
 func (x *DeliverFilterMessageType) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[26]
+	mi := &file_streaming_proto_msgTypes[28]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2025,7 +2141,7 @@ func (x *DeliverFilterMessageType) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverFilterMessageType.ProtoReflect.Descriptor instead.
 func (*DeliverFilterMessageType) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{26}
+	return file_streaming_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *DeliverFilterMessageType) GetMessageTypes() []messagespb.MessageType {
@@ -2048,7 +2164,7 @@ type StreamingError struct {
 func (x *StreamingError) Reset() {
 	*x = StreamingError{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[27]
+		mi := &file_streaming_proto_msgTypes[29]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2061,7 +2177,7 @@ func (x *StreamingError) String() string {
 func (*StreamingError) ProtoMessage() {}
 
 func (x *StreamingError) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[27]
+	mi := &file_streaming_proto_msgTypes[29]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2074,7 +2190,7 @@ func (x *StreamingError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingError.ProtoReflect.Descriptor instead.
 func (*StreamingError) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{27}
+	return file_streaming_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *StreamingError) GetCode() StreamingCode {
@@ -2109,7 +2225,7 @@ type ProduceRequest struct {
 func (x *ProduceRequest) Reset() {
 	*x = ProduceRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[28]
+		mi := &file_streaming_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2122,7 +2238,7 @@ func (x *ProduceRequest) String() string {
 func (*ProduceRequest) ProtoMessage() {}
 
 func (x *ProduceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[28]
+	mi := &file_streaming_proto_msgTypes[30]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2135,7 +2251,7 @@ func (x *ProduceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceRequest.ProtoReflect.Descriptor instead.
 func (*ProduceRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{28}
+	return file_streaming_proto_rawDescGZIP(), []int{30}
 }
 
 func (m *ProduceRequest) GetRequest() isProduceRequest_Request {
@@ -2188,7 +2304,7 @@ type CreateProducerRequest struct {
 func (x *CreateProducerRequest) Reset() {
 	*x = CreateProducerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[29]
+		mi := &file_streaming_proto_msgTypes[31]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2201,7 +2317,7 @@ func (x *CreateProducerRequest) String() string {
 func (*CreateProducerRequest) ProtoMessage() {}
 
 func (x *CreateProducerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[29]
+	mi := &file_streaming_proto_msgTypes[31]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2214,7 +2330,7 @@ func (x *CreateProducerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProducerRequest.ProtoReflect.Descriptor instead.
 func (*CreateProducerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{29}
+	return file_streaming_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CreateProducerRequest) GetPchannel() *PChannelInfo {
@@ -2237,7 +2353,7 @@ type ProduceMessageRequest struct {
 func (x *ProduceMessageRequest) Reset() {
 	*x = ProduceMessageRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[30]
+		mi := &file_streaming_proto_msgTypes[32]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2250,7 +2366,7 @@ func (x *ProduceMessageRequest) String() string {
 func (*ProduceMessageRequest) ProtoMessage() {}
 
 func (x *ProduceMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[30]
+	mi := &file_streaming_proto_msgTypes[32]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2263,7 +2379,7 @@ func (x *ProduceMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceMessageRequest.ProtoReflect.Descriptor instead.
 func (*ProduceMessageRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{30}
+	return file_streaming_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ProduceMessageRequest) GetRequestId() int64 {
@@ -2291,7 +2407,7 @@ type CloseProducerRequest struct {
 func (x *CloseProducerRequest) Reset() {
 	*x = CloseProducerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[31]
+		mi := &file_streaming_proto_msgTypes[33]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2304,7 +2420,7 @@ func (x *CloseProducerRequest) String() string {
 func (*CloseProducerRequest) ProtoMessage() {}
 
 func (x *CloseProducerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[31]
+	mi := &file_streaming_proto_msgTypes[33]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2317,7 +2433,7 @@ func (x *CloseProducerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseProducerRequest.ProtoReflect.Descriptor instead.
 func (*CloseProducerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{31}
+	return file_streaming_proto_rawDescGZIP(), []int{33}
 }
 
 // ProduceResponse is the response of the Produce RPC.
@@ -2337,7 +2453,7 @@ type ProduceResponse struct {
 func (x *ProduceResponse) Reset() {
 	*x = ProduceResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[32]
+		mi := &file_streaming_proto_msgTypes[34]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2350,7 +2466,7 @@ func (x *ProduceResponse) String() string {
 func (*ProduceResponse) ProtoMessage() {}
 
 func (x *ProduceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[32]
+	mi := &file_streaming_proto_msgTypes[34]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2363,7 +2479,7 @@ func (x *ProduceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceResponse.ProtoReflect.Descriptor instead.
 func (*ProduceResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{32}
+	return file_streaming_proto_rawDescGZIP(), []int{34}
 }
 
 func (m *ProduceResponse) GetResponse() isProduceResponse_Response {
@@ -2429,7 +2545,7 @@ type CreateProducerResponse struct {
 func (x *CreateProducerResponse) Reset() {
 	*x = CreateProducerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[33]
+		mi := &file_streaming_proto_msgTypes[35]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2442,7 +2558,7 @@ func (x *CreateProducerResponse) String() string {
 func (*CreateProducerResponse) ProtoMessage() {}
 
 func (x *CreateProducerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[33]
+	mi := &file_streaming_proto_msgTypes[35]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2455,7 +2571,7 @@ func (x *CreateProducerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProducerResponse.ProtoReflect.Descriptor instead.
 func (*CreateProducerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{33}
+	return file_streaming_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *CreateProducerResponse) GetWalName() string {
@@ -2489,7 +2605,7 @@ type ProduceMessageResponse struct {
 func (x *ProduceMessageResponse) Reset() {
 	*x = ProduceMessageResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[34]
+		mi := &file_streaming_proto_msgTypes[36]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2502,7 +2618,7 @@ func (x *ProduceMessageResponse) String() string {
 func (*ProduceMessageResponse) ProtoMessage() {}
 
 func (x *ProduceMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[34]
+	mi := &file_streaming_proto_msgTypes[36]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2515,7 +2631,7 @@ func (x *ProduceMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceMessageResponse.ProtoReflect.Descriptor instead.
 func (*ProduceMessageResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{34}
+	return file_streaming_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ProduceMessageResponse) GetRequestId() int64 {
@@ -2578,7 +2694,7 @@ type ProduceMessageResponseResult struct {
 func (x *ProduceMessageResponseResult) Reset() {
 	*x = ProduceMessageResponseResult{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[35]
+		mi := &file_streaming_proto_msgTypes[37]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2591,7 +2707,7 @@ func (x *ProduceMessageResponseResult) String() string {
 func (*ProduceMessageResponseResult) ProtoMessage() {}
 
 func (x *ProduceMessageResponseResult) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[35]
+	mi := &file_streaming_proto_msgTypes[37]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2604,7 +2720,7 @@ func (x *ProduceMessageResponseResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceMessageResponseResult.ProtoReflect.Descriptor instead.
 func (*ProduceMessageResponseResult) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{35}
+	return file_streaming_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ProduceMessageResponseResult) GetId() *messagespb.MessageID {
@@ -2645,7 +2761,7 @@ type CloseProducerResponse struct {
 func (x *CloseProducerResponse) Reset() {
 	*x = CloseProducerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[36]
+		mi := &file_streaming_proto_msgTypes[38]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2658,7 +2774,7 @@ func (x *CloseProducerResponse) String() string {
 func (*CloseProducerResponse) ProtoMessage() {}
 
 func (x *CloseProducerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[36]
+	mi := &file_streaming_proto_msgTypes[38]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2671,7 +2787,7 @@ func (x *CloseProducerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseProducerResponse.ProtoReflect.Descriptor instead.
 func (*CloseProducerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{36}
+	return file_streaming_proto_rawDescGZIP(), []int{38}
 }
 
 // ConsumeRequest is the request of the Consume RPC.
@@ -2693,7 +2809,7 @@ type ConsumeRequest struct {
 func (x *ConsumeRequest) Reset() {
 	*x = ConsumeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[37]
+		mi := &file_streaming_proto_msgTypes[39]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2706,7 +2822,7 @@ func (x *ConsumeRequest) String() string {
 func (*ConsumeRequest) ProtoMessage() {}
 
 func (x *ConsumeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[37]
+	mi := &file_streaming_proto_msgTypes[39]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2719,7 +2835,7 @@ func (x *ConsumeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsumeRequest.ProtoReflect.Descriptor instead.
 func (*ConsumeRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{37}
+	return file_streaming_proto_rawDescGZIP(), []int{39}
 }
 
 func (m *ConsumeRequest) GetRequest() isConsumeRequest_Request {
@@ -2796,7 +2912,7 @@ type CloseConsumerRequest struct {
 func (x *CloseConsumerRequest) Reset() {
 	*x = CloseConsumerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[38]
+		mi := &file_streaming_proto_msgTypes[40]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2809,7 +2925,7 @@ func (x *CloseConsumerRequest) String() string {
 func (*CloseConsumerRequest) ProtoMessage() {}
 
 func (x *CloseConsumerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[38]
+	mi := &file_streaming_proto_msgTypes[40]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2822,7 +2938,7 @@ func (x *CloseConsumerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseConsumerRequest.ProtoReflect.Descriptor instead.
 func (*CloseConsumerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{38}
+	return file_streaming_proto_rawDescGZIP(), []int{40}
 }
 
 // CreateConsumerRequest is the request of the CreateConsumer RPC.
@@ -2838,7 +2954,7 @@ type CreateConsumerRequest struct {
 func (x *CreateConsumerRequest) Reset() {
 	*x = CreateConsumerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[39]
+		mi := &file_streaming_proto_msgTypes[41]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2851,7 +2967,7 @@ func (x *CreateConsumerRequest) String() string {
 func (*CreateConsumerRequest) ProtoMessage() {}
 
 func (x *CreateConsumerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[39]
+	mi := &file_streaming_proto_msgTypes[41]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2864,7 +2980,7 @@ func (x *CreateConsumerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateConsumerRequest.ProtoReflect.Descriptor instead.
 func (*CreateConsumerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{39}
+	return file_streaming_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *CreateConsumerRequest) GetPchannel() *PChannelInfo {
@@ -2885,7 +3001,7 @@ type CreateVChannelConsumersRequest struct {
 func (x *CreateVChannelConsumersRequest) Reset() {
 	*x = CreateVChannelConsumersRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[40]
+		mi := &file_streaming_proto_msgTypes[42]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2898,7 +3014,7 @@ func (x *CreateVChannelConsumersRequest) String() string {
 func (*CreateVChannelConsumersRequest) ProtoMessage() {}
 
 func (x *CreateVChannelConsumersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[40]
+	mi := &file_streaming_proto_msgTypes[42]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2911,7 +3027,7 @@ func (x *CreateVChannelConsumersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVChannelConsumersRequest.ProtoReflect.Descriptor instead.
 func (*CreateVChannelConsumersRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{40}
+	return file_streaming_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CreateVChannelConsumersRequest) GetCreateVchannels() []*CreateVChannelConsumerRequest {
@@ -2936,7 +3052,7 @@ type CreateVChannelConsumerRequest struct {
 func (x *CreateVChannelConsumerRequest) Reset() {
 	*x = CreateVChannelConsumerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[41]
+		mi := &file_streaming_proto_msgTypes[43]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2949,7 +3065,7 @@ func (x *CreateVChannelConsumerRequest) String() string {
 func (*CreateVChannelConsumerRequest) ProtoMessage() {}
 
 func (x *CreateVChannelConsumerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[41]
+	mi := &file_streaming_proto_msgTypes[43]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2962,7 +3078,7 @@ func (x *CreateVChannelConsumerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVChannelConsumerRequest.ProtoReflect.Descriptor instead.
 func (*CreateVChannelConsumerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{41}
+	return file_streaming_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CreateVChannelConsumerRequest) GetVchannel() string {
@@ -2998,7 +3114,7 @@ type CreateVChannelConsumersResponse struct {
 func (x *CreateVChannelConsumersResponse) Reset() {
 	*x = CreateVChannelConsumersResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[42]
+		mi := &file_streaming_proto_msgTypes[44]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3011,7 +3127,7 @@ func (x *CreateVChannelConsumersResponse) String() string {
 func (*CreateVChannelConsumersResponse) ProtoMessage() {}
 
 func (x *CreateVChannelConsumersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[42]
+	mi := &file_streaming_proto_msgTypes[44]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3024,7 +3140,7 @@ func (x *CreateVChannelConsumersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVChannelConsumersResponse.ProtoReflect.Descriptor instead.
 func (*CreateVChannelConsumersResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{42}
+	return file_streaming_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *CreateVChannelConsumersResponse) GetCreateVchannels() []*CreateVChannelConsumerResponse {
@@ -3051,7 +3167,7 @@ type CreateVChannelConsumerResponse struct {
 func (x *CreateVChannelConsumerResponse) Reset() {
 	*x = CreateVChannelConsumerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[43]
+		mi := &file_streaming_proto_msgTypes[45]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3064,7 +3180,7 @@ func (x *CreateVChannelConsumerResponse) String() string {
 func (*CreateVChannelConsumerResponse) ProtoMessage() {}
 
 func (x *CreateVChannelConsumerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[43]
+	mi := &file_streaming_proto_msgTypes[45]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3077,7 +3193,7 @@ func (x *CreateVChannelConsumerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVChannelConsumerResponse.ProtoReflect.Descriptor instead.
 func (*CreateVChannelConsumerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{43}
+	return file_streaming_proto_rawDescGZIP(), []int{45}
 }
 
 func (m *CreateVChannelConsumerResponse) GetResponse() isCreateVChannelConsumerResponse_Response {
@@ -3129,7 +3245,7 @@ type CloseVChannelConsumerRequest struct {
 func (x *CloseVChannelConsumerRequest) Reset() {
 	*x = CloseVChannelConsumerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[44]
+		mi := &file_streaming_proto_msgTypes[46]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3142,7 +3258,7 @@ func (x *CloseVChannelConsumerRequest) String() string {
 func (*CloseVChannelConsumerRequest) ProtoMessage() {}
 
 func (x *CloseVChannelConsumerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[44]
+	mi := &file_streaming_proto_msgTypes[46]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3155,7 +3271,7 @@ func (x *CloseVChannelConsumerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseVChannelConsumerRequest.ProtoReflect.Descriptor instead.
 func (*CloseVChannelConsumerRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{44}
+	return file_streaming_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *CloseVChannelConsumerRequest) GetConsumerId() int64 {
@@ -3178,7 +3294,7 @@ type CloseVChannelConsumerResponse struct {
 func (x *CloseVChannelConsumerResponse) Reset() {
 	*x = CloseVChannelConsumerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[45]
+		mi := &file_streaming_proto_msgTypes[47]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3191,7 +3307,7 @@ func (x *CloseVChannelConsumerResponse) String() string {
 func (*CloseVChannelConsumerResponse) ProtoMessage() {}
 
 func (x *CloseVChannelConsumerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[45]
+	mi := &file_streaming_proto_msgTypes[47]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3204,7 +3320,7 @@ func (x *CloseVChannelConsumerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseVChannelConsumerResponse.ProtoReflect.Descriptor instead.
 func (*CloseVChannelConsumerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{45}
+	return file_streaming_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *CloseVChannelConsumerResponse) GetConsumerId() int64 {
@@ -3234,7 +3350,7 @@ type ConsumeResponse struct {
 func (x *ConsumeResponse) Reset() {
 	*x = ConsumeResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[46]
+		mi := &file_streaming_proto_msgTypes[48]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3247,7 +3363,7 @@ func (x *ConsumeResponse) String() string {
 func (*ConsumeResponse) ProtoMessage() {}
 
 func (x *ConsumeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[46]
+	mi := &file_streaming_proto_msgTypes[48]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3260,7 +3376,7 @@ func (x *ConsumeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsumeResponse.ProtoReflect.Descriptor instead.
 func (*ConsumeResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{46}
+	return file_streaming_proto_rawDescGZIP(), []int{48}
 }
 
 func (m *ConsumeResponse) GetResponse() isConsumeResponse_Response {
@@ -3366,7 +3482,7 @@ type CreateConsumerResponse struct {
 func (x *CreateConsumerResponse) Reset() {
 	*x = CreateConsumerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[47]
+		mi := &file_streaming_proto_msgTypes[49]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3379,7 +3495,7 @@ func (x *CreateConsumerResponse) String() string {
 func (*CreateConsumerResponse) ProtoMessage() {}
 
 func (x *CreateConsumerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[47]
+	mi := &file_streaming_proto_msgTypes[49]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3392,7 +3508,7 @@ func (x *CreateConsumerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateConsumerResponse.ProtoReflect.Descriptor instead.
 func (*CreateConsumerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{47}
+	return file_streaming_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *CreateConsumerResponse) GetWalName() string {
@@ -3421,7 +3537,7 @@ type ConsumeMessageReponse struct {
 func (x *ConsumeMessageReponse) Reset() {
 	*x = ConsumeMessageReponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[48]
+		mi := &file_streaming_proto_msgTypes[50]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3434,7 +3550,7 @@ func (x *ConsumeMessageReponse) String() string {
 func (*ConsumeMessageReponse) ProtoMessage() {}
 
 func (x *ConsumeMessageReponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[48]
+	mi := &file_streaming_proto_msgTypes[50]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3447,7 +3563,7 @@ func (x *ConsumeMessageReponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsumeMessageReponse.ProtoReflect.Descriptor instead.
 func (*ConsumeMessageReponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{48}
+	return file_streaming_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ConsumeMessageReponse) GetConsumerId() int64 {
@@ -3473,7 +3589,7 @@ type CloseConsumerResponse struct {
 func (x *CloseConsumerResponse) Reset() {
 	*x = CloseConsumerResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[49]
+		mi := &file_streaming_proto_msgTypes[51]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3486,7 +3602,7 @@ func (x *CloseConsumerResponse) String() string {
 func (*CloseConsumerResponse) ProtoMessage() {}
 
 func (x *CloseConsumerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[49]
+	mi := &file_streaming_proto_msgTypes[51]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3499,7 +3615,7 @@ func (x *CloseConsumerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseConsumerResponse.ProtoReflect.Descriptor instead.
 func (*CloseConsumerResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{49}
+	return file_streaming_proto_rawDescGZIP(), []int{51}
 }
 
 // StreamingManagerAssignRequest is the request message of Assign RPC.
@@ -3514,7 +3630,7 @@ type StreamingNodeManagerAssignRequest struct {
 func (x *StreamingNodeManagerAssignRequest) Reset() {
 	*x = StreamingNodeManagerAssignRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[50]
+		mi := &file_streaming_proto_msgTypes[52]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3527,7 +3643,7 @@ func (x *StreamingNodeManagerAssignRequest) String() string {
 func (*StreamingNodeManagerAssignRequest) ProtoMessage() {}
 
 func (x *StreamingNodeManagerAssignRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[50]
+	mi := &file_streaming_proto_msgTypes[52]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3540,7 +3656,7 @@ func (x *StreamingNodeManagerAssignRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use StreamingNodeManagerAssignRequest.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerAssignRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{50}
+	return file_streaming_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *StreamingNodeManagerAssignRequest) GetPchannel() *PChannelInfo {
@@ -3559,7 +3675,7 @@ type StreamingNodeManagerAssignResponse struct {
 func (x *StreamingNodeManagerAssignResponse) Reset() {
 	*x = StreamingNodeManagerAssignResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[51]
+		mi := &file_streaming_proto_msgTypes[53]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3572,7 +3688,7 @@ func (x *StreamingNodeManagerAssignResponse) String() string {
 func (*StreamingNodeManagerAssignResponse) ProtoMessage() {}
 
 func (x *StreamingNodeManagerAssignResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[51]
+	mi := &file_streaming_proto_msgTypes[53]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3585,7 +3701,7 @@ func (x *StreamingNodeManagerAssignResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use StreamingNodeManagerAssignResponse.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerAssignResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{51}
+	return file_streaming_proto_rawDescGZIP(), []int{53}
 }
 
 type StreamingNodeManagerRemoveRequest struct {
@@ -3599,7 +3715,7 @@ type StreamingNodeManagerRemoveRequest struct {
 func (x *StreamingNodeManagerRemoveRequest) Reset() {
 	*x = StreamingNodeManagerRemoveRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[52]
+		mi := &file_streaming_proto_msgTypes[54]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3612,7 +3728,7 @@ func (x *StreamingNodeManagerRemoveRequest) String() string {
 func (*StreamingNodeManagerRemoveRequest) ProtoMessage() {}
 
 func (x *StreamingNodeManagerRemoveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[52]
+	mi := &file_streaming_proto_msgTypes[54]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3625,7 +3741,7 @@ func (x *StreamingNodeManagerRemoveRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use StreamingNodeManagerRemoveRequest.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerRemoveRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{52}
+	return file_streaming_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *StreamingNodeManagerRemoveRequest) GetPchannel() *PChannelInfo {
@@ -3644,7 +3760,7 @@ type StreamingNodeManagerRemoveResponse struct {
 func (x *StreamingNodeManagerRemoveResponse) Reset() {
 	*x = StreamingNodeManagerRemoveResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[53]
+		mi := &file_streaming_proto_msgTypes[55]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3657,7 +3773,7 @@ func (x *StreamingNodeManagerRemoveResponse) String() string {
 func (*StreamingNodeManagerRemoveResponse) ProtoMessage() {}
 
 func (x *StreamingNodeManagerRemoveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[53]
+	mi := &file_streaming_proto_msgTypes[55]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3670,7 +3786,7 @@ func (x *StreamingNodeManagerRemoveResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use StreamingNodeManagerRemoveResponse.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerRemoveResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{53}
+	return file_streaming_proto_rawDescGZIP(), []int{55}
 }
 
 type StreamingNodeManagerCollectStatusRequest struct {
@@ -3682,7 +3798,7 @@ type StreamingNodeManagerCollectStatusRequest struct {
 func (x *StreamingNodeManagerCollectStatusRequest) Reset() {
 	*x = StreamingNodeManagerCollectStatusRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[54]
+		mi := &file_streaming_proto_msgTypes[56]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3695,7 +3811,7 @@ func (x *StreamingNodeManagerCollectStatusRequest) String() string {
 func (*StreamingNodeManagerCollectStatusRequest) ProtoMessage() {}
 
 func (x *StreamingNodeManagerCollectStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[54]
+	mi := &file_streaming_proto_msgTypes[56]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3708,7 +3824,7 @@ func (x *StreamingNodeManagerCollectStatusRequest) ProtoReflect() protoreflect.M
 
 // Deprecated: Use StreamingNodeManagerCollectStatusRequest.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerCollectStatusRequest) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{54}
+	return file_streaming_proto_rawDescGZIP(), []int{56}
 }
 
 type StreamingNodeMetrics struct {
@@ -3722,7 +3838,7 @@ type StreamingNodeMetrics struct {
 func (x *StreamingNodeMetrics) Reset() {
 	*x = StreamingNodeMetrics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[55]
+		mi := &file_streaming_proto_msgTypes[57]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3735,7 +3851,7 @@ func (x *StreamingNodeMetrics) String() string {
 func (*StreamingNodeMetrics) ProtoMessage() {}
 
 func (x *StreamingNodeMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[55]
+	mi := &file_streaming_proto_msgTypes[57]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3748,7 +3864,7 @@ func (x *StreamingNodeMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeMetrics.ProtoReflect.Descriptor instead.
 func (*StreamingNodeMetrics) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{55}
+	return file_streaming_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *StreamingNodeMetrics) GetWals() []*StreamingNodeWALMetrics {
@@ -3774,7 +3890,7 @@ type StreamingNodeWALMetrics struct {
 func (x *StreamingNodeWALMetrics) Reset() {
 	*x = StreamingNodeWALMetrics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[56]
+		mi := &file_streaming_proto_msgTypes[58]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3787,7 +3903,7 @@ func (x *StreamingNodeWALMetrics) String() string {
 func (*StreamingNodeWALMetrics) ProtoMessage() {}
 
 func (x *StreamingNodeWALMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[56]
+	mi := &file_streaming_proto_msgTypes[58]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3800,7 +3916,7 @@ func (x *StreamingNodeWALMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeWALMetrics.ProtoReflect.Descriptor instead.
 func (*StreamingNodeWALMetrics) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{56}
+	return file_streaming_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *StreamingNodeWALMetrics) GetInfo() *PChannelInfo {
@@ -3859,7 +3975,7 @@ type StreamingNodeRWWALMetrics struct {
 func (x *StreamingNodeRWWALMetrics) Reset() {
 	*x = StreamingNodeRWWALMetrics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[57]
+		mi := &file_streaming_proto_msgTypes[59]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3872,7 +3988,7 @@ func (x *StreamingNodeRWWALMetrics) String() string {
 func (*StreamingNodeRWWALMetrics) ProtoMessage() {}
 
 func (x *StreamingNodeRWWALMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[57]
+	mi := &file_streaming_proto_msgTypes[59]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3885,7 +4001,7 @@ func (x *StreamingNodeRWWALMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeRWWALMetrics.ProtoReflect.Descriptor instead.
 func (*StreamingNodeRWWALMetrics) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{57}
+	return file_streaming_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *StreamingNodeRWWALMetrics) GetMvccTimeTick() uint64 {
@@ -3911,7 +4027,7 @@ type StreamingNodeROWALMetrics struct {
 func (x *StreamingNodeROWALMetrics) Reset() {
 	*x = StreamingNodeROWALMetrics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[58]
+		mi := &file_streaming_proto_msgTypes[60]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3924,7 +4040,7 @@ func (x *StreamingNodeROWALMetrics) String() string {
 func (*StreamingNodeROWALMetrics) ProtoMessage() {}
 
 func (x *StreamingNodeROWALMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[58]
+	mi := &file_streaming_proto_msgTypes[60]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3937,7 +4053,7 @@ func (x *StreamingNodeROWALMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamingNodeROWALMetrics.ProtoReflect.Descriptor instead.
 func (*StreamingNodeROWALMetrics) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{58}
+	return file_streaming_proto_rawDescGZIP(), []int{60}
 }
 
 type StreamingNodeManagerCollectStatusResponse struct {
@@ -3951,7 +4067,7 @@ type StreamingNodeManagerCollectStatusResponse struct {
 func (x *StreamingNodeManagerCollectStatusResponse) Reset() {
 	*x = StreamingNodeManagerCollectStatusResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[59]
+		mi := &file_streaming_proto_msgTypes[61]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3964,7 +4080,7 @@ func (x *StreamingNodeManagerCollectStatusResponse) String() string {
 func (*StreamingNodeManagerCollectStatusResponse) ProtoMessage() {}
 
 func (x *StreamingNodeManagerCollectStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[59]
+	mi := &file_streaming_proto_msgTypes[61]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3977,7 +4093,7 @@ func (x *StreamingNodeManagerCollectStatusResponse) ProtoReflect() protoreflect.
 
 // Deprecated: Use StreamingNodeManagerCollectStatusResponse.ProtoReflect.Descriptor instead.
 func (*StreamingNodeManagerCollectStatusResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{59}
+	return file_streaming_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *StreamingNodeManagerCollectStatusResponse) GetMetrics() *StreamingNodeMetrics {
@@ -4007,7 +4123,7 @@ type VChannelMeta struct {
 func (x *VChannelMeta) Reset() {
 	*x = VChannelMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[60]
+		mi := &file_streaming_proto_msgTypes[62]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4020,7 +4136,7 @@ func (x *VChannelMeta) String() string {
 func (*VChannelMeta) ProtoMessage() {}
 
 func (x *VChannelMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[60]
+	mi := &file_streaming_proto_msgTypes[62]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4033,7 +4149,7 @@ func (x *VChannelMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VChannelMeta.ProtoReflect.Descriptor instead.
 func (*VChannelMeta) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{60}
+	return file_streaming_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *VChannelMeta) GetVchannel() string {
@@ -4078,7 +4194,7 @@ type CollectionInfoOfVChannel struct {
 func (x *CollectionInfoOfVChannel) Reset() {
 	*x = CollectionInfoOfVChannel{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[61]
+		mi := &file_streaming_proto_msgTypes[63]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4091,7 +4207,7 @@ func (x *CollectionInfoOfVChannel) String() string {
 func (*CollectionInfoOfVChannel) ProtoMessage() {}
 
 func (x *CollectionInfoOfVChannel) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[61]
+	mi := &file_streaming_proto_msgTypes[63]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4104,7 +4220,7 @@ func (x *CollectionInfoOfVChannel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionInfoOfVChannel.ProtoReflect.Descriptor instead.
 func (*CollectionInfoOfVChannel) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{61}
+	return file_streaming_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *CollectionInfoOfVChannel) GetCollectionId() int64 {
@@ -4142,7 +4258,7 @@ type CollectionSchemaOfVChannel struct {
 func (x *CollectionSchemaOfVChannel) Reset() {
 	*x = CollectionSchemaOfVChannel{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[62]
+		mi := &file_streaming_proto_msgTypes[64]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4155,7 +4271,7 @@ func (x *CollectionSchemaOfVChannel) String() string {
 func (*CollectionSchemaOfVChannel) ProtoMessage() {}
 
 func (x *CollectionSchemaOfVChannel) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[62]
+	mi := &file_streaming_proto_msgTypes[64]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4168,7 +4284,7 @@ func (x *CollectionSchemaOfVChannel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionSchemaOfVChannel.ProtoReflect.Descriptor instead.
 func (*CollectionSchemaOfVChannel) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{62}
+	return file_streaming_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *CollectionSchemaOfVChannel) GetSchema() *schemapb.CollectionSchema {
@@ -4204,7 +4320,7 @@ type PartitionInfoOfVChannel struct {
 func (x *PartitionInfoOfVChannel) Reset() {
 	*x = PartitionInfoOfVChannel{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[63]
+		mi := &file_streaming_proto_msgTypes[65]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4217,7 +4333,7 @@ func (x *PartitionInfoOfVChannel) String() string {
 func (*PartitionInfoOfVChannel) ProtoMessage() {}
 
 func (x *PartitionInfoOfVChannel) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[63]
+	mi := &file_streaming_proto_msgTypes[65]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4230,7 +4346,7 @@ func (x *PartitionInfoOfVChannel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionInfoOfVChannel.ProtoReflect.Descriptor instead.
 func (*PartitionInfoOfVChannel) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{63}
+	return file_streaming_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *PartitionInfoOfVChannel) GetPartitionId() int64 {
@@ -4266,7 +4382,7 @@ type SegmentAssignmentMeta struct {
 func (x *SegmentAssignmentMeta) Reset() {
 	*x = SegmentAssignmentMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[64]
+		mi := &file_streaming_proto_msgTypes[66]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4279,7 +4395,7 @@ func (x *SegmentAssignmentMeta) String() string {
 func (*SegmentAssignmentMeta) ProtoMessage() {}
 
 func (x *SegmentAssignmentMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[64]
+	mi := &file_streaming_proto_msgTypes[66]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4292,7 +4408,7 @@ func (x *SegmentAssignmentMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentAssignmentMeta.ProtoReflect.Descriptor instead.
 func (*SegmentAssignmentMeta) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{64}
+	return file_streaming_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *SegmentAssignmentMeta) GetCollectionId() int64 {
@@ -4371,7 +4487,7 @@ type SegmentAssignmentStat struct {
 func (x *SegmentAssignmentStat) Reset() {
 	*x = SegmentAssignmentStat{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[65]
+		mi := &file_streaming_proto_msgTypes[67]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4384,7 +4500,7 @@ func (x *SegmentAssignmentStat) String() string {
 func (*SegmentAssignmentStat) ProtoMessage() {}
 
 func (x *SegmentAssignmentStat) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[65]
+	mi := &file_streaming_proto_msgTypes[67]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4397,7 +4513,7 @@ func (x *SegmentAssignmentStat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentAssignmentStat.ProtoReflect.Descriptor instead.
 func (*SegmentAssignmentStat) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{65}
+	return file_streaming_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SegmentAssignmentStat) GetMaxBinarySize() uint64 {
@@ -4482,7 +4598,7 @@ type WALCheckpoint struct {
 func (x *WALCheckpoint) Reset() {
 	*x = WALCheckpoint{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[66]
+		mi := &file_streaming_proto_msgTypes[68]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4495,7 +4611,7 @@ func (x *WALCheckpoint) String() string {
 func (*WALCheckpoint) ProtoMessage() {}
 
 func (x *WALCheckpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[66]
+	mi := &file_streaming_proto_msgTypes[68]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4508,7 +4624,7 @@ func (x *WALCheckpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WALCheckpoint.ProtoReflect.Descriptor instead.
 func (*WALCheckpoint) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{66}
+	return file_streaming_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *WALCheckpoint) GetMessageId() *messagespb.MessageID {
@@ -4589,139 +4705,156 @@ var file_streaming_proto_rawDesc = []byte{
 	0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x5f, 0x73, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x73,
 	0x18, 0x05, 0x20, 0x01, 0x28, 0x04, 0x52, 0x1a, 0x6c, 0x61, 0x73, 0x74, 0x41, 0x73, 0x73, 0x69,
 	0x67, 0x6e, 0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x53, 0x65, 0x63, 0x6f, 0x6e,
-	0x64, 0x73, 0x22, 0x2c, 0x0a, 0x10, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x56,
-	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f,
-	0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e,
-	0x22, 0x3b, 0x0a, 0x0b, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x50, 0x61, 0x69, 0x72, 0x12,
-	0x16, 0x0a, 0x06, 0x67, 0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52,
-	0x06, 0x67, 0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x12, 0x14, 0x0a, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x22, 0xbf, 0x01,
-	0x0a, 0x0d, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x12,
+	0x64, 0x73, 0x22, 0x2a, 0x0a, 0x0c, 0x43, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x4d, 0x65,
+	0x74, 0x61, 0x12, 0x1a, 0x0a, 0x08, 0x70, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x70, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x22, 0x2c,
+	0x0a, 0x10, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x56, 0x65, 0x72, 0x73, 0x69,
+	0x6f, 0x6e, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x3b, 0x0a, 0x0b,
+	0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x50, 0x61, 0x69, 0x72, 0x12, 0x16, 0x0a, 0x06, 0x67,
+	0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x67, 0x6c, 0x6f,
+	0x62, 0x61, 0x6c, 0x12, 0x14, 0x0a, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x03, 0x52, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x22, 0xbf, 0x01, 0x0a, 0x0d, 0x42, 0x72,
+	0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x38, 0x0a, 0x07, 0x6d,
+	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73,
+	0x61, 0x67, 0x65, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x52, 0x07, 0x6d, 0x65,
+	0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x40, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x0e, 0x32, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x42, 0x72,
+	0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x53, 0x74, 0x61, 0x74, 0x65,
+	0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x32, 0x0a, 0x15, 0x61, 0x63, 0x6b, 0x65, 0x64,
+	0x5f, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x5f, 0x62, 0x69, 0x74, 0x6d, 0x61, 0x70,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x13, 0x61, 0x63, 0x6b, 0x65, 0x64, 0x56, 0x63, 0x68,
+	0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x42, 0x69, 0x74, 0x6d, 0x61, 0x70, 0x22, 0x4c, 0x0a, 0x10, 0x42,
+	0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
 	0x38, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
 	0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
 	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-	0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x40, 0x0a, 0x05, 0x73, 0x74, 0x61,
-	0x74, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
-	0x67, 0x2e, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x53,
-	0x74, 0x61, 0x74, 0x65, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x32, 0x0a, 0x15, 0x61,
-	0x63, 0x6b, 0x65, 0x64, 0x5f, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x5f, 0x62, 0x69,
-	0x74, 0x6d, 0x61, 0x70, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x13, 0x61, 0x63, 0x6b, 0x65,
-	0x64, 0x56, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x42, 0x69, 0x74, 0x6d, 0x61, 0x70, 0x22,
-	0x4c, 0x0a, 0x10, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x12, 0x38, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x4d, 0x65, 0x73,
-	0x73, 0x61, 0x67, 0x65, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0xfa, 0x01,
-	0x0a, 0x11, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x12, 0x50, 0x0a, 0x07, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x18, 0x01,
-	0x20, 0x03, 0x28, 0x0b, 0x32, 0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x42, 0x72,
-	0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x2e,
-	0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x07, 0x72, 0x65,
-	0x73, 0x75, 0x6c, 0x74, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61,
-	0x73, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0b, 0x62, 0x72, 0x6f,
-	0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x49, 0x64, 0x1a, 0x70, 0x0a, 0x0c, 0x52, 0x65, 0x73, 0x75,
-	0x6c, 0x74, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x4a, 0x0a, 0x05, 0x76, 0x61,
-	0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0xfa, 0x01, 0x0a, 0x11, 0x42, 0x72,
+	0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x50, 0x0a, 0x07, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63,
+	0x61, 0x73, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x2e, 0x52, 0x65, 0x73, 0x75,
+	0x6c, 0x74, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x07, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+	0x73, 0x12, 0x21, 0x0a, 0x0c, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x5f, 0x69,
+	0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0b, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61,
+	0x73, 0x74, 0x49, 0x64, 0x1a, 0x70, 0x0a, 0x0c, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x45,
+	0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x4a, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x50,
+	0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52, 0x05, 0x76, 0x61, 0x6c,
+	0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x9f, 0x01, 0x0a, 0x13, 0x42, 0x72, 0x6f, 0x61, 0x64,
+	0x63, 0x61, 0x73, 0x74, 0x41, 0x63, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x25,
+	0x0a, 0x0c, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x04, 0x42, 0x02, 0x18, 0x01, 0x52, 0x0b, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63,
+	0x61, 0x73, 0x74, 0x49, 0x64, 0x12, 0x1e, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
+	0x6c, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x42, 0x02, 0x18, 0x01, 0x52, 0x08, 0x76, 0x63, 0x68,
+	0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x41, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x49,
+	0x6d, 0x6d, 0x75, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x52,
+	0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0x16, 0x0a, 0x14, 0x42, 0x72, 0x6f, 0x61,
+	0x64, 0x63, 0x61, 0x73, 0x74, 0x41, 0x63, 0x6b, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x22, 0xe9, 0x01, 0x0a, 0x1d, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x57, 0x41, 0x4c, 0x42, 0x61,
+	0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x12, 0x46, 0x0a, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x57, 0x41, 0x4c, 0x42,
+	0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x43, 0x6f, 0x6e, 0x66,
+	0x69, 0x67, 0x52, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x43, 0x0a, 0x05, 0x6e, 0x6f,
+	0x64, 0x65, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2d, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
 	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69,
-	0x6e, 0x67, 0x2e, 0x50, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52,
-	0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x54, 0x0a, 0x13, 0x42, 0x72,
-	0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x41, 0x63, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x12, 0x21, 0x0a, 0x0c, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x5f, 0x69,
-	0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0b, 0x62, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61,
-	0x73, 0x74, 0x49, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c,
-	0x22, 0x16, 0x0a, 0x14, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61, 0x73, 0x74, 0x41, 0x63, 0x6b,
-	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0xe9, 0x01, 0x0a, 0x1d, 0x55, 0x70, 0x64,
-	0x61, 0x74, 0x65, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c,
-	0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x46, 0x0a, 0x06, 0x63, 0x6f,
-	0x6e, 0x66, 0x69, 0x67, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2e, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x2e, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f,
-	0x6c, 0x69, 0x63, 0x79, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52, 0x06, 0x63, 0x6f, 0x6e, 0x66,
-	0x69, 0x67, 0x12, 0x43, 0x0a, 0x05, 0x6e, 0x6f, 0x64, 0x65, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x0b, 0x32, 0x2d, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x57, 0x41, 0x4c, 0x42, 0x61,
-	0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x73,
-	0x52, 0x05, 0x6e, 0x6f, 0x64, 0x65, 0x73, 0x12, 0x3b, 0x0a, 0x0b, 0x75, 0x70, 0x64, 0x61, 0x74,
-	0x65, 0x5f, 0x6d, 0x61, 0x73, 0x6b, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67,
-	0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x46,
-	0x69, 0x65, 0x6c, 0x64, 0x4d, 0x61, 0x73, 0x6b, 0x52, 0x0a, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65,
-	0x4d, 0x61, 0x73, 0x6b, 0x22, 0x41, 0x0a, 0x16, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e,
-	0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x27,
-	0x0a, 0x0f, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x5f, 0x72, 0x65, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63,
-	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0e, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x52, 0x65,
-	0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x6b, 0x0a, 0x15, 0x57, 0x41, 0x4c, 0x42, 0x61,
-	0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x73,
-	0x12, 0x26, 0x0a, 0x0f, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0x5f,
-	0x69, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0d, 0x66, 0x72, 0x65, 0x65, 0x7a,
-	0x65, 0x4e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x73, 0x12, 0x2a, 0x0a, 0x11, 0x64, 0x65, 0x66, 0x72,
-	0x65, 0x65, 0x7a, 0x65, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x02, 0x20,
-	0x03, 0x28, 0x03, 0x52, 0x0f, 0x64, 0x65, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x4e, 0x6f, 0x64,
-	0x65, 0x49, 0x64, 0x73, 0x22, 0x90, 0x01, 0x0a, 0x1e, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x57,
-	0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52,
-	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x46, 0x0a, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69,
-	0x67, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x6e, 0x67, 0x2e, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c,
+	0x69, 0x63, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x73, 0x52, 0x05, 0x6e, 0x6f, 0x64, 0x65, 0x73, 0x12,
+	0x3b, 0x0a, 0x0b, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x5f, 0x6d, 0x61, 0x73, 0x6b, 0x18, 0x03,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x4d, 0x61, 0x73, 0x6b,
+	0x52, 0x0a, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x4d, 0x61, 0x73, 0x6b, 0x22, 0x41, 0x0a, 0x16,
+	0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79,
+	0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x5f,
+	0x72, 0x65, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52,
+	0x0e, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x52, 0x65, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22,
+	0x6b, 0x0a, 0x15, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c,
+	0x69, 0x63, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x73, 0x12, 0x26, 0x0a, 0x0f, 0x66, 0x72, 0x65, 0x65,
+	0x7a, 0x65, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28,
+	0x03, 0x52, 0x0d, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x4e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x73,
+	0x12, 0x2a, 0x0a, 0x11, 0x64, 0x65, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x5f, 0x6e, 0x6f, 0x64,
+	0x65, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0f, 0x64, 0x65, 0x66,
+	0x72, 0x65, 0x65, 0x7a, 0x65, 0x4e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x73, 0x22, 0x90, 0x01, 0x0a,
+	0x1e, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63,
+	0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x46, 0x0a, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73,
+	0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61,
+	0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52,
+	0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x26, 0x0a, 0x0f, 0x66, 0x72, 0x65, 0x65, 0x7a,
+	0x65, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03,
+	0x52, 0x0d, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x4e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x73, 0x22,
+	0xd1, 0x01, 0x0a, 0x19, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69,
+	0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x59, 0x0a,
+	0x0c, 0x72, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x65, 0x72, 0x72, 0x6f, 0x72, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x52, 0x65, 0x70,
+	0x6f, 0x72, 0x74, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x45, 0x72, 0x72,
+	0x6f, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x48, 0x00, 0x52, 0x0b, 0x72, 0x65, 0x70,
+	0x6f, 0x72, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x12, 0x4e, 0x0a, 0x05, 0x63, 0x6c, 0x6f, 0x73,
+	0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
 	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67,
-	0x2e, 0x57, 0x41, 0x4c, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63,
-	0x79, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12,
-	0x26, 0x0a, 0x0f, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69,
-	0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0d, 0x66, 0x72, 0x65, 0x65, 0x7a, 0x65,
-	0x4e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x73, 0x22, 0xd1, 0x01, 0x0a, 0x19, 0x41, 0x73, 0x73, 0x69,
-	0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65,
-	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x59, 0x0a, 0x0c, 0x72, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x5f,
-	0x65, 0x72, 0x72, 0x6f, 0x72, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x34, 0x2e, 0x6d, 0x69,
+	0x2e, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74,
+	0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x48,
+	0x00, 0x52, 0x05, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x42, 0x09, 0x0a, 0x07, 0x63, 0x6f, 0x6d, 0x6d,
+	0x61, 0x6e, 0x64, 0x22, 0x9a, 0x01, 0x0a, 0x1c, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x73,
+	0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x12, 0x40, 0x0a, 0x08, 0x70, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e,
+	0x50, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x08, 0x70, 0x63,
+	0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x38, 0x0a, 0x03, 0x65, 0x72, 0x72, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72,
+	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x03, 0x65, 0x72, 0x72,
+	0x22, 0x20, 0x0a, 0x1e, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d,
+	0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x22, 0xe4, 0x01, 0x0a, 0x1a, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e,
+	0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x69, 0x0a, 0x0f, 0x66, 0x75, 0x6c, 0x6c, 0x5f, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e,
+	0x6d, 0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x3e, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+	0x69, 0x6e, 0x67, 0x2e, 0x46, 0x75, 0x6c, 0x6c, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
+	0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x57,
+	0x69, 0x74, 0x68, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x48, 0x00, 0x52, 0x0e, 0x66, 0x75,
+	0x6c, 0x6c, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x12, 0x4f, 0x0a, 0x05,
+	0x63, 0x6c, 0x6f, 0x73, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x37, 0x2e, 0x6d, 0x69,
 	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61,
-	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x73, 0x73, 0x69, 0x67,
-	0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x48, 0x00, 0x52, 0x0b, 0x72, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72,
-	0x12, 0x4e, 0x0a, 0x05, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32,
-	0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73,
-	0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x41, 0x73,
-	0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x48, 0x00, 0x52, 0x05, 0x63, 0x6c, 0x6f, 0x73, 0x65,
-	0x42, 0x09, 0x0a, 0x07, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x22, 0x9a, 0x01, 0x0a, 0x1c,
-	0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74,
-	0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x40, 0x0a, 0x08,
-	0x70, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24,
-	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74,
-	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x50, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c,
-	0x49, 0x6e, 0x66, 0x6f, 0x52, 0x08, 0x70, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x38,
-	0x0a, 0x03, 0x65, 0x72, 0x72, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61,
-	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x45, 0x72,
-	0x72, 0x6f, 0x72, 0x52, 0x03, 0x65, 0x72, 0x72, 0x22, 0x20, 0x0a, 0x1e, 0x43, 0x6c, 0x6f, 0x73,
-	0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f,
-	0x76, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0xe4, 0x01, 0x0a, 0x1a, 0x41,
-	0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65,
-	0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x69, 0x0a, 0x0f, 0x66, 0x75, 0x6c,
-	0x6c, 0x5f, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x0b, 0x32, 0x3e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x46, 0x75, 0x6c, 0x6c,
-	0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41, 0x73, 0x73,
-	0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x57, 0x69, 0x74, 0x68, 0x56, 0x65, 0x72, 0x73, 0x69,
-	0x6f, 0x6e, 0x48, 0x00, 0x52, 0x0e, 0x66, 0x75, 0x6c, 0x6c, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e,
-	0x6d, 0x65, 0x6e, 0x74, 0x12, 0x4f, 0x0a, 0x05, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x18, 0x02, 0x20,
-	0x01, 0x28, 0x0b, 0x32, 0x37, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x6c, 0x6f,
-	0x73, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63,
-	0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x48, 0x00, 0x52, 0x05,
-	0x63, 0x6c, 0x6f, 0x73, 0x65, 0x42, 0x0a, 0x0a, 0x08, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
-	0x65, 0x22, 0xba, 0x01, 0x0a, 0x26, 0x46, 0x75, 0x6c, 0x6c, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e,
-	0x74, 0x57, 0x69, 0x74, 0x68, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x3d, 0x0a, 0x07,
-	0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x50, 0x61,
-	0x69, 0x72, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x51, 0x0a, 0x0b, 0x61,
-	0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b,
-	0x32, 0x2f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e,
-	0x74, 0x52, 0x0b, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x22, 0x21,
+	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e,
+	0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x48, 0x00, 0x52, 0x05, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x42, 0x0a, 0x0a,
+	0x08, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x82, 0x02, 0x0a, 0x26, 0x46, 0x75,
+	0x6c, 0x6c, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41,
+	0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x57, 0x69, 0x74, 0x68, 0x56, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x12, 0x3d, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x56,
+	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x50, 0x61, 0x69, 0x72, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73,
+	0x69, 0x6f, 0x6e, 0x12, 0x51, 0x0a, 0x0b, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e,
+	0x74, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
+	0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x41,
+	0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x52, 0x0b, 0x61, 0x73, 0x73, 0x69, 0x67,
+	0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x46, 0x0a, 0x08, 0x63, 0x63, 0x68, 0x61, 0x6e, 0x6e,
+	0x65, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
+	0x67, 0x2e, 0x43, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e,
+	0x6d, 0x65, 0x6e, 0x74, 0x52, 0x08, 0x63, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x22, 0x4e,
+	0x0a, 0x12, 0x43, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e,
+	0x6d, 0x65, 0x6e, 0x74, 0x12, 0x38, 0x0a, 0x04, 0x6d, 0x65, 0x74, 0x61, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x43, 0x68, 0x61,
+	0x6e, 0x6e, 0x65, 0x6c, 0x4d, 0x65, 0x74, 0x61, 0x52, 0x04, 0x6d, 0x65, 0x74, 0x61, 0x22, 0x21,
 	0x0a, 0x1f, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e,
 	0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
 	0x65, 0x22, 0x4a, 0x0a, 0x11, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f,
@@ -5351,7 +5484,7 @@ func file_streaming_proto_rawDescGZIP() []byte {
 }
 
 var file_streaming_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_streaming_proto_msgTypes = make([]protoimpl.MessageInfo, 68)
+var file_streaming_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_streaming_proto_goTypes = []interface{}{
 	(PChannelAccessMode)(0),                           // 0: milvus.proto.streaming.PChannelAccessMode
 	(PChannelMetaState)(0),                            // 1: milvus.proto.streaming.PChannelMetaState
@@ -5363,191 +5496,196 @@ var file_streaming_proto_goTypes = []interface{}{
 	(*PChannelInfo)(nil),                              // 7: milvus.proto.streaming.PChannelInfo
 	(*PChannelAssignmentLog)(nil),                     // 8: milvus.proto.streaming.PChannelAssignmentLog
 	(*PChannelMeta)(nil),                              // 9: milvus.proto.streaming.PChannelMeta
-	(*StreamingVersion)(nil),                          // 10: milvus.proto.streaming.StreamingVersion
-	(*VersionPair)(nil),                               // 11: milvus.proto.streaming.VersionPair
-	(*BroadcastTask)(nil),                             // 12: milvus.proto.streaming.BroadcastTask
-	(*BroadcastRequest)(nil),                          // 13: milvus.proto.streaming.BroadcastRequest
-	(*BroadcastResponse)(nil),                         // 14: milvus.proto.streaming.BroadcastResponse
-	(*BroadcastAckRequest)(nil),                       // 15: milvus.proto.streaming.BroadcastAckRequest
-	(*BroadcastAckResponse)(nil),                      // 16: milvus.proto.streaming.BroadcastAckResponse
-	(*UpdateWALBalancePolicyRequest)(nil),             // 17: milvus.proto.streaming.UpdateWALBalancePolicyRequest
-	(*WALBalancePolicyConfig)(nil),                    // 18: milvus.proto.streaming.WALBalancePolicyConfig
-	(*WALBalancePolicyNodes)(nil),                     // 19: milvus.proto.streaming.WALBalancePolicyNodes
-	(*UpdateWALBalancePolicyResponse)(nil),            // 20: milvus.proto.streaming.UpdateWALBalancePolicyResponse
-	(*AssignmentDiscoverRequest)(nil),                 // 21: milvus.proto.streaming.AssignmentDiscoverRequest
-	(*ReportAssignmentErrorRequest)(nil),              // 22: milvus.proto.streaming.ReportAssignmentErrorRequest
-	(*CloseAssignmentDiscoverRequest)(nil),            // 23: milvus.proto.streaming.CloseAssignmentDiscoverRequest
-	(*AssignmentDiscoverResponse)(nil),                // 24: milvus.proto.streaming.AssignmentDiscoverResponse
-	(*FullStreamingNodeAssignmentWithVersion)(nil),    // 25: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
-	(*CloseAssignmentDiscoverResponse)(nil),           // 26: milvus.proto.streaming.CloseAssignmentDiscoverResponse
-	(*StreamingNodeInfo)(nil),                         // 27: milvus.proto.streaming.StreamingNodeInfo
-	(*StreamingNodeAssignment)(nil),                   // 28: milvus.proto.streaming.StreamingNodeAssignment
-	(*DeliverPolicy)(nil),                             // 29: milvus.proto.streaming.DeliverPolicy
-	(*DeliverFilter)(nil),                             // 30: milvus.proto.streaming.DeliverFilter
-	(*DeliverFilterTimeTickGT)(nil),                   // 31: milvus.proto.streaming.DeliverFilterTimeTickGT
-	(*DeliverFilterTimeTickGTE)(nil),                  // 32: milvus.proto.streaming.DeliverFilterTimeTickGTE
-	(*DeliverFilterMessageType)(nil),                  // 33: milvus.proto.streaming.DeliverFilterMessageType
-	(*StreamingError)(nil),                            // 34: milvus.proto.streaming.StreamingError
-	(*ProduceRequest)(nil),                            // 35: milvus.proto.streaming.ProduceRequest
-	(*CreateProducerRequest)(nil),                     // 36: milvus.proto.streaming.CreateProducerRequest
-	(*ProduceMessageRequest)(nil),                     // 37: milvus.proto.streaming.ProduceMessageRequest
-	(*CloseProducerRequest)(nil),                      // 38: milvus.proto.streaming.CloseProducerRequest
-	(*ProduceResponse)(nil),                           // 39: milvus.proto.streaming.ProduceResponse
-	(*CreateProducerResponse)(nil),                    // 40: milvus.proto.streaming.CreateProducerResponse
-	(*ProduceMessageResponse)(nil),                    // 41: milvus.proto.streaming.ProduceMessageResponse
-	(*ProduceMessageResponseResult)(nil),              // 42: milvus.proto.streaming.ProduceMessageResponseResult
-	(*CloseProducerResponse)(nil),                     // 43: milvus.proto.streaming.CloseProducerResponse
-	(*ConsumeRequest)(nil),                            // 44: milvus.proto.streaming.ConsumeRequest
-	(*CloseConsumerRequest)(nil),                      // 45: milvus.proto.streaming.CloseConsumerRequest
-	(*CreateConsumerRequest)(nil),                     // 46: milvus.proto.streaming.CreateConsumerRequest
-	(*CreateVChannelConsumersRequest)(nil),            // 47: milvus.proto.streaming.CreateVChannelConsumersRequest
-	(*CreateVChannelConsumerRequest)(nil),             // 48: milvus.proto.streaming.CreateVChannelConsumerRequest
-	(*CreateVChannelConsumersResponse)(nil),           // 49: milvus.proto.streaming.CreateVChannelConsumersResponse
-	(*CreateVChannelConsumerResponse)(nil),            // 50: milvus.proto.streaming.CreateVChannelConsumerResponse
-	(*CloseVChannelConsumerRequest)(nil),              // 51: milvus.proto.streaming.CloseVChannelConsumerRequest
-	(*CloseVChannelConsumerResponse)(nil),             // 52: milvus.proto.streaming.CloseVChannelConsumerResponse
-	(*ConsumeResponse)(nil),                           // 53: milvus.proto.streaming.ConsumeResponse
-	(*CreateConsumerResponse)(nil),                    // 54: milvus.proto.streaming.CreateConsumerResponse
-	(*ConsumeMessageReponse)(nil),                     // 55: milvus.proto.streaming.ConsumeMessageReponse
-	(*CloseConsumerResponse)(nil),                     // 56: milvus.proto.streaming.CloseConsumerResponse
-	(*StreamingNodeManagerAssignRequest)(nil),         // 57: milvus.proto.streaming.StreamingNodeManagerAssignRequest
-	(*StreamingNodeManagerAssignResponse)(nil),        // 58: milvus.proto.streaming.StreamingNodeManagerAssignResponse
-	(*StreamingNodeManagerRemoveRequest)(nil),         // 59: milvus.proto.streaming.StreamingNodeManagerRemoveRequest
-	(*StreamingNodeManagerRemoveResponse)(nil),        // 60: milvus.proto.streaming.StreamingNodeManagerRemoveResponse
-	(*StreamingNodeManagerCollectStatusRequest)(nil),  // 61: milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
-	(*StreamingNodeMetrics)(nil),                      // 62: milvus.proto.streaming.StreamingNodeMetrics
-	(*StreamingNodeWALMetrics)(nil),                   // 63: milvus.proto.streaming.StreamingNodeWALMetrics
-	(*StreamingNodeRWWALMetrics)(nil),                 // 64: milvus.proto.streaming.StreamingNodeRWWALMetrics
-	(*StreamingNodeROWALMetrics)(nil),                 // 65: milvus.proto.streaming.StreamingNodeROWALMetrics
-	(*StreamingNodeManagerCollectStatusResponse)(nil), // 66: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
-	(*VChannelMeta)(nil),                              // 67: milvus.proto.streaming.VChannelMeta
-	(*CollectionInfoOfVChannel)(nil),                  // 68: milvus.proto.streaming.CollectionInfoOfVChannel
-	(*CollectionSchemaOfVChannel)(nil),                // 69: milvus.proto.streaming.CollectionSchemaOfVChannel
-	(*PartitionInfoOfVChannel)(nil),                   // 70: milvus.proto.streaming.PartitionInfoOfVChannel
-	(*SegmentAssignmentMeta)(nil),                     // 71: milvus.proto.streaming.SegmentAssignmentMeta
-	(*SegmentAssignmentStat)(nil),                     // 72: milvus.proto.streaming.SegmentAssignmentStat
-	(*WALCheckpoint)(nil),                             // 73: milvus.proto.streaming.WALCheckpoint
-	nil,                                               // 74: milvus.proto.streaming.BroadcastResponse.ResultsEntry
-	(*messagespb.Message)(nil),                        // 75: milvus.proto.messages.Message
-	(*fieldmaskpb.FieldMask)(nil),                     // 76: google.protobuf.FieldMask
-	(*emptypb.Empty)(nil),                             // 77: google.protobuf.Empty
-	(*messagespb.MessageID)(nil),                      // 78: milvus.proto.messages.MessageID
-	(messagespb.MessageType)(0),                       // 79: milvus.proto.messages.MessageType
-	(*messagespb.TxnContext)(nil),                     // 80: milvus.proto.messages.TxnContext
-	(*anypb.Any)(nil),                                 // 81: google.protobuf.Any
-	(*messagespb.ImmutableMessage)(nil),               // 82: milvus.proto.messages.ImmutableMessage
-	(*schemapb.CollectionSchema)(nil),                 // 83: milvus.proto.schema.CollectionSchema
-	(datapb.SegmentLevel)(0),                          // 84: milvus.proto.data.SegmentLevel
-	(*milvuspb.GetComponentStatesRequest)(nil),        // 85: milvus.proto.milvus.GetComponentStatesRequest
-	(*milvuspb.ComponentStates)(nil),                  // 86: milvus.proto.milvus.ComponentStates
+	(*CChannelMeta)(nil),                              // 10: milvus.proto.streaming.CChannelMeta
+	(*StreamingVersion)(nil),                          // 11: milvus.proto.streaming.StreamingVersion
+	(*VersionPair)(nil),                               // 12: milvus.proto.streaming.VersionPair
+	(*BroadcastTask)(nil),                             // 13: milvus.proto.streaming.BroadcastTask
+	(*BroadcastRequest)(nil),                          // 14: milvus.proto.streaming.BroadcastRequest
+	(*BroadcastResponse)(nil),                         // 15: milvus.proto.streaming.BroadcastResponse
+	(*BroadcastAckRequest)(nil),                       // 16: milvus.proto.streaming.BroadcastAckRequest
+	(*BroadcastAckResponse)(nil),                      // 17: milvus.proto.streaming.BroadcastAckResponse
+	(*UpdateWALBalancePolicyRequest)(nil),             // 18: milvus.proto.streaming.UpdateWALBalancePolicyRequest
+	(*WALBalancePolicyConfig)(nil),                    // 19: milvus.proto.streaming.WALBalancePolicyConfig
+	(*WALBalancePolicyNodes)(nil),                     // 20: milvus.proto.streaming.WALBalancePolicyNodes
+	(*UpdateWALBalancePolicyResponse)(nil),            // 21: milvus.proto.streaming.UpdateWALBalancePolicyResponse
+	(*AssignmentDiscoverRequest)(nil),                 // 22: milvus.proto.streaming.AssignmentDiscoverRequest
+	(*ReportAssignmentErrorRequest)(nil),              // 23: milvus.proto.streaming.ReportAssignmentErrorRequest
+	(*CloseAssignmentDiscoverRequest)(nil),            // 24: milvus.proto.streaming.CloseAssignmentDiscoverRequest
+	(*AssignmentDiscoverResponse)(nil),                // 25: milvus.proto.streaming.AssignmentDiscoverResponse
+	(*FullStreamingNodeAssignmentWithVersion)(nil),    // 26: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
+	(*CChannelAssignment)(nil),                        // 27: milvus.proto.streaming.CChannelAssignment
+	(*CloseAssignmentDiscoverResponse)(nil),           // 28: milvus.proto.streaming.CloseAssignmentDiscoverResponse
+	(*StreamingNodeInfo)(nil),                         // 29: milvus.proto.streaming.StreamingNodeInfo
+	(*StreamingNodeAssignment)(nil),                   // 30: milvus.proto.streaming.StreamingNodeAssignment
+	(*DeliverPolicy)(nil),                             // 31: milvus.proto.streaming.DeliverPolicy
+	(*DeliverFilter)(nil),                             // 32: milvus.proto.streaming.DeliverFilter
+	(*DeliverFilterTimeTickGT)(nil),                   // 33: milvus.proto.streaming.DeliverFilterTimeTickGT
+	(*DeliverFilterTimeTickGTE)(nil),                  // 34: milvus.proto.streaming.DeliverFilterTimeTickGTE
+	(*DeliverFilterMessageType)(nil),                  // 35: milvus.proto.streaming.DeliverFilterMessageType
+	(*StreamingError)(nil),                            // 36: milvus.proto.streaming.StreamingError
+	(*ProduceRequest)(nil),                            // 37: milvus.proto.streaming.ProduceRequest
+	(*CreateProducerRequest)(nil),                     // 38: milvus.proto.streaming.CreateProducerRequest
+	(*ProduceMessageRequest)(nil),                     // 39: milvus.proto.streaming.ProduceMessageRequest
+	(*CloseProducerRequest)(nil),                      // 40: milvus.proto.streaming.CloseProducerRequest
+	(*ProduceResponse)(nil),                           // 41: milvus.proto.streaming.ProduceResponse
+	(*CreateProducerResponse)(nil),                    // 42: milvus.proto.streaming.CreateProducerResponse
+	(*ProduceMessageResponse)(nil),                    // 43: milvus.proto.streaming.ProduceMessageResponse
+	(*ProduceMessageResponseResult)(nil),              // 44: milvus.proto.streaming.ProduceMessageResponseResult
+	(*CloseProducerResponse)(nil),                     // 45: milvus.proto.streaming.CloseProducerResponse
+	(*ConsumeRequest)(nil),                            // 46: milvus.proto.streaming.ConsumeRequest
+	(*CloseConsumerRequest)(nil),                      // 47: milvus.proto.streaming.CloseConsumerRequest
+	(*CreateConsumerRequest)(nil),                     // 48: milvus.proto.streaming.CreateConsumerRequest
+	(*CreateVChannelConsumersRequest)(nil),            // 49: milvus.proto.streaming.CreateVChannelConsumersRequest
+	(*CreateVChannelConsumerRequest)(nil),             // 50: milvus.proto.streaming.CreateVChannelConsumerRequest
+	(*CreateVChannelConsumersResponse)(nil),           // 51: milvus.proto.streaming.CreateVChannelConsumersResponse
+	(*CreateVChannelConsumerResponse)(nil),            // 52: milvus.proto.streaming.CreateVChannelConsumerResponse
+	(*CloseVChannelConsumerRequest)(nil),              // 53: milvus.proto.streaming.CloseVChannelConsumerRequest
+	(*CloseVChannelConsumerResponse)(nil),             // 54: milvus.proto.streaming.CloseVChannelConsumerResponse
+	(*ConsumeResponse)(nil),                           // 55: milvus.proto.streaming.ConsumeResponse
+	(*CreateConsumerResponse)(nil),                    // 56: milvus.proto.streaming.CreateConsumerResponse
+	(*ConsumeMessageReponse)(nil),                     // 57: milvus.proto.streaming.ConsumeMessageReponse
+	(*CloseConsumerResponse)(nil),                     // 58: milvus.proto.streaming.CloseConsumerResponse
+	(*StreamingNodeManagerAssignRequest)(nil),         // 59: milvus.proto.streaming.StreamingNodeManagerAssignRequest
+	(*StreamingNodeManagerAssignResponse)(nil),        // 60: milvus.proto.streaming.StreamingNodeManagerAssignResponse
+	(*StreamingNodeManagerRemoveRequest)(nil),         // 61: milvus.proto.streaming.StreamingNodeManagerRemoveRequest
+	(*StreamingNodeManagerRemoveResponse)(nil),        // 62: milvus.proto.streaming.StreamingNodeManagerRemoveResponse
+	(*StreamingNodeManagerCollectStatusRequest)(nil),  // 63: milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
+	(*StreamingNodeMetrics)(nil),                      // 64: milvus.proto.streaming.StreamingNodeMetrics
+	(*StreamingNodeWALMetrics)(nil),                   // 65: milvus.proto.streaming.StreamingNodeWALMetrics
+	(*StreamingNodeRWWALMetrics)(nil),                 // 66: milvus.proto.streaming.StreamingNodeRWWALMetrics
+	(*StreamingNodeROWALMetrics)(nil),                 // 67: milvus.proto.streaming.StreamingNodeROWALMetrics
+	(*StreamingNodeManagerCollectStatusResponse)(nil), // 68: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
+	(*VChannelMeta)(nil),                              // 69: milvus.proto.streaming.VChannelMeta
+	(*CollectionInfoOfVChannel)(nil),                  // 70: milvus.proto.streaming.CollectionInfoOfVChannel
+	(*CollectionSchemaOfVChannel)(nil),                // 71: milvus.proto.streaming.CollectionSchemaOfVChannel
+	(*PartitionInfoOfVChannel)(nil),                   // 72: milvus.proto.streaming.PartitionInfoOfVChannel
+	(*SegmentAssignmentMeta)(nil),                     // 73: milvus.proto.streaming.SegmentAssignmentMeta
+	(*SegmentAssignmentStat)(nil),                     // 74: milvus.proto.streaming.SegmentAssignmentStat
+	(*WALCheckpoint)(nil),                             // 75: milvus.proto.streaming.WALCheckpoint
+	nil,                                               // 76: milvus.proto.streaming.BroadcastResponse.ResultsEntry
+	(*messagespb.Message)(nil),                        // 77: milvus.proto.messages.Message
+	(*messagespb.ImmutableMessage)(nil),               // 78: milvus.proto.messages.ImmutableMessage
+	(*fieldmaskpb.FieldMask)(nil),                     // 79: google.protobuf.FieldMask
+	(*emptypb.Empty)(nil),                             // 80: google.protobuf.Empty
+	(*messagespb.MessageID)(nil),                      // 81: milvus.proto.messages.MessageID
+	(messagespb.MessageType)(0),                       // 82: milvus.proto.messages.MessageType
+	(*messagespb.TxnContext)(nil),                     // 83: milvus.proto.messages.TxnContext
+	(*anypb.Any)(nil),                                 // 84: google.protobuf.Any
+	(*schemapb.CollectionSchema)(nil),                 // 85: milvus.proto.schema.CollectionSchema
+	(datapb.SegmentLevel)(0),                          // 86: milvus.proto.data.SegmentLevel
+	(*milvuspb.GetComponentStatesRequest)(nil),        // 87: milvus.proto.milvus.GetComponentStatesRequest
+	(*milvuspb.ComponentStates)(nil),                  // 88: milvus.proto.milvus.ComponentStates
 }
 var file_streaming_proto_depIdxs = []int32{
 	0,  // 0: milvus.proto.streaming.PChannelInfo.access_mode:type_name -> milvus.proto.streaming.PChannelAccessMode
-	27, // 1: milvus.proto.streaming.PChannelAssignmentLog.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
+	29, // 1: milvus.proto.streaming.PChannelAssignmentLog.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
 	0,  // 2: milvus.proto.streaming.PChannelAssignmentLog.access_mode:type_name -> milvus.proto.streaming.PChannelAccessMode
 	7,  // 3: milvus.proto.streaming.PChannelMeta.channel:type_name -> milvus.proto.streaming.PChannelInfo
-	27, // 4: milvus.proto.streaming.PChannelMeta.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
+	29, // 4: milvus.proto.streaming.PChannelMeta.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
 	1,  // 5: milvus.proto.streaming.PChannelMeta.state:type_name -> milvus.proto.streaming.PChannelMetaState
 	8,  // 6: milvus.proto.streaming.PChannelMeta.histories:type_name -> milvus.proto.streaming.PChannelAssignmentLog
-	75, // 7: milvus.proto.streaming.BroadcastTask.message:type_name -> milvus.proto.messages.Message
+	77, // 7: milvus.proto.streaming.BroadcastTask.message:type_name -> milvus.proto.messages.Message
 	2,  // 8: milvus.proto.streaming.BroadcastTask.state:type_name -> milvus.proto.streaming.BroadcastTaskState
-	75, // 9: milvus.proto.streaming.BroadcastRequest.message:type_name -> milvus.proto.messages.Message
-	74, // 10: milvus.proto.streaming.BroadcastResponse.results:type_name -> milvus.proto.streaming.BroadcastResponse.ResultsEntry
-	18, // 11: milvus.proto.streaming.UpdateWALBalancePolicyRequest.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
-	19, // 12: milvus.proto.streaming.UpdateWALBalancePolicyRequest.nodes:type_name -> milvus.proto.streaming.WALBalancePolicyNodes
-	76, // 13: milvus.proto.streaming.UpdateWALBalancePolicyRequest.update_mask:type_name -> google.protobuf.FieldMask
-	18, // 14: milvus.proto.streaming.UpdateWALBalancePolicyResponse.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
-	22, // 15: milvus.proto.streaming.AssignmentDiscoverRequest.report_error:type_name -> milvus.proto.streaming.ReportAssignmentErrorRequest
-	23, // 16: milvus.proto.streaming.AssignmentDiscoverRequest.close:type_name -> milvus.proto.streaming.CloseAssignmentDiscoverRequest
-	7,  // 17: milvus.proto.streaming.ReportAssignmentErrorRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	34, // 18: milvus.proto.streaming.ReportAssignmentErrorRequest.err:type_name -> milvus.proto.streaming.StreamingError
-	25, // 19: milvus.proto.streaming.AssignmentDiscoverResponse.full_assignment:type_name -> milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
-	26, // 20: milvus.proto.streaming.AssignmentDiscoverResponse.close:type_name -> milvus.proto.streaming.CloseAssignmentDiscoverResponse
-	11, // 21: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.version:type_name -> milvus.proto.streaming.VersionPair
-	28, // 22: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.assignments:type_name -> milvus.proto.streaming.StreamingNodeAssignment
-	27, // 23: milvus.proto.streaming.StreamingNodeAssignment.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
-	7,  // 24: milvus.proto.streaming.StreamingNodeAssignment.channels:type_name -> milvus.proto.streaming.PChannelInfo
-	77, // 25: milvus.proto.streaming.DeliverPolicy.all:type_name -> google.protobuf.Empty
-	77, // 26: milvus.proto.streaming.DeliverPolicy.latest:type_name -> google.protobuf.Empty
-	78, // 27: milvus.proto.streaming.DeliverPolicy.start_from:type_name -> milvus.proto.messages.MessageID
-	78, // 28: milvus.proto.streaming.DeliverPolicy.start_after:type_name -> milvus.proto.messages.MessageID
-	31, // 29: milvus.proto.streaming.DeliverFilter.time_tick_gt:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGT
-	32, // 30: milvus.proto.streaming.DeliverFilter.time_tick_gte:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGTE
-	33, // 31: milvus.proto.streaming.DeliverFilter.message_type:type_name -> milvus.proto.streaming.DeliverFilterMessageType
-	79, // 32: milvus.proto.streaming.DeliverFilterMessageType.message_types:type_name -> milvus.proto.messages.MessageType
-	3,  // 33: milvus.proto.streaming.StreamingError.code:type_name -> milvus.proto.streaming.StreamingCode
-	37, // 34: milvus.proto.streaming.ProduceRequest.produce:type_name -> milvus.proto.streaming.ProduceMessageRequest
-	38, // 35: milvus.proto.streaming.ProduceRequest.close:type_name -> milvus.proto.streaming.CloseProducerRequest
-	7,  // 36: milvus.proto.streaming.CreateProducerRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	75, // 37: milvus.proto.streaming.ProduceMessageRequest.message:type_name -> milvus.proto.messages.Message
-	40, // 38: milvus.proto.streaming.ProduceResponse.create:type_name -> milvus.proto.streaming.CreateProducerResponse
-	41, // 39: milvus.proto.streaming.ProduceResponse.produce:type_name -> milvus.proto.streaming.ProduceMessageResponse
-	43, // 40: milvus.proto.streaming.ProduceResponse.close:type_name -> milvus.proto.streaming.CloseProducerResponse
-	42, // 41: milvus.proto.streaming.ProduceMessageResponse.result:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
-	34, // 42: milvus.proto.streaming.ProduceMessageResponse.error:type_name -> milvus.proto.streaming.StreamingError
-	78, // 43: milvus.proto.streaming.ProduceMessageResponseResult.id:type_name -> milvus.proto.messages.MessageID
-	80, // 44: milvus.proto.streaming.ProduceMessageResponseResult.txnContext:type_name -> milvus.proto.messages.TxnContext
-	81, // 45: milvus.proto.streaming.ProduceMessageResponseResult.extra:type_name -> google.protobuf.Any
-	48, // 46: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumer:type_name -> milvus.proto.streaming.CreateVChannelConsumerRequest
-	47, // 47: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumers:type_name -> milvus.proto.streaming.CreateVChannelConsumersRequest
-	51, // 48: milvus.proto.streaming.ConsumeRequest.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerRequest
-	45, // 49: milvus.proto.streaming.ConsumeRequest.close:type_name -> milvus.proto.streaming.CloseConsumerRequest
-	7,  // 50: milvus.proto.streaming.CreateConsumerRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	48, // 51: milvus.proto.streaming.CreateVChannelConsumersRequest.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumerRequest
-	29, // 52: milvus.proto.streaming.CreateVChannelConsumerRequest.deliver_policy:type_name -> milvus.proto.streaming.DeliverPolicy
-	30, // 53: milvus.proto.streaming.CreateVChannelConsumerRequest.deliver_filters:type_name -> milvus.proto.streaming.DeliverFilter
-	50, // 54: milvus.proto.streaming.CreateVChannelConsumersResponse.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumerResponse
-	34, // 55: milvus.proto.streaming.CreateVChannelConsumerResponse.error:type_name -> milvus.proto.streaming.StreamingError
-	54, // 56: milvus.proto.streaming.ConsumeResponse.create:type_name -> milvus.proto.streaming.CreateConsumerResponse
-	55, // 57: milvus.proto.streaming.ConsumeResponse.consume:type_name -> milvus.proto.streaming.ConsumeMessageReponse
-	50, // 58: milvus.proto.streaming.ConsumeResponse.create_vchannel:type_name -> milvus.proto.streaming.CreateVChannelConsumerResponse
-	49, // 59: milvus.proto.streaming.ConsumeResponse.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumersResponse
-	52, // 60: milvus.proto.streaming.ConsumeResponse.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerResponse
-	56, // 61: milvus.proto.streaming.ConsumeResponse.close:type_name -> milvus.proto.streaming.CloseConsumerResponse
-	82, // 62: milvus.proto.streaming.ConsumeMessageReponse.message:type_name -> milvus.proto.messages.ImmutableMessage
-	7,  // 63: milvus.proto.streaming.StreamingNodeManagerAssignRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	7,  // 64: milvus.proto.streaming.StreamingNodeManagerRemoveRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	63, // 65: milvus.proto.streaming.StreamingNodeMetrics.wals:type_name -> milvus.proto.streaming.StreamingNodeWALMetrics
-	7,  // 66: milvus.proto.streaming.StreamingNodeWALMetrics.info:type_name -> milvus.proto.streaming.PChannelInfo
-	64, // 67: milvus.proto.streaming.StreamingNodeWALMetrics.rw:type_name -> milvus.proto.streaming.StreamingNodeRWWALMetrics
-	65, // 68: milvus.proto.streaming.StreamingNodeWALMetrics.ro:type_name -> milvus.proto.streaming.StreamingNodeROWALMetrics
-	62, // 69: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse.metrics:type_name -> milvus.proto.streaming.StreamingNodeMetrics
-	4,  // 70: milvus.proto.streaming.VChannelMeta.state:type_name -> milvus.proto.streaming.VChannelState
-	68, // 71: milvus.proto.streaming.VChannelMeta.collection_info:type_name -> milvus.proto.streaming.CollectionInfoOfVChannel
-	70, // 72: milvus.proto.streaming.CollectionInfoOfVChannel.partitions:type_name -> milvus.proto.streaming.PartitionInfoOfVChannel
-	69, // 73: milvus.proto.streaming.CollectionInfoOfVChannel.schemas:type_name -> milvus.proto.streaming.CollectionSchemaOfVChannel
-	83, // 74: milvus.proto.streaming.CollectionSchemaOfVChannel.schema:type_name -> milvus.proto.schema.CollectionSchema
-	5,  // 75: milvus.proto.streaming.CollectionSchemaOfVChannel.state:type_name -> milvus.proto.streaming.VChannelSchemaState
-	6,  // 76: milvus.proto.streaming.SegmentAssignmentMeta.state:type_name -> milvus.proto.streaming.SegmentAssignmentState
-	72, // 77: milvus.proto.streaming.SegmentAssignmentMeta.stat:type_name -> milvus.proto.streaming.SegmentAssignmentStat
-	84, // 78: milvus.proto.streaming.SegmentAssignmentStat.level:type_name -> milvus.proto.data.SegmentLevel
-	78, // 79: milvus.proto.streaming.WALCheckpoint.message_id:type_name -> milvus.proto.messages.MessageID
-	42, // 80: milvus.proto.streaming.BroadcastResponse.ResultsEntry.value:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
-	85, // 81: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
-	13, // 82: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:input_type -> milvus.proto.streaming.BroadcastRequest
-	15, // 83: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:input_type -> milvus.proto.streaming.BroadcastAckRequest
-	17, // 84: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:input_type -> milvus.proto.streaming.UpdateWALBalancePolicyRequest
-	21, // 85: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:input_type -> milvus.proto.streaming.AssignmentDiscoverRequest
-	35, // 86: milvus.proto.streaming.StreamingNodeHandlerService.Produce:input_type -> milvus.proto.streaming.ProduceRequest
-	44, // 87: milvus.proto.streaming.StreamingNodeHandlerService.Consume:input_type -> milvus.proto.streaming.ConsumeRequest
-	57, // 88: milvus.proto.streaming.StreamingNodeManagerService.Assign:input_type -> milvus.proto.streaming.StreamingNodeManagerAssignRequest
-	59, // 89: milvus.proto.streaming.StreamingNodeManagerService.Remove:input_type -> milvus.proto.streaming.StreamingNodeManagerRemoveRequest
-	61, // 90: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:input_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
-	86, // 91: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	14, // 92: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:output_type -> milvus.proto.streaming.BroadcastResponse
-	16, // 93: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:output_type -> milvus.proto.streaming.BroadcastAckResponse
-	20, // 94: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:output_type -> milvus.proto.streaming.UpdateWALBalancePolicyResponse
-	24, // 95: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:output_type -> milvus.proto.streaming.AssignmentDiscoverResponse
-	39, // 96: milvus.proto.streaming.StreamingNodeHandlerService.Produce:output_type -> milvus.proto.streaming.ProduceResponse
-	53, // 97: milvus.proto.streaming.StreamingNodeHandlerService.Consume:output_type -> milvus.proto.streaming.ConsumeResponse
-	58, // 98: milvus.proto.streaming.StreamingNodeManagerService.Assign:output_type -> milvus.proto.streaming.StreamingNodeManagerAssignResponse
-	60, // 99: milvus.proto.streaming.StreamingNodeManagerService.Remove:output_type -> milvus.proto.streaming.StreamingNodeManagerRemoveResponse
-	66, // 100: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:output_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
-	91, // [91:101] is the sub-list for method output_type
-	81, // [81:91] is the sub-list for method input_type
-	81, // [81:81] is the sub-list for extension type_name
-	81, // [81:81] is the sub-list for extension extendee
-	0,  // [0:81] is the sub-list for field type_name
+	77, // 9: milvus.proto.streaming.BroadcastRequest.message:type_name -> milvus.proto.messages.Message
+	76, // 10: milvus.proto.streaming.BroadcastResponse.results:type_name -> milvus.proto.streaming.BroadcastResponse.ResultsEntry
+	78, // 11: milvus.proto.streaming.BroadcastAckRequest.message:type_name -> milvus.proto.messages.ImmutableMessage
+	19, // 12: milvus.proto.streaming.UpdateWALBalancePolicyRequest.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
+	20, // 13: milvus.proto.streaming.UpdateWALBalancePolicyRequest.nodes:type_name -> milvus.proto.streaming.WALBalancePolicyNodes
+	79, // 14: milvus.proto.streaming.UpdateWALBalancePolicyRequest.update_mask:type_name -> google.protobuf.FieldMask
+	19, // 15: milvus.proto.streaming.UpdateWALBalancePolicyResponse.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
+	23, // 16: milvus.proto.streaming.AssignmentDiscoverRequest.report_error:type_name -> milvus.proto.streaming.ReportAssignmentErrorRequest
+	24, // 17: milvus.proto.streaming.AssignmentDiscoverRequest.close:type_name -> milvus.proto.streaming.CloseAssignmentDiscoverRequest
+	7,  // 18: milvus.proto.streaming.ReportAssignmentErrorRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
+	36, // 19: milvus.proto.streaming.ReportAssignmentErrorRequest.err:type_name -> milvus.proto.streaming.StreamingError
+	26, // 20: milvus.proto.streaming.AssignmentDiscoverResponse.full_assignment:type_name -> milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
+	28, // 21: milvus.proto.streaming.AssignmentDiscoverResponse.close:type_name -> milvus.proto.streaming.CloseAssignmentDiscoverResponse
+	12, // 22: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.version:type_name -> milvus.proto.streaming.VersionPair
+	30, // 23: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.assignments:type_name -> milvus.proto.streaming.StreamingNodeAssignment
+	27, // 24: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.cchannel:type_name -> milvus.proto.streaming.CChannelAssignment
+	10, // 25: milvus.proto.streaming.CChannelAssignment.meta:type_name -> milvus.proto.streaming.CChannelMeta
+	29, // 26: milvus.proto.streaming.StreamingNodeAssignment.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
+	7,  // 27: milvus.proto.streaming.StreamingNodeAssignment.channels:type_name -> milvus.proto.streaming.PChannelInfo
+	80, // 28: milvus.proto.streaming.DeliverPolicy.all:type_name -> google.protobuf.Empty
+	80, // 29: milvus.proto.streaming.DeliverPolicy.latest:type_name -> google.protobuf.Empty
+	81, // 30: milvus.proto.streaming.DeliverPolicy.start_from:type_name -> milvus.proto.messages.MessageID
+	81, // 31: milvus.proto.streaming.DeliverPolicy.start_after:type_name -> milvus.proto.messages.MessageID
+	33, // 32: milvus.proto.streaming.DeliverFilter.time_tick_gt:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGT
+	34, // 33: milvus.proto.streaming.DeliverFilter.time_tick_gte:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGTE
+	35, // 34: milvus.proto.streaming.DeliverFilter.message_type:type_name -> milvus.proto.streaming.DeliverFilterMessageType
+	82, // 35: milvus.proto.streaming.DeliverFilterMessageType.message_types:type_name -> milvus.proto.messages.MessageType
+	3,  // 36: milvus.proto.streaming.StreamingError.code:type_name -> milvus.proto.streaming.StreamingCode
+	39, // 37: milvus.proto.streaming.ProduceRequest.produce:type_name -> milvus.proto.streaming.ProduceMessageRequest
+	40, // 38: milvus.proto.streaming.ProduceRequest.close:type_name -> milvus.proto.streaming.CloseProducerRequest
+	7,  // 39: milvus.proto.streaming.CreateProducerRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
+	77, // 40: milvus.proto.streaming.ProduceMessageRequest.message:type_name -> milvus.proto.messages.Message
+	42, // 41: milvus.proto.streaming.ProduceResponse.create:type_name -> milvus.proto.streaming.CreateProducerResponse
+	43, // 42: milvus.proto.streaming.ProduceResponse.produce:type_name -> milvus.proto.streaming.ProduceMessageResponse
+	45, // 43: milvus.proto.streaming.ProduceResponse.close:type_name -> milvus.proto.streaming.CloseProducerResponse
+	44, // 44: milvus.proto.streaming.ProduceMessageResponse.result:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
+	36, // 45: milvus.proto.streaming.ProduceMessageResponse.error:type_name -> milvus.proto.streaming.StreamingError
+	81, // 46: milvus.proto.streaming.ProduceMessageResponseResult.id:type_name -> milvus.proto.messages.MessageID
+	83, // 47: milvus.proto.streaming.ProduceMessageResponseResult.txnContext:type_name -> milvus.proto.messages.TxnContext
+	84, // 48: milvus.proto.streaming.ProduceMessageResponseResult.extra:type_name -> google.protobuf.Any
+	50, // 49: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumer:type_name -> milvus.proto.streaming.CreateVChannelConsumerRequest
+	49, // 50: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumers:type_name -> milvus.proto.streaming.CreateVChannelConsumersRequest
+	53, // 51: milvus.proto.streaming.ConsumeRequest.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerRequest
+	47, // 52: milvus.proto.streaming.ConsumeRequest.close:type_name -> milvus.proto.streaming.CloseConsumerRequest
+	7,  // 53: milvus.proto.streaming.CreateConsumerRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
+	50, // 54: milvus.proto.streaming.CreateVChannelConsumersRequest.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumerRequest
+	31, // 55: milvus.proto.streaming.CreateVChannelConsumerRequest.deliver_policy:type_name -> milvus.proto.streaming.DeliverPolicy
+	32, // 56: milvus.proto.streaming.CreateVChannelConsumerRequest.deliver_filters:type_name -> milvus.proto.streaming.DeliverFilter
+	52, // 57: milvus.proto.streaming.CreateVChannelConsumersResponse.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumerResponse
+	36, // 58: milvus.proto.streaming.CreateVChannelConsumerResponse.error:type_name -> milvus.proto.streaming.StreamingError
+	56, // 59: milvus.proto.streaming.ConsumeResponse.create:type_name -> milvus.proto.streaming.CreateConsumerResponse
+	57, // 60: milvus.proto.streaming.ConsumeResponse.consume:type_name -> milvus.proto.streaming.ConsumeMessageReponse
+	52, // 61: milvus.proto.streaming.ConsumeResponse.create_vchannel:type_name -> milvus.proto.streaming.CreateVChannelConsumerResponse
+	51, // 62: milvus.proto.streaming.ConsumeResponse.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumersResponse
+	54, // 63: milvus.proto.streaming.ConsumeResponse.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerResponse
+	58, // 64: milvus.proto.streaming.ConsumeResponse.close:type_name -> milvus.proto.streaming.CloseConsumerResponse
+	78, // 65: milvus.proto.streaming.ConsumeMessageReponse.message:type_name -> milvus.proto.messages.ImmutableMessage
+	7,  // 66: milvus.proto.streaming.StreamingNodeManagerAssignRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
+	7,  // 67: milvus.proto.streaming.StreamingNodeManagerRemoveRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
+	65, // 68: milvus.proto.streaming.StreamingNodeMetrics.wals:type_name -> milvus.proto.streaming.StreamingNodeWALMetrics
+	7,  // 69: milvus.proto.streaming.StreamingNodeWALMetrics.info:type_name -> milvus.proto.streaming.PChannelInfo
+	66, // 70: milvus.proto.streaming.StreamingNodeWALMetrics.rw:type_name -> milvus.proto.streaming.StreamingNodeRWWALMetrics
+	67, // 71: milvus.proto.streaming.StreamingNodeWALMetrics.ro:type_name -> milvus.proto.streaming.StreamingNodeROWALMetrics
+	64, // 72: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse.metrics:type_name -> milvus.proto.streaming.StreamingNodeMetrics
+	4,  // 73: milvus.proto.streaming.VChannelMeta.state:type_name -> milvus.proto.streaming.VChannelState
+	70, // 74: milvus.proto.streaming.VChannelMeta.collection_info:type_name -> milvus.proto.streaming.CollectionInfoOfVChannel
+	72, // 75: milvus.proto.streaming.CollectionInfoOfVChannel.partitions:type_name -> milvus.proto.streaming.PartitionInfoOfVChannel
+	71, // 76: milvus.proto.streaming.CollectionInfoOfVChannel.schemas:type_name -> milvus.proto.streaming.CollectionSchemaOfVChannel
+	85, // 77: milvus.proto.streaming.CollectionSchemaOfVChannel.schema:type_name -> milvus.proto.schema.CollectionSchema
+	5,  // 78: milvus.proto.streaming.CollectionSchemaOfVChannel.state:type_name -> milvus.proto.streaming.VChannelSchemaState
+	6,  // 79: milvus.proto.streaming.SegmentAssignmentMeta.state:type_name -> milvus.proto.streaming.SegmentAssignmentState
+	74, // 80: milvus.proto.streaming.SegmentAssignmentMeta.stat:type_name -> milvus.proto.streaming.SegmentAssignmentStat
+	86, // 81: milvus.proto.streaming.SegmentAssignmentStat.level:type_name -> milvus.proto.data.SegmentLevel
+	81, // 82: milvus.proto.streaming.WALCheckpoint.message_id:type_name -> milvus.proto.messages.MessageID
+	44, // 83: milvus.proto.streaming.BroadcastResponse.ResultsEntry.value:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
+	87, // 84: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
+	14, // 85: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:input_type -> milvus.proto.streaming.BroadcastRequest
+	16, // 86: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:input_type -> milvus.proto.streaming.BroadcastAckRequest
+	18, // 87: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:input_type -> milvus.proto.streaming.UpdateWALBalancePolicyRequest
+	22, // 88: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:input_type -> milvus.proto.streaming.AssignmentDiscoverRequest
+	37, // 89: milvus.proto.streaming.StreamingNodeHandlerService.Produce:input_type -> milvus.proto.streaming.ProduceRequest
+	46, // 90: milvus.proto.streaming.StreamingNodeHandlerService.Consume:input_type -> milvus.proto.streaming.ConsumeRequest
+	59, // 91: milvus.proto.streaming.StreamingNodeManagerService.Assign:input_type -> milvus.proto.streaming.StreamingNodeManagerAssignRequest
+	61, // 92: milvus.proto.streaming.StreamingNodeManagerService.Remove:input_type -> milvus.proto.streaming.StreamingNodeManagerRemoveRequest
+	63, // 93: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:input_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
+	88, // 94: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	15, // 95: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:output_type -> milvus.proto.streaming.BroadcastResponse
+	17, // 96: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:output_type -> milvus.proto.streaming.BroadcastAckResponse
+	21, // 97: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:output_type -> milvus.proto.streaming.UpdateWALBalancePolicyResponse
+	25, // 98: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:output_type -> milvus.proto.streaming.AssignmentDiscoverResponse
+	41, // 99: milvus.proto.streaming.StreamingNodeHandlerService.Produce:output_type -> milvus.proto.streaming.ProduceResponse
+	55, // 100: milvus.proto.streaming.StreamingNodeHandlerService.Consume:output_type -> milvus.proto.streaming.ConsumeResponse
+	60, // 101: milvus.proto.streaming.StreamingNodeManagerService.Assign:output_type -> milvus.proto.streaming.StreamingNodeManagerAssignResponse
+	62, // 102: milvus.proto.streaming.StreamingNodeManagerService.Remove:output_type -> milvus.proto.streaming.StreamingNodeManagerRemoveResponse
+	68, // 103: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:output_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
+	94, // [94:104] is the sub-list for method output_type
+	84, // [84:94] is the sub-list for method input_type
+	84, // [84:84] is the sub-list for extension type_name
+	84, // [84:84] is the sub-list for extension extendee
+	0,  // [0:84] is the sub-list for field type_name
 }
 
 func init() { file_streaming_proto_init() }
@@ -5593,7 +5731,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingVersion); i {
+			switch v := v.(*CChannelMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5605,7 +5743,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*VersionPair); i {
+			switch v := v.(*StreamingVersion); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5617,7 +5755,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BroadcastTask); i {
+			switch v := v.(*VersionPair); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5629,7 +5767,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BroadcastRequest); i {
+			switch v := v.(*BroadcastTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5641,7 +5779,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BroadcastResponse); i {
+			switch v := v.(*BroadcastRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5653,7 +5791,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BroadcastAckRequest); i {
+			switch v := v.(*BroadcastResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5665,7 +5803,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BroadcastAckResponse); i {
+			switch v := v.(*BroadcastAckRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5677,7 +5815,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateWALBalancePolicyRequest); i {
+			switch v := v.(*BroadcastAckResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5689,7 +5827,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WALBalancePolicyConfig); i {
+			switch v := v.(*UpdateWALBalancePolicyRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5701,7 +5839,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WALBalancePolicyNodes); i {
+			switch v := v.(*WALBalancePolicyConfig); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5713,7 +5851,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateWALBalancePolicyResponse); i {
+			switch v := v.(*WALBalancePolicyNodes); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5725,7 +5863,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*AssignmentDiscoverRequest); i {
+			switch v := v.(*UpdateWALBalancePolicyResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5737,7 +5875,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReportAssignmentErrorRequest); i {
+			switch v := v.(*AssignmentDiscoverRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5749,7 +5887,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseAssignmentDiscoverRequest); i {
+			switch v := v.(*ReportAssignmentErrorRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5761,7 +5899,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*AssignmentDiscoverResponse); i {
+			switch v := v.(*CloseAssignmentDiscoverRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5773,7 +5911,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FullStreamingNodeAssignmentWithVersion); i {
+			switch v := v.(*AssignmentDiscoverResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5785,7 +5923,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseAssignmentDiscoverResponse); i {
+			switch v := v.(*FullStreamingNodeAssignmentWithVersion); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5797,7 +5935,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeInfo); i {
+			switch v := v.(*CChannelAssignment); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5809,7 +5947,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeAssignment); i {
+			switch v := v.(*CloseAssignmentDiscoverResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5821,7 +5959,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeliverPolicy); i {
+			switch v := v.(*StreamingNodeInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5833,7 +5971,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeliverFilter); i {
+			switch v := v.(*StreamingNodeAssignment); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5845,7 +5983,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeliverFilterTimeTickGT); i {
+			switch v := v.(*DeliverPolicy); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5857,7 +5995,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeliverFilterTimeTickGTE); i {
+			switch v := v.(*DeliverFilter); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5869,7 +6007,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeliverFilterMessageType); i {
+			switch v := v.(*DeliverFilterTimeTickGT); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5881,7 +6019,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingError); i {
+			switch v := v.(*DeliverFilterTimeTickGTE); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5893,7 +6031,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProduceRequest); i {
+			switch v := v.(*DeliverFilterMessageType); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5905,7 +6043,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[29].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateProducerRequest); i {
+			switch v := v.(*StreamingError); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5917,7 +6055,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[30].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProduceMessageRequest); i {
+			switch v := v.(*ProduceRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5929,7 +6067,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[31].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseProducerRequest); i {
+			switch v := v.(*CreateProducerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5941,7 +6079,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[32].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProduceResponse); i {
+			switch v := v.(*ProduceMessageRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5953,7 +6091,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[33].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateProducerResponse); i {
+			switch v := v.(*CloseProducerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5965,7 +6103,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[34].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProduceMessageResponse); i {
+			switch v := v.(*ProduceResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5977,7 +6115,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[35].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProduceMessageResponseResult); i {
+			switch v := v.(*CreateProducerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -5989,7 +6127,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[36].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseProducerResponse); i {
+			switch v := v.(*ProduceMessageResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6001,7 +6139,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[37].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConsumeRequest); i {
+			switch v := v.(*ProduceMessageResponseResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6013,7 +6151,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[38].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseConsumerRequest); i {
+			switch v := v.(*CloseProducerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6025,7 +6163,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[39].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateConsumerRequest); i {
+			switch v := v.(*ConsumeRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6037,7 +6175,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[40].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateVChannelConsumersRequest); i {
+			switch v := v.(*CloseConsumerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6049,7 +6187,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[41].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateVChannelConsumerRequest); i {
+			switch v := v.(*CreateConsumerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6061,7 +6199,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[42].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateVChannelConsumersResponse); i {
+			switch v := v.(*CreateVChannelConsumersRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6073,7 +6211,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[43].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateVChannelConsumerResponse); i {
+			switch v := v.(*CreateVChannelConsumerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6085,7 +6223,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[44].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseVChannelConsumerRequest); i {
+			switch v := v.(*CreateVChannelConsumersResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6097,7 +6235,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[45].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseVChannelConsumerResponse); i {
+			switch v := v.(*CreateVChannelConsumerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6109,7 +6247,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[46].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConsumeResponse); i {
+			switch v := v.(*CloseVChannelConsumerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6121,7 +6259,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[47].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateConsumerResponse); i {
+			switch v := v.(*CloseVChannelConsumerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6133,7 +6271,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[48].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConsumeMessageReponse); i {
+			switch v := v.(*ConsumeResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6145,7 +6283,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[49].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CloseConsumerResponse); i {
+			switch v := v.(*CreateConsumerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6157,7 +6295,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[50].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerAssignRequest); i {
+			switch v := v.(*ConsumeMessageReponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6169,7 +6307,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[51].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerAssignResponse); i {
+			switch v := v.(*CloseConsumerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6181,7 +6319,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[52].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerRemoveRequest); i {
+			switch v := v.(*StreamingNodeManagerAssignRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6193,7 +6331,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[53].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerRemoveResponse); i {
+			switch v := v.(*StreamingNodeManagerAssignResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6205,7 +6343,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[54].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerCollectStatusRequest); i {
+			switch v := v.(*StreamingNodeManagerRemoveRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6217,7 +6355,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[55].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeMetrics); i {
+			switch v := v.(*StreamingNodeManagerRemoveResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6229,7 +6367,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[56].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeWALMetrics); i {
+			switch v := v.(*StreamingNodeManagerCollectStatusRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6241,7 +6379,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[57].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeRWWALMetrics); i {
+			switch v := v.(*StreamingNodeMetrics); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6253,7 +6391,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[58].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeROWALMetrics); i {
+			switch v := v.(*StreamingNodeWALMetrics); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6265,7 +6403,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[59].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerCollectStatusResponse); i {
+			switch v := v.(*StreamingNodeRWWALMetrics); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6277,7 +6415,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[60].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*VChannelMeta); i {
+			switch v := v.(*StreamingNodeROWALMetrics); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6289,7 +6427,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[61].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionInfoOfVChannel); i {
+			switch v := v.(*StreamingNodeManagerCollectStatusResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6301,7 +6439,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[62].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionSchemaOfVChannel); i {
+			switch v := v.(*VChannelMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6313,7 +6451,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[63].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionInfoOfVChannel); i {
+			switch v := v.(*CollectionInfoOfVChannel); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6325,7 +6463,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[64].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentAssignmentMeta); i {
+			switch v := v.(*CollectionSchemaOfVChannel); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6337,7 +6475,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[65].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentAssignmentStat); i {
+			switch v := v.(*PartitionInfoOfVChannel); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -6349,6 +6487,30 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[66].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SegmentAssignmentMeta); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_streaming_proto_msgTypes[67].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SegmentAssignmentStat); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_streaming_proto_msgTypes[68].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*WALCheckpoint); i {
 			case 0:
 				return &v.state
@@ -6361,49 +6523,49 @@ func file_streaming_proto_init() {
 			}
 		}
 	}
-	file_streaming_proto_msgTypes[14].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[15].OneofWrappers = []interface{}{
 		(*AssignmentDiscoverRequest_ReportError)(nil),
 		(*AssignmentDiscoverRequest_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[17].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[18].OneofWrappers = []interface{}{
 		(*AssignmentDiscoverResponse_FullAssignment)(nil),
 		(*AssignmentDiscoverResponse_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[22].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[24].OneofWrappers = []interface{}{
 		(*DeliverPolicy_All)(nil),
 		(*DeliverPolicy_Latest)(nil),
 		(*DeliverPolicy_StartFrom)(nil),
 		(*DeliverPolicy_StartAfter)(nil),
 	}
-	file_streaming_proto_msgTypes[23].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[25].OneofWrappers = []interface{}{
 		(*DeliverFilter_TimeTickGt)(nil),
 		(*DeliverFilter_TimeTickGte)(nil),
 		(*DeliverFilter_MessageType)(nil),
 	}
-	file_streaming_proto_msgTypes[28].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[30].OneofWrappers = []interface{}{
 		(*ProduceRequest_Produce)(nil),
 		(*ProduceRequest_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[32].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[34].OneofWrappers = []interface{}{
 		(*ProduceResponse_Create)(nil),
 		(*ProduceResponse_Produce)(nil),
 		(*ProduceResponse_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[34].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[36].OneofWrappers = []interface{}{
 		(*ProduceMessageResponse_Result)(nil),
 		(*ProduceMessageResponse_Error)(nil),
 	}
-	file_streaming_proto_msgTypes[37].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[39].OneofWrappers = []interface{}{
 		(*ConsumeRequest_CreateVchannelConsumer)(nil),
 		(*ConsumeRequest_CreateVchannelConsumers)(nil),
 		(*ConsumeRequest_CloseVchannel)(nil),
 		(*ConsumeRequest_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[43].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[45].OneofWrappers = []interface{}{
 		(*CreateVChannelConsumerResponse_ConsumerId)(nil),
 		(*CreateVChannelConsumerResponse_Error)(nil),
 	}
-	file_streaming_proto_msgTypes[46].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[48].OneofWrappers = []interface{}{
 		(*ConsumeResponse_Create)(nil),
 		(*ConsumeResponse_Consume)(nil),
 		(*ConsumeResponse_CreateVchannel)(nil),
@@ -6411,7 +6573,7 @@ func file_streaming_proto_init() {
 		(*ConsumeResponse_CloseVchannel)(nil),
 		(*ConsumeResponse_Close)(nil),
 	}
-	file_streaming_proto_msgTypes[56].OneofWrappers = []interface{}{
+	file_streaming_proto_msgTypes[58].OneofWrappers = []interface{}{
 		(*StreamingNodeWALMetrics_Rw)(nil),
 		(*StreamingNodeWALMetrics_Ro)(nil),
 	}
@@ -6421,7 +6583,7 @@ func file_streaming_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_streaming_proto_rawDesc,
 			NumEnums:      7,
-			NumMessages:   68,
+			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   5,
 		},

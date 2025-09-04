@@ -129,7 +129,8 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                 AssertInfo(
                     field_data->get_num_rows() == 1,
                     "wrong length of string num in old index binlog file");
-                auto new_field_data = CreateFieldData(DataType::INT8, nullable);
+                auto new_field_data =
+                    CreateFieldData(DataType::INT8, DataType::NONE, nullable);
                 new_field_data->FillFieldData(
                     (*static_cast<const std::string*>(field_data->RawValue(0)))
                         .c_str(),

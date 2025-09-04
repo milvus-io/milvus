@@ -25,8 +25,6 @@ std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
 
-std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL(
-    DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL);
 std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
     DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
 std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
@@ -50,13 +48,6 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
-}
-
-void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
-    JSON_KEY_STATS_COMMIT_INTERVAL.store(val);
-    LOG_INFO("set default json key Stats commit interval: {}",
-             JSON_KEY_STATS_COMMIT_INTERVAL.load());
 }
 
 void

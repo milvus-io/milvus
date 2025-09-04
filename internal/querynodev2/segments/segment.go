@@ -30,6 +30,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -292,10 +293,11 @@ type LocalSegment struct {
 	rowNum      *atomic.Int64
 	insertCount *atomic.Int64
 
+	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
-	fieldJSONStats     []int64
+	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
 }
 
 func NewSegment(ctx context.Context,
@@ -362,6 +364,7 @@ func NewSegment(ctx context.Context,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
 		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
@@ -506,6 +509,43 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	defer s.ptrLock.Unpin()
 
 	return s.csegment.HasRawData(fieldID)
+}
+
+func (s *LocalSegment) HasFieldData(fieldID int64) bool {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return false
+	}
+	defer s.ptrLock.Unpin()
+	return s.csegment.HasFieldData(fieldID)
+}
+
+func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
+		field := typeutil.GetField(s.collection.schema.Load(), indexInfo.IndexInfo.FieldID)
+		if typeutil.IsJSONType(field.GetDataType()) {
+			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
+			if err != nil {
+				return err
+			}
+			err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
+			if err != nil {
+				return err
+			}
+		}
+
+		s.fieldIndexes.Remove(indexID)
+	}
+	return nil
 }
 
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
@@ -701,6 +741,16 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 	defer s.ptrLock.Unpin()
 
+	s.deltaMut.Lock()
+	defer s.deltaMut.Unlock()
+
+	if s.lastDeltaTimestamp.Load() >= timestamps[len(timestamps)-1] {
+		log.Info("skip delete due to delete record before lastDeltaTimestamp",
+			zap.Int64("segmentID", s.ID()),
+			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
+		return nil
+	}
+
 	var err error
 	GetDynamicPool().Submit(func() (any, error) {
 		start := time.Now()
@@ -776,7 +826,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -808,6 +858,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+	}
+
+	if len(warmupPolicy) > 0 {
+		req.WarmupPolicy = warmupPolicy[0]
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -885,6 +939,15 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 	)
+
+	s.deltaMut.Lock()
+	defer s.deltaMut.Unlock()
+
+	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] {
+		log.Info("skip load delta data due to delete record before lastDeltaTimestamp",
+			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
+		return nil
+	}
 
 	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
 	if err != nil {
@@ -1132,29 +1195,27 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 	defer s.ptrLock.Unpin()
 
-	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
+	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		log.Ctx(ctx).Warn("load json key index failed, json key stats is not enabled")
+		return nil
+	}
+
+	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
+
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-	exists := false
-	for _, field := range s.fieldJSONStats {
-		if field == jsonKeyStats.GetFieldID() {
-			exists = true
-			break
-		}
-	}
-	if exists {
-		log.Warn("JsonKeyIndexStats already loaded")
+	if info, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok && info.GetDataFormatVersion() >= common.JSONStatsDataFormatVersion {
+		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
+
 	f, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
 	if err != nil {
 		return err
 	}
 
-	// Json key stats index mmap config is based on the raw data mmap.
-	enableMmap := isDataMmapEnable(f)
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),
 		Version:      jsonKeyStats.GetVersion(),
@@ -1164,7 +1225,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
 		LoadPriority: s.loadInfo.Load().GetPriority(),
-		EnableMmap:   enableMmap,
+		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
+		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1178,7 +1240,13 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
 		return nil, nil
 	}).Await()
-	s.fieldJSONStats = append(s.fieldJSONStats, jsonKeyStats.GetFieldID())
+
+	s.fieldJSONStats[jsonKeyStats.GetFieldID()] = &querypb.JsonStatsInfo{
+		FieldID:           jsonKeyStats.GetFieldID(),
+		DataFormatVersion: jsonKeyStats.GetJsonKeyStatsDataFormat(),
+		BuildID:           jsonKeyStats.GetBuildID(),
+		VersionID:         jsonKeyStats.GetVersion(),
+	}
 	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
 }
 
@@ -1395,6 +1463,6 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
 }
 
-func (s *LocalSegment) GetFieldJSONIndexStats() []int64 {
+func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return s.fieldJSONStats
 }

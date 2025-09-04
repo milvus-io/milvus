@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Tracer.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "google/protobuf/text_format.h"
 #include "log/Log.h"
 #include "mmap/Types.h"
@@ -39,6 +40,7 @@
 #include "mmap/Types.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "exec/expression/ExprCache.h"
+#include "monitor/Monitor.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -308,6 +310,15 @@ HasRawData(CSegmentInterface c_segment, int64_t field_id) {
     return segment->HasRawData(field_id);
 }
 
+bool
+HasFieldData(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto segment =
+        reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    return segment->HasFieldData(milvus::FieldId(field_id));
+}
+
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,
@@ -529,15 +540,32 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         config[milvus::index::INDEX_FILES] = files;
         config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
         config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+        if (info_proto->enable_mmap()) {
+            config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
+        }
+
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
-        auto index = std::make_unique<milvus::index::JsonKeyStatsInvertedIndex>(
-            file_ctx, true);
-        index->Load(ctx, config);
+        auto index =
+            std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
+        {
+            milvus::ScopedTimer timer(
+                "json_stats_load",
+                [](double ms) {
+                    milvus::monitor::internal_json_stats_latency_load.Observe(
+                        ms);
+                },
+                milvus::ScopedTimer::LogLevel::Info);
+            index->Load(ctx, config);
+        }
 
-        segment->LoadJsonKeyIndex(milvus::FieldId(info_proto->fieldid()),
-                                  std::move(index));
+        segment->LoadJsonStats(milvus::FieldId(info_proto->fieldid()),
+                               std::move(index));
+
+        LOG_INFO("load json stats success for field:{} of segment:{}",
+                 info_proto->fieldid(),
+                 segment->get_segment_id());
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -592,6 +620,25 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
+                           int64_t field_id,
+                           const char* nested_path) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->DropJSONIndex(milvus::FieldId(field_id), nested_path);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

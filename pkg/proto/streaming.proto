@@ -66,6 +66,11 @@ message PChannelMeta {
     uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
 }
 
+// CChannelMeta is the meta information of a control channel.
+message CChannelMeta {
+    string pchannel = 1; // the pchannel that control channel locate on.
+}
+
 // StreamingVersion is the version of the streaming service.
 message StreamingVersion {
     int64 version = 1; // version of the streaming,
@@ -129,8 +134,9 @@ message BroadcastResponse {
 }
 
 message BroadcastAckRequest {
-    uint64 broadcast_id = 1;                  // broadcast id.
-    string vchannel = 2;                     // the vchannel that acked the message.
+    uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
+    string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
+    messages.ImmutableMessage message = 3;       // the message that to be acked.
 }
 
 message BroadcastAckResponse {
@@ -210,6 +216,12 @@ message AssignmentDiscoverResponse {
 message FullStreamingNodeAssignmentWithVersion {
     VersionPair version                          = 1;
     repeated StreamingNodeAssignment assignments = 2;
+    CChannelAssignment cchannel                  = 3; // Where the control channel located.
+}
+
+// CChannelAssignment is the assignment info of a control channel.
+message CChannelAssignment {
+    CChannelMeta meta = 1;
 }
 
 message CloseAssignmentDiscoverResponse {}

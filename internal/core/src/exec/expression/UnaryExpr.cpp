@@ -16,14 +16,16 @@
 
 #include "UnaryExpr.h"
 #include <optional>
+#include <boost/regex.hpp>
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "exec/expression/ExprCache.h"
 #include "common/type_c.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "common/ScopedTimer.h"
 
-#include <boost/regex.hpp>
 namespace milvus {
 namespace exec {
 template <typename T>
@@ -35,8 +37,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     using Index = index::ScalarIndex<IndexInnerType>;
 
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-        auto index_ptr = const_cast<Index*>(pw.get());
+        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
 
         if (index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::HYBRID ||
@@ -199,8 +200,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
             auto val_type_inner = FromValCase(val_type);
-            if (CanExecNgramMatchForJson(val_type_inner) &&
-                !has_offset_input_) {
+            if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch();
                 // If nullopt is returned, it means the query cannot be
                 // optimized by ngram index. Forward it to the normal path.
@@ -663,8 +663,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
 
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
-        return ExecRangeVisitorImplJsonForIndex<ExprValueType>();
+    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+        return ExecRangeVisitorImplJsonByStats<ExprValueType>();
     }
 
     auto real_batch_size =
@@ -965,7 +965,7 @@ PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
@@ -974,509 +974,261 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
-    auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
-    std::string pointer = pointerpair.first;
-    std::string arrayIndex = pointerpair.second;
 
-#define UnaryRangeJSONIndexCompare(cmp)                       \
-    do {                                                      \
-        auto x = json.at<GetType>(offset, size);              \
-        if (x.error()) {                                      \
-            if constexpr (std::is_same_v<GetType, int64_t>) { \
-                auto x = json.at<double>(offset, size);       \
-                return !x.error() && (cmp);                   \
-            }                                                 \
-            return false;                                     \
-        }                                                     \
-        return (cmp);                                         \
-    } while (false)
+    if (cached_index_chunk_id_ != 0 &&
+        segment_->type() == SegmentType::Sealed) {
+        auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
+        auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
+        std::string pointer = pointerpair.first;
+        size_t array_index = pointerpair.second.empty()
+                                 ? INVALID_ARRAY_INDEX
+                                 : std::stoi(pointerpair.second);
 
-#define UnaryJSONTypeCompare(cmp)                                              \
-    do {                                                                       \
-        if constexpr (std::is_same_v<GetType, std::string_view>) {             \
-            if (type == uint8_t(milvus::index::JSONType::STRING)) {            \
-                auto x = json.at_string(offset, size);                         \
-                return (cmp);                                                  \
-            } else {                                                           \
-                return false;                                                  \
-            }                                                                  \
-        } else if constexpr (std::is_same_v<GetType, double>) {                \
-            if (type == uint8_t(milvus::index::JSONType::INT64)) {             \
-                auto x =                                                       \
-                    std::stoll(std::string(json.at_string(offset, size)));     \
-                return (cmp);                                                  \
-            } else if (type == uint8_t(milvus::index::JSONType::DOUBLE)) {     \
-                auto x = std::stod(std::string(json.at_string(offset, size))); \
-                return (cmp);                                                  \
-            } else {                                                           \
-                return false;                                                  \
-            }                                                                  \
-        } else if constexpr (std::is_same_v<GetType, int64_t>) {               \
-            if (type == uint8_t(milvus::index::JSONType::INT64)) {             \
-                auto x =                                                       \
-                    std::stoll(std::string(json.at_string(offset, size)));     \
-                return (cmp);                                                  \
-            } else if (type == uint8_t(milvus::index::JSONType::DOUBLE)) {     \
-                auto x = std::stod(std::string(json.at_string(offset, size))); \
-                return (cmp);                                                  \
-            } else {                                                           \
-                return false;                                                  \
-            }                                                                  \
-        }                                                                      \
-    } while (false)
+        ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
+        auto op_type = expr_->op_type_;
 
-#define UnaryJSONTypeCompareWithValue(cmp)                         \
-    do {                                                           \
-        if constexpr (std::is_same_v<GetType, int64_t>) {          \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) { \
-                float x = *reinterpret_cast<float*>(&value);       \
-                return (cmp);                                      \
-            } else {                                               \
-                int64_t x = value;                                 \
-                return (cmp);                                      \
-            }                                                      \
-        } else if constexpr (std::is_same_v<GetType, double>) {    \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) { \
-                float x = *reinterpret_cast<float*>(&value);       \
-                return (cmp);                                      \
-            } else {                                               \
-                int64_t x = value;                                 \
-                return (cmp);                                      \
-            }                                                      \
-        } else if constexpr (std::is_same_v<GetType, bool>) {      \
-            bool x = *reinterpret_cast<bool*>(&value);             \
-            return (cmp);                                          \
-        }                                                          \
-    } while (false)
-
-#define CompareValueWithOpType(type, value, val, op_type)                    \
-    switch (op_type) {                                                       \
-        case proto::plan::GreaterThan:                                       \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x > static_cast<float>(val));  \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x > val);                      \
-            }                                                                \
-            break;                                                           \
-        case proto::plan::GreaterEqual:                                      \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x >= static_cast<float>(val)); \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x >= val);                     \
-            }                                                                \
-            break;                                                           \
-        case proto::plan::LessThan:                                          \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x < static_cast<float>(val));  \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x < val);                      \
-            }                                                                \
-            break;                                                           \
-        case proto::plan::LessEqual:                                         \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x <= static_cast<float>(val)); \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x <= val);                     \
-            }                                                                \
-            break;                                                           \
-        case proto::plan::Equal:                                             \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x == static_cast<float>(val)); \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x == val);                     \
-            }                                                                \
-            break;                                                           \
-        case proto::plan::NotEqual:                                          \
-            if (type == uint8_t(milvus::index::JSONType::FLOAT)) {           \
-                UnaryJSONTypeCompareWithValue(x != static_cast<float>(val)); \
-            } else {                                                         \
-                UnaryJSONTypeCompareWithValue(x != val);                     \
-            }                                                                \
-            break;                                                           \
-        default:                                                             \
-            return false;                                                    \
-    }
-
-#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)                     \
-    do {                                                                  \
-        if (type != uint8_t(milvus::index::JSONType::UNKNOWN)) {          \
-            return false;                                                 \
-        }                                                                 \
-        auto array = json.array_at(offset, size);                         \
-        if (array.error()) {                                              \
-            return false;                                                 \
-        }                                                                 \
-        auto value = array.at_pointer(arrayIndex);                        \
-        if (value.error()) {                                              \
-            return false;                                                 \
-        }                                                                 \
-        if constexpr (std::is_same_v<GetType, int64_t> ||                 \
-                      std::is_same_v<GetType, double>) {                  \
-            if (!value.is_number()) {                                     \
-                return false;                                             \
-            }                                                             \
-        } else if constexpr (std::is_same_v<GetType, std::string_view>) { \
-            if (!value.is_string()) {                                     \
-                return false;                                             \
-            }                                                             \
-        } else if constexpr (std::is_same_v<GetType, bool>) {             \
-            if (!value.is_bool()) {                                       \
-                return false;                                             \
-            }                                                             \
-        }                                                                 \
-        auto x = value.get<GetType>();                                    \
-        if (x.error()) {                                                  \
-            if constexpr (std::is_same_v<GetType, int64_t>) {             \
-                auto x = value.get<double>();                             \
-                return !x.error() && (cmp);                               \
-            }                                                             \
-        }                                                                 \
-        return (cmp);                                                     \
-    } while (false)
-
-#define UnaryRangeJSONIndexCompareNotEqual(cmp)               \
-    do {                                                      \
-        auto x = json.at<GetType>(offset, size);              \
-        if (x.error()) {                                      \
-            if constexpr (std::is_same_v<GetType, int64_t>) { \
-                auto x = json.at<double>(offset, size);       \
-                return x.error() || (cmp);                    \
-            }                                                 \
-            return true;                                      \
-        }                                                     \
-        return (cmp);                                         \
-    } while (false)
-#define UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(cmp)             \
-    do {                                                                  \
-        auto array = json.array_at(offset, size);                         \
-        if (array.error()) {                                              \
-            return false;                                                 \
-        }                                                                 \
-        auto value = array.at_pointer(arrayIndex);                        \
-        if (value.error()) {                                              \
-            return false;                                                 \
-        }                                                                 \
-        if constexpr (std::is_same_v<GetType, int64_t> ||                 \
-                      std::is_same_v<GetType, double>) {                  \
-            if (!value.is_number()) {                                     \
-                return false;                                             \
-            }                                                             \
-        } else if constexpr (std::is_same_v<GetType, std::string_view>) { \
-            if (!value.is_string()) {                                     \
-                return false;                                             \
-            }                                                             \
-        } else if constexpr (std::is_same_v<GetType, bool>) {             \
-            if (!value.is_bool()) {                                       \
-                return false;                                             \
-            }                                                             \
-        }                                                                 \
-        auto x = value.get<GetType>();                                    \
-        if (x.error()) {                                                  \
-            if constexpr (std::is_same_v<GetType, int64_t>) {             \
-                auto x = value.get<double>();                             \
-                return x.error() || (cmp);                                \
-            }                                                             \
-        }                                                                 \
-        return (cmp);                                                     \
-    } while (false)
-
-#define CHECKISJSONTYPEWITHOFFSET(type)                  \
-    (type == uint8_t(milvus::index::JSONType::STRING) || \
-     type == uint8_t(milvus::index::JSONType::DOUBLE) || \
-     type == uint8_t(milvus::index::JSONType::INT64))
-
-#define CHECKJSONTYPEISNUMBER(type)                           \
-    if ((type != uint8_t(milvus::index::JSONType::INT32)) &&  \
-        (type != uint8_t(milvus::index::JSONType::INT64)) &&  \
-        (type != uint8_t(milvus::index::JSONType::FLOAT)) &&  \
-        (type != uint8_t(milvus::index::JSONType::DOUBLE))) { \
-        return false;                                         \
-    }
-
-#define ISVALIDJSONTYPE(type, GetType)                                   \
-    if constexpr (std::is_same_v<GetType, int64_t>) {                    \
-        CHECKJSONTYPEISNUMBER(type)                                      \
-    } else if constexpr (std::is_same_v<GetType, std::string_view>) {    \
-        if ((type != uint8_t(milvus::index::JSONType::STRING)) &&        \
-            (type != uint8_t(milvus::index::JSONType::STRING_ESCAPE))) { \
-            return false;                                                \
-        }                                                                \
-    } else if constexpr (std::is_same_v<GetType, double>) {              \
-        CHECKJSONTYPEISNUMBER(type)                                      \
-    } else if constexpr (std::is_same_v<GetType, bool>) {                \
-        if (type != uint8_t(milvus::index::JSONType::BOOL)) {            \
-            return false;                                                \
-        }                                                                \
-    }
-
-    ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
-    auto op_type = expr_->op_type_;
-
-    if (cached_index_chunk_id_ != 0) {
-        cached_index_chunk_id_ = 0;
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        }
+        auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
+        auto* index = segment->GetJsonStats(field_id);
         Assert(index != nullptr);
-        Assert(segment != nullptr);
-        auto filter_func = [segment,
-                            field_id,
-                            op_type,
-                            val,
-                            arrayIndex,
-                            pointer](const bool* valid_array,
-                                     const uint8_t* type_array,
-                                     const uint32_t* row_id_array,
-                                     const uint16_t* offset_array,
-                                     const uint16_t* size_array,
-                                     const int32_t* value_array,
-                                     TargetBitmap& bitset,
-                                     const size_t n) {
-            std::vector<int64_t> invalid_row_ids;
-            std::vector<int64_t> invalid_offset;
-            std::vector<int64_t> invalid_type;
-            std::vector<int64_t> invalid_size;
-            for (size_t i = 0; i < n; i++) {
-                auto valid = valid_array[i];
-                auto type = type_array[i];
-                auto row_id = row_id_array[i];
-                auto offset = offset_array[i];
-                auto size = size_array[i];
-                auto value = value_array[i];
-                if (!valid) {
-                    invalid_row_ids.push_back(row_id);
-                    invalid_offset.push_back(offset);
-                    invalid_type.push_back(type);
-                    invalid_size.push_back(size);
-                    continue;
-                }
-                auto f = [&]() {
-                    if (type == uint8_t(milvus::index::JSONType::UNKNOWN) ||
-                        !arrayIndex.empty()) {
-                        return false;
-                    }
-                    ISVALIDJSONTYPE(type, GetType);
-                    switch (op_type) {
-                        case proto::plan::GreaterThan:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        case proto::plan::GreaterEqual:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        case proto::plan::LessThan:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        case proto::plan::LessEqual:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        case proto::plan::Equal:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        case proto::plan::NotEqual:
-                            CompareValueWithOpType(type, value, val, op_type);
-                        default:
-                            return false;
-                    }
-                };
-                bitset[row_id] = f();
-            }
-            auto f = [&](const milvus::Json& json,
-                         uint8_t type,
-                         uint16_t offset,
-                         uint16_t size,
-                         bool is_valid) {
-                if (!is_valid) {
-                    return false;
-                }
-                switch (op_type) {
-                    case proto::plan::GreaterThan:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    ExprValueType(x.value()) > val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x > val);
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        ExprValueType(x.value()) > val);
-                                }
-                            }
-                        }
-                    case proto::plan::GreaterEqual:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    ExprValueType(x.value()) >= val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x >= val);
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        ExprValueType(x.value()) >= val);
-                                }
-                            }
-                        }
-                    case proto::plan::LessThan:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    ExprValueType(x.value()) < val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x < val);
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        ExprValueType(x.value()) < val);
-                                }
-                            }
-                        }
-                    case proto::plan::LessEqual:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    ExprValueType(x.value()) <= val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x <= val);
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        ExprValueType(x.value()) <= val);
-                                }
-                            }
-                        }
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(active_count_, true);
+        TargetBitmapView res_view(*cached_index_chunk_res_);
+        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
 
-                    case proto::plan::Equal:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            if (type !=
-                                uint8_t(milvus::index::JSONType::UNKNOWN)) {
-                                return false;
-                            }
-                            auto array = json.array_at(offset, size);
-                            if (array.error()) {
-                                return false;
-                            }
-                            return CompareTwoJsonArray(array.value(), val);
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    ExprValueType(x.value()) == val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x == val);
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        ExprValueType(x.value()) == val);
-                                }
-                            }
-                        }
-                    case proto::plan::NotEqual:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            if (type !=
-                                uint8_t(milvus::index::JSONType::UNKNOWN)) {
-                                return false;
-                            }
-                            auto array = json.array_at(offset, size);
-                            if (array.error()) {
-                                return false;
-                            }
-                            return !CompareTwoJsonArray(array.value(), val);
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(
-                                    ExprValueType(x.value()) != val);
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(x != val);
-                                } else {
-                                    UnaryRangeJSONIndexCompareNotEqual(
-                                        ExprValueType(x.value()) != val);
-                                }
-                            }
-                        }
-                    case proto::plan::InnerMatch:
-                    case proto::plan::PostfixMatch:
-                    case proto::plan::PrefixMatch:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    milvus::query::Match(
-                                        ExprValueType(x.value()),
-                                        val,
-                                        op_type));
-                            } else {
-                                if (CHECKISJSONTYPEWITHOFFSET(type)) {
-                                    UnaryJSONTypeCompare(
-                                        milvus::query::Match(x, val, op_type));
-                                } else {
-                                    UnaryRangeJSONIndexCompare(
-                                        milvus::query::Match(
-                                            ExprValueType(x.value()),
-                                            val,
-                                            op_type));
-                                }
-                            }
-                        }
-                    case proto::plan::Match:
-                        if constexpr (std::is_same_v<GetType,
-                                                     proto::plan::Array>) {
-                            return false;
-                        } else {
-                            PatternMatchTranslator translator;
-                            auto regex_pattern = translator(val);
-                            RegexMatcher matcher(regex_pattern);
-                            if (!arrayIndex.empty()) {
-                                UnaryRangeJSONIndexCompareWithArrayIndex(
-                                    matcher(ExprValueType(x.value())));
-                            } else {
-                                UnaryRangeJSONIndexCompare(
-                                    matcher(ExprValueType(x.value())));
-                            }
-                        }
-                    default:
-                        return false;
-                }
-            };
-            segment->BulkGetJsonData(
-                field_id,
-                [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto row_id = invalid_row_ids[i];
-                    auto type = invalid_type[i];
-                    auto offset = invalid_offset[i];
-                    auto size = invalid_size[i];
-                    bitset[row_id] = f(json, type, offset, size, is_valid);
-                },
-                invalid_row_ids.data(),
-                invalid_row_ids.size());
+        // process shredding data
+        auto try_execute = [&](milvus::index::JSONType json_type,
+                               TargetBitmapView& res_view,
+                               TargetBitmapView& valid_res_view,
+                               auto GetType,
+                               auto ValType) {
+            auto target_field = index->GetShreddingField(pointer, json_type);
+            if (!target_field.empty()) {
+                using ColType = decltype(GetType);
+                using ValType = decltype(ValType);
+                ShreddingExecutor<ColType, ValType> executor(
+                    op_type, pointer, val);
+                index->ExecutorForShreddingData<ColType>(
+                    target_field, executor, nullptr, res_view, valid_res_view);
+                LOG_DEBUG(
+                    "using shredding data's field: {} with value {}, count {}",
+                    target_field,
+                    val,
+                    res_view.count());
+            }
         };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-            std::move(index->FilterByPath(pointer,
-                                          active_count_,
-                                          is_growing,
-                                          is_strong_consistency,
-                                          filter_func)));
+
+        {
+            milvus::ScopedTimer timer(
+                "unary_json_stats_shredding_data", [](double ms) {
+                    milvus::monitor::internal_json_stats_latency_shredding
+                        .Observe(ms);
+                });
+
+            if constexpr (std::is_same_v<GetType, bool>) {
+                try_execute(milvus::index::JSONType::BOOL,
+                            res_view,
+                            valid_res_view,
+                            bool{},
+                            bool{});
+            } else if constexpr (std::is_same_v<GetType, int64_t>) {
+                try_execute(milvus::index::JSONType::INT64,
+                            res_view,
+                            valid_res_view,
+                            int64_t{},
+                            int64_t{});
+
+                // and double compare
+                TargetBitmap res_double(active_count_, false);
+                TargetBitmapView res_double_view(res_double);
+                TargetBitmap res_double_valid(active_count_, true);
+                TargetBitmapView valid_res_double_view(res_double_valid);
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_double_view,
+                            valid_res_double_view,
+                            double{},
+                            int64_t{});
+                res_view.inplace_or_with_count(res_double_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_double_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_view,
+                            valid_res_view,
+                            double{},
+                            double{});
+
+                // add int64 compare
+                TargetBitmap res_int64(active_count_, false);
+                TargetBitmapView res_int64_view(res_int64);
+                TargetBitmap res_int64_valid(active_count_, true);
+                TargetBitmapView valid_res_int64_view(res_int64_valid);
+                try_execute(milvus::index::JSONType::INT64,
+                            res_int64_view,
+                            valid_res_int64_view,
+                            int64_t{},
+                            double{});
+                res_view.inplace_or_with_count(res_int64_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_int64_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, std::string> ||
+                                 std::is_same_v<GetType, std::string_view>) {
+                try_execute(milvus::index::JSONType::STRING,
+                            res_view,
+                            valid_res_view,
+                            GetType{},
+                            GetType{});
+            } else if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                // ARRAY shredding data: stored as BSON binary in binary column
+                auto target_field = index->GetShreddingField(
+                    pointer, milvus::index::JSONType::ARRAY);
+                if (!target_field.empty()) {
+                    ShreddingArrayBsonExecutor executor(op_type, pointer, val);
+                    index->ExecutorForShreddingData<std::string_view>(
+                        target_field,
+                        executor,
+                        nullptr,
+                        res_view,
+                        valid_res_view);
+                    LOG_DEBUG("using shredding array field: {}, count {}",
+                              target_field,
+                              res_view.count());
+                }
+            }
+        }
+
+        // process shared data
+        auto shared_executor = [op_type, val, array_index, &res_view](
+                                   milvus::BsonView bson,
+                                   uint32_t row_id,
+                                   uint32_t value_offset) {
+            if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                Assert(op_type == proto::plan::OpType::Equal ||
+                       op_type == proto::plan::OpType::NotEqual);
+                if (array_index != INVALID_ARRAY_INDEX) {
+                    auto array_value = bson.ParseAsArrayAtOffset(value_offset);
+                    if (!array_value.has_value()) {
+                        res_view[row_id] = false;
+                        return;
+                    }
+                    auto sub_array = milvus::BsonView::GetNthElementInArray<
+                        bsoncxx::array::view>(array_value.value().data(),
+                                              array_index);
+                    if (!sub_array.has_value()) {
+                        res_view[row_id] = false;
+                        return;
+                    }
+                    res_view[row_id] =
+                        op_type == proto::plan::OpType::Equal
+                            ? CompareTwoJsonArray(sub_array.value(), val)
+                            : !CompareTwoJsonArray(sub_array.value(), val);
+                } else {
+                    auto array_value = bson.ParseAsArrayAtOffset(value_offset);
+                    if (!array_value.has_value()) {
+                        res_view[row_id] = false;
+                        return;
+                    }
+                    res_view[row_id] =
+                        op_type == proto::plan::OpType::Equal
+                            ? CompareTwoJsonArray(array_value.value(), val)
+                            : !CompareTwoJsonArray(array_value.value(), val);
+                }
+            } else {
+                std::optional<GetType> get_value;
+                if (array_index != INVALID_ARRAY_INDEX) {
+                    auto array_value = bson.ParseAsArrayAtOffset(value_offset);
+                    if (!array_value.has_value()) {
+                        res_view[row_id] = false;
+                        return;
+                    }
+                    get_value = milvus::BsonView::GetNthElementInArray<GetType>(
+                        array_value.value().data(), array_index);
+                    // If GetType is int and value is not found, try double
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        if (!get_value.has_value()) {
+                            auto get_value =
+                                milvus::BsonView::GetNthElementInArray<double>(
+                                    array_value.value().data(), array_index);
+                            if (get_value.has_value()) {
+                                res_view[row_id] = UnaryCompare(
+                                    get_value.value(), val, op_type);
+                            }
+                            return;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, double>) {
+                        if (!get_value.has_value()) {
+                            auto get_value =
+                                milvus::BsonView::GetNthElementInArray<int64_t>(
+                                    array_value.value().data(), array_index);
+                            if (get_value.has_value()) {
+                                res_view[row_id] = UnaryCompare(
+                                    get_value.value(), val, op_type);
+                            }
+                            return;
+                        }
+                    }
+                } else {
+                    get_value =
+                        bson.ParseAsValueAtOffset<GetType>(value_offset);
+                    // If GetType is int and value is not found, try double
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        if (!get_value.has_value()) {
+                            auto get_value =
+                                bson.ParseAsValueAtOffset<double>(value_offset);
+                            if (get_value.has_value()) {
+                                res_view[row_id] = UnaryCompare(
+                                    get_value.value(), val, op_type);
+                            }
+                            return;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, double>) {
+                        if (!get_value.has_value()) {
+                            auto get_value = bson.ParseAsValueAtOffset<int64_t>(
+                                value_offset);
+                            if (get_value.has_value()) {
+                                res_view[row_id] = UnaryCompare(
+                                    get_value.value(), val, op_type);
+                            }
+                            return;
+                        }
+                    }
+                }
+                if (!get_value.has_value()) {
+                    res_view[row_id] = false;
+                    return;
+                }
+                res_view[row_id] =
+                    UnaryCompare(get_value.value(), val, op_type);
+            }
+        };
+
+        std::set<milvus::index::JSONType> target_types;
+        if constexpr (std::is_same_v<GetType, std::string>) {
+            target_types.insert(milvus::index::JSONType::STRING);
+        } else if constexpr (std::is_same_v<GetType, int64_t> ||
+                             std::is_same_v<GetType, double>) {
+            target_types.insert(milvus::index::JSONType::INT64);
+            target_types.insert(milvus::index::JSONType::DOUBLE);
+        } else if constexpr (std::is_same_v<GetType, bool>) {
+            target_types.insert(milvus::index::JSONType::BOOL);
+        }
+
+        {
+            milvus::ScopedTimer timer(
+                "unary_json_stats_shared_data", [](double ms) {
+                    milvus::monitor::internal_json_stats_latency_shared.Observe(
+                        ms);
+                });
+
+            if (!index->CanSkipShared(pointer, target_types)) {
+                index->ExecuteForSharedData(pointer, shared_executor);
+            }
+        }
+
+        cached_index_chunk_id_ = 0;
     }
+
     TargetBitmap result;
     result.append(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -1496,7 +1248,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (CanExecNgramMatch(expr_->op_type_)) {
+    } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1955,10 +1707,7 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    auto has_index =
-        segment_->HasIndex(field_id_,
-                           milvus::Json::pointer(expr_->column_.nested_path_),
-                           val_type);
+    bool has_index = pinned_index_.size() > 0;
     switch (val_type) {
         case DataType::STRING:
         case DataType::VARCHAR:
@@ -2076,24 +1825,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 };
 
 bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
-    return (op_type == proto::plan::OpType::InnerMatch ||
-            op_type == proto::plan::OpType::Match ||
-            op_type == proto::plan::OpType::PrefixMatch ||
-            op_type == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ && CanUseNgramIndex(field_id_);
-}
-
-bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson(DataType val_type) {
-    return (val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
-           (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
-            expr_->op_type_ == proto::plan::OpType::Match ||
-            expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
-            expr_->op_type_ == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ &&
-           CanUseNgramIndexForJson(
-               field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+PhyUnaryRangeFilterExpr::CanUseNgramIndex() {
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 std::optional<VectorPtr>
@@ -2110,14 +1843,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        PinWrapper<index::NgramInvertedIndex*> pinned_index;
-        if (expr_->column_.data_type_ == DataType::JSON) {
-            pinned_index = segment_->GetNgramIndexForJson(
-                field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
-        } else {
-            pinned_index = segment_->GetNgramIndex(field_id_);
-        }
-        index::NgramInvertedIndex* index = pinned_index.get();
+        auto index = pinned_ngram_index_.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
