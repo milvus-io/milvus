@@ -1393,6 +1393,149 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	return merr.Success(), nil
 }
 
+func (c *Core) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	t := &addCollectionFunctionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(t.name())
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("task", t.name()),
+	)
+
+	log.Info("received request")
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request",
+			zap.Error(err))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("Task Failed ",
+			zap.Error(err),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(t.name()).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(t.name()).Observe(float64(t.GetDurationInQueue().Milliseconds()))
+
+	log.Info("Finish task",
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
+func (c *Core) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	t := &alterCollectionFunctionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(t.name())
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("function", in.GetFunctionName()),
+		zap.String("task", t.name()),
+	)
+
+	log.Info("received request")
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request",
+			zap.Error(err))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("Task Failed ",
+			zap.Error(err),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(t.name()).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(t.name()).Observe(float64(t.GetDurationInQueue().Milliseconds()))
+
+	log.Info("Finish task",
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
+func (c *Core) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	t := &dropCollectionFunctionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(t.name())
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("task", t.name()),
+		zap.String("function", in.GetFunctionName()),
+	)
+
+	log.Info("received request")
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request",
+			zap.Error(err))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("Task Failed ",
+			zap.Error(err),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(t.name(), metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(t.name()).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(t.name()).Observe(float64(t.GetDurationInQueue().Milliseconds()))
+
+	log.Info("Finish task",
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
 func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil

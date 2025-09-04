@@ -75,16 +75,16 @@ func (_c *RootCoordCatalog_AlterAlias_Call) RunAndReturn(run func(context.Contex
 }
 
 // AlterCollection provides a mock function with given fields: ctx, oldColl, newColl, alterType, ts, fieldModify
-func (_m *RootCoordCatalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts uint64, fieldModify bool) error {
-	ret := _m.Called(ctx, oldColl, newColl, alterType, ts, fieldModify)
+func (_m *RootCoordCatalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts uint64, fieldModify bool, functionModify bool) error {
+	ret := _m.Called(ctx, oldColl, newColl, alterType, ts, fieldModify, functionModify)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AlterCollection")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, metastore.AlterType, uint64, bool) error); ok {
-		r0 = rf(ctx, oldColl, newColl, alterType, ts, fieldModify)
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, metastore.AlterType, uint64, bool, bool) error); ok {
+		r0 = rf(ctx, oldColl, newColl, alterType, ts, fieldModify, functionModify)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -104,8 +104,8 @@ type RootCoordCatalog_AlterCollection_Call struct {
 //   - alterType metastore.AlterType
 //   - ts uint64
 //   - fieldModify bool
-func (_e *RootCoordCatalog_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, alterType interface{}, ts interface{}, fieldModify interface{}) *RootCoordCatalog_AlterCollection_Call {
-	return &RootCoordCatalog_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, alterType, ts, fieldModify)}
+func (_e *RootCoordCatalog_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, alterType interface{}, ts interface{}, fieldModify interface{}, functionModify interface{}) *RootCoordCatalog_AlterCollection_Call {
+	return &RootCoordCatalog_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, alterType, ts, fieldModify, functionModify)}
 }
 
 func (_c *RootCoordCatalog_AlterCollection_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts uint64, fieldModify bool)) *RootCoordCatalog_AlterCollection_Call {

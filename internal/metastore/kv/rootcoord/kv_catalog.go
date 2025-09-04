@@ -673,7 +673,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	return kc.Snapshot.MultiSaveAndRemove(ctx, nil, collectionKeys, ts)
 }
 
-func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
+func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool, functionModify bool) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
 		return errors.New("altering tenant id or collection id is forbidden")
 	}
@@ -726,6 +726,17 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			saves[k] = string(v)
 		}
 	}
+	if functionModify {
+		for _, function := range newColl.Functions {
+			k := BuildFunctionKey(newColl.CollectionID, function.ID)
+			functionInfo := model.MarshalFunctionModel(function)
+			v, err := proto.Marshal(functionInfo)
+			if err != nil {
+				return err
+			}
+			saves[k] = string(v)
+		}
+	}
 
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	return etcd.SaveByBatchWithLimit(saves, maxTxnNum, func(partialKvs map[string]string) error {
@@ -733,10 +744,10 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	})
 }
 
-func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp, fieldModify bool) error {
+func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp, fieldModify bool, functionModify bool) error {
 	switch alterType {
 	case metastore.MODIFY:
-		return kc.alterModifyCollection(ctx, oldColl, newColl, ts, fieldModify)
+		return kc.alterModifyCollection(ctx, oldColl, newColl, ts, fieldModify, functionModify)
 	default:
 		return fmt.Errorf("altering collection doesn't support %s", alterType.String())
 	}
