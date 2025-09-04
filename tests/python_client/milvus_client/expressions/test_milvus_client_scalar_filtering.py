@@ -1143,9 +1143,9 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                 "flag": False
             }
         else:
-            # Example: [{h:{i:42}}, {j:5678}, "abcxyz"]
+            # Example: [{h:{h:["milvus", "rocks", "stick"]}}, {"fanta", "stick"}, "abcxyz"]
             return [
-                {"h": {"h": ["milvus", "rocks", "stick"]},},
+                {"h": {"h": ["milvus", "rocks", "stick"]}},
                 ["fanta", "stick"],
                 "abcxyz"
             ]
@@ -2091,7 +2091,6 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                             filter=test_expression, output_fields=["*"],
                             check_task=CheckTasks.check_nothing
                         )[0]
-                        print(f"res_len={len(res)}") 
 
                         if isinstance(res, Error):
                             if self.is_parsing_error(res):

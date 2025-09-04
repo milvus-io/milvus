@@ -22,6 +22,8 @@ This directory contains comprehensive test modules for Milvus client expression 
 - 10% of data is NULL to test IS NULL/IS NOT NULL operators
 - Specific VARCHAR patterns: `str_xxx`, `xxx_str`, `xxx_str_xxx`
 - Comprehensive LIKE pattern coverage with escape handling
+- Create examples of typed, dynamic, and shared keys in json
+- Generate expressions to valida query result
 
 ### 2. `test_milvus_client_scalar_expression_filtering.py`
 **Legacy comprehensive scalar expression filtering test**
