@@ -482,10 +482,6 @@ class RowContainer {
 
     int alignment_ = 1;
 
-    // Copied over the null bits of each row on initialization. Keys are
-    // not null, aggregates are null.
-    std::vector<uint8_t> initialNulls_;
-
     std::vector<Accumulator> accumulators_;
 
     uint64_t numRows_ = 0;

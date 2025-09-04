@@ -29,7 +29,7 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
     int32_t nullOffset = 0;
     bool isVariableWidth = false;
     int idx = 0;
-    for (auto& type : keyTypes_) {
+    for (auto type : keyTypes_) {
         bool varLength = !IsFixedSizeType(type);
         isVariableWidth |= varLength;
         if (varLength) {
@@ -52,14 +52,9 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
     const int32_t firstAggregateOffset = offset;
     if (!accumulators.empty()) {
         // This moves nullOffset to the start of the next byte.
-        // This is to guarantee the null and initialized bits for an aggregate
-        // always appear in the same byte.
         nullOffset = (nullOffset + 7) & -8;
     }
     for (const auto& accumulator : accumulators) {
-        // Initialized bit.  Set when the accumulator is initialized.
-        nullOffsets_.push_back(nullOffset);
-        ++nullOffset;
         // Null bit.
         nullOffsets_.push_back(nullOffset);
         ++nullOffset;
@@ -88,15 +83,6 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         offset += sizeof(uint32_t);
     }
     fixedRowSize_ = milvus::bits::roundUp(offset, alignment_);
-
-    // A distinct hash table has no aggregates and if the hash table has
-    // no nulls, it may be that there are no null flags.
-    if (!nullOffsets_.empty()) {
-        // All flags like free and null flags for keys and non-keys
-        // start as 0. This is also used to mark aggregates as uninitialized on row
-        // creation.
-        initialNulls_.resize(flagBytes_, 0x0);
-    }
     size_t nullOffsetsPos = 0;
     uint16_t column_sum = keyTypes_.size() + accumulators.size();
     for (auto i = 0; i < offsets_.size(); i++) {
