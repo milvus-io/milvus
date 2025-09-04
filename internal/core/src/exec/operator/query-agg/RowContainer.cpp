@@ -47,10 +47,6 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         idx++;
     }
     const int32_t firstAggregateOffset = offset;
-    if (!accumulators.empty()) {
-        // This moves nullOffset to the start of the next byte.
-        nullOffset = (nullOffset + 7) & -8;
-    }
     for (const auto& accumulator : accumulators) {
         // Null bit.
         nullOffsets_.push_back(nullOffset);
@@ -76,6 +72,7 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         offset += sizeof(uint32_t);
     }
     fixedRowSize_ = milvus::bits::roundUp(offset, alignment_);
+    // add null offsets to offsets
     size_t nullOffsetsPos = 0;
     for (auto i = 0; i < offsets_.size(); i++) {
         rowColumns_.emplace_back(offsets_[i], nullOffsets_[nullOffsetsPos]);
