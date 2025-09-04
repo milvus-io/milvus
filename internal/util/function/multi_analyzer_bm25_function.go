@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -154,6 +155,9 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 	}()
 
 	for i := 0; i < len(text); i++ {
+		if !typeutil.IsUTF8(text[i]) {
+			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
+		}
 		embeddingMap := map[uint32]float32{}
 
 		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
