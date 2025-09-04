@@ -57,9 +57,6 @@ class Accumulator {
 /// a column inside a RowContainer.
 class RowColumn {
  public:
-    /// Used as null offset for a non-null column.
-    static constexpr int32_t kNotNullOffset = -1;
-
     RowColumn(int32_t offset, int32_t nullOffset)
         : packedOffsets_(PackOffsets(offset, nullOffset)) {
     }
@@ -92,12 +89,6 @@ class RowColumn {
  private:
     static uint64_t
     PackOffsets(int32_t offset, int32_t nullOffset) {
-        if (nullOffset == kNotNullOffset) {
-            // If the column is not nullable, The low word is 0, meaning
-            // that a null check will AND 0 to the 0th byte of the row,
-            // which is always false and always safe to do.
-            return static_cast<uint64_t>(offset) << 32;
-        }
         return (1UL << (nullOffset & 7)) | ((nullOffset & ~7UL) << 5) |
                static_cast<uint64_t>(offset) << 32;
     }
@@ -109,10 +100,6 @@ class RowContainer {
  public:
     RowContainer(const std::vector<DataType>& keyTypes,
                  const std::vector<Accumulator>& accumulators);
-
-    // The number of flags (bits) per accumulator, one for null and one for
-    // initialized.
-    static constexpr size_t kNumAccumulatorFlags = 2;
 
     /// Allocates a new row and initializes possible aggregates to null.
     char*
@@ -476,8 +463,7 @@ class RowContainer {
     uint32_t fixedRowSize_;
     uint32_t flagBytes_;
 
-    // Bit position of free bit.
-    uint32_t freeFlagOffset_ = 0;
+    // for rows containing variable width fields, we store row size at the end of the row
     uint32_t rowSizeOffset_ = 0;
 
     int alignment_ = 1;

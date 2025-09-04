@@ -46,9 +46,6 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         ++nullOffset;
         idx++;
     }
-    // Make offset at least sizeof pointer so that there is space for a
-    // free list next pointer below the bit at 'freeFlagOffset_'.
-    offset = std::max<int32_t>(offset, sizeof(void*));
     const int32_t firstAggregateOffset = offset;
     if (!accumulators.empty()) {
         // This moves nullOffset to the start of the next byte.
@@ -62,10 +59,6 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         alignment_ = combineAlignments(accumulator.alignment(), alignment_);
     }
 
-    // Free flag.
-    nullOffsets_.push_back(nullOffset);
-    freeFlagOffset_ = nullOffset + firstAggregateOffset * 8;
-    ++nullOffset;
     // Add 1 to the last null offset to get the number of bits.
     flagBytes_ = milvus::bits::nBytes(nullOffsets_.back() + 1);
     for (auto i = 0; i < nullOffsets_.size(); i++) {
@@ -84,19 +77,9 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
     }
     fixedRowSize_ = milvus::bits::roundUp(offset, alignment_);
     size_t nullOffsetsPos = 0;
-    uint16_t column_sum = keyTypes_.size() + accumulators.size();
     for (auto i = 0; i < offsets_.size(); i++) {
-        rowColumns_.emplace_back(offsets_[i],
-                                 (i >= keyTypes_.size())
-                                     ? nullOffsets_[nullOffsetsPos]
-                                     : RowColumn::kNotNullOffset);
-        // offsets_ contains the offsets for keys, then accumulators
-        // This captures the case where i is the index of an accumulator.
-        if (!accumulators.empty() && i >= keyTypes_.size() && i < column_sum) {
-            nullOffsetsPos += kNumAccumulatorFlags;
-        } else {
-            ++nullOffsetsPos;
-        }
+        rowColumns_.emplace_back(offsets_[i], nullOffsets_[nullOffsetsPos]);
+        ++nullOffsetsPos;
     }
 }
 
