@@ -1130,7 +1130,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 
 	for {
 		registered, revision, err := registerActiveFn()
-		if err != nil {
+		if err != nil && err != merr.ErrOldSessionExists {
 			// Some error such as ErrLeaseNotFound, is not retryable.
 			// Just return error to stop the standby process and wait for retry.
 			return err
