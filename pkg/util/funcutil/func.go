@@ -42,6 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+const (
+	ControlChannelSuffix = "vcchan" // is the suffix of the virtual control channel
+)
+
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
 func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 	timer := time.NewTimer(100 * time.Millisecond)
@@ -291,6 +295,11 @@ func IsPhysicalChannel(channel string) bool {
 	return !strings.Contains(channel[i+1:], "v")
 }
 
+// IsControlChannel checks if the channel is a control channel
+func IsControlChannel(channel string) bool {
+	return strings.HasSuffix(channel, ControlChannelSuffix)
+}
+
 // ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
 	if IsPhysicalChannel(vchannel) {
@@ -301,6 +310,11 @@ func ToPhysicalChannel(vchannel string) string {
 		return vchannel
 	}
 	return vchannel[:index]
+}
+
+// GetControlChannel returns the control channel name of the pchannel.
+func GetControlChannel(pchannel string) string {
+	return fmt.Sprintf("%s_%s", pchannel, ControlChannelSuffix)
 }
 
 func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
