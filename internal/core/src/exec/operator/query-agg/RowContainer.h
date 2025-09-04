@@ -430,8 +430,8 @@ class RowContainer {
     void
     clear() {
         for (auto row : rows_) {
-            for (auto i = 0; i < variable_offsets.size(); i++) {
-                auto& off = variable_offsets[i];
+            for (auto i = 0; i < variable_offsets_.size(); i++) {
+                auto& off = variable_offsets_[i];
                 auto& row_col = columnAt(variable_idxes[i]);
                 bool isStrNull =
                     isNullAt(row, row_col.nullByte(), row_col.nullMask());
@@ -452,8 +452,8 @@ class RowContainer {
 
  private:
     const std::vector<DataType> keyTypes_;
-    std::vector<int> variable_offsets{};
-    std::vector<int> variable_idxes{};
+    std::vector<int> variable_offsets_{};
+    std::vector<int> variable_idxes_{};
     std::vector<uint32_t> offsets_;
     std::vector<uint32_t> nullOffsets_;
 

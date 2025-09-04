@@ -33,8 +33,8 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         bool varLength = !IsFixedSizeType(type);
         isVariableWidth |= varLength;
         if (varLength) {
-            variable_offsets.emplace_back(offset);
-            variable_idxes.emplace_back(idx);
+            variable_offsets_.emplace_back(offset);
+            variable_idxes_.emplace_back(idx);
         }
         offsets_.push_back(offset);
         if (type == DataType::VARCHAR || type == DataType::STRING) {
