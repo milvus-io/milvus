@@ -1801,7 +1801,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         fields = []
         for field in all_fields:
             # if desired_field_names is specified, only generate the fields in desired_field_names
-            if field.name in desired_field_names:
+            if field.get('name', None) in desired_field_names:
                 fields.append(field)
             # elif desired_field_names is not specified, generate all fields
             elif not desired_field_names:
