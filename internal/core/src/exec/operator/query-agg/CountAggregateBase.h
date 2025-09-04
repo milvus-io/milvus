@@ -38,6 +38,7 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
 
     void
     addRawInput(char** groups,
+                int32_t numGroups,
                 const std::vector<VectorPtr>& input) override {
         ColumnVectorPtr input_column = nullptr;
         AssertInfo(input.empty() || input.size() == 1,
@@ -47,24 +48,16 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
         if (input.size() == 1) {
             input_column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
         }
-        auto start = -1;
-        do {
-            auto next_active_idx = activeRows.find_next(start);
-            if (!next_active_idx.has_value()) {
-                break;
-            }
-            auto active_idx = next_active_idx.value();
-            if ((input_column && input_column->ValidAt(active_idx)) ||
+        for (auto i = 0; i < numGroups; i++) {
+            if ((input_column && input_column->ValidAt(i)) ||
                 !input_column) {
-                addToGroup(groups[active_idx], 1);
+                addToGroup(groups[i], 1);
             }
-            start = active_idx;
-        } while (true);
+        }
     }
 
     void
     addSingleGroupRawInput(char* group,
-                           const TargetBitmapView& activeRows,
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    fmt::format("input column count for count aggregation "
@@ -94,6 +87,7 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
     void
     initializeNewGroupsInternal(
         char** groups, folly::Range<const vector_size_t*> indices) override {
+        // no need to set nulls for count aggregate as count result is always a number
         for (auto i : indices) {
             // initialized result of count is always zero
             *value<int64_t>(groups[i]) = static_cast<int64_t>(0);

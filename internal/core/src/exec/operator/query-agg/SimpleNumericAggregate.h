@@ -54,27 +54,20 @@ class SimpleNumericAggregate : public exec::Aggregate {
               typename UpdateSingleValue>
     void
     updateGroups(char** groups,
+                int32_t numGroups,
                  const VectorPtr& vector,
                  UpdateSingleValue updateSingleValue) {
-        auto start = -1;
         auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
         AssertInfo(
             column_data != nullptr,
             "input column data for upgrading groups should not be nullptr");
-        while (true) {
-            auto next_selected = rows.find_next(start);
-            if (!next_selected.has_value()) {
-                return;
-            }
-            auto selected_idx = next_selected.value();
-            if (column_data->ValidAt(selected_idx)) {
+        for (auto i = 0; i < numGroups; i++) {
+            if (column_data->ValidAt(i)) {
                 updateNonNullValue<tableHasNulls, TData>(
-                    groups[selected_idx],
-                    TData(column_data->ValueAt<TValue>(selected_idx)),
+                    groups[i],
+                    TData(column_data->ValueAt<TValue>(i)),
                     updateSingleValue);
-            } else {
             }
-            start = selected_idx;
         }
     }
 
@@ -83,27 +76,19 @@ class SimpleNumericAggregate : public exec::Aggregate {
               typename UpdateSingle>
     void
     updateOneGroup(char* group,
-                   const TargetBitmapView& rows,
                    const VectorPtr& vector,
                    UpdateSingle updateSingleValue) {
-        auto start = -1;
         auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
         AssertInfo(
             column_data != nullptr,
             "input column data for upgrading groups should not be nullptr");
-        while (true) {
-            auto next_selected = rows.find_next(start);
-            if (!next_selected.has_value()) {
-                return;
-            }
-            auto selected_idx = next_selected.value();
-            if (column_data->ValidAt(selected_idx)) {
+        for (auto i = 0; i < column_data->size(); i++) {
+            if (column_data->ValidAt(i)) {
                 updateNonNullValue<true, TData>(
                     group,
-                    TData(column_data->ValueAt<TValue>(selected_idx)),
+                    TData(column_data->ValueAt<TValue>(i)),
                     updateSingleValue);
             }
-            start = selected_idx;
         }
     }
 

@@ -46,14 +46,11 @@ GroupingSet::addInput(const RowVectorPtr& input) {
 
 void
 GroupingSet::initializeGlobalAggregation() {
-    if (globalAggregationInitialized_) {
-        return;
-    }
     lookup_ = std::make_unique<HashLookup>(hashers_, group_limit_);
     lookup_->reset(1);
 
     // Row layout is:
-    //  - alternating null flag, intialized flag - one bit per flag, one pair per
+    //  - alternating null flag - one bit per flag, one pair per
     //                                             aggregation,
     //  - uint32_t row size,
     //  - fixed-width accumulators - one per aggregate
@@ -64,8 +61,7 @@ GroupingSet::initializeGlobalAggregation() {
 
     // Allocate space for the null and initialized flags.
     size_t numAggregates = aggregates_.size();
-    int32_t rowSizeOffset = milvus::bits::nBytes(
-        numAggregates * RowContainer::kNumAccumulatorFlags);
+    int32_t rowSizeOffset = milvus::bits::nBytes(numAggregates);
     int32_t offset = rowSizeOffset + sizeof(int32_t);
     int32_t accumulatorFlagsOffset = 0;
     int32_t alignment = 1;
@@ -81,7 +77,7 @@ GroupingSet::initializeGlobalAggregation() {
             RowContainer::nullMask(accumulatorFlagsOffset),
             rowSizeOffset);
         offset += accumulator.fixedWidthSize();
-        accumulatorFlagsOffset += RowContainer::kNumAccumulatorFlags;
+        accumulatorFlagsOffset += 1;
         alignment =
             RowContainer::combineAlignments(accumulator.alignment(), alignment);
     }
@@ -94,7 +90,6 @@ GroupingSet::initializeGlobalAggregation() {
         aggregate.function_->initializeNewGroups(lookup_->hits_.data(),
                                                  singleGroup);
     }
-    globalAggregationInitialized_ = true;
 }
 
 void
@@ -104,7 +99,7 @@ GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     for (auto i = 0; i < aggregates_.size(); i++) {
         auto& function = aggregates_[i].function_;
         populateTempVectors(i, input);
-        function->addSingleGroupRawInput(group, active_views, tempVectors_);
+        function->addSingleGroupRawInput(group, tempVectors_);
     }
     tempVectors_.clear();
 }

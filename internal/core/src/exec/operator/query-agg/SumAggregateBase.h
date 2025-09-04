@@ -50,8 +50,9 @@ class SumAggregateBase
 
     void
     addRawInput(char** groups,
+                int32_t numGroups,
                 const std::vector<VectorPtr>& input) override {
-        updateInternal<TAccumulator>(groups, input);
+        updateInternal<TAccumulator>(groups, numGroups, input);
     }
 
     void
@@ -74,14 +75,15 @@ class SumAggregateBase
     template <typename TData, typename TValue = TInput>
     void
     updateInternal(char** groups,
+                   int32_t numGroups,
                    const std::vector<VectorPtr>& input) {
         const auto& input_column = input[0];
         if (Aggregate::numNulls_) {
             BaseAggregate::template updateGroups<true, TData, TValue>(
-                groups, input_column, &updateSingleValue<TData>);
+                groups, numGroups, input_column, &updateSingleValue<TData>);
         } else {
             BaseAggregate::template updateGroups<false, TData, TValue>(
-                groups, input_column, &updateSingleValue<TData>);
+                groups, numGroups, input_column, &updateSingleValue<TData>);
         }
     }
 
