@@ -279,4 +279,5 @@ message PlanNode {
   repeated string dynamic_fields = 5;
   repeated ScoreFunction scorers = 6;
   PlanOption plan_options = 7;
+  optional string namespace = 8;
 }

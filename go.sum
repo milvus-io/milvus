@@ -792,6 +792,8 @@ github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250903074146-fe93017b6822
 github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250903074146-fe93017b6822/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250903080546-f1a74984d9e4 h1:9hoFUhw6wVRGBZFPDNjEaUihvZy5DEOV+SxRIWLEbRM=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250903080546-f1a74984d9e4/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250904062346-44a14367628c h1:qbuRL2onMjdhaUAzupFfaoy/Joq9wfG/friU97gSltI=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250904062346-44a14367628c/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 h1:AMFGa4R4MiIpspGNG7Z948v4n35fFGB3RR3G/ry4FWs=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8/go.mod h1:mC1jAcsrzbxHt8iiaC+zU4b1ylILSosueou12R++wfY=
 github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 h1:+n/aFZefKZp7spd8DFdX7uMikMLXX4oubIzJF4kv/wI=

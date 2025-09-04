@@ -2333,18 +2333,11 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	err := common.CheckNamespace(schema, insertMsg.InsertRequest.Namespace)
 	if err != nil {
 		return err
 	}
-	namespaceIsSet := insertMsg.InsertRequest.Namespace != nil
-
-	if namespaceEnabeld != namespaceIsSet {
-		if namespaceIsSet {
-			return fmt.Errorf("namespace data is set but namespace disabled")
-		}
-		return fmt.Errorf("namespace data is not set but namespace enabled")
-	}
+	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
 	if !namespaceEnabeld {
 		return nil
 	}
