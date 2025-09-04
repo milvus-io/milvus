@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"plugin"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -281,7 +282,7 @@ func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 
 func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEnabledKey {
+		if property.Key == EncryptionEnabledKey && strings.ToLower(property.Value) == "true" {
 			return true
 		}
 	}
