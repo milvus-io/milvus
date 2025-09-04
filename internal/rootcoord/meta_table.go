@@ -895,8 +895,8 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	log := log.Ctx(ctx).With(
 		zap.String("oldDBName", dbName),
-		zap.String("oldName", oldName),
 		zap.String("newDBName", newDBName),
+		zap.String("oldName", oldName),
 		zap.String("newName", newName),
 	)
 
@@ -906,12 +906,12 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		dbName = util.DefaultDBName
 	}
 
+	// No target DB provided, use collection's original DB
 	if newDBName == "" {
-		log.Warn("target db name is empty")
 		newDBName = dbName
 	}
 
-	// check target db
+	// get target db
 	targetDB, ok := mt.dbName2Meta[newDBName]
 	if !ok {
 		return fmt.Errorf("target database:%s not found", newDBName)
@@ -930,28 +930,29 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("cannot rename collection to an existing alias: %s", newName)
 	}
 
-	// check new collection already exists
+	// check if new name already belongs to another existing collection
 	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
 	if coll != nil {
-		log.Warn("check new collection fail")
+		log.Warn("duplicated new collection name, already taken by another collection or alias.")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
-		log.Warn("check new collection name fail")
+		log.Warn("fail to check if new collection name is already taken", zap.Error(err))
 		return err
 	}
 
 	// get old collection meta
 	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, ts)
 	if err != nil {
-		log.Warn("get old collection fail")
+		log.Warn("fail to find collection with old name", zap.Error(err))
 		return err
 	}
 
-	// unsupported rename collection while the collection has aliases
+	// Cannot rename a collection with aliases
 	aliases := mt.listAliasesByID(oldColl.CollectionID)
 	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
-		return errors.New("fail to rename db name, must drop all aliases of this collection before rename")
+		log.Warn("cannot change a collection's database when it has aliases")
+		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection %s before rename", oldName)
 	}
 
 	newColl := oldColl.Clone()
