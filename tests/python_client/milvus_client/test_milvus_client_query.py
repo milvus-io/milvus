@@ -2410,12 +2410,17 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
-                                                        ["*", ct.default_int64_field_name]])
-    def test_milvus_client_query_output_field_wildcard(self, wildcard_output_fields):
+                                                        ["*", ct.default_int64_field_name],
+                                                        ["*", ct.default_string_field_name]])
+    def test_milvus_client_query_output_field_wildcard_with_mmap(self, wildcard_output_fields):
         """
-        target: test query with output fields using wildcard
-        method: query with one output_field (wildcard)
-        expected: query success
+        Purpose: Verify that queries with wildcard output fields return correct results, both with and without mmap enabled.
+        Steps:
+            1. Create a collection with multiple fields and enable dynamic fields.
+            2. Insert data and build indexes.
+            3. Query using wildcard output fields and validate the returned fields.
+            4. Enable mmap, reload the collection, and repeat the query to ensure consistency.
+        Expected: The query results with wildcard output fields should be correct and consistent before and after enabling mmap.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -2425,23 +2430,33 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_int64_field_name, DataType.INT64)
-        self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert data
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_int64_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=ct.default_float_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        # 4. get wildcard output field names
-        schema_info = self.describe_collection(client, collection_name)[0]
-        output_fields = cf.get_wildcard_output_field_names(schema_info, wildcard_output_fields)
-        # 5. query with wildcard output fields
+        # 4. query with wildcard output fields
         actual_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
-        # 6. verify output fields
-        assert set(actual_res[0].keys()) == set(output_fields)
-        # 7. clean up
+        # 5. test mmap
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_vector_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_int64_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        mmap_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
+        assert actual_res == mmap_res
+        # 6. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2552,9 +2567,6 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 b.specify output_fields with wildcard %
         expected: verify query result
         """
-        from faker import Faker
-        fake = Faker()
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection with two float vector fields
@@ -2574,15 +2586,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_function(bm25_function)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert data
-        rows = []
-        data_size = 3000
-        for i in range(data_size):
-            rows.append({
-                ct.default_int64_field_name: i,
-                "sparse1": {random.randint(1, 10000): random.random() for _ in range(100)},
-                "sparse2": {random.randint(1, 10000): random.random() for _ in range(100)},
-                "document": fake.text(),
-            })
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
@@ -3198,34 +3202,37 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 3. create index and load collection
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
-
-        self.release_collection(client, collection_name)
-        # 4. Set mmap enabled before loading
-        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        describe_res = self.describe_collection(client, collection_name)[0]
-        properties = describe_res.get("properties")
-        assert properties["mmap.enabled"] == 'True'
         self.load_collection(client, collection_name)
-
-        # 5. prepare expected results
+        # prepare expected results
         exp_ids = ['0', '1', '10', '100', '1000', '1001', '1002', '1003', '1004', '1005']
         expected_res = []
         for ids in exp_ids:
             expected_res.append({ct.default_string_field_name: ids})
-        
-        # 6. query with empty expression and limit
         res = self.query(client, collection_name, filter="", limit=ct.default_limit)[0]
-        query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
-        assert query_res == expected_res
-        
-        # 7. query with empty expression, limit + offset
+        query_res1 = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        res = self.query(client, collection_name, filter="", limit=5, offset=5)[0]
+        query_res2 = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        # 4. Set mmap enabled before loading
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        # 5. query with empty expression and limit
+        res = self.query(client, collection_name, filter="", limit=ct.default_limit)[0]
+        mmap_query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        assert mmap_query_res == expected_res == query_res1
+        # 6. query with empty expression, limit + offset
         expected_res_offset = expected_res[5:]
         res = self.query(client, collection_name, filter="", limit=5, offset=5)[0]
-        query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
-        assert query_res == expected_res_offset
-        
-        # 8. clean up
+        mmap_query_res = [{ct.default_string_field_name: item[ct.default_string_field_name]} for item in res]
+        assert mmap_query_res == expected_res_offset == query_res2
+        # 7. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3318,9 +3325,13 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 3. enable mmap and create index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=ct.default_float_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_field_name, properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 4. query with empty string expression
         output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
@@ -3348,16 +3359,109 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        # 3. enable mmap and create index
-        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        actual_res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        # 3. enable mmap and create index
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 4. query with string expression and only string field as output
-        res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        assert set(res[0].keys()) == {ct.default_string_field_name}
+        mmap_res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        assert set(mmap_res[0].keys()) == {ct.default_string_field_name}
+        assert actual_res == mmap_res
+        self.drop_collection(client, collection_name)
+
+class TestQueryOperation(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+      The following cases are used to test query interface operations
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_without_connection(self):
+        """
+        target: test query without connection
+        method: close connect and query
+        expected: raise exception
+        """
+        client_temp = self._client(alias="client_temp")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Remove connection
+        self.close(client_temp)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.query(client_temp, collection_name, filter=default_search_exp,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_without_loading(self):
+        """
+        target: test query without loading
+        method: query without loading
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.release_collection(client, collection_name)
+        # 3. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        collection_info = self.get_collection_stats(client, collection_name)[0]
+        assert collection_info['row_count'] == default_nb
+        # 4. query without loading
+        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        self.query(client, collection_name, filter=default_term_expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_partition_repeatedly(self):
+        """
+        target: test query repeatedly on partition
+        method: query on partition twice
+        expected: verify query result is identical
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data to partition
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_name=partition_name)
+        self.flush(client, collection_name)
+        # 3. check number of entities
+        partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
+        assert partition_info['row_count'] == default_nb
+        # 4. create index and load partition
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 5. query twice on the same partition
+        res_one = self.query(client, collection_name, filter=default_search_exp, 
+                           partition_names=[partition_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
+                           )[0]
+        res_two = self.query(client, collection_name, filter=default_search_exp, 
+                           partition_names=[partition_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
+                           )[0]
+        assert res_one == res_two, "Query results should be identical when querying the same partition repeatedly"
         self.drop_collection(client, collection_name)
 
 
