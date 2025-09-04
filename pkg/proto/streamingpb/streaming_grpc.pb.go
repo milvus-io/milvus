@@ -258,7 +258,7 @@ type StreamingCoordAssignmentServiceClient interface {
 	//     operation, effectively removing all replication configuration.
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
-	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
+	UpdateReplicateConfiguration(ctx context.Context, in *UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error)
@@ -276,7 +276,7 @@ func NewStreamingCoordAssignmentServiceClient(cc grpc.ClientConnInterface) Strea
 	return &streamingCoordAssignmentServiceClient{cc}
 }
 
-func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error) {
+func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error) {
 	out := new(UpdateReplicateConfigurationResponse)
 	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -339,7 +339,7 @@ type StreamingCoordAssignmentServiceServer interface {
 	//     operation, effectively removing all replication configuration.
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
-	UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
+	UpdateReplicateConfiguration(context.Context, *UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error)
@@ -353,7 +353,7 @@ type StreamingCoordAssignmentServiceServer interface {
 type UnimplementedStreamingCoordAssignmentServiceServer struct {
 }
 
-func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error) {
+func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateReplicateConfiguration(context.Context, *UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateReplicateConfiguration not implemented")
 }
 func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error) {
@@ -375,7 +375,7 @@ func RegisterStreamingCoordAssignmentServiceServer(s grpc.ServiceRegistrar, srv 
 }
 
 func _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.UpdateReplicateConfigurationRequest)
+	in := new(UpdateReplicateConfigurationRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -387,7 +387,7 @@ func _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler(srv i
 		FullMethod: StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, req.(*milvuspb.UpdateReplicateConfigurationRequest))
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, req.(*UpdateReplicateConfigurationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

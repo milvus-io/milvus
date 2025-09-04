@@ -53,23 +53,26 @@ func NewImmutableMesasge(
 }
 
 // NewReplicateMessage creates a new replicate message.
-func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) MutableMessage {
+func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) ReplicateMutableMessage {
 	messageID := MustUnmarshalMessageID(im.GetId())
-	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
-	pmsg := msg.IntoImmutableMessageProto()
-	m := &messageImpl{
-		payload:    pmsg.GetPayload(),
-		properties: pmsg.GetProperties(),
-	}
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
 	rh, err := EncodeProto(&messagespb.ReplicateHeader{
-		ClusterId: clustrID,
-		MessageId: pmsg.GetId(),
-		TimeTick:  msg.TimeTick(),
-		Vchannel:  msg.VChannel(),
+		ClusterId:              clustrID,
+		MessageId:              msg.MessageID().IntoProto(),
+		LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
+		TimeTick:               msg.TimeTick(),
+		Vchannel:               msg.VChannel(),
 	})
 	if err != nil {
 		panic("failed to encode replicate header")
 	}
+	m := &messageImpl{
+		payload:    msg.payload,
+		properties: msg.properties.Clone(),
+	}
+	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
+	m.properties.Delete(messageTimeTick)
+	m.properties.Delete(messageLastConfirmed)
 	m.properties.Set(messageReplicateMesssageHeader, rh)
 	return m
 }

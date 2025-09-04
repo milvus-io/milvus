@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -125,13 +126,12 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 			return
 		default:
 			// TODO: sheep, append async.
-			// TODO: sheep, append
-			// appendResult, err := streaming.WAL().RawAppend(p.streamServer.Context(), msg)
-			// if err != nil {
-			// 	log.Warn("append replicate message to wal failed", zap.Error(err))
-			// 	continue
-			// }
-			p.sendReplicateResultDebug(msg.TimeTick())
+			appendResult, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+			if err != nil {
+				log.Warn("append replicate message to wal failed", zap.Error(err))
+				continue
+			}
+			p.sendReplicateResult(appendResult)
 			return
 		}
 	}
@@ -153,26 +153,6 @@ func (p *ReplicateStreamServer) sendReplicateResult(appendResult *wal.AppendResu
 		log.Debug("send replicate message response to client", zap.Uint64("confirmedTimeTick", appendResult.TimeTick))
 	case <-p.streamServer.Context().Done():
 		log.Warn("stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", appendResult.TimeTick))
-		return
-	}
-}
-
-// sendReplicateResult sends the replicate result to client.
-func (p *ReplicateStreamServer) sendReplicateResultDebug(ts uint64) {
-	resp := &milvuspb.ReplicateResponse{
-		Response: &milvuspb.ReplicateResponse_ReplicateConfirmedMessageInfo{
-			ReplicateConfirmedMessageInfo: &milvuspb.ReplicateConfirmedMessageInfo{
-				ConfirmedTimeTick: ts,
-			},
-		},
-	}
-	// If server context is canceled, it means the stream has been closed.
-	// all pending response message should be dropped, client side will handle it.
-	select {
-	case p.replicateRespCh <- resp:
-		log.Debug("send replicate message response to client", zap.Uint64("confirmedTimeTick", ts))
-	case <-p.streamServer.Context().Done():
-		log.Warn("stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", ts))
 		return
 	}
 }

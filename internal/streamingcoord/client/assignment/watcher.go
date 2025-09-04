@@ -6,8 +6,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -44,7 +44,7 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	return &last, nil
 }
 
-func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
 	w.cond.L.Lock()
 	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
 		w.lastVersionedAssignment.ReplicateConfigHelper == nil {
@@ -54,7 +54,7 @@ func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*commonp
 	}
 	last := w.lastVersionedAssignment
 	w.cond.L.Unlock()
-	return last.ReplicateConfigHelper.GetFullReplicateConfiguration(), nil
+	return last.ReplicateConfigHelper, nil
 }
 
 // AssignmentDiscover watches the assignment discovery.

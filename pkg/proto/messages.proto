@@ -29,6 +29,15 @@ enum MessageType {
     CreateSegment    = 10;
     Import           = 11;
     SchemaChange     = 12;
+
+    // PutReplicateConfig is used to put the replicate configuration to the current cluster.
+    // When the PutReplicateConfig message is received, the replication topology is changed.
+    // Maybe some cluster give up the leader role, no any other message will be received from this cluster.
+    // So leader will stop writing message into wal and stop replicating any message to the other cluster,
+    // and the follower will stop receiving any message from the old leader.
+    // New leader will start to write message into wal and start replicating message to the other cluster.
+    PutReplicateConfig = 800;
+
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -177,6 +186,15 @@ message DropPartitionMessageHeader {
     int64 partition_id  = 2;
 }
 
+// PutReplicateConfigMessageHeader is the header of put replicate configuration message.
+message PutReplicateConfigMessageHeader {
+    common.ReplicateConfiguration replicate_configuration = 1;
+}
+
+// PutReplicateConfigMessageBody is the body of put replicate configuration message.
+message PutReplicateConfigMessageBody {
+}
+
 // BeginTxnMessageHeader is the header of begin transaction message.
 // Just do nothing now.
 // Add Channel info here to implement cross pchannel transaction.
@@ -269,8 +287,9 @@ message BroadcastHeader {
 message ReplicateHeader {
     string cluster_id    = 1; // the cluster id of source cluster
     common.MessageID message_id = 2; // the message id of replicate msg from source cluster
-    uint64 time_tick     = 3; // the time tick of replicate msg from source cluster
-    string vchannel      = 4; // the vchannel of replicate msg from source cluster
+    common.MessageID last_confirmed_message_id = 3; // the last confirmed message id of replicate msg from source cluster
+    uint64 time_tick     = 4; // the time tick of replicate msg from source cluster
+    string vchannel      = 5; // the vchannel of replicate msg from source cluster
 }
 
 // ResourceDomain is the domain of resource hold.

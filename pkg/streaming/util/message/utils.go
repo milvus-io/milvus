@@ -55,3 +55,12 @@ func MustGetMessageTypeWithVersion[H proto.Message, B proto.Message]() MessageTy
 	}
 	return mv
 }
+
+// ReplicateHeader is the header of replicate message.
+type ReplicateHeader struct {
+	ClusterID              string
+	MessageID              MessageID
+	LastConfirmedMessageID MessageID
+	TimeTick               uint64
+	VChannel               string
+}

@@ -3,7 +3,6 @@ package metastore
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -209,22 +208,22 @@ type QueryCoordCatalog interface {
 }
 
 // ReplicationCatalog is the interface for replication catalog
+// it's used by CDC component.
 type ReplicationCatalog interface {
-	// SaveReplicatePChannels saves the replicate pchannels to metastore.
-	SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error
 	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
+	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
 	RemoveReplicatePChannel(ctx context.Context, sourceChannelName, targetChannelName string) error
-	// ListReplicatePChannels lists all replicate pchannels from metastore.
-	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
 
-	// SaveReplicateConfiguration saves the replicate configuration to metastore.
-	SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
-	// GetReplicateConfiguration gets the replicate configuration from metastore.
-	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+	// ListReplicatePChannels lists all replicate pchannels from metastore.
+	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.
+	// the task is written by streaming coord, SaveReplicateConfiguration operation.
+	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
 }
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	ReplicationCatalog
+
 	// GetCChannel get the control channel from metastore.
 	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
 
@@ -254,7 +253,11 @@ type StreamingCoordCataLog interface {
 	// When broadcast task is done, it will be removed from metastore.
 	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
 
-	ReplicationCatalog
+	// SaveReplicateConfiguration saves the replicate configuration to metastore.
+	SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error
+
+	// GetReplicateConfiguration gets the replicate configuration from metastore.
+	GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error)
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

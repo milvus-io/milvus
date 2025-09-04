@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -37,7 +38,7 @@ type AssignmentService interface {
 	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 
 	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
-	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+	GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error)
 
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
