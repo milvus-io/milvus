@@ -258,6 +258,18 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.AddCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.AlterCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.DropCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.AlterDatabase(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
