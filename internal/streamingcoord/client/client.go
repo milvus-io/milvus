@@ -45,6 +45,7 @@ type AssignmentService interface {
 
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// Return the WAL balance policy after the update.
+	// Deprecated: This function is deprecated and will be removed in the future.
 	UpdateWALBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error)
 }
 

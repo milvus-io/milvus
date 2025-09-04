@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -100,7 +101,7 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 	return merr.Success(), nil
 }
 
-// return all available node list, for each node, return it's (nodeID, ip_address)
+// ListQueryNode return all available node list, for each node, return it's (nodeID, ip_address)
 func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
 	log := log.Ctx(ctx)
 	log.Info("ListQueryNode request received")
@@ -121,13 +122,33 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 		}
 	})
 
+	// 2. Second Pass: Filter and Map the converted nodes to get their IDs
+	nodeIDs := lo.FilterMap(nodes, func(nodeInfo *querypb.NodeInfo, _ int) (int64, bool) {
+		if nodeInfo.State != session.StoppingStateName {
+			return nodeInfo.ID, true
+		}
+		return 0, false // Discard this node
+	})
+
+	nodesSuspended := s.meta.ResourceManager.GetNodesSuspended(nodeIDs)
+
+	// Loop through each node in the `nodes` slice.
+	for _, node := range nodes {
+		// Check the `nodesSuspended` map for the current node's ID.
+		// The `ok` variable ensures the key actually exists in the map.
+		if isSuspended, ok := nodesSuspended[node.ID]; ok && isSuspended {
+			// If the node ID is in the map and the status is true, update the State.
+			node.State = session.SuspendStateName
+		}
+	}
+
 	return &querypb.ListQueryNodeResponse{
 		Status:    merr.Success(),
 		NodeInfos: nodes,
 	}, nil
 }
 
-// return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
+// GetQueryNodeDistribution return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
 func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", req.GetNodeID()))
 	log.Info("GetQueryNodeDistribution request received")
@@ -157,7 +178,43 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	}, nil
 }
 
-// suspend background balance for all query node, include stopping balance and auto balance
+func (s *Server) SuspendChannelBalance(ctx context.Context) error {
+	log := log.Ctx(ctx)
+	log.Info("SuspendChannelBalance request received")
+
+	errMsg := "failed to suspend channel balance for all querynode"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return err
+	}
+	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "false"); err != nil {
+		log.Warn(err.Error(), zap.Error(err))
+		return err
+	}
+	log.Info("SuspendChannelBalance request finished successfully")
+	return nil
+}
+
+func (s *Server) ResumeChannelBalance(ctx context.Context) error {
+	log := log.Ctx(ctx)
+	log.Info("ResumeChannelBalance request received")
+
+	errMsg := "failed to resume channel balance for all querynode"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return err
+	}
+
+	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "true"); err != nil {
+		log.Warn(err.Error(), zap.Error(err))
+		return err
+	}
+	log.Info("ResumeChannelBalance request finished successfully")
+
+	return nil
+}
+
+// SuspendBalance background balance for all query node, include stopping balance and auto balance
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	log.Info("SuspendBalance request received")
@@ -176,7 +233,7 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 	return merr.Success(), nil
 }
 
-// resume background balance for all query node, include stopping balance and auto balance
+// ResumeBalance background balance for all query node, include stopping balance and auto balance
 func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 
@@ -221,6 +278,43 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 		Status:   merr.Success(),
 		IsActive: isActive,
 	}, nil
+}
+
+func (s *Server) CheckChannelBalanceActive(ctx context.Context) (bool, error) {
+	log := log.Ctx(ctx)
+	log.Info("ResumeChannelBalance request received")
+
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to resume channel balance", zap.Error(err))
+		return false, err
+	}
+	active := paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool()
+
+	log.Info("ResumeChannelBalance request finished successfully", zap.Bool("active", active))
+
+	return active, nil
+}
+
+// IsNodeSuspended checks if a specific node is suspended based on the provided request.
+// It returns true if the node is suspended, false otherwise.
+func (s *Server) IsNodeSuspended(ctx context.Context, nodeID int64) (bool, error) {
+	log := log.Ctx(ctx)
+
+	log.Info("IsNodeSuspended request received", zap.Int64("nodeID", nodeID))
+
+	errMsg := "failed to call IsNodeSuspended for query node"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return false, err
+	}
+
+	if s.nodeMgr.Get(nodeID) == nil {
+		err := merr.WrapErrNodeNotFound(nodeID, errMsg)
+		log.Warn(errMsg, zap.Error(err))
+		return false, err
+	}
+	isSuspended := s.meta.ResourceManager.IsNodeSuspended(nodeID)
+	return isSuspended, nil
 }
 
 // suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
@@ -469,7 +563,7 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		}
 	}
 
-	// check whether all segment exist in source node has been loaded in target node
+	// check whether all segments exist in source node has been loaded in target node
 	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
 	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
 	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {

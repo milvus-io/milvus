@@ -180,7 +180,9 @@ service StreamingCoordAssignmentService {
 
     // UpdateWALBalancePolicy is used to update the WAL balance policy.
     // The policy is used to control the balance of the WAL.
-    rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {};
+    rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {
+        option deprecated = true;
+    };
 
     // AssignmentDiscover is used to discover all log nodes managed by the
     // streamingcoord. Channel assignment information will be pushed to client

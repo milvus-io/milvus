@@ -259,6 +259,7 @@ type StreamingCoordAssignmentServiceClient interface {
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
 	UpdateReplicateConfiguration(ctx context.Context, in *UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
+	// Deprecated: Do not use.
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error)
@@ -285,6 +286,7 @@ func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *streamingCoordAssignmentServiceClient) UpdateWALBalancePolicy(ctx context.Context, in *UpdateWALBalancePolicyRequest, opts ...grpc.CallOption) (*UpdateWALBalancePolicyResponse, error) {
 	out := new(UpdateWALBalancePolicyResponse)
 	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateWALBalancePolicy_FullMethodName, in, out, opts...)
@@ -340,6 +342,7 @@ type StreamingCoordAssignmentServiceServer interface {
 	//   - The RPC is expected to be idempotent: submitting the same configuration
 	//     multiple times must not cause side effects.
 	UpdateReplicateConfiguration(context.Context, *UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
+	// Deprecated: Do not use.
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// The policy is used to control the balance of the WAL.
 	UpdateWALBalancePolicy(context.Context, *UpdateWALBalancePolicyRequest) (*UpdateWALBalancePolicyResponse, error)
