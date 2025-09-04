@@ -1240,9 +1240,9 @@ class PartialUpdateChecker(Checker):
         # Choose subset fields to update: always include PK + one non-PK field if available
         num = count % num_fields
         desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
-        partial_rows = cf.gen_partial_row_data_by_schema(nb=half,
-                                                         schema=schema,
-                                                         desired_field_names=desired_fields)
+        partial_rows = cf.gen_row_data_by_schema(nb=half,
+                                                 schema=schema,
+                                                 desired_field_names=desired_fields)
 
         # Override PKs for partial updates to target existing rows
         for i in range(half):

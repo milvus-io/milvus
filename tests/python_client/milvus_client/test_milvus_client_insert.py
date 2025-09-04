@@ -1395,8 +1395,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         assert len(result) == default_nb
         
         # Step 3: partial update data
-        new_row = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                    desired_field_names=[default_primary_key_field_name, default_string_field_name])
+        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                            desired_field_names=[default_primary_key_field_name, default_string_field_name])
         self.upsert(client, collection_name, new_row, partial_update=True)
         result = self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -1448,8 +1448,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             update_field_name = schema.fields[i if i != 0 else 1].name
             if update_field_name == "text_sparse_emb":
                  continue
-            new_rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                       desired_field_names=[primary_key_field_name, update_field_name])
+            new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                                 desired_field_names=[primary_key_field_name, update_field_name])
 
             self.upsert(client, collection_name, new_rows, partial_update=True)
             result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
@@ -1528,8 +1528,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
 
         # string field
-        scalar_rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                       desired_field_names=[default_primary_key_field_name, default_string_field_name])
+        scalar_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                                desired_field_names=[default_primary_key_field_name, default_string_field_name])
         self.upsert(client, collection_name, scalar_rows, partial_update=True)
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -1539,8 +1539,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})[0]
         
         # float field
-        float_rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                       desired_field_names=[default_primary_key_field_name, default_float_field_name])
+        float_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                               desired_field_names=[default_primary_key_field_name, default_float_field_name])
         self.upsert(client, collection_name, float_rows, partial_update=True)
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -1550,8 +1550,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})[0]
         
         # bool field
-        bool_rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                       desired_field_names=[default_primary_key_field_name, default_bool_field_name])
+        bool_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                              desired_field_names=[default_primary_key_field_name, default_bool_field_name])
         self.upsert(client, collection_name, bool_rows, partial_update=True)
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -1561,8 +1561,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})[0]
         
         # array field
-        array_rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                       desired_field_names=[default_primary_key_field_name, default_int32_array_field_name])
+        array_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                               desired_field_names=[default_primary_key_field_name, default_int32_array_field_name])
         self.upsert(client, collection_name, array_rows, partial_update=True)
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -1982,8 +1982,8 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
                                consistency_level="Strong", index_params=index_params)
         
         # step 2: partial upsert a new pk with only partial field
-        rows = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                 desired_field_names=[default_primary_key_field_name, default_int32_field_name])
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                         desired_field_names=[default_primary_key_field_name, default_int32_field_name])
         error = {ct.err_code: 1100, ct.err_msg: 
                 f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter"}
         self.upsert(client, collection_name, rows, partial_update=True, 
@@ -2093,16 +2093,16 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
         
         # Step 3: partial update data
-        new_row = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                    desired_field_names=[default_primary_key_field_name, default_string_field_name])
+        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                            desired_field_names=[default_primary_key_field_name, default_string_field_name])
         self.upsert(client, collection_name, new_row, partial_update=True)
 
         # Step 4: release collection
         self.release_collection(client, collection_name)
 
         # Step 5: partial update data
-        new_row = cf.gen_partial_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                    desired_field_names=[default_primary_key_field_name, default_string_field_name])
+        new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                            desired_field_names=[default_primary_key_field_name, default_string_field_name])
         error = {ct.err_code: 101, 
                  ct.err_msg: f"failed to query: collection not loaded"}
         self.upsert(client, collection_name, new_row, partial_update=True,
