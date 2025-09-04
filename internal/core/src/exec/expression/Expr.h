@@ -1298,7 +1298,7 @@ class SegmentExpr : public Expr {
         return PlanUseJsonStats(context) && HasJsonStats(field_id);
     }
 
-    bool
+    virtual bool
     CanUseNgramIndex() const {
         return false;
     };
