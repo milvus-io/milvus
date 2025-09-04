@@ -112,7 +112,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
-	msg := message.NewReplicateMessage(p.clusterID, reqMsg)
+	msg := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
 	log.Debug("recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
 		log.FieldMessage(msg),

@@ -73,6 +73,7 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) Replica
 	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
 	m.properties.Delete(messageTimeTick)
 	m.properties.Delete(messageLastConfirmed)
+	m.properties.Delete(messageWALTerm)
 	m.properties.Set(messageReplicateMesssageHeader, rh)
 	return m
 }
