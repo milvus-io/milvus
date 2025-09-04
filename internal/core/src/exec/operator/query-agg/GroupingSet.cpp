@@ -79,8 +79,6 @@ GroupingSet::initializeGlobalAggregation() {
             offset,
             RowContainer::nullByte(accumulatorFlagsOffset),
             RowContainer::nullMask(accumulatorFlagsOffset),
-            RowContainer::initializedByte(accumulatorFlagsOffset),
-            RowContainer::initializedMask(accumulatorFlagsOffset),
             rowSizeOffset);
         offset += accumulator.fixedWidthSize();
         accumulatorFlagsOffset += RowContainer::kNumAccumulatorFlags;
@@ -233,8 +231,6 @@ initializeAggregates(const std::vector<AggregateInfo>& aggregates,
         function->setOffsets(rowColumn.offset(),
                              rowColumn.nullByte(),
                              rowColumn.nullMask(),
-                             rowColumn.initializedByte(),
-                             rowColumn.initializedMask(),
                              rows.rowSizeOffset());
         i++;
     }

@@ -76,16 +76,6 @@ class RowColumn {
         return packedOffsets_ & 0xff;
     }
 
-    int32_t
-    initializedByte() const {
-        return nullByte();
-    }
-
-    int32_t
-    initializedMask() const {
-        return nullMask() << 1;
-    }
-
  private:
     static uint64_t
     PackOffsets(int32_t offset, int32_t nullOffset) {
@@ -409,24 +399,7 @@ class RowContainer {
     nullMask(int32_t nullOffset) {
         return 1 << (nullOffset & 7);
     }
-    // Only accumulators have initialized flags. accumulatorFlagsOffset is the
-    // offset at which the flags for an accumulator begin. Currently this is the
-    // null flag, followed by the initialized flag.  So it's equivalent to the
-    // nullOffset.
-
-    // It's guaranteed that the flags for an accumulator appear in the same byte.
-    static inline int32_t
-    initializedByte(int32_t accumulatorFlagsOffset) {
-        return nullByte(accumulatorFlagsOffset);
-    }
-
-    // accumulatorFlagsOffset is the offset at which the flags for an accumulator
-    // begin.
-    static inline int32_t
-    initializedMask(int32_t accumulatorFlagsOffset) {
-        return nullMask(accumulatorFlagsOffset) << 1;
-    }
-
+    
     void
     clear() {
         for (auto row : rows_) {
@@ -463,11 +436,8 @@ class RowContainer {
 
     // for rows containing variable width fields, we store row size at the end of the row
     uint32_t rowSizeOffset_ = 0;
-
     int alignment_ = 1;
-
     std::vector<Accumulator> accumulators_;
-
     uint64_t numRows_ = 0;
     std::vector<char*> rows_{};
 };

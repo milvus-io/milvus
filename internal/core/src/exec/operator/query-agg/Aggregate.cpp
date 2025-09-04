@@ -18,14 +18,10 @@ void
 Aggregate::setOffsetsInternal(int32_t offset,
                               int32_t nullByte,
                               uint8_t nullMask,
-                              int32_t initializedByte,
-                              uint8_t initializedMask,
                               int32_t rowSizeOffset) {
     offset_ = offset;
     nullByte_ = nullByte;
     nullMask_ = nullMask;
-    initializedByte_ = initializedByte;
-    initializedMask_ = initializedMask;
     rowSizeOffset_ = rowSizeOffset;
 }
 

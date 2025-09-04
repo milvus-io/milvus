@@ -29,9 +29,6 @@ class Aggregate {
     // Byte position of null flag in group row.
     int32_t nullByte_;
     uint8_t nullMask_;
-    // Byte position of the initialized flag in group row.
-    int32_t initializedByte_;
-    uint8_t initializedMask_;
     // Offset of fixed length accumulator state in group row.
     int32_t offset_;
     // Offset of uint32_t row byte size of row. 0 if there are no
@@ -58,14 +55,10 @@ class Aggregate {
     setOffsets(int32_t offset,
                int32_t nullByte,
                uint8_t nullMask,
-               int32_t initializedByte,
-               int8_t initializedMask,
                int32_t rowSizeOffset) {
         setOffsetsInternal(offset,
                            nullByte,
                            nullMask,
-                           initializedByte,
-                           initializedMask,
                            rowSizeOffset);
     }
 
@@ -73,9 +66,6 @@ class Aggregate {
     initializeNewGroups(char** groups,
                         folly::Range<const vector_size_t*> indices) {
         initializeNewGroupsInternal(groups, indices);
-        for (auto index : indices) {
-            groups[index][initializedByte_] |= initializedMask_;
-        }
     }
 
     virtual void
@@ -135,8 +125,6 @@ class Aggregate {
     setOffsetsInternal(int32_t offset,
                        int32_t nullByte,
                        uint8_t nullMask,
-                       int32_t initializedByte,
-                       uint8_t initializedMask,
                        int32_t rowSizeOffset);
 
     virtual void
