@@ -340,12 +340,12 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 		}
 
 		if fieldSchema.GetDefaultValue() == nil {
-			err = v.fillWithNullValue(field, fieldSchema, numRows)
+			err = FillWithNullValue(field, fieldSchema, numRows)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = v.fillWithDefaultValue(field, fieldSchema, numRows)
+			err = FillWithDefaultValue(field, fieldSchema, numRows)
 			if err != nil {
 				return err
 			}
@@ -355,7 +355,7 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 	return nil
 }
 
-func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
+func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
 	err := nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
@@ -434,7 +434,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 	return nil
 }
 
-func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
+func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
 	var err error
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
