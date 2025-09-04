@@ -19,6 +19,10 @@ const (
 	TxnStateRollbacked TxnState = messagespb.TxnState_TxnRollbacked
 
 	NonTxnID = TxnID(-1)
+
+	// TxnKeepaliveInfinite is the infinite keepalive duration.
+	// If the keepalive is infinite, the txn will never be expired.
+	TxnKeepaliveInfinite = -1 * time.Second
 )
 
 // NewTxnContextFromProto generates TxnContext from proto message.

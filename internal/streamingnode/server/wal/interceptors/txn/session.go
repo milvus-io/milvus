@@ -2,6 +2,7 @@ package txn
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -129,6 +130,9 @@ func (s *TxnSession) isExpiredOrDone(ts uint64) bool {
 
 // expiredTimeTick returns the expired time tick of the session.
 func (s *TxnSession) expiredTimeTick() uint64 {
+	if s.txnContext.Keepalive == message.TxnKeepaliveInfinite {
+		return math.MaxUint64
+	}
 	return tsoutil.AddPhysicalDurationOnTs(s.lastTimetick, s.txnContext.Keepalive)
 }
 

@@ -108,6 +108,10 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// ControlChannel returns the control channel name of the wal.
+	// It will return the channel name of the control channel of the wal.
+	ControlChannel() string
+
 	// Balancer returns the balancer management of the wal.
 	Balancer() Balancer
 
