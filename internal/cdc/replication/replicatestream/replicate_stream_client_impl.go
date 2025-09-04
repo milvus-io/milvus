@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const pendingMessageQueueLength = 128
@@ -39,6 +40,7 @@ const pendingMessageQueueLength = 128
 type replicateStreamClient struct {
 	replicateInfo *streamingpb.ReplicatePChannelMeta
 
+	clusterID       string
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
 	pendingMessages MsgQueue
 	metrics         ReplicateMetrics
@@ -54,6 +56,7 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 	ctx1 = contextutil.WithClusterID(ctx1, replicateInfo.GetTargetCluster().GetClusterId())
 
 	rs := &replicateStreamClient{
+		clusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		replicateInfo:   replicateInfo,
 		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
 		metrics:         NewReplicateMetrics(replicateInfo),
@@ -238,6 +241,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error 
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
+				SourceClusterId: r.clusterID,
 				Message: &commonpb.ImmutableMessage{
 					Id:         msg.MessageID().IntoProto(),
 					Payload:    immutableMessage.GetPayload(),
