@@ -507,7 +507,6 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
-		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_ClusteringCompaction,
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
@@ -570,7 +569,6 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
-		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               compactionType, // todo: use SingleCompaction
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,

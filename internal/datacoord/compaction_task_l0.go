@@ -341,7 +341,6 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	plan := &datapb.CompactionPlan{
 		PlanID:           taskProto.GetPlanID(),
 		StartTime:        taskProto.GetStartTime(),
-		TimeoutInSeconds: taskProto.GetTimeoutInSeconds(),
 		Type:             taskProto.GetType(),
 		Channel:          taskProto.GetChannel(),
 		CollectionTtl:    taskProto.GetCollectionTtl(),
