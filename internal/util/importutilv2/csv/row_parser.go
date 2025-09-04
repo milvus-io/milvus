@@ -689,7 +689,6 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 					return nil, fmt.Errorf("failed to parse float: %w", err)
 				}
 				vector[i] = float32(num)
-
 			}
 
 			if len(vector) != int(dim) {

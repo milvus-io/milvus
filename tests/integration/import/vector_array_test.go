@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -37,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestGenerateJsonFileWithVectorArray(t *testing.T) {

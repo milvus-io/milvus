@@ -183,6 +183,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			dynamicValues[key] = value
 		} else {
 			// from v2.6, we don't intend to return error for redundant fields, just skip it
+			return nil
 		}
 
 		return nil

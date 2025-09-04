@@ -1872,7 +1872,6 @@ func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
 					},
 				})
 			}
-
 		}
 	default:
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for vector field '%s'",
