@@ -140,6 +140,8 @@ message SegmentAssignment {
 message DeleteMessageHeader {
     int64 collection_id = 1;
     uint64 rows = 2;
+    repeated int64 segment_ids =3;
+    schema.IDs delete_primary_keys =4;
 }
 
 // FlushMessageHeader just nothing.
