@@ -63,7 +63,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 
 	collectionName := "TestBinlogImport_A_" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchemaOfVecDataTypeWithStruct(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -96,6 +96,16 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
+	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.StructSubFloatVecField,
+		IndexName:      "array_of_vector_index",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexEmbListHNSW, metric.MaxSim),
+	})
+	s.NoError(err)
+	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.StructSubFloatVecField)
+
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
@@ -123,10 +133,11 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		totalDeleteRowNum += delRow
 
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, insRow, dim)
+		structColumn := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, insRow, dim)
 		hashKeys := integration.GenerateHashKeys(insRow)
 		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			CollectionName: collectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn},
+			FieldsData:     []*schemapb.FieldData{fVecColumn, structColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(insRow),
 		})

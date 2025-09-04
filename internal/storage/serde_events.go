@@ -125,8 +125,8 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		}
 		recs := make([]arrow.Array, fieldNum)
 
-		idx := 0
 		appendFieldRecord := func(f *schemapb.FieldSchema) error {
+			idx := crr.index[f.FieldID]
 			if crr.rrs[idx] != nil {
 				if ok := crr.rrs[idx].Next(); !ok {
 					return io.EOF
@@ -143,7 +143,6 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				}
 				recs[idx] = arr
 			}
-			idx++
 			return nil
 		}
 

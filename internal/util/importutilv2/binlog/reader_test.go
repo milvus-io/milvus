@@ -100,7 +100,7 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		dim = 1
 	}
 
-	evt, err := w.NextInsertEventWriter(storage.WithDim(int(dim)), storage.WithNullable(field.GetNullable()))
+	evt, err := w.NextInsertEventWriter(storage.WithDim(int(dim)), storage.WithNullable(field.GetNullable()), storage.WithElementType(field.GetElementType()))
 	assert.NoError(t, err)
 
 	evt.SetEventTimestamp(1, math.MaxInt64)
@@ -190,6 +190,17 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		vectors := data.(*storage.Int8VectorFieldData).Data
 		err = evt.AddInt8VectorToPayload(vectors, int(dim))
 		assert.NoError(t, err)
+	case schemapb.DataType_ArrayOfVector:
+		elementType := field.GetElementType()
+		switch elementType {
+		case schemapb.DataType_FloatVector:
+			vectors := data.(*storage.VectorArrayFieldData)
+			err = evt.AddVectorArrayFieldDataToPayload(vectors)
+			assert.NoError(t, err)
+		default:
+			assert.True(t, false)
+			return nil
+		}
 	default:
 		assert.True(t, false)
 		return nil
@@ -254,7 +265,8 @@ func (suite *ReaderSuite) createMockChunk(schema *schemapb.CollectionSchema, ins
 			paths = make([]string, 0)
 			bytes = make([][]byte, 0)
 		)
-		for _, field := range schema.Fields {
+		allFields := typeutil.GetAllFieldSchemas(schema)
+		for _, field := range allFields {
 			fieldID := field.GetFieldID()
 			logs, ok := insertBinlogs[fieldID]
 			if ok && len(logs) > 0 {
@@ -327,8 +339,48 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 				Nullable:    nullable,
 			},
 		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 103,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     104,
+						Name:        "struct_str",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_VarChar,
+						TypeParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.MaxLengthKey,
+								Value: "256",
+							},
+							{
+								Key:   common.MaxCapacityKey,
+								Value: "20",
+							},
+						},
+					},
+					{
+						FieldID:     105,
+						Name:        "struct_float_vector",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.MaxCapacityKey,
+								Value: "20",
+							},
+							{
+								Key:   common.DimKey,
+								Value: "8",
+							},
+						},
+					},
+				},
+			},
+		},
 	}
-	insertBinlogs := genBinlogPaths(lo.Map(schema.Fields, func(fieldSchema *schemapb.FieldSchema, _ int) int64 {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	insertBinlogs := genBinlogPaths(lo.Map(allFields, func(fieldSchema *schemapb.FieldSchema, _ int) int64 {
 		return fieldSchema.GetFieldID()
 	}))
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
@@ -383,6 +435,8 @@ OUTER:
 				} else {
 					suite.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
 				}
+			} else if fieldDataType == schemapb.DataType_ArrayOfVector {
+				suite.True(slices.Equal(expect.(*schemapb.VectorField).GetFloatVector().GetData(), actual.(*schemapb.VectorField).GetFloatVector().GetData()))
 			} else {
 				suite.Equal(expect, actual)
 			}
