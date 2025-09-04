@@ -9,6 +9,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	replicateutil "github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -131,23 +133,23 @@ func (_c *MockAssignmentService_GetLatestAssignments_Call) RunAndReturn(run func
 }
 
 // GetReplicateConfiguration provides a mock function with given fields: ctx
-func (_m *MockAssignmentService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+func (_m *MockAssignmentService) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReplicateConfiguration")
 	}
 
-	var r0 *commonpb.ReplicateConfiguration
+	var r0 *replicateutil.ConfigHelper
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (*replicateutil.ConfigHelper, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) *replicateutil.ConfigHelper); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
+			r0 = ret.Get(0).(*replicateutil.ConfigHelper)
 		}
 	}
 
@@ -178,12 +180,12 @@ func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Run(run func(ctx
 	return _c
 }
 
-func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockAssignmentService_GetReplicateConfiguration_Call {
+func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Return(_a0 *replicateutil.ConfigHelper, _a1 error) *MockAssignmentService_GetReplicateConfiguration_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAssignmentService_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockAssignmentService_GetReplicateConfiguration_Call {
+func (_c *MockAssignmentService_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*replicateutil.ConfigHelper, error)) *MockAssignmentService_GetReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

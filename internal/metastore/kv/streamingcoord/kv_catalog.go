@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -179,39 +178,18 @@ func buildBroadcastTaskPath(id uint64) string {
 	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
 }
 
-func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
-	key := ReplicateConfigurationKey
-	if config == nil {
-		return errors.New("replicate configuration is nil")
-	}
+func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
 	v, err := proto.Marshal(config)
 	if err != nil {
 		return errors.Wrapf(err, "marshal replicate configuration failed")
 	}
-	return c.metaKV.Save(ctx, key, string(v))
-}
 
-func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
-	key := ReplicateConfigurationKey
-	value, err := c.metaKV.Load(ctx, key)
-	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	config := &commonpb.ReplicateConfiguration{}
-	if err = proto.Unmarshal([]byte(value), config); err != nil {
-		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
-	}
-	return config, nil
-}
+	kvs := make(map[string]string, len(replicatingTasks)+1)
+	kvs[ReplicateConfigurationKey] = string(v)
 
-func (c *catalog) SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error {
-	kvs := make(map[string]string, len(infos))
-	for _, info := range infos {
-		key := buildReplicatePChannelPath(info.GetTargetCluster().GetClusterId(), info.GetSourceChannelName())
-		v, err := proto.Marshal(info)
+	for _, task := range replicatingTasks {
+		key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
+		v, err := proto.Marshal(task)
 		if err != nil {
 			return errors.Wrapf(err, "marshal replicate pchannel meta failed")
 		}
@@ -220,6 +198,22 @@ func (c *catalog) SaveReplicatePChannels(ctx context.Context, infos []*streaming
 	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
+}
+
+func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error) {
+	key := ReplicateConfigurationKey
+	value, err := c.metaKV.Load(ctx, key)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	config := &streamingpb.ReplicateConfigurationMeta{}
+	if err = proto.Unmarshal([]byte(value), config); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
+	}
+	return config, nil
 }
 
 func (c *catalog) RemoveReplicatePChannel(ctx context.Context, targetClusterID, sourceChannelName string) error {

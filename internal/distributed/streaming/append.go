@@ -14,20 +14,14 @@ import (
 // Otherwise, it will return the pchannel of the vchannel.
 // TODO: support cross-cluster replication, so the remote vchannel should be mapping to the pchannel of the local cluster.
 func (w *walAccesserImpl) routePChannel(ctx context.Context, vchannel string) (string, error) {
-	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
-	if err != nil {
-		return "", err
-	}
 	if vchannel == message.ControlChannel {
+		assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+		if err != nil {
+			return "", err
+		}
 		return assignments.PChannelOfCChannel(), nil
 	}
-	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	repConfigHelper := assignments.ReplicateConfigHelper
-	if repConfigHelper != nil {
-		// Route the pchannel to the target cluster if the message is replicated.
-		pchannel = repConfigHelper.GetTargetChannel(pchannel, w.clusterID)
-	}
-	return pchannel, nil
+	return funcutil.ToPhysicalChannel(vchannel), nil
 }
 
 // appendToWAL appends the message to the wal.
@@ -64,6 +58,9 @@ func assertValidMessage(msgs ...message.MutableMessage) {
 		if msg.MessageType().IsSystem() {
 			panic("system message is not allowed to append from client")
 		}
+		if msg.MessageType().IsSelfControlled() {
+			panic("self controlled message is not allowed to append from client")
+		}
 		if msg.VChannel() == "" {
 			panic("we don't support sent all vchannel message at client now")
 		}
@@ -74,6 +71,9 @@ func assertValidMessage(msgs ...message.MutableMessage) {
 func assertValidBroadcastMessage(msg message.BroadcastMutableMessage) {
 	if msg.MessageType().IsSystem() {
 		panic("system message is not allowed to broadcast append from client")
+	}
+	if msg.MessageType().IsSelfControlled() {
+		panic("self controlled message is not allowed to broadcast append from client")
 	}
 }
 

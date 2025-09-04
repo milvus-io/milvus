@@ -105,24 +105,19 @@ func TestNewConfigHelper(t *testing.T) {
 			name:   "success - valid config",
 			config: createValidConfig(),
 		},
-		{
-			name:   "success - config with different channel counts",
-			config: createConfigWithDifferentChannelCounts(),
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			helper := NewConfigHelper(tt.config)
+			helper := MustNewConfigHelper("source-cluster", tt.config)
 			assert.NotNil(t, helper)
-			assert.Implements(t, (*ConfigHelper)(nil), helper)
 		})
 	}
 }
 
 func TestConfigHelper_GetCluster(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("source-cluster", config)
 
 	tests := []struct {
 		name      string
@@ -165,12 +160,11 @@ func TestConfigHelper_GetCluster(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.wantErr {
-				assert.Panics(t, func() {
-					helper.GetCluster(tt.clusterID)
-				})
+				result := helper.GetCluster(tt.clusterID)
+				assert.Nil(t, result)
 			} else {
 				result := helper.GetCluster(tt.clusterID)
-				assert.Equal(t, tt.expected, result)
+				assert.Equal(t, tt.expected, result.MilvusCluster)
 			}
 		})
 	}
@@ -178,22 +172,22 @@ func TestConfigHelper_GetCluster(t *testing.T) {
 
 func TestConfigHelper_GetSourceCluster(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("target-cluster-a", config)
 
 	t.Run("success - get source cluster", func(t *testing.T) {
-		result := helper.GetSourceCluster()
+		result := helper.GetCurrentCluster().SourceCluster()
 		assert.NotNil(t, result)
 		assert.Equal(t, "source-cluster", result.GetClusterId())
-		assert.Equal(t, config.GetClusters()[0], result)
+		assert.Equal(t, config.GetClusters()[0], result.MilvusCluster)
 	})
 }
 
 func TestConfigHelper_GetTargetClusters(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("source-cluster", config)
 
 	t.Run("success - get target clusters", func(t *testing.T) {
-		result := helper.GetTargetClusters()
+		result := helper.GetCurrentCluster().TargetClusters()
 		assert.Len(t, result, 2)
 
 		// Check that we have both target clusters
@@ -208,46 +202,53 @@ func TestConfigHelper_GetTargetClusters(t *testing.T) {
 
 func TestConfigHelper_GetSourceChannel(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("source-cluster", config)
 
 	tests := []struct {
 		name              string
+		clusterID         string
 		targetChannelName string
 		wantErr           bool
 		expected          string
 	}{
 		{
 			name:              "success - get source channel for target cluster a channel 1",
+			clusterID:         "target-cluster-a",
 			targetChannelName: "target-cluster-a-channel-1",
 			wantErr:           false,
 			expected:          "source-cluster-channel-1",
 		},
 		{
 			name:              "success - get source channel for target cluster a channel 2",
+			clusterID:         "target-cluster-a",
 			targetChannelName: "target-cluster-a-channel-2",
 			wantErr:           false,
 			expected:          "source-cluster-channel-2",
 		},
 		{
 			name:              "success - get source channel for target cluster b channel 1",
+			clusterID:         "target-cluster-b",
 			targetChannelName: "target-cluster-b-channel-1",
 			wantErr:           false,
 			expected:          "source-cluster-channel-1",
 		},
 		{
 			name:              "success - get source channel for target cluster b channel 2",
+			clusterID:         "target-cluster-b",
 			targetChannelName: "target-cluster-b-channel-2",
 			wantErr:           false,
 			expected:          "source-cluster-channel-2",
 		},
 		{
 			name:              "panic - target channel not found",
+			clusterID:         "target-cluster-a",
 			targetChannelName: "non-existent-channel",
 			wantErr:           true,
 			expected:          "",
 		},
 		{
 			name:              "panic - empty target channel name",
+			clusterID:         "target-cluster-a",
 			targetChannelName: "",
 			wantErr:           true,
 			expected:          "",
@@ -258,10 +259,10 @@ func TestConfigHelper_GetSourceChannel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.wantErr {
 				assert.Panics(t, func() {
-					helper.GetSourceChannel(tt.targetChannelName)
+					helper.GetCluster(tt.clusterID).MustGetSourceChannel(tt.targetChannelName)
 				})
 			} else {
-				result := helper.GetSourceChannel(tt.targetChannelName)
+				result := helper.GetCluster(tt.clusterID).MustGetSourceChannel(tt.targetChannelName)
 				assert.Equal(t, tt.expected, result)
 			}
 		})
@@ -270,7 +271,7 @@ func TestConfigHelper_GetSourceChannel(t *testing.T) {
 
 func TestConfigHelper_GetTargetChannel(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("source-cluster", config)
 
 	tests := []struct {
 		name              string
@@ -340,11 +341,11 @@ func TestConfigHelper_GetTargetChannel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.wantErr {
-				assert.Panics(t, func() {
-					helper.GetTargetChannel(tt.sourceChannelName, tt.targetClusterID)
-				})
+				_, err := helper.GetCurrentCluster().GetTargetChannel(tt.sourceChannelName, tt.targetClusterID)
+				assert.Error(t, err)
 			} else {
-				result := helper.GetTargetChannel(tt.sourceChannelName, tt.targetClusterID)
+				result, err := helper.GetCurrentCluster().GetTargetChannel(tt.sourceChannelName, tt.targetClusterID)
+				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 			}
 		})
@@ -354,13 +355,9 @@ func TestConfigHelper_GetTargetChannel(t *testing.T) {
 func TestConfigHelper_EdgeCases(t *testing.T) {
 	t.Run("config with different channel counts", func(t *testing.T) {
 		config := createConfigWithDifferentChannelCounts()
-		helper := NewConfigHelper(config)
-
-		// Test that the helper handles mismatched channel counts gracefully
-		// The current implementation will panic if channel counts don't match
-		// This test documents the current behavior
+		// helper can not be created
 		assert.Panics(t, func() {
-			helper.GetTargetChannel("source-channel-3", "target-cluster-a")
+			MustNewConfigHelper("source-cluster", config)
 		})
 	})
 
@@ -379,13 +376,13 @@ func TestConfigHelper_EdgeCases(t *testing.T) {
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
 
-		helper := NewConfigHelper(config)
+		helper := MustNewConfigHelper("single-cluster", config)
 
 		// Source cluster should be nil when no topology is defined
-		assert.Nil(t, helper.GetSourceCluster())
+		assert.Nil(t, helper.GetCurrentCluster().SourceCluster())
 
 		// Target clusters should be empty
-		assert.Len(t, helper.GetTargetClusters(), 0)
+		assert.Len(t, helper.GetCurrentCluster().TargetClusters(), 0)
 	})
 
 	t.Run("config with empty clusters", func(t *testing.T) {
@@ -394,93 +391,46 @@ func TestConfigHelper_EdgeCases(t *testing.T) {
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
 
-		helper := NewConfigHelper(config)
-
-		// Source cluster should be nil
-		assert.Nil(t, helper.GetSourceCluster())
-
-		// Target clusters should be empty
-		assert.Len(t, helper.GetTargetClusters(), 0)
+		assert.Panics(t, func() {
+			MustNewConfigHelper("source-cluster", config)
+		})
 	})
 }
 
 func TestConfigHelper_ChannelMappingConsistency(t *testing.T) {
 	config := createValidConfig()
-	helper := NewConfigHelper(config)
+	helper := MustNewConfigHelper("source-cluster", config)
 
 	t.Run("bidirectional channel mapping consistency", func(t *testing.T) {
 		// Test that source -> target -> source mapping is consistent
 		sourceChannel := "source-cluster-channel-1"
 		targetClusterID := "target-cluster-a"
 
-		targetChannel := helper.GetTargetChannel(sourceChannel, targetClusterID)
+		targetChannel, err := helper.GetCurrentCluster().GetTargetChannel(sourceChannel, targetClusterID)
 		assert.Equal(t, "target-cluster-a-channel-1", targetChannel)
+		assert.NoError(t, err)
 
 		// Reverse mapping should give us back the original source channel
-		reverseSourceChannel := helper.GetSourceChannel(targetChannel)
+		reverseSourceChannel := helper.GetCluster(targetClusterID).MustGetSourceChannel(targetChannel)
 		assert.Equal(t, sourceChannel, reverseSourceChannel)
 	})
 
 	t.Run("all channel mappings are consistent", func(t *testing.T) {
-		sourceCluster := helper.GetSourceCluster()
-		targetClusters := helper.GetTargetClusters()
+		sourceCluster := helper.GetCurrentCluster()
+		targetClusters := helper.GetCurrentCluster().TargetClusters()
 
 		for _, targetCluster := range targetClusters {
 			targetClusterID := targetCluster.GetClusterId()
 
 			for i, sourceChannel := range sourceCluster.GetPchannels() {
-				targetChannel := helper.GetTargetChannel(sourceChannel, targetClusterID)
+				targetChannel, err := helper.GetCurrentCluster().GetTargetChannel(sourceChannel, targetClusterID)
+				assert.NoError(t, err)
 
 				// Verify the reverse mapping
-				reverseSourceChannel := helper.GetSourceChannel(targetChannel)
+				reverseSourceChannel := helper.GetCluster(targetClusterID).MustGetSourceChannel(targetChannel)
 				assert.Equal(t, sourceChannel, reverseSourceChannel,
 					"Channel mapping inconsistency for cluster %s, channel index %d", targetClusterID, i)
 			}
 		}
-	})
-}
-
-func TestConfigHelper_PanicMessages(t *testing.T) {
-	config := createValidConfig()
-	helper := NewConfigHelper(config)
-
-	t.Run("panic message for cluster not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				panicMsg := r.(string)
-				assert.Contains(t, panicMsg, "cluster non-existent-cluster not found")
-			}
-		}()
-		helper.GetCluster("non-existent-cluster")
-	})
-
-	t.Run("panic message for source channel not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				panicMsg := r.(string)
-				assert.Contains(t, panicMsg, "source channel not found for target channel non-existent-channel")
-			}
-		}()
-		helper.GetSourceChannel("non-existent-channel")
-	})
-
-	t.Run("panic message for target cluster not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				panicMsg := r.(string)
-				assert.Contains(t, panicMsg, "target cluster non-existent-cluster not found")
-			}
-		}()
-		helper.GetTargetChannel("source-cluster-channel-1", "non-existent-cluster")
-	})
-
-	t.Run("panic message for target channel not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				panicMsg := r.(string)
-				assert.Contains(t, panicMsg, "target channel not found for source channel non-existent-channel, target cluster target-cluster-a")
-			}
-		}()
-		helper.GetTargetChannel("non-existent-channel", "target-cluster-a")
 	})
 }

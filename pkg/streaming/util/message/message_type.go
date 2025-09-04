@@ -45,6 +45,12 @@ func (t MessageType) IsSystem() bool {
 	return ok
 }
 
+// IsSelfControlled checks if the MessageType is self controlled.
+func (t MessageType) IsSelfControlled() bool {
+	_, ok := selfControlledMessageType[t]
+	return ok
+}
+
 // unmarshalMessageType unmarshal MessageType from string.
 func unmarshalMessageType(s string) MessageType {
 	i, err := strconv.ParseInt(s, 10, 32)

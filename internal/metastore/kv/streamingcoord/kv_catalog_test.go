@@ -148,10 +148,6 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
 		return kvStorage[s], nil
 	})
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key, value string) error {
-		kvStorage[key] = value
-		return nil
-	})
 	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
 		keys := make([]string, 0, len(kvStorage))
 		vals := make([]string, 0, len(kvStorage))
@@ -203,32 +199,34 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 			},
 		},
 	}
-	err := catalog.SaveReplicateConfiguration(context.Background(), config)
+	err := catalog.SaveReplicateConfiguration(context.Background(), &streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: config}, nil)
 	assert.NoError(t, err)
 
 	cfg, err := catalog.GetReplicateConfiguration(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, cfg.GetClusters()[0].GetClusterId(), "source-cluster")
-	assert.Equal(t, cfg.GetClusters()[1].GetClusterId(), "target-cluster-a")
-	assert.Equal(t, cfg.GetClusters()[2].GetClusterId(), "target-cluster-b")
-	assert.Equal(t, cfg.GetCrossClusterTopology()[0].GetSourceClusterId(), "source-cluster")
-	assert.Equal(t, cfg.GetCrossClusterTopology()[0].GetTargetClusterId(), "target-cluster-a")
-	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetSourceClusterId(), "source-cluster")
-	assert.Equal(t, cfg.GetCrossClusterTopology()[1].GetTargetClusterId(), "target-cluster-b")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetClusters()[0].GetClusterId(), "source-cluster")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetClusters()[1].GetClusterId(), "target-cluster-a")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetClusters()[2].GetClusterId(), "target-cluster-b")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetCrossClusterTopology()[0].GetSourceClusterId(), "source-cluster")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetCrossClusterTopology()[0].GetTargetClusterId(), "target-cluster-a")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetCrossClusterTopology()[1].GetSourceClusterId(), "source-cluster")
+	assert.Equal(t, cfg.ReplicateConfiguration.GetCrossClusterTopology()[1].GetTargetClusterId(), "target-cluster-b")
 
 	// ReplicatePChannel test
-	err = catalog.SaveReplicatePChannels(context.Background(), []*streamingpb.ReplicatePChannelMeta{
-		{
-			SourceChannelName: "source-channel-1",
-			TargetChannelName: "target-channel-1",
-			TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
-		},
-		{
-			SourceChannelName: "source-channel-2",
-			TargetChannelName: "target-channel-2",
-			TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
-		},
-	})
+	err = catalog.SaveReplicateConfiguration(context.Background(),
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: config},
+		[]*streamingpb.ReplicatePChannelMeta{
+			{
+				SourceChannelName: "source-channel-1",
+				TargetChannelName: "target-channel-1",
+				TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+			},
+			{
+				SourceChannelName: "source-channel-2",
+				TargetChannelName: "target-channel-2",
+				TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+			},
+		})
 	assert.NoError(t, err)
 
 	infos, err := catalog.ListReplicatePChannels(context.Background())

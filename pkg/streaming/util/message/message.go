@@ -60,6 +60,10 @@ type BasicMessage interface {
 	// If the message is not a broadcast message, it will return 0.
 	BroadcastHeader() *BroadcastHeader
 
+	// ReplicateHeader returns the replicate header of current message.
+	// If the message is not a replicate message, it will return nil.
+	ReplicateHeader() *ReplicateHeader
+
 	// IsPersisted returns true if the message is persisted into underlying log storage.
 	IsPersisted() bool
 
@@ -110,6 +114,14 @@ type MutableMessage interface {
 
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
+}
+
+// ReplicateMutableMessage is the replicate message interface.
+type ReplicateMutableMessage interface {
+	MutableMessage
+
+	// OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
+	OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string)
 }
 
 // BroadcastMutableMessage is the broadcast message interface.
@@ -211,6 +223,9 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 
 	// OverwriteHeader overwrites the message header.
 	OverwriteHeader(header H)
+
+	// OverwriteBody overwrites the message body.
+	OverwriteBody(body B)
 }
 
 // SpecializedImmutableMessage is the specialized immutable message interface.

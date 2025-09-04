@@ -5,8 +5,6 @@ package mock_metastore
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -84,23 +82,23 @@ func (_c *MockStreamingCoordCataLog_GetCChannel_Call) RunAndReturn(run func(cont
 }
 
 // GetReplicateConfiguration provides a mock function with given fields: ctx
-func (_m *MockStreamingCoordCataLog) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+func (_m *MockStreamingCoordCataLog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReplicateConfiguration")
 	}
 
-	var r0 *commonpb.ReplicateConfiguration
+	var r0 *streamingpb.ReplicateConfigurationMeta
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (*streamingpb.ReplicateConfigurationMeta, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) *streamingpb.ReplicateConfigurationMeta); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
+			r0 = ret.Get(0).(*streamingpb.ReplicateConfigurationMeta)
 		}
 	}
 
@@ -131,12 +129,12 @@ func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) Run(run func
 	return _c
 }
 
-func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
+func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) Return(_a0 *streamingpb.ReplicateConfigurationMeta, _a1 error) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
+func (_c *MockStreamingCoordCataLog_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*streamingpb.ReplicateConfigurationMeta, error)) *MockStreamingCoordCataLog_GetReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -563,17 +561,17 @@ func (_c *MockStreamingCoordCataLog_SavePChannels_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// SaveReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockStreamingCoordCataLog) SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
-	ret := _m.Called(ctx, config)
+// SaveReplicateConfiguration provides a mock function with given fields: ctx, config, replicatingTasks
+func (_m *MockStreamingCoordCataLog) SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
+	ret := _m.Called(ctx, config, replicatingTasks)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SaveReplicateConfiguration")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
-		r0 = rf(ctx, config)
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.ReplicateConfigurationMeta, []*streamingpb.ReplicatePChannelMeta) error); ok {
+		r0 = rf(ctx, config, replicatingTasks)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -588,14 +586,15 @@ type MockStreamingCoordCataLog_SaveReplicateConfiguration_Call struct {
 
 // SaveReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - config *commonpb.ReplicateConfiguration
-func (_e *MockStreamingCoordCataLog_Expecter) SaveReplicateConfiguration(ctx interface{}, config interface{}) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
-	return &MockStreamingCoordCataLog_SaveReplicateConfiguration_Call{Call: _e.mock.On("SaveReplicateConfiguration", ctx, config)}
+//   - config *streamingpb.ReplicateConfigurationMeta
+//   - replicatingTasks []*streamingpb.ReplicatePChannelMeta
+func (_e *MockStreamingCoordCataLog_Expecter) SaveReplicateConfiguration(ctx interface{}, config interface{}, replicatingTasks interface{}) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
+	return &MockStreamingCoordCataLog_SaveReplicateConfiguration_Call{Call: _e.mock.On("SaveReplicateConfiguration", ctx, config, replicatingTasks)}
 }
 
-func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
+func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) Run(run func(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta)) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
+		run(args[0].(context.Context), args[1].(*streamingpb.ReplicateConfigurationMeta), args[2].([]*streamingpb.ReplicatePChannelMeta))
 	})
 	return _c
 }
@@ -605,54 +604,7 @@ func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) Return(_a0 
 	return _c
 }
 
-func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveReplicatePChannels provides a mock function with given fields: ctx, infos
-func (_m *MockStreamingCoordCataLog) SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error {
-	ret := _m.Called(ctx, infos)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveReplicatePChannels")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*streamingpb.ReplicatePChannelMeta) error); ok {
-		r0 = rf(ctx, infos)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockStreamingCoordCataLog_SaveReplicatePChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveReplicatePChannels'
-type MockStreamingCoordCataLog_SaveReplicatePChannels_Call struct {
-	*mock.Call
-}
-
-// SaveReplicatePChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - infos []*streamingpb.ReplicatePChannelMeta
-func (_e *MockStreamingCoordCataLog_Expecter) SaveReplicatePChannels(ctx interface{}, infos interface{}) *MockStreamingCoordCataLog_SaveReplicatePChannels_Call {
-	return &MockStreamingCoordCataLog_SaveReplicatePChannels_Call{Call: _e.mock.On("SaveReplicatePChannels", ctx, infos)}
-}
-
-func (_c *MockStreamingCoordCataLog_SaveReplicatePChannels_Call) Run(run func(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta)) *MockStreamingCoordCataLog_SaveReplicatePChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]*streamingpb.ReplicatePChannelMeta))
-	})
-	return _c
-}
-
-func (_c *MockStreamingCoordCataLog_SaveReplicatePChannels_Call) Return(_a0 error) *MockStreamingCoordCataLog_SaveReplicatePChannels_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockStreamingCoordCataLog_SaveReplicatePChannels_Call) RunAndReturn(run func(context.Context, []*streamingpb.ReplicatePChannelMeta) error) *MockStreamingCoordCataLog_SaveReplicatePChannels_Call {
+func (_c *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *streamingpb.ReplicateConfigurationMeta, []*streamingpb.ReplicatePChannelMeta) error) *MockStreamingCoordCataLog_SaveReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

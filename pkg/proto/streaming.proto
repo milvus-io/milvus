@@ -100,6 +100,20 @@ message BroadcastTask {
     bytes acked_vchannel_bitmap = 3; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
 }
 
+// AckedResult is the result of the ack.
+// It's a helper proto to help managing the consuming of broadcast message at coordinator.
+message AckedResult {
+    repeated string channels = 1; // may be pchannel name or vchannel name.
+    repeated AckedCheckpoint acked_checkpoints = 2; // always same length with channels, not nil if acked.
+}
+
+// AckedCheckpoint is the checkpoint that has been acked.
+message AckedCheckpoint {
+    common.MessageID message_id = 1;  // the message id that has been acked.
+    common.MessageID last_confirmed_message_id = 2; // the last confirmed message id that has been acked.
+    uint64 time_tick = 3; // the time tick of the message that has been acked.
+}
+
 //
 // Milvus Service
 //
@@ -161,7 +175,7 @@ service StreamingCoordAssignmentService {
     //     operation, effectively removing all replication configuration.
     //   - The RPC is expected to be idempotent: submitting the same configuration
     //     multiple times must not cause side effects.
-    rpc UpdateReplicateConfiguration(milvus.UpdateReplicateConfigurationRequest)
+    rpc UpdateReplicateConfiguration(UpdateReplicateConfigurationRequest)
         returns (UpdateReplicateConfigurationResponse) {}
 
     // UpdateWALBalancePolicy is used to update the WAL balance policy.
@@ -173,6 +187,10 @@ service StreamingCoordAssignmentService {
     // by stream.
     rpc AssignmentDiscover(stream AssignmentDiscoverRequest)
         returns (stream AssignmentDiscoverResponse) {}
+}
+
+message UpdateReplicateConfigurationRequest {
+    common.ReplicateConfiguration configuration = 1;
 }
 
 // UpdateReplicateConfigurationResponse is the response of UpdateReplicateConfiguration service
@@ -309,8 +327,9 @@ enum StreamingCode {
     STREAMING_CODE_INVAILD_ARGUMENT       = 8;  // invalid argument
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
-    STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
+    STREAMING_CODE_UNRECOVERABLE          = 11; // unrecoverable error
     STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
+    STREAMING_CODE_REPLICATE_VIOLATION    = 13; // replicate violation
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
@@ -353,7 +372,7 @@ service StreamingNodeHandlerService {
 
 // GetReplicateCheckpointRequest is the request of GetReplicateCheckpoint service.
 message GetReplicateCheckpointRequest {
-  string channel_name = 1;
+  PChannelInfo pchannel = 1;
 }
 
 // GetReplicateCheckpointResponse is the response of GetReplicateCheckpoint service.
@@ -678,10 +697,21 @@ message WALCheckpoint {
     uint64 time_tick = 2; // The timetick of checkpoint, keep consistecy with message_id.
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
+    // The wal name of the checkpoint.
+    common.ReplicateConfiguration replicate_config = 4; // if the wal join a replicated clusters, the replicate config is not null,
+    common.ReplicateCheckpoint replicate_checkpoint = 5; // if the wal is replicated from remote cluster, the checkpoint is not null,
+    // It's used to recover the replication state for remote cluster.
+}
+
+// ReplicateConfigurationMeta is the replicate configuration of the wal.
+message ReplicateConfigurationMeta {
+    common.ReplicateConfiguration replicate_configuration = 1;
+    AckedResult acked_result = 2; // a acked helper to help managing the consuming of PutReplicateConfigMessageV2 message at coordinator.
 }
 
 message ReplicatePChannelMeta {
     string source_channel_name          = 1;
     string target_channel_name          = 2;
     common.MilvusCluster target_cluster = 3;
+    common.ReplicateCheckpoint initialized_checkpoint = 4;
 }

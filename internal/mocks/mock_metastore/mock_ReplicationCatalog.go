@@ -5,8 +5,6 @@ package mock_metastore
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -23,64 +21,6 @@ type MockReplicationCatalog_Expecter struct {
 
 func (_m *MockReplicationCatalog) EXPECT() *MockReplicationCatalog_Expecter {
 	return &MockReplicationCatalog_Expecter{mock: &_m.Mock}
-}
-
-// GetReplicateConfiguration provides a mock function with given fields: ctx
-func (_m *MockReplicationCatalog) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetReplicateConfiguration")
-	}
-
-	var r0 *commonpb.ReplicateConfiguration
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockReplicationCatalog_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
-type MockReplicationCatalog_GetReplicateConfiguration_Call struct {
-	*mock.Call
-}
-
-// GetReplicateConfiguration is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockReplicationCatalog_Expecter) GetReplicateConfiguration(ctx interface{}) *MockReplicationCatalog_GetReplicateConfiguration_Call {
-	return &MockReplicationCatalog_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", ctx)}
-}
-
-func (_c *MockReplicationCatalog_GetReplicateConfiguration_Call) Run(run func(ctx context.Context)) *MockReplicationCatalog_GetReplicateConfiguration_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockReplicationCatalog_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockReplicationCatalog_GetReplicateConfiguration_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockReplicationCatalog_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockReplicationCatalog_GetReplicateConfiguration_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // ListReplicatePChannels provides a mock function with given fields: ctx
@@ -185,100 +125,6 @@ func (_c *MockReplicationCatalog_RemoveReplicatePChannel_Call) Return(_a0 error)
 }
 
 func (_c *MockReplicationCatalog_RemoveReplicatePChannel_Call) RunAndReturn(run func(context.Context, string, string) error) *MockReplicationCatalog_RemoveReplicatePChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockReplicationCatalog) SaveReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
-	ret := _m.Called(ctx, config)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveReplicateConfiguration")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
-		r0 = rf(ctx, config)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockReplicationCatalog_SaveReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveReplicateConfiguration'
-type MockReplicationCatalog_SaveReplicateConfiguration_Call struct {
-	*mock.Call
-}
-
-// SaveReplicateConfiguration is a helper method to define mock.On call
-//   - ctx context.Context
-//   - config *commonpb.ReplicateConfiguration
-func (_e *MockReplicationCatalog_Expecter) SaveReplicateConfiguration(ctx interface{}, config interface{}) *MockReplicationCatalog_SaveReplicateConfiguration_Call {
-	return &MockReplicationCatalog_SaveReplicateConfiguration_Call{Call: _e.mock.On("SaveReplicateConfiguration", ctx, config)}
-}
-
-func (_c *MockReplicationCatalog_SaveReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockReplicationCatalog_SaveReplicateConfiguration_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
-	})
-	return _c
-}
-
-func (_c *MockReplicationCatalog_SaveReplicateConfiguration_Call) Return(_a0 error) *MockReplicationCatalog_SaveReplicateConfiguration_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockReplicationCatalog_SaveReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockReplicationCatalog_SaveReplicateConfiguration_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveReplicatePChannels provides a mock function with given fields: ctx, infos
-func (_m *MockReplicationCatalog) SaveReplicatePChannels(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta) error {
-	ret := _m.Called(ctx, infos)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveReplicatePChannels")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*streamingpb.ReplicatePChannelMeta) error); ok {
-		r0 = rf(ctx, infos)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockReplicationCatalog_SaveReplicatePChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveReplicatePChannels'
-type MockReplicationCatalog_SaveReplicatePChannels_Call struct {
-	*mock.Call
-}
-
-// SaveReplicatePChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - infos []*streamingpb.ReplicatePChannelMeta
-func (_e *MockReplicationCatalog_Expecter) SaveReplicatePChannels(ctx interface{}, infos interface{}) *MockReplicationCatalog_SaveReplicatePChannels_Call {
-	return &MockReplicationCatalog_SaveReplicatePChannels_Call{Call: _e.mock.On("SaveReplicatePChannels", ctx, infos)}
-}
-
-func (_c *MockReplicationCatalog_SaveReplicatePChannels_Call) Run(run func(ctx context.Context, infos []*streamingpb.ReplicatePChannelMeta)) *MockReplicationCatalog_SaveReplicatePChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]*streamingpb.ReplicatePChannelMeta))
-	})
-	return _c
-}
-
-func (_c *MockReplicationCatalog_SaveReplicatePChannels_Call) Return(_a0 error) *MockReplicationCatalog_SaveReplicatePChannels_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockReplicationCatalog_SaveReplicatePChannels_Call) RunAndReturn(run func(context.Context, []*streamingpb.ReplicatePChannelMeta) error) *MockReplicationCatalog_SaveReplicatePChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }

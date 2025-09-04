@@ -9,12 +9,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -109,17 +109,18 @@ func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	if err != nil {
 		return err
 	}
-	_, err = service.UpdateReplicateConfiguration(ctx, &milvuspb.UpdateReplicateConfigurationRequest{
-		ReplicateConfiguration: config,
+	_, err = service.UpdateReplicateConfiguration(ctx, &streamingpb.UpdateReplicateConfigurationRequest{
+		Configuration: config,
 	})
 	return err
 }
 
-func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("assignment service client is closing")
 	}
 	defer c.lifetime.Done()
+
 	return c.watcher.GetLatestReplicateConfiguration(ctx)
 }
 

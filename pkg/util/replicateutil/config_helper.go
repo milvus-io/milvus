@@ -19,106 +19,196 @@ package replicateutil
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type (
-	targetToSourceChannelMap = map[string]string // targetChannel -> sourceChannel
-	sourceToTargetChannelMap = map[string]string // sourceChannel -> targetChannel
+type Role int
+
+const (
+	RolePrimary Role = iota
+	RoleSecondary
 )
 
+var ErrWrongConfiguration = errors.New("wrong replicate configuration")
+
+func (r Role) String() string {
+	switch r {
+	case RolePrimary:
+		return "primary"
+	case RoleSecondary:
+		return "secondary"
+	default:
+		panic(r)
+	}
+}
+
+// MustNewConfigHelper creates a new graph from the replicate configuration.
+func MustNewConfigHelper(currentClusterID string, cfg *commonpb.ReplicateConfiguration) *ConfigHelper {
+	g, err := NewConfigHelper(currentClusterID, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return g
+}
+
+// NewConfigHelper creates a new graph from the replicate configuration.
+func NewConfigHelper(currentClusterID string, cfg *commonpb.ReplicateConfiguration) (*ConfigHelper, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	h := &ConfigHelper{}
+	vs := make(map[string]*MilvusCluster)
+	for _, cluster := range cfg.GetClusters() {
+		vs[cluster.GetClusterId()] = &MilvusCluster{
+			h:             h,
+			MilvusCluster: cluster,
+			idxMap:        make(map[string]int),
+			role:          RolePrimary,
+			source:        "",
+			targets:       typeutil.NewSet[string](),
+		}
+		for i, pchannel := range cluster.Pchannels {
+			vs[cluster.GetClusterId()].idxMap[pchannel] = i
+		}
+	}
+	for _, topology := range cfg.GetCrossClusterTopology() {
+		if _, ok := vs[topology.SourceClusterId]; !ok {
+			return nil, ErrWrongConfiguration
+		}
+		if _, ok := vs[topology.TargetClusterId]; !ok {
+			return nil, ErrWrongConfiguration
+		}
+		if vs[topology.SourceClusterId].targets.Contain(topology.TargetClusterId) {
+			return nil, ErrWrongConfiguration
+		}
+		if vs[topology.TargetClusterId].source != "" {
+			return nil, ErrWrongConfiguration
+		}
+		vs[topology.TargetClusterId].source = topology.SourceClusterId
+		vs[topology.TargetClusterId].role = RoleSecondary
+		vs[topology.SourceClusterId].targets.Insert(topology.TargetClusterId)
+	}
+	primaryCount := 0
+	for _, vertice := range vs {
+		if vertice.role == RolePrimary {
+			primaryCount++
+		}
+	}
+	if primaryCount != 1 {
+		return nil, errors.Wrap(ErrWrongConfiguration, "primary count is not 1")
+	}
+	if _, ok := vs[currentClusterID]; !ok {
+		return nil, errors.Wrap(ErrWrongConfiguration, fmt.Sprintf("current cluster %s not found", currentClusterID))
+	}
+	pchannels := len(vs[currentClusterID].Pchannels)
+	for _, vertice := range vs {
+		if len(vertice.Pchannels) != pchannels {
+			return nil, errors.Wrap(ErrWrongConfiguration, fmt.Sprintf("pchannel count is not equal for cluster %s", vertice.GetClusterId()))
+		}
+	}
+	h.currentClusterID = currentClusterID
+	h.cfg = cfg
+	h.vs = vs
+	return h, nil
+}
+
+// ConfigHelper describes the replicate topology.
 type ConfigHelper struct {
-	sourceCluster  *commonpb.MilvusCluster
-	targetClusters []*commonpb.MilvusCluster
-	clusterMap     map[string]*commonpb.MilvusCluster
-
-	sourceToTargetChannelMap map[string]sourceToTargetChannelMap // targetClusterID -> sourceToTargetChannelMap
-	targetToSourceChannelMap targetToSourceChannelMap
-
-	config *commonpb.ReplicateConfiguration
+	currentClusterID string
+	cfg              *commonpb.ReplicateConfiguration
+	vs               map[string]*MilvusCluster
 }
 
-func NewConfigHelper(config *commonpb.ReplicateConfiguration) *ConfigHelper {
-	if config == nil {
-		return nil
-	}
-	helper := &ConfigHelper{
-		config: config,
-	}
-	helper.build(config)
-	return helper
+// GetReplicateConfiguration returns the replicate configuration of the graph.
+func (g *ConfigHelper) GetReplicateConfiguration() *commonpb.ReplicateConfiguration {
+	return g.cfg
 }
 
-func (h *ConfigHelper) build(config *commonpb.ReplicateConfiguration) {
-	h.clusterMap = make(map[string]*commonpb.MilvusCluster, len(config.GetClusters()))
-	for _, cluster := range config.GetClusters() {
-		h.clusterMap[cluster.GetClusterId()] = cluster
-	}
-
-	h.targetClusters = make([]*commonpb.MilvusCluster, 0, len(config.GetClusters()))
-	for _, topology := range config.GetCrossClusterTopology() {
-		if h.sourceCluster == nil {
-			sourceClusterID := topology.GetSourceClusterId()
-			h.sourceCluster = h.clusterMap[sourceClusterID]
-		}
-		targetClusterID := topology.GetTargetClusterId()
-		h.targetClusters = append(h.targetClusters, h.clusterMap[targetClusterID])
-	}
-
-	sourcePChannels := h.sourceCluster.GetPchannels()
-	h.sourceToTargetChannelMap = make(map[string]sourceToTargetChannelMap)
-	for _, targetCluster := range h.targetClusters {
-		sourceToTarget := make(sourceToTargetChannelMap)
-		for i, tc := range targetCluster.GetPchannels() {
-			sourceToTarget[sourcePChannels[i]] = tc
-		}
-		h.sourceToTargetChannelMap[targetCluster.GetClusterId()] = sourceToTarget
-	}
-
-	h.targetToSourceChannelMap = make(targetToSourceChannelMap)
-	for _, targetCluster := range h.targetClusters {
-		for i, tc := range targetCluster.GetPchannels() {
-			h.targetToSourceChannelMap[tc] = h.sourceCluster.GetPchannels()[i]
-		}
-	}
+// GetCurrentCluster returns the current cluster id.
+func (g *ConfigHelper) GetCurrentCluster() *MilvusCluster {
+	return g.vs[g.currentClusterID]
 }
 
-func (h *ConfigHelper) GetCluster(clusterID string) *commonpb.MilvusCluster {
-	cluster, ok := h.clusterMap[clusterID]
+// GetCluster returns the cluster from the graph.
+func (g *ConfigHelper) GetCluster(clusterID string) *MilvusCluster {
+	return g.vs[clusterID]
+}
+
+// MustGetCluster returns the cluster from the graph.
+func (g *ConfigHelper) MustGetCluster(clusterID string) *MilvusCluster {
+	vertice, ok := g.vs[clusterID]
 	if !ok {
 		panic(fmt.Sprintf("cluster %s not found", clusterID))
 	}
-	return cluster
+	return vertice
 }
 
-func (h *ConfigHelper) GetSourceCluster() *commonpb.MilvusCluster {
-	return h.sourceCluster
+// MilvusCluster describes the replicate topology.
+type MilvusCluster struct {
+	*commonpb.MilvusCluster
+	h       *ConfigHelper
+	role    Role
+	idxMap  map[string]int
+	source  string
+	targets typeutil.Set[string]
 }
 
-func (h *ConfigHelper) GetTargetClusters() []*commonpb.MilvusCluster {
-	return h.targetClusters
+// Role returns the role of the milvus cluster.
+func (v *MilvusCluster) Role() Role {
+	return v.role
 }
 
-func (h *ConfigHelper) GetSourceChannel(targetChannelName string) string {
-	sourceChannel, ok := h.targetToSourceChannelMap[targetChannelName]
-	if !ok {
-		panic(fmt.Sprintf("source channel not found for target channel %s", targetChannelName))
+// SourceCluster returns the source cluster of the milvus.
+// return nil if the milvus cluster is a primary node.
+func (v *MilvusCluster) SourceCluster() *MilvusCluster {
+	if v.role == RolePrimary {
+		return nil
 	}
-	return sourceChannel
+	return v.h.vs[v.source]
 }
 
-func (h *ConfigHelper) GetTargetChannel(sourceChannelName string, targetClusterID string) string {
-	sourceToTarget, ok := h.sourceToTargetChannelMap[targetClusterID]
-	if !ok {
-		panic(fmt.Sprintf("target cluster %s not found", targetClusterID))
+// TargetClusters returns the target clusters of the milvus.
+func (v *MilvusCluster) TargetClusters() []*MilvusCluster {
+	targets := make([]*MilvusCluster, 0, len(v.targets))
+	for target := range v.targets {
+		targets = append(targets, v.h.vs[target])
 	}
-	targetChannel, ok := sourceToTarget[sourceChannelName]
-	if !ok {
-		panic(fmt.Sprintf("target channel not found for source channel %s, target cluster %s", sourceChannelName, targetClusterID))
-	}
-	return targetChannel
+	return targets
 }
 
-func (h *ConfigHelper) GetFullReplicateConfiguration() *commonpb.ReplicateConfiguration {
-	return h.config
+// TargetCluster returns the target cluster of the milvus.
+func (v *MilvusCluster) TargetCluster(targetClusterID string) *MilvusCluster {
+	if !v.targets.Contain(targetClusterID) {
+		return nil
+	}
+	return v.h.vs[targetClusterID]
+}
+
+// MustGetSourceChannel returns the source channel by the current cluster channel.
+func (v *MilvusCluster) MustGetSourceChannel(pchannel string) string {
+	source := v.SourceCluster()
+	if source == nil {
+		panic(fmt.Sprintf("source cluster not found for milvus cluster %s", v.GetClusterId()))
+	}
+	idx, ok := v.idxMap[pchannel]
+	if !ok {
+		panic(fmt.Sprintf("channel of current cluster not found for pchannel: %s", pchannel))
+	}
+	return source.Pchannels[idx]
+}
+
+// GetTargetChannel returns the target channel of the current cluster.
+func (v *MilvusCluster) GetTargetChannel(currentClusterPChannel string, targetClusterID string) (string, error) {
+	if !v.targets.Contain(targetClusterID) {
+		return "", errors.Errorf("target cluster %s not found, current cluster is %s", targetClusterID, v.GetClusterId())
+	}
+	idx, ok := v.idxMap[currentClusterPChannel]
+	if !ok {
+		return "", errors.Errorf("current cluster pchannel %s not found in the graph", currentClusterPChannel)
+	}
+	target := v.h.vs[targetClusterID]
+	return target.Pchannels[idx], nil
 }

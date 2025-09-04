@@ -5,9 +5,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -27,8 +27,8 @@ type (
 // Balancer is a local component, it should promise all channel can be assigned, and reach the final consistency.
 // Balancer should be thread safe.
 type Balancer interface {
-	// GetPChannels returns all pchannels.
-	GetPChannels() []string
+	// GetLatestChannelAssignment returns the latest channel assignment.
+	GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error)
 
 	// GetAllStreamingNodes fetches all streaming node info.
 	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error)
@@ -56,7 +56,7 @@ type Balancer interface {
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
 
 	// UpdateReplicateConfiguration updates the replicate configuration.
-	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration)
+	UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error
 
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error

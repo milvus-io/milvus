@@ -6457,7 +6457,7 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 		return merr.Status(err), nil
 	}
 	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
-	err := streaming.WAL().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
 	if err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return merr.Status(err), nil
@@ -6485,20 +6485,20 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 			logger.Info("GetReplicateInfo success", zap.Any("checkpoints", resp.GetCheckpoints()))
 		}
 	}()
-	config, err := streaming.WAL().GetReplicateConfiguration(ctx)
+
+	configHelper, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	configHelper := replicateutil.NewConfigHelper(config)
-	currentCluster := configHelper.GetCluster(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	currentCluster := configHelper.GetCurrentCluster()
 
 	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
 	for _, pchannel := range currentCluster.GetPchannels() {
-		checkpoint, err := streaming.WAL().GetReplicateCheckpoint(ctx, pchannel)
+		checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, pchannel)
 		if err != nil {
 			return nil, err
 		}
-		checkpoints = append(checkpoints, checkpoint)
+		checkpoints = append(checkpoints, checkpoint.IntoProto())
 	}
 	return &milvuspb.GetReplicateInfoResponse{
 		Checkpoints: checkpoints,

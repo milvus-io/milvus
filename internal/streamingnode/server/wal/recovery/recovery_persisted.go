@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -43,7 +44,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 			return errors.Wrap(err, "failed to initialize checkpoint")
 		}
 	}
-	r.checkpoint = newWALCheckpointFromProto(cpProto)
+	r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	r.Logger().Info("recover checkpoint done",
 		zap.String("checkpoint", r.checkpoint.MessageID.String()),
 		zap.Uint64("timetick", r.checkpoint.TimeTick),

@@ -7,8 +7,6 @@ import (
 
 	grpc "google.golang.org/grpc"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -101,7 +99,7 @@ func (_c *MockStreamingCoordAssignmentServiceClient_AssignmentDiscover_Call) Run
 }
 
 // UpdateReplicateConfiguration provides a mock function with given fields: ctx, in, opts
-func (_m *MockStreamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
+func (_m *MockStreamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *streamingpb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -117,10 +115,10 @@ func (_m *MockStreamingCoordAssignmentServiceClient) UpdateReplicateConfiguratio
 
 	var r0 *streamingpb.UpdateReplicateConfigurationResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) *streamingpb.UpdateReplicateConfigurationResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) *streamingpb.UpdateReplicateConfigurationResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
@@ -128,7 +126,7 @@ func (_m *MockStreamingCoordAssignmentServiceClient) UpdateReplicateConfiguratio
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -144,14 +142,14 @@ type MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *milvuspb.UpdateReplicateConfigurationRequest
+//   - in *streamingpb.UpdateReplicateConfigurationRequest
 //   - opts ...grpc.CallOption
 func (_e *MockStreamingCoordAssignmentServiceClient_Expecter) UpdateReplicateConfiguration(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call {
 	return &MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption)) *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call {
+func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, in *streamingpb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption)) *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -159,7 +157,7 @@ func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*milvuspb.UpdateReplicateConfigurationRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*streamingpb.UpdateReplicateConfigurationRequest), variadicArgs...)
 	})
 	return _c
 }
@@ -169,7 +167,7 @@ func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration
 	return _c
 }
 
-func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error)) *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call {
+func (_c *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *streamingpb.UpdateReplicateConfigurationRequest, ...grpc.CallOption) (*streamingpb.UpdateReplicateConfigurationResponse, error)) *MockStreamingCoordAssignmentServiceClient_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
