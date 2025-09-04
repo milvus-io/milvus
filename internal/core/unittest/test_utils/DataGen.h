@@ -1616,7 +1616,8 @@ gen_field_meta(int64_t collection_id = 1,
                int64_t field_id = 101,
                DataType data_type = DataType::NONE,
                DataType element_type = DataType::NONE,
-               bool nullable = false) {
+               bool nullable = false,
+               int64_t max_length = 64) {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -1628,6 +1629,12 @@ gen_field_meta(int64_t collection_id = 1,
     meta.field_schema.set_element_type(
         static_cast<proto::schema::DataType>(element_type));
     meta.field_schema.set_nullable(nullable);
+    meta.field_schema.set_fieldid(field_id);
+    if (IsStringDataType(data_type)) {
+        auto type_params = meta.field_schema.add_type_params();
+        type_params->set_key(MAX_LENGTH);
+        type_params->set_value(std::to_string(max_length));
+    }
     return meta;
 }
 

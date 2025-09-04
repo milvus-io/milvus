@@ -100,19 +100,26 @@ IndexFactory::IndexLoadResource(
     DataType field_type,
     DataType element_type,
     IndexVersion index_version,
-    float index_size,
+    uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
                                     index_version,
-                                    index_size,
+                                    index_size_in_bytes,
                                     index_params,
-                                    mmap_enable);
+                                    mmap_enable,
+                                    num_rows,
+                                    dim);
     } else {
-        return ScalarIndexLoadResource(
-            field_type, index_version, index_size, index_params, mmap_enable);
+        return ScalarIndexLoadResource(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable);
     }
 }
 
@@ -121,9 +128,11 @@ IndexFactory::VecIndexLoadResource(
     DataType field_type,
     DataType element_type,
     IndexVersion index_version,
-    float index_size,
+    uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -138,9 +147,7 @@ IndexFactory::VecIndexLoadResource(
     }
 
     knowhere::expected<knowhere::Resource> resource;
-    float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
-    float download_buffer_size_gb =
-        DEFAULT_FIELD_MAX_MEMORY_LIMIT * 1.0 / 1024.0 / 1024.0 / 1024.0;
+    uint64_t download_buffer_size_in_bytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT;
 
     bool has_raw_data = false;
     switch (field_type) {
@@ -148,7 +155,9 @@ IndexFactory::VecIndexLoadResource(
             resource = knowhere::IndexStaticFaced<
                 knowhere::bin1>::EstimateLoadResource(index_type,
                                                       index_version,
-                                                      index_size_gb,
+                                                      index_size_in_bytes,
+                                                      num_rows,
+                                                      dim,
                                                       config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::bin1>::HasRawData(
@@ -158,7 +167,9 @@ IndexFactory::VecIndexLoadResource(
             resource = knowhere::IndexStaticFaced<
                 knowhere::fp32>::EstimateLoadResource(index_type,
                                                       index_version,
-                                                      index_size_gb,
+                                                      index_size_in_bytes,
+                                                      num_rows,
+                                                      dim,
                                                       config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
@@ -168,7 +179,9 @@ IndexFactory::VecIndexLoadResource(
             resource = knowhere::IndexStaticFaced<
                 knowhere::fp16>::EstimateLoadResource(index_type,
                                                       index_version,
-                                                      index_size_gb,
+                                                      index_size_in_bytes,
+                                                      num_rows,
+                                                      dim,
                                                       config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::fp16>::HasRawData(
@@ -178,18 +191,22 @@ IndexFactory::VecIndexLoadResource(
             resource = knowhere::IndexStaticFaced<
                 knowhere::bf16>::EstimateLoadResource(index_type,
                                                       index_version,
-                                                      index_size_gb,
+                                                      index_size_in_bytes,
+                                                      num_rows,
+                                                      dim,
                                                       config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::bf16>::HasRawData(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
-            resource = knowhere::IndexStaticFaced<
-                knowhere::sparse_u32_f32>::EstimateLoadResource(index_type,
-                                                                index_version,
-                                                                index_size_gb,
-                                                                config);
+            resource = knowhere::IndexStaticFaced<knowhere::sparse_u32_f32>::
+                EstimateLoadResource(index_type,
+                                     index_version,
+                                     index_size_in_bytes,
+                                     num_rows,
+                                     dim,
+                                     config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
                     index_type, index_version, config);
@@ -198,7 +215,9 @@ IndexFactory::VecIndexLoadResource(
             resource = knowhere::IndexStaticFaced<
                 knowhere::int8>::EstimateLoadResource(index_type,
                                                       index_version,
-                                                      index_size_gb,
+                                                      index_size_in_bytes,
+                                                      num_rows,
+                                                      dim,
                                                       config);
             has_raw_data =
                 knowhere::IndexStaticFaced<knowhere::int8>::HasRawData(
@@ -207,11 +226,13 @@ IndexFactory::VecIndexLoadResource(
         case milvus::DataType::VECTOR_ARRAY: {
             switch (element_type) {
                 case milvus::DataType::VECTOR_FLOAT:
-                    resource = knowhere::IndexStaticFaced<
-                        knowhere::fp32>::EstimateLoadResource(index_type,
-                                                              index_version,
-                                                              index_size_gb,
-                                                              config);
+                    resource = knowhere::IndexStaticFaced<knowhere::fp32>::
+                        EstimateLoadResource(index_type,
+                                             index_version,
+                                             index_size_in_bytes,
+                                             num_rows,
+                                             dim,
+                                             config);
                     has_raw_data =
                         knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
                             index_type, index_version, config);
@@ -240,8 +261,8 @@ IndexFactory::VecIndexLoadResource(
     request.final_memory_cost = resource.value().memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
         request.max_disk_cost = resource.value().diskCost;
-        request.max_memory_cost =
-            std::max(resource.value().memoryCost, download_buffer_size_gb);
+        request.max_memory_cost = std::max(resource.value().memoryCost,
+                                           download_buffer_size_in_bytes);
     } else {
         request.max_disk_cost = 0;
         request.max_memory_cost = 2 * resource.value().memoryCost;
@@ -253,7 +274,7 @@ LoadResourceRequest
 IndexFactory::ScalarIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
-    float index_size,
+    uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
@@ -263,57 +284,56 @@ IndexFactory::ScalarIndexLoadResource(
     std::string index_type = index_params.at("index_type");
 
     knowhere::expected<knowhere::Resource> resource;
-    float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
 
     LoadResourceRequest request{};
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_gb;
+        request.final_memory_cost = index_size_in_bytes;
         request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_gb;
+        request.max_memory_cost = 2 * index_size_in_bytes;
         request.max_disk_cost = 0;
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
             request.final_memory_cost = 0;
-            request.final_disk_cost = index_size_gb;
-            request.max_memory_cost = index_size_gb;
-            request.max_disk_cost = index_size_gb;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;
         } else {
-            request.final_memory_cost = index_size_gb;
+            request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_gb;
+            request.max_memory_cost = 2 * index_size_in_bytes;
             request.max_disk_cost = 0;
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE) {
         request.final_memory_cost = 0;
-        request.final_disk_cost = index_size_gb;
-        request.max_memory_cost = index_size_gb;
-        request.max_disk_cost = index_size_gb;
+        request.final_disk_cost = index_size_in_bytes;
+        request.max_memory_cost = index_size_in_bytes;
+        request.max_disk_cost = index_size_in_bytes;
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
             request.final_memory_cost = 0;
-            request.final_disk_cost = index_size_gb;
-            request.max_memory_cost = index_size_gb;
-            request.max_disk_cost = index_size_gb;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;
         } else {
-            request.final_memory_cost = index_size_gb;
+            request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_gb;
+            request.max_memory_cost = 2 * index_size_in_bytes;
             request.max_disk_cost = 0;
         }
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
-        request.final_memory_cost = index_size_gb;
-        request.final_disk_cost = index_size_gb;
-        request.max_memory_cost = 2 * index_size_gb;
-        request.max_disk_cost = index_size_gb;
+        request.final_memory_cost = index_size_in_bytes;
+        request.final_disk_cost = index_size_in_bytes;
+        request.max_memory_cost = 2 * index_size_in_bytes;
+        request.max_disk_cost = index_size_in_bytes;
         request.has_raw_data = false;
     } else {
         LOG_ERROR(
