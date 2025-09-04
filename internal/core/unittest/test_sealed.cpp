@@ -2336,7 +2336,7 @@ TEST(Sealed, SearchVectorArray) {
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
     int64_t index_id = 5000;
-    int64_t dim = 32;
+    int64_t dim = 8;
 
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::MAX_SIM;
@@ -2360,7 +2360,7 @@ TEST(Sealed, SearchVectorArray) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
     int64_t dataset_size = 1000;
-    auto emb_list_len = 10;
+    auto emb_list_len = 3;
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
     // create field data
@@ -2492,57 +2492,6 @@ TEST(Sealed, SearchVectorArray) {
         auto sr_parsed = SearchResultToJson(*sr);
         std::cout << sr_parsed.dump(1) << std::endl;
     }
-
-    // // brute force search with iterative filter
-    // {
-    //     auto [min, max] =
-    //         std::minmax_element(int_values.begin(), int_values.end());
-    //     auto min_val = *min;
-    //     auto max_val = *max;
-
-    //     auto raw_plan = fmt::format(R"(vector_anns: <
-    //                                 field_id: 101
-    //                                 predicates: <
-    //                                   binary_range_expr: <
-    //                                     column_info: <
-    //                                       field_id: 100
-    //                                       data_type: Int64
-    //                                     >
-    //                                     lower_inclusive: true
-    //                                     upper_inclusive: true
-    //                                     lower_value: <
-    //                                       int64_val: {}
-    //                                     >
-    //                                     upper_value: <
-    //                                       int64_val: {}
-    //                                     >
-    //                                   >
-    //                                 >
-    //                                 query_info: <
-    //                                   topk: 5
-    //                                   round_decimal: 3
-    //                                   metric_type: "MAX_SIM"
-    //                                   hints: "iterative_filter"
-    //                                   search_params: "{{\"nprobe\": 10}}"
-    //                                 >
-    //                                 placeholder_tag: "$0"
-    //                               >)",
-    //                                 min_val,
-    //                                 max_val);
-    //     auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
-    //     auto plan =
-    //         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-    //     auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-    //         vec_num, dim, query_vec.data(), query_vec_lims);
-    //     auto ph_group =
-    //         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    //     Timestamp timestamp = 1000000;
-    //     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
-
-    //     auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
-    //     auto sr_parsed = SearchResultToJson(*sr);
-    //     std::cout << sr_parsed.dump(1) << std::endl;
-    // }
 
     // search with index
     {
