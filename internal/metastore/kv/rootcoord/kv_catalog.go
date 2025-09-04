@@ -725,6 +725,15 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			}
 			saves[k] = string(v)
 		}
+		for _, function := range newColl.Functions {
+			k := BuildFunctionKey(newColl.CollectionID, function.ID)
+			functionInfo := model.MarshalFunctionModel(function)
+			v, err := proto.Marshal(functionInfo)
+			if err != nil {
+				return err
+			}
+			saves[k] = string(v)
+		}
 	}
 
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()

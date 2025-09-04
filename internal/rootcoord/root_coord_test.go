@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1263,6 +1264,102 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AddCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_DropCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AlterCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAlterFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAlterFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 }
 

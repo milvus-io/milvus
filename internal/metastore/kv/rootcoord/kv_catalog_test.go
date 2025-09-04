@@ -1117,6 +1117,29 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 	})
+
+	t.Run("modify function", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := kv.NewMockSnapshotKV()
+		snapshot.MultiSaveFunc = func(ctx context.Context, saves map[string]string, ts typeutil.Timestamp) error {
+			assert.LessOrEqual(t, len(saves), 64)
+			return nil
+		}
+
+		kc := NewCatalog(nil, snapshot).(*Catalog)
+		ctx := context.Background()
+
+		functions := []*model.Function{
+			{
+				Name: "test_function",
+			},
+		}
+
+		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
+		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Functions: functions}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCatalog_AlterCollectionDB(t *testing.T) {
