@@ -575,6 +575,88 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 5. clean up
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_multi_partitions_multi_results(self):
+        """
+        target: test query on multi partitions and get multi results
+        method: 1.create two partitions and insert entities into them
+                2.query on two partitions and get multi results
+        expected: query results from two partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and two partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data into two partitions
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on two partitions to get multi results
+        term_expr = f'{default_primary_key_field_name} in [{half - 1}, {half}]'
+        rows = rows_partition1 + rows_partition2
+        self.query(client, collection_name, filter=term_expr, 
+                        partition_names=[partition_name1, partition_name2],
+                        check_task=CheckTasks.check_query_results,
+                        check_items={"exp_res": rows[half - 1:half + 1], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_multi_partitions_single_results(self):
+        """
+        target: test query on multi partitions and get multi results
+        method: 1.create two partitions and insert entities into them
+                2.query on two partitions and query single results
+        expected: query from two partitions and get single result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and two partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data into two partitions
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on two partitions to get multi results
+        term_expr = f'{default_primary_key_field_name} in [{half}]'
+        rows = rows_partition1 + rows_partition2
+        self.query(client, collection_name, filter=term_expr, 
+                        partition_names=[partition_name1, partition_name2],
+                        check_task=CheckTasks.check_query_results,
+                        check_items={"exp_res": rows[half:half + 1], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_query_empty_partition(self):
         """
@@ -3375,6 +3457,259 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         assert actual_res == mmap_res
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_mmap_query_string_expr_with_prefixes(self):
+        """
+        target: test query with prefix string expression when mmap enabled
+        method: specify string is primary field, use prefix string expr with mmap
+        expected: verify query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query before enabling mmap
+        normal_res = self.query(client, collection_name, filter=perfix_expr)[0]
+        # 5. enable mmap and reload
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.load_collection(client, collection_name)
+        # 6. query after enabling mmap
+        mmap_res = self.query(client, collection_name, filter=perfix_expr)[0]
+        assert normal_res == mmap_res
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_growing", [True, False])
+    def test_milvus_client_query_to_get_latest_entity_with_dup_ids(self, with_growing):
+        """
+        target: test query to get latest entity with duplicate primary keys
+        method: 1.create collection and insert dup primary key = 0
+                2.query with expr=dup_id
+        expected: return the latest entity; verify the result is same as dedup entities
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=16)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with duplicate primary keys
+        nb = 50
+        rounds = 10
+        for i in range(rounds):
+            # Generate data for this round
+            rows = []
+            for j in range(nb):
+                rows.append({
+                    ct.default_int64_field_name: i,  # Same primary key for all entities in this round
+                    ct.default_float_vec_field_name: [random.random() for _ in range(16)],
+                    ct.default_float_field_name: float(j)
+                })
+            self.insert(client, collection_name, rows)
+            # Re-insert the last piece of data to refresh the timestamp
+            last_piece = [{
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: [random.random() for _ in range(16)],
+                ct.default_float_field_name: float(nb - 1)  # This should be the latest value
+            }]
+            self.insert(client, collection_name, last_piece)
+        # 3. flush if not testing growing segments
+        if not with_growing:
+            self.flush(client, collection_name)
+        # 4. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 5. verify the result returns the latest entity if there are duplicate primary keys
+        expr = f'{ct.default_int64_field_name} == 0'
+        res = self.query(client, collection_name, filter=expr, 
+                        output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == 1, f"Expected 1 result for duplicate primary key 0, got {len(res)}"
+        assert res[0][ct.default_float_field_name] == float(nb - 1), \
+            f"Expected latest float value {float(nb - 1)}, got {res[0][ct.default_float_field_name]}"
+        # 6. verify the result is same as dedup entities (should return one entity per round)
+        expr = f'{ct.default_int64_field_name} >= 0'
+        res = self.query(client, collection_name, filter=expr, 
+                        output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == rounds
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
+    def test_milvus_client_query_output_all_vector_type(self, vector_data_type):
+        """
+        target: test query output different vector type
+        method: create index and specify vec field as output field
+        expected: return primary field and vec field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with specified vector type
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, vector_data_type, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with vector field as output
+        expected_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        res = self.query(client, collection_name, filter=default_term_expr, 
+                        output_fields=[ct.default_float_vec_field_name])[0]
+        # 5. verify that query returns both primary key and vector field
+        assert set(res[0].keys()) == set(expected_fields)
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_growing_segment_data(self):
+        """
+        target: test query data in the growing segment
+        method: 1. create collection
+                2. load collection
+                3. insert without flush
+                4. query
+        expected: Data can be queried
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        # 2. create index and load collection (before inserting data)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. insert data without flush (data will be in growing segment)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        time.sleep(1)
+        # Prepare expected result - find the entity with primary key = 1
+        exp_res = []
+        for row in rows:
+            if row[default_primary_key_field_name] == 1:
+                exp_res.append(row)
+                break
+        # Query for entity with primary key = 1
+        self.query(client, collection_name, filter=f'{default_primary_key_field_name} in [1]',
+                        check_task=CheckTasks.check_query_results,
+                        check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_query_using_all_types_of_default_value(self, auto_id):
+        """
+        target: test create collection with default_value
+        method: create a schema with all fields using default value and query
+        expected: query results are as expected
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add various scalar fields with default values
+        schema.add_field(ct.default_int8_field_name, DataType.INT8, default_value=np.int8(8))
+        schema.add_field(ct.default_int16_field_name, DataType.INT16, default_value=np.int16(16))
+        schema.add_field(ct.default_int32_field_name, DataType.INT32, default_value=np.int32(32))
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, default_value=np.int64(64))
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, default_value=np.float32(3.14))
+        schema.add_field(ct.default_double_field_name, DataType.DOUBLE, default_value=np.double(3.1415))
+        schema.add_field(ct.default_bool_field_name, DataType.BOOL, default_value=False)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, default_value="abc")
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # Insert data - only provide required fields (pk and vector), other fields will use default values
+        rows = []
+        for i in range(default_nb):
+            row = {}
+            if not auto_id:
+                row[default_primary_key_field_name] = i
+            row[ct.default_float_vec_field_name] = [random.random() for _ in range(default_dim)]
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # Query with specific primary keys and verify default values
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["*"])[0]
+        # Verify all default values are correctly applied
+        first_result = res[0]
+        assert first_result[ct.default_int8_field_name] == 8, f"Expected int8 default value 8, got {first_result[ct.default_int8_field_name]}"
+        assert first_result[ct.default_int16_field_name] == 16, f"Expected int16 default value 16, got {first_result[ct.default_int16_field_name]}"
+        assert first_result[ct.default_int32_field_name] == 32, f"Expected int32 default value 32, got {first_result[ct.default_int32_field_name]}"
+        assert first_result[ct.default_int64_field_name] == 64, f"Expected int64 default value 64, got {first_result[ct.default_int64_field_name]}"
+        assert first_result[ct.default_float_field_name] == np.float32(3.14), f"Expected float default value 3.14, got {first_result[ct.default_float_field_name]}"
+        assert first_result[ct.default_double_field_name] == 3.1415, f"Expected double default value 3.1415, got {first_result[ct.default_double_field_name]}"
+        assert first_result[ct.default_bool_field_name] is False, f"Expected bool default value False, got {first_result[ct.default_bool_field_name]}"
+        assert first_result[ct.default_string_field_name] == "abc", f"Expected string default value 'abc', got {first_result[ct.default_string_field_name]}"
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_query_multi_logical_exprs(self):
+        """
+        target: test the scenario which query with many logical expressions
+        method: 1. create collection
+                3. query the expr that like: int64 == 0 || int64 == 1 ........
+        expected: run successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with multi logical expressions
+        # Create expression like: int64 == 0 || int64 == 1 || int64 == 2 ... || int64 == 59
+        multi_exprs = " || ".join(f'{default_primary_key_field_name} == {i}' for i in range(60))
+        res = self.query(client, collection_name, filter=multi_exprs, 
+                        check_task=CheckTasks.check_query_results,
+                        check_items={"exp_res": rows[:60], "pk_name": default_primary_key_field_name})[0]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+    
+
 class TestQueryOperation(TestMilvusClientV2Base):
     """
     ******************************************************************
@@ -3826,3 +4161,12 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
                 log.debug(compare_dict[f'{i}']["id_list"])
             assert id_list == compare_dict[f'{i}']["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
+
+
+class TestQueryString(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+      The following cases are used to test query with string
+    ******************************************************************
+    """
+    
