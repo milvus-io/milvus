@@ -56,6 +56,11 @@ SetDefaultExprEvalBatchSize(int64_t val) {
 }
 
 void
+SetDefaultDeleteDumpBatchSize(int64_t val) {
+    milvus::SetDefaultDeleteDumpBatchSize(val);
+}
+
+void
 SetDefaultOptimizeExprEnable(bool val) {
     milvus::SetDefaultOptimizeExprEnable(val);
 }
