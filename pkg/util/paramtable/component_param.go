@@ -4622,7 +4622,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.dropTolerance",
 		Version:      "2.4.2",
 		Doc:          "Compaction task will be cleaned after finish longer than this time(in seconds)",
-		DefaultValue: "86400",
+		DefaultValue: "3600",
 		Export:       true,
 	}
 	p.CompactionDropToleranceInSeconds.Init(base.mgr)
