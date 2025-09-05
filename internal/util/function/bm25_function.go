@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -110,6 +111,9 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 	defer tokenizer.Destroy()
 
 	for i := 0; i < len(data); i++ {
+		if !typeutil.IsUTF8(data[i]) {
+			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", data[i])
+		}
 		embeddingMap := map[uint32]float32{}
 		tokenStream := tokenizer.NewTokenStream(data[i])
 		defer tokenStream.Destroy()
