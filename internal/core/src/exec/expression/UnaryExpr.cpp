@@ -1012,10 +1012,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 index->ExecutorForShreddingData<ColType>(
                     target_field, executor, nullptr, res_view, valid_res_view);
                 LOG_DEBUG(
-                    "using shredding data's field: {} with value {}, count {}",
+                    "using shredding data's field: {} with value {}, count {} "
+                    "for segment {}",
                     target_field,
                     val,
-                    res_view.count());
+                    res_view.count(),
+                    segment_->get_segment_id());
             }
         };
 
