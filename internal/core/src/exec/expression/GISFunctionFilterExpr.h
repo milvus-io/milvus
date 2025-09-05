@@ -48,14 +48,26 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
  private:
-    //  VectorPtr
-    //  EvalForIndexSegment();
+    VectorPtr
+    EvalForIndexSegment();
 
     VectorPtr
     EvalForDataSegment();
 
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;
+
+    /*
+     * Segment-level cache: run a single R-Tree Query for all index chunks to
+     * obtain coarse candidate bitmaps. Subsequent batches reuse these cached
+     * results to avoid repeated ScalarIndex::Query calls per chunk.
+     */
+    // whether coarse results have been prefetched once
+    bool coarse_cached_ = false;
+    // global coarse bitmap (segment-level)
+    TargetBitmap coarse_global_;
+    // global not-null bitmap (segment-level)
+    TargetBitmap coarse_valid_global_;
 };
 }  //namespace exec
 }  // namespace milvus

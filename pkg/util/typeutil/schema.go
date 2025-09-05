@@ -840,6 +840,17 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 					dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data[idx])
 				}
 				appendSize += int64(unsafe.Sizeof(srcScalar.GeometryData.Data[idx]))
+			// just for result
+			case *schemapb.ScalarField_GeometryWktData:
+				if dstScalar.GetGeometryWktData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: []string{srcScalar.GeometryWktData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
+				}
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}

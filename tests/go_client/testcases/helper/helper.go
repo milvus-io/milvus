@@ -59,7 +59,7 @@ func GetAllScalarFieldType() []entity.FieldType {
 		entity.FieldTypeVarChar,
 		entity.FieldTypeArray,
 		entity.FieldTypeJSON,
-		// entity.FieldTypeGeometry,
+		entity.FieldTypeGeometry,
 	}
 }
 
@@ -85,7 +85,7 @@ func GetInvalidPkFieldType() []entity.FieldType {
 		entity.FieldTypeDouble,
 		entity.FieldTypeString,
 		entity.FieldTypeJSON,
-		// entity.FieldTypeGeometry,
+		entity.FieldTypeGeometry,
 		entity.FieldTypeArray,
 	}
 	return nonPkFieldTypes
@@ -100,7 +100,7 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 		entity.FieldTypeFloat,
 		entity.FieldTypeDouble,
 		entity.FieldTypeJSON,
-		// entity.FieldTypeGeometry,
+		entity.FieldTypeGeometry,
 		entity.FieldTypeArray,
 		entity.FieldTypeFloatVector,
 	}

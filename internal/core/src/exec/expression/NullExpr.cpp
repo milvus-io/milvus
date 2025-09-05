@@ -75,6 +75,17 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<ArrayView>(input);
             break;
         }
+        case DataType::GEOMETRY: {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                result = ExecVisitorImpl<std::string>(input);
+            } else {
+                result = ExecVisitorImpl<std::string_view>(input);
+            }
+            break;
+        }
         default:
             PanicInfo(DataTypeInvalid,
                       "unsupported data type: {}",

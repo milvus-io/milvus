@@ -294,7 +294,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     HasIndex(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
-        if (IsVectorDataType(field_meta.get_data_type()) &&
+        if ((IsVectorDataType(field_meta.get_data_type()) ||
+             IsGeometryType(field_meta.get_data_type())) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
             return true;
         }

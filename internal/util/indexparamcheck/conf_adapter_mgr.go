@@ -56,6 +56,7 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexTrie] = newTRIEChecker()
 	mgr.checkers[IndexBitmap] = newBITMAPChecker()
 	mgr.checkers[IndexHybrid] = newHYBRIDChecker()
+	mgr.checkers[IndexRTREE] = newRTREEChecker()
 	mgr.checkers["marisa-trie"] = newTRIEChecker()
 	mgr.checkers[AutoIndex] = newAUTOINDEXChecker()
 }

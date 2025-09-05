@@ -268,6 +268,8 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
     ADD_DEFINITIONS(-DBUILD_DISK_ANN=${BUILD_DISK_ANN})
 endif ()
 
+ADD_DEFINITIONS(-DBOOST_GEOMETRY_INDEX_DETAIL_EXPERIMENTAL)
+
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
 # otherwise cpp code coverage tool will miss src folder
 add_subdirectory( thirdparty )

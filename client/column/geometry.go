@@ -1,34 +1,32 @@
 package column
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
-type ColumnGeometryBytes struct {
-	*genericColumnBase[[]byte]
+type ColumnGeometryWKT struct {
+	*genericColumnBase[string]
 }
 
 // Name returns column name.
-func (c *ColumnGeometryBytes) Name() string {
+func (c *ColumnGeometryWKT) Name() string {
 	return c.name
 }
 
 // Type returns column entity.FieldType.
-func (c *ColumnGeometryBytes) Type() entity.FieldType {
+func (c *ColumnGeometryWKT) Type() entity.FieldType {
 	return entity.FieldTypeGeometry
 }
 
 // Len returns column values length.
-func (c *ColumnGeometryBytes) Len() int {
+func (c *ColumnGeometryWKT) Len() int {
 	return len(c.values)
 }
 
-func (c *ColumnGeometryBytes) Slice(start, end int) Column {
+func (c *ColumnGeometryWKT) Slice(start, end int) Column {
 	l := c.Len()
 	if start > l {
 		start = l
@@ -36,79 +34,55 @@ func (c *ColumnGeometryBytes) Slice(start, end int) Column {
 	if end == -1 || end > l {
 		end = l
 	}
-	return &ColumnGeometryBytes{
+	return &ColumnGeometryWKT{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }
 
 // Get returns value at index as interface{}.
-func (c *ColumnGeometryBytes) Get(idx int) (interface{}, error) {
+func (c *ColumnGeometryWKT) Get(idx int) (interface{}, error) {
 	if idx < 0 || idx >= c.Len() {
 		return nil, errors.New("index out of range")
 	}
 	return c.values[idx], nil
 }
 
-func (c *ColumnGeometryBytes) GetAsString(idx int) (string, error) {
-	bs, err := c.ValueByIdx(idx)
-	if err != nil {
-		return "", err
-	}
-	return string(bs), nil
+func (c *ColumnGeometryWKT) GetAsString(idx int) (string, error) {
+	return c.ValueByIdx(idx)
 }
 
 // FieldData return column data mapped to schemapb.FieldData.
-func (c *ColumnGeometryBytes) FieldData() *schemapb.FieldData {
-	fd := &schemapb.FieldData{
-		Type:      schemapb.DataType_Geometry,
-		FieldName: c.name,
-	}
-
-	fd.Field = &schemapb.FieldData_Scalars{
-		Scalars: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_GeometryData{
-				GeometryData: &schemapb.GeometryArray{
-					Data: c.values,
-				},
-			},
-		},
-	}
-
+func (c *ColumnGeometryWKT) FieldData() *schemapb.FieldData {
+	fd := c.genericColumnBase.FieldData()
 	return fd
 }
 
 // ValueByIdx returns value of the provided index.
-func (c *ColumnGeometryBytes) ValueByIdx(idx int) ([]byte, error) {
+func (c *ColumnGeometryWKT) ValueByIdx(idx int) (string, error) {
 	if idx < 0 || idx >= c.Len() {
-		return nil, errors.New("index out of range")
+		return "", errors.New("index out of range")
 	}
 	return c.values[idx], nil
 }
 
 // AppendValue append value into column.
-func (c *ColumnGeometryBytes) AppendValue(i interface{}) error {
-	var v []byte
-	switch raw := i.(type) {
-	case []byte:
-		v = raw
-	case string:
-		v = []byte(raw)
-	default:
-		return fmt.Errorf("expect geometry compatible type([]byte, struct, map), got %T", i)
+func (c *ColumnGeometryWKT) AppendValue(i interface{}) error {
+	s, ok := i.(string)
+	if !ok {
+		return errors.New("expect geometry WKT type(string)")
 	}
-	c.values = append(c.values, v)
-
+	c.values = append(c.values, s)
 	return nil
 }
 
 // Data returns column data.
-func (c *ColumnGeometryBytes) Data() [][]byte {
+func (c *ColumnGeometryWKT) Data() []string {
 	return c.values
 }
 
-func NewColumnGeometryBytes(name string, values [][]byte) *ColumnGeometryBytes {
-	return &ColumnGeometryBytes{
-		genericColumnBase: &genericColumnBase[[]byte]{
+func NewColumnGeometryWKT(name string, values []string) *ColumnGeometryWKT {
+	return &ColumnGeometryWKT{
+		genericColumnBase: &genericColumnBase[string]{
 			name:      name,
 			fieldType: entity.FieldTypeGeometry,
 			values:    values,
