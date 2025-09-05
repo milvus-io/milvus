@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -214,13 +215,6 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		}, nil
 	}
 
-	resp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
@@ -228,23 +222,128 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		return nil, err
 	}
 
-	dbCollections := resp.GetDbCollections()
-	wg := errgroup.Group{}
-	// limit goroutine number to 100
-	wg.SetLimit(100)
-	for _, dbCollection := range dbCollections {
-		for _, collectionID := range dbCollection.GetCollectionIDs() {
-			cid := collectionID
-			wg.Go(func() error {
-				_, err := s.flushCollection(ctx, cid, ts, nil)
-				if err != nil {
-					log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
-					return err
-				}
-				return nil
+	// Determine which databases and collections to flush
+	type targetInfo struct {
+		dbName          string
+		collectionNames []string // empty means all collections
+	}
+	targets := make([]targetInfo, 0)
+
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			targets = append(targets, targetInfo{
+				dbName:          target.GetDbName(),
+				collectionNames: target.GetCollectionNames(),
+			})
+		}
+	} else if req.GetDbName() != "" {
+		// Backward compatibility: use deprecated db_name field
+		targets = append(targets, targetInfo{
+			dbName:          req.GetDbName(),
+			collectionNames: []string{}, // flush all collections
+		})
+	} else {
+		// Flush all databases
+		dbsResp, err := s.broker.ListDatabases(ctx)
+		if err != nil {
+			return &datapb.FlushAllResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		for _, dbName := range dbsResp.GetDbNames() {
+			targets = append(targets, targetInfo{
+				dbName:          dbName,
+				collectionNames: []string{}, // flush all collections
 			})
 		}
 	}
+
+	type flushInfo struct {
+		dbName         string
+		collectionID   int64
+		collectionName string
+		flushResult    *datapb.FlushResult
+	}
+	var mu sync.Mutex
+	flushInfos := make([]flushInfo, 0)
+
+	wg := errgroup.Group{}
+	// limit goroutine number to 100
+	wg.SetLimit(100)
+
+	for _, target := range targets {
+		dbName := target.dbName
+		targetCollections := target.collectionNames
+
+		// Get collections for this database
+		resp, err := s.broker.ShowCollectionIDs(ctx, dbName)
+		if err != nil {
+			log.Warn("failed to show collection IDs", zap.String("db", dbName), zap.Error(err))
+			continue // Skip this database
+		}
+
+		dbCollections := resp.GetDbCollections()
+		for _, dbCollection := range dbCollections {
+			if dbCollection.GetDbName() != dbName {
+				continue
+			}
+
+			for _, collectionID := range dbCollection.GetCollectionIDs() {
+				cid := collectionID
+				db := dbName
+
+				// Check if we should flush this collection
+				if len(targetCollections) > 0 {
+					// Get collection name to check if it's in target list
+					coll, err := s.handler.GetCollection(ctx, cid)
+					if err != nil || coll == nil || coll.Schema == nil {
+						continue
+					}
+					collName := coll.Schema.GetName()
+					found := false
+					for _, targetColl := range targetCollections {
+						if collName == targetColl {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				}
+
+				wg.Go(func() error {
+					flushResult, err := s.flushCollection(ctx, cid, ts, nil)
+					if err != nil {
+						log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
+						return err
+					}
+					// Get collection name if possible
+					collName := ""
+					coll, err := s.handler.GetCollection(ctx, cid)
+					if err == nil && coll != nil && coll.Schema != nil {
+						collName = coll.Schema.GetName()
+					}
+
+					// Set database and collection names in the flush result
+					flushResult.DbName = db
+					flushResult.CollectionName = collName
+
+					mu.Lock()
+					flushInfos = append(flushInfos, flushInfo{
+						dbName:         db,
+						collectionID:   cid,
+						collectionName: collName,
+						flushResult:    flushResult,
+					})
+					mu.Unlock()
+					return nil
+				})
+			}
+		}
+	}
+
 	err = wg.Wait()
 	if err != nil {
 		return &datapb.FlushAllResponse{
@@ -252,9 +351,19 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		}, nil
 	}
 
+	// Build detailed flush results
+	flushResults := make([]*datapb.FlushResult, 0, len(flushInfos))
+	for _, info := range flushInfos {
+		if info.flushResult != nil {
+			// The DbName and CollectionName should already be set in the flush process above
+			flushResults = append(flushResults, info.flushResult)
+		}
+	}
+
 	return &datapb.FlushAllResponse{
-		Status:  merr.Success(),
-		FlushTs: ts,
+		Status:       merr.Success(),
+		FlushTs:      ts,
+		FlushResults: flushResults,
 	}, nil
 }
 
@@ -1514,7 +1623,10 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		}, nil
 	}
 
-	resp := &milvuspb.GetFlushAllStateResponse{Status: merr.Success()}
+	resp := &milvuspb.GetFlushAllStateResponse{
+		Status:      merr.Success(),
+		FlushStates: make([]*milvuspb.FlushAllState, 0),
+	}
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
@@ -1522,43 +1634,96 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	dbNames := dbsRsp.DbNames
-	if req.GetDbName() != "" {
-		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
-			return dbName == req.GetDbName()
-		})
-		if len(dbNames) == 0 {
+
+	// Determine which databases to check
+	var targetDbs []string
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			if target.GetDbName() != "" {
+				if !lo.Contains(dbsRsp.DbNames, target.GetDbName()) {
+					resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(target.GetDbName()))
+					return resp, nil
+				}
+				targetDbs = append(targetDbs, target.GetDbName())
+			}
+		}
+	} else if req.GetDbName() != "" {
+		if !lo.Contains(dbsRsp.DbNames, req.GetDbName()) {
 			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
 			return resp, nil
 		}
+		// Backward compatibility: use deprecated db_name field
+		targetDbs = []string{req.GetDbName()}
+	} else {
+		// Check all databases
+		targetDbs = dbsRsp.DbNames
 	}
 
-	for _, dbName := range dbsRsp.DbNames {
+	// Remove duplicates
+	targetDbs = lo.Uniq(targetDbs)
+	allFlushed := true
+
+	for _, dbName := range targetDbs {
+		flushState := &milvuspb.FlushAllState{
+			DbName:                dbName,
+			CollectionFlushStates: make(map[string]bool),
+		}
+
+		// Get collections to check for this database
+		var targetCollections []string
+		if len(req.GetFlushTargets()) > 0 {
+			// Check if specific collections are requested for this db
+			for _, target := range req.GetFlushTargets() {
+				if target.GetDbName() == dbName && len(target.GetCollectionNames()) > 0 {
+					targetCollections = target.GetCollectionNames()
+					break
+				}
+			}
+		}
+
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
 		if err != nil {
-			log.Warn("failed to ShowCollections", zap.Error(err))
+			log.Warn("failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
 
-		for _, collection := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collection)
+		for idx, collectionID := range showColRsp.GetCollectionIds() {
+			collectionName := ""
+			if idx < len(showColRsp.GetCollectionNames()) {
+				collectionName = showColRsp.GetCollectionNames()[idx]
+			}
+
+			// If specific collections are requested, skip others
+			if len(targetCollections) > 0 && !lo.Contains(targetCollections, collectionName) {
+				continue
+			}
+
+			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
-				log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+				log.Warn("failed to DescribeCollectionInternal",
+					zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
+
+			collectionFlushed := true
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
 				channelCP := s.meta.GetChannelCheckpoint(channel)
 				if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
-					resp.Flushed = false
-
-					return resp, nil
+					collectionFlushed = false
+					allFlushed = false
+					break
 				}
 			}
+			flushState.CollectionFlushStates[collectionName] = collectionFlushed
 		}
+
+		resp.FlushStates = append(resp.FlushStates, flushState)
 	}
-	resp.Flushed = true
+
+	resp.Flushed = allFlushed
 	return resp, nil
 }
 

@@ -1851,54 +1851,56 @@ func TestFlushAll(t *testing.T) {
 	}
 
 	// Test normal case
-	mockey.PatchConvey("normal case", t, func() {
-		testServer := &Server{
-			allocator: allocator.NewRootCoordAllocator(nil),
-			broker:    broker.NewCoordinatorBroker(nil),
-		}
-		// Mock GetStateCode
-		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
-			Return(commonpb.StateCode_Healthy).Build()
+	testServer := &Server{
+		allocator: allocator.NewRootCoordAllocator(nil),
+		broker:    broker.NewCoordinatorBroker(nil),
+	}
+	// Mock GetStateCode
+	mockGetStateCode := mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+		Return(commonpb.StateCode_Healthy).Build()
+	defer mockGetStateCode.UnPatch()
 
-		// Mock AllocTimestamp
-		expectedTs := uint64(12345)
-		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
-			Return(expectedTs, nil).Build()
+	// Mock AllocTimestamp
+	expectedTs := uint64(12345)
+	mockAllocTimestamp := mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+		Return(expectedTs, nil).Build()
+	defer mockAllocTimestamp.UnPatch()
 
-		// Mock broker.ShowCollectionIDs
-		mockDbCollections := []*rootcoordpb.DBCollections{
-			{
-				DbName:        dbName,
-				CollectionIDs: []int64{1, 2, 3},
-			},
-		}
-		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
-			Status:        merr.Success(),
-			DbCollections: mockDbCollections,
-		}
-		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
-			Return(showCollectionResp, nil).Build()
+	// Mock broker.ShowCollectionIDs
+	mockDbCollections := []*rootcoordpb.DBCollections{
+		{
+			DbName:        dbName,
+			CollectionIDs: []int64{1, 2, 3},
+		},
+	}
+	showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+		Status:        merr.Success(),
+		DbCollections: mockDbCollections,
+	}
+	mockShowCollectionIDs := mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+		Return(showCollectionResp, nil).Build()
+	defer mockShowCollectionIDs.UnPatch()
 
-		// Mock flushCollection
-		flushResult := &datapb.FlushResult{
-			CollectionID:    1,
-			SegmentIDs:      []int64{10, 11},
-			TimeOfSeal:      123456789,
-			FlushSegmentIDs: []int64{20, 21},
-			FlushTs:         expectedTs,
-			ChannelCps:      make(map[string]*msgpb.MsgPosition),
-		}
-		mockey.Mock((*Server).flushCollection).Return(flushResult, nil).Build()
+	// Mock flushCollection
+	flushResult := &datapb.FlushResult{
+		CollectionID:    1,
+		SegmentIDs:      []int64{10, 11},
+		TimeOfSeal:      123456789,
+		FlushSegmentIDs: []int64{20, 21},
+		FlushTs:         expectedTs,
+		ChannelCps:      make(map[string]*msgpb.MsgPosition),
+	}
+	mockFlushCollection := mockey.Mock((*Server).flushCollection).Return(flushResult, nil).Build()
+	defer mockFlushCollection.UnPatch()
 
-		// Execute test
-		resp, err := testServer.FlushAll(ctx, req)
+	// Execute test
+	resp, err := testServer.FlushAll(ctx, req)
 
-		// Verify results
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, int64(expectedTs), int64(resp.GetFlushTs()))
-	})
+	// Verify results
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, int64(expectedTs), int64(resp.GetFlushTs()))
 
 	// Test server unhealthy case
 	mockey.PatchConvey("server unhealthy", t, func() {
@@ -2002,6 +2004,606 @@ func TestFlushAll(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test flush_targets support with multiple databases and collections
+	t.Run("flush_targets with multiple databases and collections", func(t *testing.T) {
+		mockey.PatchConvey("flush_targets with multiple databases and collections", t, func() {
+			testServer := &Server{
+				allocator: allocator.NewRootCoordAllocator(nil),
+				broker:    broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			expectedTs := uint64(12345)
+			mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+				Return(expectedTs, nil).Build()
+
+			// Mock broker.ShowCollectionIDs for multiple databases
+			mockDbCollections := []*rootcoordpb.DBCollections{
+				{
+					DbName:        "db1",
+					CollectionIDs: []int64{1, 2},
+				},
+				{
+					DbName:        "db2",
+					CollectionIDs: []int64{3},
+				},
+			}
+			showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+				Status:        merr.Success(),
+				DbCollections: mockDbCollections,
+			}
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+				Return(showCollectionResp, nil).Build()
+
+			// Mock flushCollection for different collections
+			mockey.Mock((*Server).flushCollection).To(func(ctx context.Context, collectionID UniqueID) (*datapb.FlushResult, error) {
+				switch collectionID {
+				case 1:
+					return &datapb.FlushResult{
+						CollectionID:    1,
+						DbName:          "db1",
+						CollectionName:  "collection1",
+						SegmentIDs:      []int64{10, 11},
+						TimeOfSeal:      123456789,
+						FlushSegmentIDs: []int64{20, 21},
+						FlushTs:         expectedTs,
+						ChannelCps:      make(map[string]*msgpb.MsgPosition),
+					}, nil
+				case 2:
+					return &datapb.FlushResult{
+						CollectionID:    2,
+						DbName:          "db1",
+						CollectionName:  "collection2",
+						SegmentIDs:      []int64{12, 13},
+						TimeOfSeal:      123456790,
+						FlushSegmentIDs: []int64{22, 23},
+						FlushTs:         expectedTs,
+						ChannelCps:      make(map[string]*msgpb.MsgPosition),
+					}, nil
+				case 3:
+					return &datapb.FlushResult{
+						CollectionID:    3,
+						DbName:          "db2",
+						CollectionName:  "collection3",
+						SegmentIDs:      []int64{14, 15},
+						TimeOfSeal:      123456791,
+						FlushSegmentIDs: []int64{24, 25},
+						FlushTs:         expectedTs,
+						ChannelCps:      make(map[string]*msgpb.MsgPosition),
+					}, nil
+				default:
+					return nil, errors.New("collection not found")
+				}
+			}).Build()
+
+			// Test request with flush_targets
+			reqWithTargets := &datapb.FlushAllRequest{
+				FlushTargets: []*datapb.FlushAllTarget{
+					{
+						DbName:          "db1",
+						CollectionNames: []string{"collection1", "collection2"},
+					},
+					{
+						DbName:          "db2",
+						CollectionNames: []string{"collection3"},
+					},
+				},
+			}
+
+			resp, err := testServer.FlushAll(ctx, reqWithTargets)
+
+			// Verify results
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, expectedTs, resp.GetFlushTs())
+			assert.Len(t, resp.GetFlushResults(), 3) // Should have 3 collection results
+
+			// Verify individual flush results contain db_name and collection_name
+			for _, result := range resp.GetFlushResults() {
+				assert.NotEmpty(t, result.GetDbName())
+				assert.NotEmpty(t, result.GetCollectionName())
+				assert.Equal(t, expectedTs, result.GetFlushTs())
+			}
+		})
+	})
+
+	// Test backward compatibility with db_name field
+	t.Run("backward compatibility with db_name", func(t *testing.T) {
+		mockey.PatchConvey("backward compatibility with db_name", t, func() {
+			testServer := &Server{
+				allocator: allocator.NewRootCoordAllocator(nil),
+				broker:    broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			expectedTs := uint64(54321)
+			mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+				Return(expectedTs, nil).Build()
+
+			// Mock broker.ShowCollectionIDs for single database
+			mockDbCollections := []*rootcoordpb.DBCollections{
+				{
+					DbName:        "legacy_db",
+					CollectionIDs: []int64{100, 101},
+				},
+			}
+			showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+				Status:        merr.Success(),
+				DbCollections: mockDbCollections,
+			}
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+				Return(showCollectionResp, nil).Build()
+
+			// Mock flushCollection
+			mockey.Mock((*Server).flushCollection).To(func(ctx context.Context, collectionID UniqueID) (*datapb.FlushResult, error) {
+				return &datapb.FlushResult{
+					CollectionID:    collectionID,
+					DbName:          "legacy_db",
+					CollectionName:  fmt.Sprintf("collection_%d", collectionID),
+					SegmentIDs:      []int64{int64(collectionID * 10)},
+					TimeOfSeal:      123456789,
+					FlushSegmentIDs: []int64{int64(collectionID * 20)},
+					FlushTs:         expectedTs,
+					ChannelCps:      make(map[string]*msgpb.MsgPosition),
+				}, nil
+			}).Build()
+
+			// Test request with legacy db_name field (backward compatibility)
+			legacyReq := &datapb.FlushAllRequest{
+				DbName: "legacy_db",
+			}
+
+			resp, err := testServer.FlushAll(ctx, legacyReq)
+
+			// Verify results
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, expectedTs, resp.GetFlushTs())
+			assert.Len(t, resp.GetFlushResults(), 2) // Should have 2 collection results
+
+			// Verify flush results contain proper db_name and collection_name fields
+			for _, result := range resp.GetFlushResults() {
+				assert.Equal(t, "legacy_db", result.GetDbName())
+				assert.NotEmpty(t, result.GetCollectionName())
+				assert.Equal(t, expectedTs, result.GetFlushTs())
+			}
+		})
+	})
+
+	// Test empty flush_targets (flush all)
+	t.Run("empty flush_targets flushes all", func(t *testing.T) {
+		mockey.PatchConvey("empty flush_targets flushes all", t, func() {
+			testServer := &Server{
+				allocator: allocator.NewRootCoordAllocator(nil),
+				broker:    broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			expectedTs := uint64(99999)
+			mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+				Return(expectedTs, nil).Build()
+
+			// Mock broker.ShowCollectionIDs for all databases
+			mockDbCollections := []*rootcoordpb.DBCollections{
+				{
+					DbName:        "default",
+					CollectionIDs: []int64{200},
+				},
+				{
+					DbName:        "test_db",
+					CollectionIDs: []int64{201, 202},
+				},
+			}
+			showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+				Status:        merr.Success(),
+				DbCollections: mockDbCollections,
+			}
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+				Return(showCollectionResp, nil).Build()
+
+			// Mock flushCollection
+			mockey.Mock((*Server).flushCollection).To(func(ctx context.Context, collectionID UniqueID) (*datapb.FlushResult, error) {
+				dbName := "default"
+				if collectionID > 200 {
+					dbName = "test_db"
+				}
+				return &datapb.FlushResult{
+					CollectionID:    collectionID,
+					DbName:          dbName,
+					CollectionName:  fmt.Sprintf("collection_%d", collectionID),
+					SegmentIDs:      []int64{int64(collectionID * 10)},
+					TimeOfSeal:      123456789,
+					FlushSegmentIDs: []int64{int64(collectionID * 20)},
+					FlushTs:         expectedTs,
+					ChannelCps:      make(map[string]*msgpb.MsgPosition),
+				}, nil
+			}).Build()
+
+			// Test request with empty flush_targets
+			emptyTargetReq := &datapb.FlushAllRequest{
+				FlushTargets: []*datapb.FlushAllTarget{},
+			}
+
+			resp, err := testServer.FlushAll(ctx, emptyTargetReq)
+
+			// Verify results - should flush all collections from all databases
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, expectedTs, resp.GetFlushTs())
+			assert.Len(t, resp.GetFlushResults(), 3) // Should have all 3 collection results
+
+			// Verify flush results contain proper fields
+			dbNames := make(map[string]int)
+			for _, result := range resp.GetFlushResults() {
+				assert.NotEmpty(t, result.GetDbName())
+				assert.NotEmpty(t, result.GetCollectionName())
+				assert.Equal(t, expectedTs, result.GetFlushTs())
+				dbNames[result.GetDbName()]++
+			}
+			assert.Equal(t, 1, dbNames["default"])
+			assert.Equal(t, 2, dbNames["test_db"])
+		})
+	})
+}
+
+func TestGetFlushAllStateWithFlushTargets(t *testing.T) {
+	ctx := context.Background()
+
+	// Test GetFlushAllState with flush_targets
+	t.Run("GetFlushAllState with flush_targets", func(t *testing.T) {
+		mockey.PatchConvey("GetFlushAllState with flush_targets", t, func() {
+			testServer := &Server{
+				broker: broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			// Mock broker.ListDatabases
+			mockDbNames := []string{"test_db1", "test_db2", "other_db"}
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ListDatabases")).To(func(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+				return &milvuspb.ListDatabasesResponse{
+					Status:  merr.Success(),
+					DbNames: mockDbNames,
+				}, nil
+			}).Build()
+
+			// Mock broker.ShowCollections for test_db1
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollections")).To(func(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+				if dbName == "test_db1" {
+					return &milvuspb.ShowCollectionsResponse{
+						Status:          merr.Success(),
+						CollectionIds:   []int64{1, 2},
+						CollectionNames: []string{"collection1", "collection2"},
+					}, nil
+				} else if dbName == "test_db2" {
+					return &milvuspb.ShowCollectionsResponse{
+						Status:          merr.Success(),
+						CollectionIds:   []int64{3},
+						CollectionNames: []string{"collection3"},
+					}, nil
+				}
+				return &milvuspb.ShowCollectionsResponse{Status: merr.Success()}, nil
+			}).Build()
+
+			// Mock broker.DescribeCollectionInternal
+			mockey.Mock(mockey.GetMethod(testServer.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				switch collectionID {
+				case 1:
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"vchannel1"},
+						CollectionID:        1,
+						CollectionName:      "collection1",
+					}, nil
+				case 2:
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"vchannel2"},
+						CollectionID:        2,
+						CollectionName:      "collection2",
+					}, nil
+				case 3:
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"vchannel3"},
+						CollectionID:        3,
+						CollectionName:      "collection3",
+					}, nil
+				default:
+					return nil, errors.New("collection not found")
+				}
+			}).Build()
+
+			// Mock meta.GetChannelCheckpoint method
+			flushAllTs := uint64(100)
+			mockey.Mock((*meta).GetChannelCheckpoint).To(func(m *meta, vChannel string) *msgpb.MsgPosition {
+				switch vChannel {
+				case "vchannel1":
+					return &msgpb.MsgPosition{Timestamp: flushAllTs + 10}
+				case "vchannel2":
+					return &msgpb.MsgPosition{Timestamp: flushAllTs + 20}
+				case "vchannel3":
+					return &msgpb.MsgPosition{Timestamp: flushAllTs + 30}
+				default:
+					return nil
+				}
+			}).Build()
+			testServer.meta = &meta{}
+
+			// Test request with flush_targets
+			req := &milvuspb.GetFlushAllStateRequest{
+				FlushAllTs: flushAllTs,
+				FlushTargets: []*milvuspb.FlushAllTarget{
+					{
+						DbName:          "test_db1",
+						CollectionNames: []string{"collection1", "collection2"},
+					},
+					{
+						DbName:          "test_db2",
+						CollectionNames: []string{"collection3"},
+					},
+				},
+			}
+
+			resp, err := testServer.GetFlushAllState(ctx, req)
+
+			// Verify results
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.True(t, resp.GetFlushed())       // All collections should be flushed
+			assert.Len(t, resp.GetFlushStates(), 2) // Should have 2 database states
+
+			// Verify database states
+			dbStates := make(map[string]*milvuspb.FlushAllState)
+			for _, state := range resp.GetFlushStates() {
+				dbStates[state.DbName] = state
+			}
+
+			// Verify test_db1 state
+			db1State := dbStates["test_db1"]
+			assert.NotNil(t, db1State)
+			assert.Equal(t, "test_db1", db1State.DbName)
+			assert.Len(t, db1State.CollectionFlushStates, 2)
+			assert.True(t, db1State.CollectionFlushStates["collection1"])
+			assert.True(t, db1State.CollectionFlushStates["collection2"])
+
+			// Verify test_db2 state
+			db2State := dbStates["test_db2"]
+			assert.NotNil(t, db2State)
+			assert.Equal(t, "test_db2", db2State.DbName)
+			assert.Len(t, db2State.CollectionFlushStates, 1)
+			assert.True(t, db2State.CollectionFlushStates["collection3"])
+		})
+	})
+
+	// Test GetFlushAllState with backward compatibility db_name
+	t.Run("GetFlushAllState with backward compatibility db_name", func(t *testing.T) {
+		mockey.PatchConvey("GetFlushAllState with backward compatibility db_name", t, func() {
+			testServer := &Server{
+				broker: broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			// Mock broker.ShowCollections for legacy_db
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollections")).To(func(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+				if dbName == "legacy_db" {
+					return &milvuspb.ShowCollectionsResponse{
+						Status:          merr.Success(),
+						CollectionIds:   []int64{100},
+						CollectionNames: []string{"legacy_collection"},
+					}, nil
+				}
+				return &milvuspb.ShowCollectionsResponse{Status: merr.Success()}, nil
+			}).Build()
+
+			// Mock broker.DescribeCollectionInternal
+			mockey.Mock(mockey.GetMethod(testServer.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				if collectionID == 100 {
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"legacy_vchannel"},
+						CollectionID:        100,
+						CollectionName:      "legacy_collection",
+					}, nil
+				}
+				return nil, errors.New("collection not found")
+			}).Build()
+
+			// Mock meta.GetChannelCheckpoint method
+			flushAllTs := uint64(200)
+			mockey.Mock((*meta).GetChannelCheckpoint).To(func(m *meta, vChannel string) *msgpb.MsgPosition {
+				if vChannel == "legacy_vchannel" {
+					// Set timestamp before FlushAllTs (not flushed)
+					return &msgpb.MsgPosition{Timestamp: flushAllTs - 10}
+				}
+				return nil
+			}).Build()
+			testServer.meta = &meta{}
+
+			// Test request with legacy db_name field
+			req := &milvuspb.GetFlushAllStateRequest{
+				FlushAllTs: flushAllTs,
+				DbName:     "legacy_db", // Use deprecated db_name field
+			}
+
+			resp, err := testServer.GetFlushAllState(ctx, req)
+
+			// Verify results
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.False(t, resp.GetFlushed())      // Collection should not be flushed
+			assert.Len(t, resp.GetFlushStates(), 1) // Should have 1 database state
+
+			// Verify database state
+			dbState := resp.GetFlushStates()[0]
+			assert.Equal(t, "legacy_db", dbState.DbName)
+			assert.Len(t, dbState.CollectionFlushStates, 1)
+			assert.False(t, dbState.CollectionFlushStates["legacy_collection"]) // Not flushed
+		})
+	})
+
+	// Test GetFlushAllState with empty targets (check all databases)
+	t.Run("GetFlushAllState with empty targets checks all", func(t *testing.T) {
+		mockey.PatchConvey("GetFlushAllState with empty targets checks all", t, func() {
+			testServer := &Server{
+				broker: broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			// Mock broker.ListDatabases
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ListDatabases")).To(func(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+				return &milvuspb.ListDatabasesResponse{
+					Status:  merr.Success(),
+					DbNames: []string{"default", "test_db"},
+				}, nil
+			}).Build()
+
+			// Mock broker.ShowCollections for both databases
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollections")).To(func(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+				if dbName == "default" {
+					return &milvuspb.ShowCollectionsResponse{
+						Status:          merr.Success(),
+						CollectionIds:   []int64{200},
+						CollectionNames: []string{"collection_200"},
+					}, nil
+				} else if dbName == "test_db" {
+					return &milvuspb.ShowCollectionsResponse{
+						Status:          merr.Success(),
+						CollectionIds:   []int64{201},
+						CollectionNames: []string{"collection_201"},
+					}, nil
+				}
+				return &milvuspb.ShowCollectionsResponse{Status: merr.Success()}, nil
+			}).Build()
+
+			// Mock broker.DescribeCollectionInternal
+			mockey.Mock(mockey.GetMethod(testServer.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				switch collectionID {
+				case 200:
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"vchannel_200"},
+						CollectionID:        200,
+						CollectionName:      "collection_200",
+					}, nil
+				case 201:
+					return &milvuspb.DescribeCollectionResponse{
+						Status:              merr.Success(),
+						VirtualChannelNames: []string{"vchannel_201"},
+						CollectionID:        201,
+						CollectionName:      "collection_201",
+					}, nil
+				default:
+					return nil, errors.New("collection not found")
+				}
+			}).Build()
+
+			// Mock meta.GetChannelCheckpoint method with mixed flush states
+			flushAllTs := uint64(300)
+			mockey.Mock((*meta).GetChannelCheckpoint).To(func(m *meta, vChannel string) *msgpb.MsgPosition {
+				switch vChannel {
+				case "vchannel_200":
+					return &msgpb.MsgPosition{Timestamp: flushAllTs + 10} // Flushed
+				case "vchannel_201":
+					return &msgpb.MsgPosition{Timestamp: flushAllTs - 10} // Not flushed
+				default:
+					return nil
+				}
+			}).Build()
+			testServer.meta = &meta{}
+
+			// Test request with empty flush_targets (should check all databases)
+			req := &milvuspb.GetFlushAllStateRequest{
+				FlushAllTs:   flushAllTs,
+				FlushTargets: []*milvuspb.FlushAllTarget{}, // Empty targets
+			}
+
+			resp, err := testServer.GetFlushAllState(ctx, req)
+
+			// Verify results
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.False(t, resp.GetFlushed())      // Not all collections are flushed
+			assert.Len(t, resp.GetFlushStates(), 2) // Should have 2 database states
+
+			// Verify mixed flush states
+			dbStates := make(map[string]*milvuspb.FlushAllState)
+			for _, state := range resp.GetFlushStates() {
+				dbStates[state.DbName] = state
+			}
+
+			// Verify default database state
+			defaultState := dbStates["default"]
+			assert.NotNil(t, defaultState)
+			assert.True(t, defaultState.CollectionFlushStates["collection_200"]) // Flushed
+
+			// Verify test_db state
+			testDbState := dbStates["test_db"]
+			assert.NotNil(t, testDbState)
+			assert.False(t, testDbState.CollectionFlushStates["collection_201"]) // Not flushed
+		})
+	})
+
+	// Test GetFlushAllState error handling
+	t.Run("GetFlushAllState with server unhealthy", func(t *testing.T) {
+		mockey.PatchConvey("GetFlushAllState with server unhealthy", t, func() {
+			testServer := &Server{}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Abnormal).Build()
+
+			req := &milvuspb.GetFlushAllStateRequest{
+				FlushAllTs: 100,
+			}
+
+			resp, err := testServer.GetFlushAllState(ctx, req)
+
+			// Verify error handling
+			assert.NoError(t, err) // Should not return error, but error status
+			assert.NotNil(t, resp)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+	})
+
+	// Test GetFlushAllState with ListDatabases error
+	t.Run("GetFlushAllState with ListDatabases error", func(t *testing.T) {
+		mockey.PatchConvey("GetFlushAllState with ListDatabases error", t, func() {
+			testServer := &Server{
+				broker: broker.NewCoordinatorBroker(nil),
+			}
+			mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+				Return(commonpb.StateCode_Healthy).Build()
+
+			// Mock broker.ListDatabases to return error
+			expectedErr := errors.New("ListDatabases failed")
+			mockey.Mock(mockey.GetMethod(testServer.broker, "ListDatabases")).To(func(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+				return nil, expectedErr
+			}).Build()
+
+			req := &milvuspb.GetFlushAllStateRequest{
+				FlushAllTs:   100,
+				FlushTargets: []*milvuspb.FlushAllTarget{}, // Empty targets to trigger ListDatabases
+			}
+
+			resp, err := testServer.GetFlushAllState(ctx, req)
+
+			// Verify error handling
+			assert.NoError(t, err) // Should not return error, but error status
+			assert.NotNil(t, resp)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
 	})
 }
 
