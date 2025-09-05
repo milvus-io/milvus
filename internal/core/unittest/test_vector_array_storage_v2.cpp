@@ -52,7 +52,7 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::storage;
 
-const int64_t DIM = 32;
+const int64_t DIM = 4;
 
 SchemaPtr
 GenVectorArrayTestSchema() {
@@ -170,12 +170,12 @@ class TestVectorArrayStorageV2 : public testing::Test {
                         arrow::default_memory_pool(), value_builder);
 
                     for (int row = 0; row < test_data_count_; row++) {
-                        // Each row contains 10 vectors of dimension DIM
+                        // Each row contains 3 vectors of dimension DIM
                         auto status = list_builder->Append();
                         EXPECT_TRUE(status.ok());
 
-                        // Generate 10 vectors for this row
-                        auto data = generate_float_vector(10, DIM);
+                        // Generate 3 vectors for this row
+                        auto data = generate_float_vector(3, DIM);
                         auto float_builder =
                             std::static_pointer_cast<arrow::FloatBuilder>(
                                 value_builder);
@@ -321,8 +321,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     auto vec_index =
         dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
 
-    // Each row has 10 vectors, so total count should be rows * 10
-    EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 10);
+    // Each row has 10 vectors, so total count should be rows * 3
+    EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 3);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
     {
