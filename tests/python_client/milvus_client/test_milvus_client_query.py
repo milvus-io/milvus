@@ -22,9 +22,11 @@ default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 exp_res = "exp_res"
 default_search_string_exp = "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
+default_invalid_string_exp = "varchar >= 0"
 default_json_search_exp = "json_field[\"number\"] >= 0"
 perfix_expr = 'varchar like "0%"'
+suffix_expr = 'varchar like "%0"'
+inner_match_expr = 'varchar like "%0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_primary_key_field_name = "id"
@@ -3458,7 +3460,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_mmap_query_string_expr_with_prefixes(self):
+    @pytest.mark.parametrize("vachar_expression", [perfix_expr, suffix_expr, inner_match_expr])
+    def test_milvus_client_mmap_query_string_expr_with_prefixes_and_suffix(self, vachar_expression):
         """
         target: test query with prefix string expression when mmap enabled
         method: specify string is primary field, use prefix string expr with mmap
@@ -3481,14 +3484,36 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query before enabling mmap
-        normal_res = self.query(client, collection_name, filter=perfix_expr)[0]
+        # Prepare expected results based on the specific expression
+        exp_res = []
+        if vachar_expression == perfix_expr:  # varchar like "0%"
+            for row in rows:
+                varchar_value = row[ct.default_string_field_name]
+                if varchar_value.startswith("0"):
+                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+                    break  # Only take the first match like original test
+        elif vachar_expression == suffix_expr:  # varchar like "%0"
+            for row in rows:
+                varchar_value = row[ct.default_string_field_name]
+                if varchar_value.endswith("0"):
+                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+        elif vachar_expression == inner_match_expr:  # varchar like "%0%"
+            for row in rows:
+                varchar_value = row[ct.default_string_field_name]
+                if "0" in varchar_value:
+                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+        normal_res = self.query(client, collection_name, filter=vachar_expression,
+                                check_task=CheckTasks.check_query_results,
+                                check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
         # 5. enable mmap and reload
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 6. query after enabling mmap
-        mmap_res = self.query(client, collection_name, filter=perfix_expr)[0]
+        mmap_res = self.query(client, collection_name, filter=vachar_expression,
+                                check_task=CheckTasks.check_query_results,
+                                check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
         assert normal_res == mmap_res
         self.drop_collection(client, collection_name)
 
@@ -4169,4 +4194,624 @@ class TestQueryString(TestMilvusClientV2Base):
       The following cases are used to test query with string
     ******************************************************************
     """
-    
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_is_not_primary(self):
+        """
+        target: test query data with string field is not primary
+        method: create collection and insert data
+                collection.load()
+                query with string expr in string field is not primary
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # Prepare expected results in correct format for CheckTasks
+        exp_res = []
+        for row in rows:
+            if row[default_string_field_name] >= "0":
+                result_item = {default_string_field_name: row[default_string_field_name],
+                               default_primary_key_field_name: row[default_primary_key_field_name]}
+                exp_res.append(result_item)
+        self.query(client, collection_name, filter=default_search_string_exp, output_fields=[default_string_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_with_mix_expr(self):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with mix expr in string field and int field
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string as primary field
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. prepare expected results based on mix expression: int64 >= 0 && varchar >= "0"
+        exp_res = []
+        for row in rows:
+            # Apply the same filter logic as the query expression
+            if row[ct.default_int64_field_name] >= 0 and row[default_string_field_name] >= "0":
+                result_item = {
+                    ct.default_float_field_name: row[ct.default_float_field_name],
+                    default_string_field_name: row[default_string_field_name]
+                }
+                exp_res.append(result_item)
+        # 5. query with mix expression
+        output_fields = [ct.default_float_field_name, default_string_field_name]
+        self.query(client, collection_name, filter=default_search_mix_exp, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "pk_name": default_string_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_invalid_string_expressions())
+    def test_milvus_client_query_with_invalid_string_expr(self, expression):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with invalid expr
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid string expression - should raise exception
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
+        self.query(client, collection_name, filter=expression,
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
+    def test_milvus_client_query_string_expr_with_like_auto_index(self, expression):
+        """
+        target: test query with like string expression and indexed with auto index
+        expected: verify query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create indexes with auto index for varchar field
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="AUTOINDEX")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with auto index and get baseline result count
+        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len = len(result)
+        # 5. drop auto index and verify query result remains same
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, ct.default_string_field_name)
+        self.load_collection(client, collection_name)
+        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len_without_index = len(result_without_index)
+        assert res_len_without_index == res_len
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_with_invalid_prefix_expr(self):
+        """
+        target: test query with invalid prefix string expression
+        method: specify string primary field, use invalid prefix string expr
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid prefix expression
+        expression = 'float like "0%"'
+        error = {ct.err_code: 65535, 
+                ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported"}
+        self.query(client, collection_name, filter=expression,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_compare_two_fields(self):
+        """
+        target: test query with bool expression comparing two fields
+        method: specify string primary field, compare two fields
+        expected: verify query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with controlled values to ensure consistent comparison results
+        rows = []
+        for i in range(default_nb):
+            row = {
+                ct.default_string_field_name: str(i),
+                ct.default_int64_field_name: i + 10,  # int64 values: 10, 11, 12, ...
+                ct.default_float_field_name: float(i),  # float values: 0.0, 1.0, 2.0, ...
+                default_vector_field_name: [random.random() for _ in range(default_dim)]
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with expression comparing two fields - should return empty result
+        # Since float(i) < int64(i+10) for all i, float > int64 will always be false
+        expression = 'float > int64'
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
+        self.query(client, collection_name, filter=expression, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [], "pk_name": ct.default_string_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_compare_invalid_fields(self):
+        """
+        target: test query with invalid field comparison
+        method: specify string primary field, compare string and int field
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with invalid field comparison - should raise error
+        expression = 'varchar == int64'
+        error = {ct.err_code: 1100, 
+                ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
+                           f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
+        self.query(client, collection_name, filter=expression,
+                   check_task=CheckTasks.err_res, check_items=error)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_string_field_pk_is_empty(self):
+        """
+        target: test query with string expr and string field is primary
+        method: create collection, string field is primary
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with empty string values for varchar field
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        for row in rows:
+            row[ct.default_string_field_name] = ""
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. verify entity count
+        assert self.get_collection_stats(client, collection_name)[0]["row_count"] == default_nb
+        # 5. query with string expression for empty strings
+        string_exp = 'varchar >= ""'
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
+        res = self.query(client, collection_name, filter=string_exp, output_fields=output_fields)[0]
+        assert len(res) == 1
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
+    def test_milvus_client_query_string_expr_with_prefixes_bitmap(self, expression):
+        """
+        target: test query with prefix string expression and indexed with bitmap
+        expected: verify query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create indexes with bitmap index for varchar field
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="BITMAP")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with bitmap index and get baseline result count
+        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len = len(result)
+        # 5. drop bitmap index and verify query result remains same
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, ct.default_string_field_name)
+        self.load_collection(client, collection_name)
+        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len_without_index = len(result_without_index)
+        assert res_len_without_index == res_len
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", ['TEXT_MATCH(varchar, "0")', 'TEXT_MATCH(varchar, "1")', 'TEXT_MATCH(varchar, "test")'])
+    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "BITMAP"])
+    def test_milvus_client_query_string_expr_with_match_auto_index_and_bitmap(self, expression, index_type):
+        """
+        target: test query with match string expression and indexed with auto index and bitmap
+        expected: verify query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, enable_match=True, enable_analyzer=True)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with completely manual generation for precise TEXT_MATCH testing
+        rows = []
+        for i in range(default_nb):
+            row = {
+                default_primary_key_field_name: i,
+                default_vector_field_name: [random.random() for _ in range(default_dim)]
+            }
+            if i % 10 == 0:
+                row[ct.default_string_field_name] = "test data 0"  # Contains "test" and "0"
+            elif i % 10 == 1:
+                row[ct.default_string_field_name] = "content with 1"  # Contains "1"
+            elif i % 10 == 2:
+                row[ct.default_string_field_name] = "this is test content"  # Contains "test"
+            else:
+                row[ct.default_string_field_name] = f"sample document number {i} without keywords"
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        
+        # Calculate expected results based on the expression
+        exp_len = 0
+        if 'TEXT_MATCH(varchar, "0")' in expression:
+            # Should match "test data 0" (every 10th record starting from 0)
+            exp_len = default_nb // 10
+        elif 'TEXT_MATCH(varchar, "1")' in expression:
+            # Should match "content with 1" (every 10th record starting from 1)
+            exp_len = default_nb // 10
+        elif 'TEXT_MATCH(varchar, "test")' in expression:
+            # Should match both "test data 0" and "this is test content" 
+            exp_len = (default_nb // 10) * 2       
+        # 3. create indexes
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type, params={"tokenizer": "standard"})
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query
+        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        assert len(result) == exp_len
+        # 5. drop index and verify query result remains same
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, ct.default_string_field_name)
+        self.load_collection(client, collection_name)
+        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        assert len(result_without_index) == len(result) == exp_len
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_bitmap_alter_offset_cache_param(self):
+        """
+        target: test bitmap index with enable offset cache.
+        expected: verify create index and load successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create indexes
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type="BITMAP")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with expression and get baseline result count
+        expression = 'varchar like "0%"'
+        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len = len(result)
+        # 5. enable offset cache and verify result count remains same
+        self.release_collection(client, collection_name)
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={'indexoffsetcache.enabled': True})
+        self.load_collection(client, collection_name)
+        result_with_cache = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len_with_cache = len(result_with_cache)
+        assert res_len_with_cache == res_len
+        # 6. disable offset cache and verify result count remains same
+        self.release_collection(client, collection_name)
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={'indexoffsetcache.enabled': False})
+        self.load_collection(client, collection_name)
+        result_without_cache = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        res_len_without_cache = len(result_without_cache)
+        assert res_len_without_cache == res_len
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_milvus_client_query_with_create_diskann_with_string_pk(self, primary_field):
+        """
+        target: test query after create diskann index
+        method: create a collection with string pk and build diskann index
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with string primary key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        if primary_field == ct.default_int64_field_name:
+            schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+            schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
+        else:
+            schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+            schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. create diskann index 
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="DISKANN", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # 4. verify index created
+        index_info = self.describe_index(client, collection_name, default_vector_field_name)[0]
+        assert index_info["index_type"] == "DISKANN"
+        # 5. load collection
+        self.load_collection(client, collection_name)
+        # 6. query with mixed expression for string primary key
+        output_fields = [ct.default_float_field_name, ct.default_string_field_name, ct.default_int64_field_name]
+        # Filter expected results based on the mix expression: "int64 >= 0 && varchar >= \"0\""
+        exp_res = []
+        for row in rows:
+            if row[ct.default_int64_field_name] >= 0 and row[ct.default_string_field_name] >= "0":
+                exp_result_item = {
+                    ct.default_float_field_name: row[ct.default_float_field_name],
+                    ct.default_string_field_name: row[ct.default_string_field_name],
+                    ct.default_int64_field_name: row[ct.default_int64_field_name]
+                }
+                exp_res.append(exp_result_item)
+        self.query(client, collection_name, filter=default_search_mix_exp, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "pk_name": primary_field})
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+
+class TestQueryArray(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+      The following cases are used to test query with array
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("array_element_data_type", [DataType.INT64])
+    def test_milvus_client_query_array_with_inverted_index(self, array_element_data_type):
+        """
+        target: test query with array fields and inverted index
+        method: create collection with array fields, create inverted index, query with array expressions
+        expected: verify query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with array fields
+        additional_params = {"max_length": 1000} if array_element_data_type == DataType.VARCHAR else {}
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("contains", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("contains_any", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("contains_all", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("equals", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("array_length_field", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("array_access", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("emb", DataType.FLOAT_VECTOR, dim=128)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        train_data, query_expr = cf.prepare_array_test_data(3000, hit_rate=0.05)
+        rows = train_data.to_dict('records')
+        self.insert(client, collection_name, rows)
+        # 3. create indexes
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="emb", index_type="HNSW", metric_type="L2", params={"M": 48, "efConstruction": 500})
+        # Add INVERTED index for array fields
+        for field in ["contains", "contains_any", "contains_all", "equals", "array_length_field", "array_access"]:
+            index_params.add_index(field_name=field, index_type="INVERTED")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with array expressions and verify results
+        for item in query_expr:
+            expr = item["expr"]
+            ground_truth = item["ground_truth"]
+            res = self.query(client, collection_name, filter=expr, output_fields=["*"])[0]
+            assert len(res) == len(ground_truth)
+            # Verify the returned IDs match the ground truth
+            returned_ids = [record["id"] for record in res]
+            assert set(returned_ids) == set(ground_truth)
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("use_index", [True, False])
+    @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
+    @pytest.mark.parametrize("array_expression", [
+        'string_array[0] like "0%"',
+        'string_array[0] like "%0"',
+        'string_array[0] like "%0%"'
+    ])
+    def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type, array_expression):
+        """
+        target: test query with array element using different like patterns
+        method: create collection with string array field, query with various like patterns
+        expected: verify query result for prefix, suffix, and inner match patterns
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with array fields
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
+        schema.add_field(ct.default_int32_array_field_name, DataType.ARRAY, element_type=DataType.INT32, max_capacity=ct.default_max_capacity)
+        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
+        schema.add_field(ct.default_string_array_field_name, DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=ct.default_max_capacity, max_length=100, nullable=True)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        # Generate string array data with specific pattern for testing
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(default_nb)]
+        # Convert array data to rows format
+        rows = []
+        for i in range(default_nb):
+            row = {
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: [random.random() for _ in range(default_dim)],
+                ct.default_json_field_name: {"number": i, "float": float(i)},
+                ct.default_int32_array_field_name: [np.int32(j) for j in range(i, i + ct.default_max_capacity)],
+                ct.default_float_array_field_name: [np.float32(j) for j in range(i, i + ct.default_max_capacity)],
+                ct.default_string_array_field_name: string_field_value[i]
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        # 3. create indexes
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        if use_index:
+            index_params.add_index(field_name=ct.default_string_array_field_name, index_type=index_type)
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query with array element prefix like
+        res = self.query(client, collection_name, filter=array_expression, limit=default_nb)[0]
+        # 5. verify result based on expression type
+        if 'like "0%"' in array_expression:
+            # Prefix match: first element starts with "0"
+            filter_data = [row for row in string_field_value if row[0].startswith('0')]
+            match_func = lambda x: x.startswith("0")
+        elif 'like "%0"' in array_expression:
+            # Suffix match: first element ends with "0"  
+            filter_data = [row for row in string_field_value if row[0].endswith('0')]
+            match_func = lambda x: x.endswith("0")
+        elif 'like "%0%"' in array_expression:
+            # Inner match: first element contains "0"
+            filter_data = [row for row in string_field_value if '0' in row[0]]
+            match_func = lambda x: '0' in x
+        
+        assert len(res) == len(filter_data)
+        
+        # Verify the returned records have correct first elements
+        for record in res:
+            first_element = record[ct.default_string_array_field_name][0]
+            assert match_func(first_element)
+        self.drop_collection(client, collection_name)
