@@ -3041,6 +3041,10 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+
+	// delete snapshot dump batch size
+	DeleteDumpBatchSize ParamItem `refreshable:"false"`
+
 	// expr cache
 	ExprResCacheEnabled       ParamItem `refreshable:"false"`
 	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
@@ -4058,6 +4062,15 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	p.DeleteDumpBatchSize = ParamItem{
+		Key:          "queryNode.segcore.deleteDumpBatchSize",
+		Version:      "2.6.2",
+		DefaultValue: "10000",
+		Doc:          "Batch size for delete snapshot dump in segcore.",
+		Export:       true,
+	}
+	p.DeleteDumpBatchSize.Init(base.mgr)
+
 	// expr cache
 	p.ExprResCacheEnabled = ParamItem{
 		Key:          "queryNode.exprCache.enabled",
@@ -4622,7 +4635,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.dropTolerance",
 		Version:      "2.4.2",
 		Doc:          "Compaction task will be cleaned after finish longer than this time(in seconds)",
-		DefaultValue: "86400",
+		DefaultValue: "3600",
 		Export:       true,
 	}
 	p.CompactionDropToleranceInSeconds.Init(base.mgr)

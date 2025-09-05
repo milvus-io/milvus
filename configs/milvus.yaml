@@ -506,6 +506,7 @@ queryNode:
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -664,7 +665,7 @@ dataCoord:
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
-    dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
+    dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
     scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms
     mix:

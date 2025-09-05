@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -113,10 +112,10 @@ type ResourceEstimate struct {
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
 	return ResourceEstimate{
-		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
-		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
-		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
-		FinalDiskCost:   uint64(float64(estimate.final_disk_cost) * util.GB),
+		MaxMemoryCost:   uint64(estimate.max_memory_cost),
+		MaxDiskCost:     uint64(estimate.max_disk_cost),
+		FinalMemoryCost: uint64(estimate.final_memory_cost),
+		FinalDiskCost:   uint64(estimate.final_disk_cost),
 		HasRawData:      bool(estimate.has_raw_data),
 	}
 }

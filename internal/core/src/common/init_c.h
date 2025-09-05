@@ -43,6 +43,9 @@ void
 SetDefaultExprEvalBatchSize(int64_t val);
 
 void
+SetDefaultDeleteDumpBatchSize(int64_t val);
+
+void
 SetDefaultOptimizeExprEnable(bool val);
 
 void

@@ -493,6 +493,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultDeleteDumpBatchSize(size)
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {

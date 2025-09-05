@@ -60,6 +60,10 @@ func UpdateDefaultExprEvalBatchSize(size int) {
 	C.SetDefaultExprEvalBatchSize(C.int64_t(size))
 }
 
+func UpdateDefaultDeleteDumpBatchSize(size int) {
+	C.SetDefaultDeleteDumpBatchSize(C.int64_t(size))
+}
+
 func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }

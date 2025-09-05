@@ -27,6 +27,7 @@ namespace milvus {
 
 extern std::atomic<int64_t> FILE_SLICE_SIZE;
 extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
+extern std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
@@ -36,6 +37,9 @@ SetIndexSliceSize(const int64_t size);
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);
+
+void
+SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);

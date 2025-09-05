@@ -116,7 +116,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         std::map<std::string, std::string> index_params = {
             {"index_type", index_type},
             {"metric_type", metric_type},
-            {"nlist", "1024"}};
+            {"nlist", "64"}};
         std::map<std::string, std::string> type_params = {{"dim", "128"}};
         FieldIndexMeta fieldIndexMeta(
             vec_field_id, std::move(index_params), std::move(type_params));
@@ -165,7 +165,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     DataType data_type;
     std::optional<std::string> dense_vec_intermin_index_type = std::nullopt;
     std::string index_type;
-    size_t data_n = 10000;
+    size_t data_n = 5000;
     size_t data_d = 128;
     size_t topk = 10;
     milvus::FieldDataPtr vec_field_data = nullptr;
@@ -214,7 +214,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         segcore_config.set_dense_vector_intermin_index_type(
             dense_vec_intermin_index_type.value());
     }
-    segcore_config.set_nprobe(32);
+    segcore_config.set_nprobe(16);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField();
 
@@ -236,7 +236,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     query_info->set_topk(topk);
     query_info->set_round_decimal(3);
     query_info->set_metric_type(metric_type);
-    query_info->set_search_params(R"({"nprobe": 1024})");
+    query_info->set_search_params(R"({"nprobe": 16})");
     auto plan_str = plan_node.SerializeAsString();
 
     auto ph_group_raw =
@@ -276,7 +276,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         auto build_conf =
             knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
                            {knowhere::meta::DIM, std::to_string(data_d)},
-                           {knowhere::indexparam::NLIST, "1024"}};
+                           {knowhere::indexparam::NLIST, "64"}};
         indexing->BuildWithDataset(raw_dataset, build_conf);
 
         LoadIndexInfo load_info;
@@ -310,7 +310,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         segcore_config.set_dense_vector_intermin_index_type(
             dense_vec_intermin_index_type.value());
     }
-    segcore_config.set_nprobe(32);
+    segcore_config.set_nprobe(16);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField("./data/mmap-test");
 
@@ -332,7 +332,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     query_info->set_topk(topk);
     query_info->set_round_decimal(3);
     query_info->set_metric_type(metric_type);
-    query_info->set_search_params(R"({"nprobe": 1024})");
+    query_info->set_search_params(R"({"nprobe": 16})");
     auto plan_str = plan_node.SerializeAsString();
 
     auto ph_group_raw =
@@ -372,7 +372,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         auto build_conf =
             knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
                            {knowhere::meta::DIM, std::to_string(data_d)},
-                           {knowhere::indexparam::NLIST, "1024"}};
+                           {knowhere::indexparam::NLIST, "64"}};
         indexing->BuildWithDataset(raw_dataset, build_conf);
 
         LoadIndexInfo load_info;
@@ -419,7 +419,7 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
                        {knowhere::meta::DIM, std::to_string(data_d)},
-                       {knowhere::indexparam::NLIST, "1024"}};
+                       {knowhere::indexparam::NLIST, "64"}};
 
     indexing->BuildWithDataset(raw_dataset, build_conf);
 
