@@ -339,13 +339,15 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         }
 
-        auto dataset = is_binary 
-            ? GenFieldData(NB, metric_type, vec_field_data_type, BINARY_DIM)
-            : GenFieldData(NB, metric_type, vec_field_data_type);
+        auto dataset =
+            is_binary
+                ? GenFieldData(NB, metric_type, vec_field_data_type, BINARY_DIM)
+                : GenFieldData(NB, metric_type, vec_field_data_type);
         if (is_binary) {
             // binary vector
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataSet(NB, BINARY_DIM, xb_bin_data.data());
+            xb_dataset =
+                knowhere::GenDataSet(NB, BINARY_DIM, xb_bin_data.data());
             xq_dataset = knowhere::GenDataSet(
                 NQ, BINARY_DIM, xb_bin_data.data() + BINARY_DIM * query_offset);
         } else if (is_sparse) {

@@ -31,7 +31,8 @@
 #include "knowhere/comp/index_param.h"
 
 constexpr int64_t DIM = 4;
-constexpr int64_t BINARY_DIM = 8;  // Binary vectors need dim to be multiple of 8
+constexpr int64_t BINARY_DIM =
+    8;  // Binary vectors need dim to be multiple of 8
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 4;
 
