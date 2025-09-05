@@ -943,7 +943,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("cannot rename collection to an existing alias: %s", newName)
 	}
 
-	// check if new name already belongs to another exsiting collection
+	// check if new name already belongs to another existing collection
 	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
 	if coll != nil {
 		log.Warn("duplicated new collection name, already taken by another collection or alias.")
