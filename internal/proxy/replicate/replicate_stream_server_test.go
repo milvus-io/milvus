@@ -10,6 +10,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 )
 
@@ -37,8 +39,20 @@ func TestReplicateStreamServer_Execute(t *testing.T) {
 	ctx := createContextWithClusterID("test-cluster")
 	mockStreamServer := newMockReplicateStreamServer(ctx)
 
+	const msgCount = replicateRespChanLength * 10
+
 	// Setup WAL mock
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	tt := uint64(1)
+	replicateService.EXPECT().Append(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error) {
+			defer func() { tt++ }()
+			return &types.AppendResult{
+				TimeTick: tt,
+			}, nil
+		})
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
 	streaming.SetWALForTest(mockWAL)
 
 	server, err := CreateReplicateServer(mockStreamServer)
@@ -52,14 +66,6 @@ func TestReplicateStreamServer_Execute(t *testing.T) {
 		assert.NoError(t, err)
 	}()
 
-	const msgCount = replicateRespChanLength * 10
-	// mockWAL.EXPECT().RawAppend(mock.Anything, mock.Anything).
-	// 	RunAndReturn(func(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
-	// 		return &types.AppendResult{
-	// 			TimeTick: msgs.TimeTick(),
-	// 		}, nil
-	// 	})
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -70,7 +76,8 @@ func TestReplicateStreamServer_Execute(t *testing.T) {
 				WithVChannel("test-vchannel").
 				WithHeader(&messagespb.InsertMessageHeader{}).
 				WithBody(&msgpb.InsertRequest{}).
-				MustBuildMutable().WithTimeTick(tt)
+				MustBuildMutable().WithTimeTick(tt).
+				WithLastConfirmed(messageID)
 			milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
 			mockStreamServer.SendRequest(&milvuspb.ReplicateRequest{
 				Request: &milvuspb.ReplicateRequest_ReplicateMessage{

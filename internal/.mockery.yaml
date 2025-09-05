@@ -9,6 +9,7 @@ packages:
   github.com/milvus-io/milvus/internal/distributed/streaming:
     interfaces:
       WALAccesser:
+      ReplicateService:
       Utility:
       Broadcast:
       Local:
