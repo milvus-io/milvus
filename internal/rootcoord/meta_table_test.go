@@ -1794,12 +1794,6 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("rename collection edit dbname with db encryption on", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 
 		// Test case 1: Source DB has encryption enabled
 		t.Run("source db encrypted", func(t *testing.T) {
