@@ -250,7 +250,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     }
     auto range_plan_str = range_query_plan_node.SerializeAsString();
 
-    int64_t per_batch = 1000;
+    int64_t per_batch = 10000;
     int64_t n_batch = 5;
     int64_t top_k = 5;
     for (int64_t i = 0; i < n_batch; i++) {
