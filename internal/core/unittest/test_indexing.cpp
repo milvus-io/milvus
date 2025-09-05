@@ -415,7 +415,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(Indexing, Iterator) {
     constexpr int N = 10240;
     constexpr int TOPK = 100;
-    constexpr int dim = 128;
+    constexpr int dim = 4;
 
     auto [raw_data, timestamps, uids] = generate_data<dim>(N);
     milvus::index::CreateIndexInfo create_index_info;

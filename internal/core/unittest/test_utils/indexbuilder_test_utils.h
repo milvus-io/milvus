@@ -30,7 +30,7 @@
 #include "storage/Types.h"
 #include "knowhere/comp/index_param.h"
 
-constexpr int64_t DIM = 16;
+constexpr int64_t DIM = 4;
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 4;
 

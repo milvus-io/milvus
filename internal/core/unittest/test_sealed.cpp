@@ -111,7 +111,8 @@ TEST(Sealed, without_predicate) {
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
 
-    auto database = knowhere::GenDataSet(N, dim, vec_col.data() + (ROW_COUNT / 2) * dim);
+    auto database =
+        knowhere::GenDataSet(N, dim, vec_col.data() + (ROW_COUNT / 2) * dim);
     indexing->BuildWithDataset(database, build_conf);
 
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
