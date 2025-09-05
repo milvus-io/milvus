@@ -274,8 +274,10 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
 
         // match
         expected_result = {true, false, false, false, false};
-        test_ngram_with_data(
-            data, "%Alv%y s%", proto::plan::OpType::Match, expected_result);
+        test_ngram_with_data(data,
+                             "[\\s\\S]*Alv[\\s\\S]*y s[\\s\\S]*",
+                             proto::plan::OpType::Match,
+                             expected_result);
     }
 
     // exceeds max_gram
@@ -304,7 +306,7 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
         // match
         expected_result = {true, true, true, true, false};
         test_ngram_with_data(data,
-                             "%secondary%school%",
+                             "[\\s\\S]*secondary[\\s\\S]*school[\\s\\S]*",
                              proto::plan::OpType::Match,
                              expected_result);
     }
@@ -326,13 +328,13 @@ TEST(NgramIndex, TestNgramSimple) {
                          std::vector<bool>(10000, true));
 
     test_ngram_with_data(data,
-                         "%ary%sec%",
+                         "[\\s\\S]*ary[\\s\\S]*sec[\\s\\S]*",
                          proto::plan::OpType::Match,
                          std::vector<bool>(10000, true));
 
     // should be forwarded to brute force
     test_ngram_with_data(data,
-                         "%ary%s%",
+                         "[\\s\\S]*ary[\\s\\S]*s[\\s\\S]*",
                          proto::plan::OpType::Match,
                          std::vector<bool>(10000, true),
                          true);
@@ -456,7 +458,7 @@ TEST(NgramIndex, TestNgramJson) {
     test_cases.push_back(std::make_tuple(
         value, std::vector<int64_t>{3, 4}, proto::plan::OpType::PostfixMatch));
 
-    value.set_string_val("%ery%ode%");
+    value.set_string_val("[\\s\\S]*ery[\\s\\S]*ode[\\s\\S]*");
     test_cases.push_back(std::make_tuple(
         value, std::vector<int64_t>{3}, proto::plan::OpType::Match));
 
