@@ -31,6 +31,7 @@
 #include "knowhere/comp/index_param.h"
 
 constexpr int64_t DIM = 4;
+constexpr int64_t BINARY_DIM = 8;  // Binary vectors need dim to be multiple of 8
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 4;
 
@@ -76,13 +77,13 @@ generate_build_conf(const milvus::IndexType& index_type,
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, std::to_string(DIM)},
+            {knowhere::meta::DIM, std::to_string(BINARY_DIM)},
             {knowhere::indexparam::NLIST, "16"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, std::to_string(DIM)},
+            {knowhere::meta::DIM, std::to_string(BINARY_DIM)},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         return knowhere::Json{

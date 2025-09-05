@@ -51,7 +51,9 @@ TestVecIndex() {
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
     assert(ok);
-    auto dataset = GenFieldData(NB, metric_type, TraitType::data_type);
+    auto dataset = std::is_same_v<TraitType, milvus::BinaryVector>
+        ? GenFieldData(NB, metric_type, TraitType::data_type, BINARY_DIM)
+        : GenFieldData(NB, metric_type, TraitType::data_type);
 
     CDataType dtype = TraitType::c_data_type;
     CIndex index;
@@ -65,7 +67,7 @@ TestVecIndex() {
 
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
-        status = BuildBinaryVecIndex(index, NB * DIM / 8, xb_data.data());
+        status = BuildBinaryVecIndex(index, NB * BINARY_DIM / 8, xb_data.data());
     } else if (std::is_same_v<TraitType, milvus::SparseFloatVector>) {
         auto xb_data = dataset.template get_col<
             knowhere::sparse::SparseRow<milvus::SparseValueType>>(
