@@ -321,7 +321,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     auto vec_index =
         dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
 
-    // Each row has 10 vectors, so total count should be rows * 3
+    // Each row has 3 vectors, so total count should be rows * 3
     EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 3);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
