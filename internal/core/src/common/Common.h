@@ -30,6 +30,7 @@ extern float LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern float CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
+extern int32_t DELETE_DUMP_BATCH_SIZE;
 extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
 extern bool OPTIMIZE_EXPR_ENABLED;
 extern bool GROWING_JSON_KEY_STATS_ENABLED;
@@ -55,6 +56,9 @@ SetCpuNum(const int core);
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);
+
+void
+SetDefaultDeleteDumpBatchSize(int32_t val);
 
 void
 SetDefaultJSONKeyStatsCommitInterval(int64_t val);

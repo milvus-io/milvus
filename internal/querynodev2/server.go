@@ -304,6 +304,9 @@ func (node *QueryNode) InitSegcore() error {
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
 
+	cDeleteDumpBatchSize := C.int32_t(paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.GetAsInt64())
+	C.InitDefaultDeleteDumpBatchSize(cDeleteDumpBatchSize)
+
 	cJSONKeyStatsCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.GetAsInt64())
 	C.InitDefaultJSONKeyStatsCommitInterval(cJSONKeyStatsCommitInterval)
 

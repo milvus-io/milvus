@@ -21,7 +21,7 @@
 #include "exec/expression/ExprCache.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
-    flag10, flag11, flag12, flag13;
+    flag10, flag11, flag12, flag13, flag14;
 std::once_flag traceFlag;
 
 void
@@ -129,6 +129,15 @@ InitExprResCacheCapacityBytes(int64_t bytes) {
         },
         bytes);
 }
+
+void
+InitDefaultDeleteDumpBatchSize(int32_t val) {
+    std::call_once(
+        flag14,
+        [](int32_t val) { milvus::SetDefaultDeleteDumpBatchSize(val); },
+        val);
+}
+
 
 void
 InitTrace(CTraceConfig* config) {
