@@ -2318,6 +2318,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 				FieldsData:     request.FieldsData,
 				NumRows:        uint64(request.NumRows),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
+				Namespace:      request.Namespace,
 			},
 		},
 		idAllocator:     node.rowIDAllocator,

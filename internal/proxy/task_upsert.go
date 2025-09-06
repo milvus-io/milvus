@@ -744,6 +744,13 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
+	if Params.CommonCfg.EnableNamespace.GetAsBool() {
+		err := addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		if err != nil {
+			return err
+		}
+	}
+
 	err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	if err != nil {
 		return err
@@ -946,6 +953,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				NumRows:        uint64(it.req.NumRows),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 				DbName:         it.req.DbName,
+				Namespace:      it.req.Namespace,
 			},
 		},
 		DeleteMsg: &msgstream.DeleteMsg{
