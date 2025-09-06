@@ -144,6 +144,30 @@ func (gc *garbageCollector) start() {
 	}
 }
 
+// GcStatus holds the current status of the garbage collector.
+type GcStatus struct {
+	IsPaused      bool
+	TimeRemaining time.Duration
+}
+
+// GetStatus returns the current status of the garbage collector.
+func (gc *garbageCollector) GetStatus() GcStatus {
+	pauseUntil := gc.pauseUntil.Load()
+	now := time.Now()
+
+	if now.Before(pauseUntil) {
+		return GcStatus{
+			IsPaused:      true,
+			TimeRemaining: pauseUntil.Sub(now),
+		}
+	}
+
+	return GcStatus{
+		IsPaused:      false,
+		TimeRemaining: 0,
+	}
+}
+
 func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
 	if !gc.option.enabled {
 		log.Info("garbage collection not enabled")

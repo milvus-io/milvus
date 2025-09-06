@@ -121,6 +121,26 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 		}
 	})
 
+	// 2. Second Pass: Filter and Map the converted nodes to get their IDs
+	nodeIDs := lo.FilterMap(nodes, func(nodeInfo *querypb.NodeInfo, _ int) (int64, bool) {
+		if nodeInfo.State != session.StoppingStateName {
+			return nodeInfo.ID, true
+		}
+		return 0, false // Discard this node
+	})
+
+	nodesSuspended := s.meta.ResourceManager.GetNodesSuspended(nodeIDs)
+
+	// Loop through each node in the `nodes` slice.
+	for _, node := range nodes {
+		// Check the `nodesSuspended` map for the current node's ID.
+		// The `ok` variable ensures the key actually exists in the map.
+		if isSuspended, ok := nodesSuspended[node.ID]; ok && isSuspended {
+			// If the node ID is in the map and the status is true, update the State.
+			node.State = session.SuspendStateName
+		}
+	}
+
 	return &querypb.ListQueryNodeResponse{
 		Status:    merr.Success(),
 		NodeInfos: nodes,
@@ -220,6 +240,35 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 	return &querypb.CheckBalanceStatusResponse{
 		Status:   merr.Success(),
 		IsActive: isActive,
+	}, nil
+}
+
+// IsNodeSuspended checks if a specific node is suspended based on the provided request.
+// It returns true if the node is suspended, false otherwise.
+func (s *Server) IsNodeSuspended(ctx context.Context, req *querypb.IsNodeSuspendedRequest) (*querypb.IsNodeSuspendedResponse, error) {
+	log := log.Ctx(ctx)
+
+	log.Info("IsNodeSuspended request received", zap.Int64("nodeID", req.GetNodeID()))
+
+	errMsg := "failed to call IsNodeSuspended for query node"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.IsNodeSuspendedResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.IsNodeSuspendedResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	isSuspended := s.meta.ResourceManager.IsNodeSuspended(req.GetNodeID())
+	return &querypb.IsNodeSuspendedResponse{
+		Status:      merr.Success(),
+		IsSuspended: isSuspended,
 	}, nil
 }
 
@@ -469,7 +518,7 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		}
 	}
 
-	// check whether all segment exist in source node has been loaded in target node
+	// check whether all segments exist in source node has been loaded in target node
 	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
 	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
 	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
