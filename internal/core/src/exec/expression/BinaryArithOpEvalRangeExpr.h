@@ -450,7 +450,10 @@ struct ArithOpIndexFunc {
     }
 };
 
+class PhyTimestamptzArithCompareExpr;
 class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
+    friend class PhyTimestamptzArithCompareExpr;
+
  public:
     PhyBinaryArithOpEvalRangeExpr(
         const std::vector<std::shared_ptr<Expr>>& input,

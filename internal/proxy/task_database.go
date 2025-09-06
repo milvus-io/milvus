@@ -265,6 +265,13 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 }
 
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
+	if len(t.GetProperties()) > 0 {
+		// Check the validation of timezone
+		err := checkTimezone(t.Properties...)
+		if err != nil {
+			return err
+		}
+	}
 	_, ok := common.GetReplicateID(t.Properties)
 	if ok {
 		return merr.WrapErrParameterInvalidMsg("can't set the replicate id property in alter database request")

@@ -145,6 +145,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
 		return err
 	}
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, it.insertMsg.GetDbName())
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get database info", zap.Error(err))
+		return err
+	}
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
@@ -242,6 +247,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))
+		return err
+	}
+
+	// trans timestamptz data
+	_, colTimezone := getColTimezone(colInfo)
+	_, dbTimezone := getDbTimezone(dbInfo)
+	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone, dbTimezone)
+	if err != nil {
 		return err
 	}
 
