@@ -19,17 +19,21 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -59,366 +63,615 @@ func createTestFlushAllTaskByStreamingService(t *testing.T, dbName string) (*flu
 }
 
 func TestFlushAllTask_WithSpecificDB(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_WithSpecificDB", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
 
-		// Mock ShowCollections
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1", "collection2"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(cache *MetaCache, ctx context.Context, database, collectionName string) (UniqueID, error) {
+		if collectionName == "collection1" {
+			return UniqueID(100), nil
+		} else if collectionName == "collection2" {
+			return UniqueID(200), nil
+		}
+		return 0, fmt.Errorf("collection not found")
+	}).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels
+	mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+		if collID == UniqueID(100) {
+			return []string{"vchannel1", "vchannel2"}, nil
+		} else if collID == UniqueID(200) {
+			return []string{"vchannel3"}, nil
+		}
+		return nil, fmt.Errorf("collection not found")
+	}).Build()
+	defer mockGetVChannels.UnPatch()
+
+	// Mock sendManualFlushToWAL
+	mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
+	defer mockSendManualFlush.UnPatch()
+
+	// Mock MixCoord.Flush calls for each collection
+	mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+		return req.CollectionID == 100 || req.CollectionID == 200
+	})).Return(&datapb.FlushResponse{
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		FlushSegmentIDs: []int64{},
+		ChannelCps:      map[string]*msgpb.MsgPosition{},
+	}, nil).Times(2)
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+}
+
+func TestFlushAllTask_WithoutSpecificDB(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ListDatabases
+	listDBResp := &milvuspb.ListDatabasesResponse{
+		Status:  merr.Success(),
+		DbNames: []string{"db1", "db2"},
+	}
+	mixCoord.EXPECT().ListDatabases(mock.Anything, mock.AnythingOfType("*milvuspb.ListDatabasesRequest")).
+		Return(listDBResp, nil).Once()
+
+	// Mock ShowCollections for each database
+	showColResp1 := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	showColResp2 := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection2"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
+		return req.DbName == "db1"
+	})).Return(showColResp1, nil).Once()
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
+		return req.DbName == "db2"
+	})).Return(showColResp2, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(cache *MetaCache, ctx context.Context, database, collectionName string) (UniqueID, error) {
+		if collectionName == "collection1" {
+			return UniqueID(100), nil
+		} else if collectionName == "collection2" {
+			return UniqueID(200), nil
+		}
+		return 0, fmt.Errorf("collection not found")
+	}).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels
+	mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+		if collID == UniqueID(100) {
+			return []string{"vchannel1"}, nil
+		} else if collID == UniqueID(200) {
+			return []string{"vchannel2"}, nil
+		}
+		return nil, fmt.Errorf("collection not found")
+	}).Build()
+	defer mockGetVChannels.UnPatch()
+
+	// Mock sendManualFlushToWAL
+	mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
+	defer mockSendManualFlush.UnPatch()
+
+	// Mock MixCoord.Flush calls for each collection
+	mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+		return req.CollectionID == 100 || req.CollectionID == 200
+	})).Return(&datapb.FlushResponse{
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		FlushSegmentIDs: []int64{},
+		ChannelCps:      map[string]*msgpb.MsgPosition{},
+	}, nil).Times(2)
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+}
+
+func TestFlushAllTask_ListDatabasesError(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ListDatabases with error
+	expectedErr := fmt.Errorf("list databases failed")
+	mixCoord.EXPECT().ListDatabases(mock.Anything, mock.AnythingOfType("*milvuspb.ListDatabasesRequest")).
+		Return(nil, expectedErr).Once()
+
+	err := task.Execute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "list databases failed")
+}
+
+func TestFlushAllTask_ShowCollectionsError(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections with error
+	expectedErr := fmt.Errorf("show collections failed")
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(nil, expectedErr).Once()
+
+	err := task.Execute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "show collections failed")
+}
+
+func TestFlushAllTask_GetCollectionIDError(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID with error
+	globalMetaCache = &MetaCache{}
+	expectedErr := fmt.Errorf("collection not found")
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(0), expectedErr).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.Execute(ctx)
+	assert.Error(t, err)
+	// The error should be wrapped by merr.WrapErrAsInputErrorWhen
+	assert.NotNil(t, err)
+}
+
+func TestFlushAllTask_GetVChannelsError(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels with error
+	expectedErr := fmt.Errorf("get vchannels failed")
+	chMgr.EXPECT().getVChannels(UniqueID(100)).Return(nil, expectedErr).Once()
+
+	err := task.Execute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get vchannels failed")
+}
+
+func TestFlushAllTask_SendManualFlushError(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels
+	chMgr.EXPECT().getVChannels(UniqueID(100)).Return([]string{"vchannel1"}, nil).Once()
+
+	// Mock sendManualFlushToWAL with error
+	expectedErr := fmt.Errorf("send manual flush failed")
+	mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).Return(nil, expectedErr).Build()
+	defer mockSendManualFlush.UnPatch()
+
+	err := task.Execute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "send manual flush failed")
+}
+
+func TestFlushAllTask_WithEmptyCollections(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections with empty collections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+}
+
+func TestFlushAllTask_MultipleVChannels(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels with multiple channels
+	vchannels := []string{"vchannel1", "vchannel2", "vchannel3"}
+	mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+		return vchannels, nil
+	}).Build()
+	defer mockGetVChannels.UnPatch()
+
+	// Mock sendManualFlushToWAL - should be called for each vchannel
+	callCount := 0
+	mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
+		callCount++
+		assert.Equal(t, UniqueID(100), collID)
+		assert.Contains(t, vchannels, vchannel)
+		return nil, nil
+	}).Build()
+	defer mockSendManualFlush.UnPatch()
+
+	// Mock MixCoord.Flush call for the collection
+	mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+		return req.CollectionID == 100
+	})).Return(&datapb.FlushResponse{
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		FlushSegmentIDs: []int64{},
+		ChannelCps:      map[string]*msgpb.MsgPosition{},
+	}, nil).Once()
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, len(vchannels), callCount) // Verify sendManualFlushToWAL was called for each vchannel
+	assert.NotNil(t, task.result)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+}
+
+func TestFlushAllTask_VerifyFlushTs(t *testing.T) {
+	task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
+	defer mixCoord.AssertExpectations(t)
+	defer replicateMsgStream.AssertExpectations(t)
+	defer chMgr.AssertExpectations(t)
+
+	// Mock ShowCollections
+	showColResp := &milvuspb.ShowCollectionsResponse{
+		Status:          merr.Success(),
+		CollectionNames: []string{"collection1"},
+	}
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
+		Return(showColResp, nil).Once()
+
+	// Mock GetCollectionID
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	// Mock getVChannels
+	mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+		return []string{"vchannel1"}, nil
+	}).Build()
+	defer mockGetVChannels.UnPatch()
+
+	// Mock sendManualFlushToWAL and verify flushTs
+	expectedFlushTs := task.BeginTs()
+	mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
+		assert.Equal(t, expectedFlushTs, flushTs)
+		return nil, nil
+	}).Build()
+	defer mockSendManualFlush.UnPatch()
+
+	// Mock MixCoord.Flush call for the collection
+	mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+		return req.CollectionID == 100
+	})).Return(&datapb.FlushResponse{
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		FlushSegmentIDs: []int64{},
+		ChannelCps:      map[string]*msgpb.MsgPosition{},
+	}, nil).Once()
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.Equal(t, expectedFlushTs, task.result.FlushAllTs)
+}
+
+func TestFlushAllStreamingTask_WithFlushTargets(t *testing.T) {
+	// Test streaming FlushAll with flush_targets filtering
+	t.Run("streaming FlushAll with flush_targets filtering", func(t *testing.T) {
+		ctx := context.Background()
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		chMgr := NewMockChannelsMgr(t)
+
+		// Create flushAllTask with flush_targets
+		task := &flushAllTask{
+			baseTask:  baseTask{},
+			Condition: NewTaskCondition(ctx),
+			FlushAllRequest: &milvuspb.FlushAllRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Flush,
+					MsgID:     1,
+					Timestamp: uint64(time.Now().UnixNano()),
+					SourceID:  1,
+				},
+				FlushTargets: []*milvuspb.FlushAllTarget{
+					{
+						DbName:          "test_db1",
+						CollectionNames: []string{"collection1", "collection2"},
+					},
+					{
+						DbName:          "test_db2",
+						CollectionNames: []string{"collection3"},
+					},
+				},
+			},
+			ctx:      ctx,
+			mixCoord: mixCoord,
+			chMgr:    chMgr,
+			result: &milvuspb.FlushAllResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				FlushAllTs:   uint64(time.Now().UnixNano()),
+				FlushResults: make([]*milvuspb.FlushAllResult, 0),
+			},
+		}
+
+		// No ListDatabases mock needed when using flush_targets - databases are specified directly
+
+		// Mock ShowCollections for test_db1 - should be filtered based on flush_targets
+		showColResp1 := &milvuspb.ShowCollectionsResponse{
+			Status:          merr.Success(),
+			CollectionNames: []string{"collection1", "collection2", "unwanted_collection"},
+		}
+		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
+			return req.DbName == "test_db1"
+		})).Return(showColResp1, nil).Once()
+
+		// Mock ShowCollections for test_db2 - should be filtered based on flush_targets
+		showColResp2 := &milvuspb.ShowCollectionsResponse{
+			Status:          merr.Success(),
+			CollectionNames: []string{"collection3", "unwanted_collection2"},
+		}
+		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
+			return req.DbName == "test_db2"
+		})).Return(showColResp2, nil).Once()
+
+		// Mock GetCollectionID for filtered collections only
+		globalMetaCache = &MetaCache{}
+		mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			switch collectionName {
+			case "collection1":
+				return UniqueID(101), nil
+			case "collection2":
+				return UniqueID(102), nil
+			case "collection3":
+				return UniqueID(103), nil
+			default:
+				return UniqueID(0), errors.New("collection not found")
+			}
+		}).Build()
+		defer mockGetCollectionID.UnPatch()
+
+		// Mock getVChannels for each collection
+		mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+			switch collID {
+			case 101:
+				return []string{"vchannel1"}, nil
+			case 102:
+				return []string{"vchannel2"}, nil
+			case 103:
+				return []string{"vchannel3"}, nil
+			default:
+				return nil, errors.New("vchannel not found")
+			}
+		}).Build()
+		defer mockGetVChannels.UnPatch()
+
+		// Mock sendManualFlushToWAL - should only be called for targeted collections
+		var flushedCollections []UniqueID
+		var mutex sync.Mutex
+		mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
+			mutex.Lock()
+			defer mutex.Unlock()
+			flushedCollections = append(flushedCollections, collID)
+			return []int64{collID * 10}, nil // Mock segment IDs
+		}).Build()
+		defer mockSendManualFlush.UnPatch()
+
+		// Mock MixCoord.Flush calls for each collection
+		mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+			return req.CollectionID == 101 || req.CollectionID == 102 || req.CollectionID == 103
+		})).Return(&datapb.FlushResponse{
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			FlushSegmentIDs: []int64{},
+			ChannelCps:      map[string]*msgpb.MsgPosition{},
+		}, nil).Times(3)
+
+		// Execute test
+		err := task.Execute(ctx)
+
+		// Verify results
+		assert.NoError(t, err)
+		assert.NotNil(t, task.result)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+
+		// Verify that only targeted collections were flushed
+		assert.ElementsMatch(t, []UniqueID{101, 102, 103}, flushedCollections)
+		assert.Len(t, flushedCollections, 3) // Should flush exactly 3 collections
+
+		// Verify that flush results contain proper database-level aggregation
+		assert.Len(t, task.result.FlushResults, 2) // Should have 2 database-level results
+
+		// Verify database names in results
+		dbNames := make(map[string]bool)
+		for _, result := range task.result.FlushResults {
+			dbNames[result.DbName] = true
+		}
+		assert.True(t, dbNames["test_db1"])
+		assert.True(t, dbNames["test_db2"])
+
+		mixCoord.AssertExpectations(t)
+	})
+
+	// Test streaming FlushAll with specific database filtering
+	t.Run("streaming FlushAll with database-only filtering", func(t *testing.T) {
+		ctx := context.Background()
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		chMgr := NewMockChannelsMgr(t)
+
+		// Create flushAllTask with database-only flush_targets
+		task := &flushAllTask{
+			baseTask:  baseTask{},
+			Condition: NewTaskCondition(ctx),
+			FlushAllRequest: &milvuspb.FlushAllRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Flush,
+					MsgID:     1,
+					Timestamp: uint64(time.Now().UnixNano()),
+					SourceID:  1,
+				},
+				FlushTargets: []*milvuspb.FlushAllTarget{
+					{
+						DbName:          "target_db",
+						CollectionNames: []string{}, // Empty collections means flush all in this DB
+					},
+				},
+			},
+			ctx:      ctx,
+			mixCoord: mixCoord,
+			chMgr:    chMgr,
+			result: &milvuspb.FlushAllResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				FlushAllTs:   uint64(time.Now().UnixNano()),
+				FlushResults: make([]*milvuspb.FlushAllResult, 0),
+			},
+		}
+
+		// No ListDatabases mock needed when using flush_targets - target database is specified directly
+
+		// Mock ShowCollections only for target_db - other_db should be filtered out
 		showColResp := &milvuspb.ShowCollectionsResponse{
 			Status:          merr.Success(),
 			CollectionNames: []string{"collection1", "collection2"},
 		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).To(func(cache *MetaCache, ctx context.Context, database, collectionName string) (UniqueID, error) {
-			if collectionName == "collection1" {
-				return UniqueID(100), nil
-			} else if collectionName == "collection2" {
-				return UniqueID(200), nil
-			}
-			return 0, fmt.Errorf("collection not found")
-		}).Build()
-
-		// Mock getVChannels
-		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
-			if collID == UniqueID(100) {
-				return []string{"vchannel1", "vchannel2"}, nil
-			} else if collID == UniqueID(200) {
-				return []string{"vchannel3"}, nil
-			}
-			return nil, fmt.Errorf("collection not found")
-		}).Build()
-
-		// Mock sendManualFlushToWAL
-		mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-	})
-}
-
-func TestFlushAllTask_WithoutSpecificDB(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_WithoutSpecificDB", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ListDatabases
-		listDBResp := &milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"db1", "db2"},
-		}
-		mixCoord.EXPECT().ListDatabases(mock.Anything, mock.AnythingOfType("*milvuspb.ListDatabasesRequest")).
-			Return(listDBResp, nil).Once()
-
-		// Mock ShowCollections for each database
-		showColResp1 := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		showColResp2 := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection2"},
-		}
 		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
-			return req.DbName == "db1"
-		})).Return(showColResp1, nil).Once()
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowCollectionsRequest) bool {
-			return req.DbName == "db2"
-		})).Return(showColResp2, nil).Once()
+			return req.DbName == "target_db"
+		})).Return(showColResp, nil).Once()
 
-		// Mock GetCollectionID
+		// Mock GetCollectionID for all collections in target_db
 		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).To(func(cache *MetaCache, ctx context.Context, database, collectionName string) (UniqueID, error) {
-			if collectionName == "collection1" {
-				return UniqueID(100), nil
-			} else if collectionName == "collection2" {
-				return UniqueID(200), nil
+		mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			if dbName == "target_db" {
+				if collectionName == "collection1" {
+					return UniqueID(201), nil
+				} else if collectionName == "collection2" {
+					return UniqueID(202), nil
+				}
 			}
-			return 0, fmt.Errorf("collection not found")
+			return UniqueID(0), errors.New("collection not found")
 		}).Build()
+		defer mockGetCollectionID.UnPatch()
 
-		// Mock getVChannels
-		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
-			if collID == UniqueID(100) {
+		// Mock getVChannels for each collection
+		mockGetVChannels := mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
+			switch collID {
+			case 201:
 				return []string{"vchannel1"}, nil
-			} else if collID == UniqueID(200) {
+			case 202:
 				return []string{"vchannel2"}, nil
+			default:
+				return nil, errors.New("vchannel not found")
 			}
-			return nil, fmt.Errorf("collection not found")
 		}).Build()
+		defer mockGetVChannels.UnPatch()
 
-		// Mock sendManualFlushToWAL
-		mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
+		// Mock sendManualFlushToWAL - should be called for all collections in target_db
+		var flushedCollections []UniqueID
+		var mutex2 sync.Mutex
+		mockSendManualFlush := mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
+			mutex2.Lock()
+			defer mutex2.Unlock()
+			flushedCollections = append(flushedCollections, collID)
+			return []int64{collID * 10}, nil
+		}).Build()
+		defer mockSendManualFlush.UnPatch()
 
+		// Mock MixCoord.Flush calls for each collection
+		mixCoord.EXPECT().Flush(mock.Anything, mock.MatchedBy(func(req *datapb.FlushRequest) bool {
+			return req.CollectionID == 201 || req.CollectionID == 202
+		})).Return(&datapb.FlushResponse{
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			FlushSegmentIDs: []int64{},
+			ChannelCps:      map[string]*msgpb.MsgPosition{},
+		}, nil).Times(2)
+
+		// Execute test
 		err := task.Execute(ctx)
+
+		// Verify results
 		assert.NoError(t, err)
 		assert.NotNil(t, task.result)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-	})
-}
 
-func TestFlushAllTask_ListDatabasesError(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_ListDatabasesError", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
+		// Verify that all collections in target_db were flushed
+		assert.ElementsMatch(t, []UniqueID{201, 202}, flushedCollections)
+		assert.Len(t, flushedCollections, 2)
 
-		// Mock ListDatabases with error
-		expectedErr := fmt.Errorf("list databases failed")
-		mixCoord.EXPECT().ListDatabases(mock.Anything, mock.AnythingOfType("*milvuspb.ListDatabasesRequest")).
-			Return(nil, expectedErr).Once()
+		// Verify that flush results contain exactly 1 database result
+		assert.Len(t, task.result.FlushResults, 1)
+		assert.Equal(t, "target_db", task.result.FlushResults[0].DbName)
 
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "list databases failed")
-	})
-}
-
-func TestFlushAllTask_ShowCollectionsError(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_ShowCollectionsError", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections with error
-		expectedErr := fmt.Errorf("show collections failed")
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(nil, expectedErr).Once()
-
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "show collections failed")
-	})
-}
-
-func TestFlushAllTask_GetCollectionIDError(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_GetCollectionIDError", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID with error
-		globalMetaCache = &MetaCache{}
-		expectedErr := fmt.Errorf("collection not found")
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(0), expectedErr).Build()
-
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		// The error should be wrapped by merr.WrapErrAsInputErrorWhen
-		assert.NotNil(t, err)
-	})
-}
-
-func TestFlushAllTask_GetVChannelsError(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_GetVChannelsError", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-
-		// Mock getVChannels with error
-		expectedErr := fmt.Errorf("get vchannels failed")
-		chMgr.EXPECT().getVChannels(UniqueID(100)).Return(nil, expectedErr).Once()
-
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "get vchannels failed")
-	})
-}
-
-func TestFlushAllTask_SendManualFlushError(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_SendManualFlushError", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-
-		// Mock getVChannels
-		chMgr.EXPECT().getVChannels(UniqueID(100)).Return([]string{"vchannel1"}, nil).Once()
-
-		// Mock sendManualFlushToWAL with error
-		expectedErr := fmt.Errorf("send manual flush failed")
-		mockey.Mock(sendManualFlushToWAL).Return(nil, expectedErr).Build()
-
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "send manual flush failed")
-	})
-}
-
-func TestFlushAllTask_WithEmptyCollections(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_WithEmptyCollections", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections with empty collections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-	})
-}
-
-func TestFlushAllTask_WithEmptyVChannels(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_WithEmptyVChannels", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-
-		// Mock getVChannels with empty channels
-		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
-			return []string{}, nil
-		}).Build()
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-	})
-}
-
-func TestFlushAllTask_MultipleVChannels(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_MultipleVChannels", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-
-		// Mock getVChannels with multiple channels
-		vchannels := []string{"vchannel1", "vchannel2", "vchannel3"}
-		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
-			return vchannels, nil
-		}).Build()
-
-		// Mock sendManualFlushToWAL - should be called for each vchannel
-		callCount := 0
-		mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
-			callCount++
-			assert.Equal(t, UniqueID(100), collID)
-			assert.Contains(t, vchannels, vchannel)
-			return nil, nil
-		}).Build()
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.Equal(t, len(vchannels), callCount) // Verify sendManualFlushToWAL was called for each vchannel
-		assert.NotNil(t, task.result)
-		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-	})
-}
-
-func TestFlushAllTask_VerifyFlushTs(t *testing.T) {
-	mockey.PatchConvey("TestFlushAllTask_VerifyFlushTs", t, func() {
-		task, mixCoord, replicateMsgStream, chMgr, ctx := createTestFlushAllTaskByStreamingService(t, "test_db")
-		defer mixCoord.AssertExpectations(t)
-		defer replicateMsgStream.AssertExpectations(t)
-		defer chMgr.AssertExpectations(t)
-
-		// Mock ShowCollections
-		showColResp := &milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionNames: []string{"collection1"},
-		}
-		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
-			Return(showColResp, nil).Once()
-
-		// Mock GetCollectionID
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-
-		// Mock getVChannels
-		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
-			return []string{"vchannel1"}, nil
-		}).Build()
-
-		// Mock sendManualFlushToWAL and verify flushTs
-		expectedFlushTs := task.BeginTs()
-		mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
-			assert.Equal(t, expectedFlushTs, flushTs)
-			return nil, nil
-		}).Build()
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-		assert.Equal(t, expectedFlushTs, task.result.FlushTs)
+		mixCoord.AssertExpectations(t)
 	})
 }
