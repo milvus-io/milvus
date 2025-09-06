@@ -64,8 +64,10 @@ constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
 inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
     "key_layout_type_map";
 // start json stats field id for mock column
-const int64_t START_JSON_STATS_FIELD_ID = 1000;
-const int64_t END_JSON_STATS_FIELD_ID = 10000;
+// max user field id is 1024, so start json stats field id from 2000
+// new field numbers will not exceed 10000 fields
+const int64_t START_JSON_STATS_FIELD_ID = 2000;
+const int64_t END_JSON_STATS_FIELD_ID = 12000;
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";

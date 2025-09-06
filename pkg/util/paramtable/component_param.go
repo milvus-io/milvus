@@ -5424,6 +5424,13 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "1024",
 		Doc:          "the max number of columns to shred",
 		Export:       true,
+		Formatter: func(value string) string {
+			v := getAsInt(value)
+			if v > 10000 {
+				return "10000"
+			}
+			return strconv.Itoa(v)
+		},
 	}
 	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
 
