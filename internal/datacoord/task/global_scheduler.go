@@ -249,7 +249,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		queueingTime := time.Since(task.GetTaskTime(taskcommon.TimeQueue))
 		if queueingTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task queueing time is too long", zap.Int64("taskID", taskID),
+			log.Ctx(s.ctx).Warn("task queueing time is too long",
+				zap.Int64("taskID", taskID), zap.String("taskType", taskType),
 				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
 		}
 
@@ -270,7 +271,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		runningTime := time.Since(task.GetTaskTime(taskcommon.TimeStart))
 		if runningTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task running time is too long", zap.Int64("taskID", task.GetTaskID()),
+			log.Ctx(s.ctx).Warn("task running time is too long",
+				zap.Int64("taskID", task.GetTaskID()), zap.String("taskType", taskType),
 				zap.Int64("running time(ms)", runningTime.Milliseconds()))
 		}
 
