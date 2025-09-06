@@ -8,9 +8,11 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -475,16 +477,22 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
-	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	// pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	// if err != nil {
+	// 	return err
+	// }
+
+	// op, operand, err := translatePatternMatch(pattern)
+	// if err != nil {
+	// 	return err
+	// }
+
+	op, operand, err := escapeStringWithWildcards(ctx.StringLiteral().GetText())
 	if err != nil {
 		return err
 	}
 
-	op, operand, err := translatePatternMatch(pattern)
-	if err != nil {
-		return err
-	}
-
+	log.Info("like op", zap.Any("op", op), zap.Any("operand", operand))
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
