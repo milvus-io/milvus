@@ -3,6 +3,7 @@ package milvus.proto.plan;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
 import "schema.proto";
+import "common.proto";
 
 enum OpType {
   Invalid = 0;
@@ -257,9 +258,31 @@ message QueryPlanNode {
   int64 limit = 3;
 };
 
+enum FunctionType{
+  FunctionTypeWeight = 0;
+  FunctionTypeRandom = 1;
+}
+
+enum FunctionMode{
+  FunctionModeMultiply = 0;
+  FunctionModeSum = 1;
+};
+
+enum BoostMode{
+  BoostModeMultiply = 0;
+  BoostModeSum = 1;
+};
+
 message ScoreFunction {
-  Expr filter =1;
-  float weight = 2;  
+  Expr filter = 1;
+  float weight = 2;
+  FunctionType type = 3;
+  repeated common.KeyValuePair params = 4;
+}
+
+message ScoreOption{
+  BoostMode boost_mode = 1;
+  FunctionMode function_mode = 2;
 }
 
 message PlanOption {
@@ -276,4 +299,5 @@ message PlanNode {
   repeated string dynamic_fields = 5;
   repeated ScoreFunction scorers = 6;
   PlanOption plan_options = 7;
+  ScoreOption score_option = 8;
 }

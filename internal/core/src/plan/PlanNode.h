@@ -24,6 +24,7 @@
 #include "common/Vector.h"
 #include "expr/ITypeExpr.h"
 #include "common/EasyAssert.h"
+#include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "plan/PlanNodeIdGenerator.h"
 #include "rescores/Scorer.h"
@@ -442,10 +443,12 @@ class RescoresNode : public PlanNode {
  public:
     RescoresNode(
         const PlanNodeId& id,
-        const std::vector<std::shared_ptr<rescores::Scorer>> scorers,
+        const std::vector<std::shared_ptr<rescores::Scorer>>& scorers,
+        const proto::plan::ScoreOption& option,
         const std::vector<PlanNodePtr>& sources = std::vector<PlanNodePtr>{})
         : PlanNode(id),
           scorers_(std::move(scorers)),
+          option_(std::move(option)),
           sources_{std::move(sources)} {
     }
 
@@ -457,6 +460,11 @@ class RescoresNode : public PlanNode {
     std::vector<PlanNodePtr>
     sources() const override {
         return sources_;
+    }
+
+    const proto::plan::ScoreOption
+    option() const {
+        return option_;
     }
 
     const std::vector<std::shared_ptr<rescores::Scorer>>&
@@ -476,6 +484,7 @@ class RescoresNode : public PlanNode {
     }
 
  private:
+    const proto::plan::ScoreOption option_;
     const std::vector<PlanNodePtr> sources_;
     const std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
 };

@@ -17,7 +17,9 @@
 #include "RescoresNode.h"
 #include <cstddef>
 #include "exec/operator/Utils.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::exec {
 
@@ -31,6 +33,7 @@ PhyRescoresNode::PhyRescoresNode(
                scorer->id(),
                "PhyRescoresNode") {
     scorers_ = scorer->scorers();
+    option_ = scorer->option();
 };
 
 void
@@ -62,13 +65,14 @@ PhyRescoresNode::GetOutput() {
     auto query_context_ = exec_context->get_query_context();
     auto query_info = exec_context->get_query_config();
     milvus::SearchResult search_result = query_context_->get_search_result();
+    auto segment = query_context_->get_segment();
 
     // prepare segment offset
     FixedVector<int32_t> offsets;
     std::vector<size_t> offset_idx;
 
     for (size_t i = 0; i < search_result.seg_offsets_.size(); i++) {
-        // remain offset will be -1 if result count not enough (less than topk)
+        // remain offset will be placeholder(-1) if result count not enough (less than topk)
         // skip placeholder offset
         if (search_result.seg_offsets_[i] >= 0) {
             offsets.push_back(
@@ -83,14 +87,14 @@ PhyRescoresNode::GetOutput() {
         return input_;
     }
 
+    std::vector<std::optional<float>> boost_scores(offsets.size());
+    auto function_mode = option_.function_mode();
+
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
-        // rescore for all result if no filter
+        // boost for all result if no filter
         if (!filter) {
-            for (auto i = 0; i < offsets.size(); i++) {
-                search_result.distances_[offset_idx[i]] =
-                    scorer->rescore(search_result.distances_[offset_idx[i]]);
-            }
+            scorer->batch_score(segment, function_mode, offsets, boost_scores);
             continue;
         }
 
@@ -116,13 +120,8 @@ PhyRescoresNode::GetOutput() {
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
-            Assert(bitsetview.size() == offsets.size());
-            for (auto i = 0; i < offsets.size(); i++) {
-                if (bitsetview[i] > 0) {
-                    search_result.distances_[offset_idx[i]] = scorer->rescore(
-                        search_result.distances_[offset_idx[i]]);
-                }
-            }
+            scorer->batch_score(
+                segment, function_mode, offsets, bitsetview, boost_scores);
         } else {
             // query all segment if expr not native
             expr_set->Eval(0, 1, true, eval_ctx, results);
@@ -133,11 +132,28 @@ PhyRescoresNode::GetOutput() {
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             bitset.append(view);
-            for (auto i = 0; i < offsets.size(); i++) {
-                if (bitset[offsets[i]] > 0) {
-                    search_result.distances_[offset_idx[i]] = scorer->rescore(
-                        search_result.distances_[offset_idx[i]]);
-                }
+            scorer->batch_score(
+                segment, function_mode, offsets, bitset, boost_scores);
+        }
+    }
+
+    // calculate final score
+    auto boost_mode = option_.boost_mode();
+    for (auto i = 0; i < offsets.size(); i++) {
+        if (boost_scores[i].has_value()) {
+            switch (boost_mode) {
+                case proto::plan::BoostModeMultiply:
+                    search_result.distances_[offset_idx[i]] *=
+                        boost_scores[i].value();
+                    break;
+                case proto::plan::BoostModeSum:
+                    search_result.distances_[offset_idx[i]] +=
+                        boost_scores[i].value();
+                    break;
+                default:
+                    ThrowInfo(ErrorCode::UnexpectedError,
+                              fmt::format("unknwon boost function mode: {}",
+                                          boost_mode));
             }
         }
     }

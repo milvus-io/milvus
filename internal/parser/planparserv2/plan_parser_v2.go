@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -10,13 +11,16 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -266,6 +270,66 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	return planNode, nil
 }
 
+func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*commonpb.KeyValuePair, error) {
+	paramsMap := make(map[string]any)
+
+	log.Info("test--", zap.String("json", string(bytes)))
+
+	dec := json.NewDecoder(strings.NewReader(bytes))
+	dec.UseNumber()
+
+	err := dec.Decode(&paramsMap)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range paramsMap {
+		log.Info("test-- kv", zap.String("key", key), zap.Any("value", value))
+		switch key {
+		// parse field name to field ID
+		case "field":
+			name, ok := value.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("random seed field name must be string")
+			}
+
+			field, err := schema.GetFieldFromName(name)
+			if err != nil {
+				return nil, merr.WrapErrFieldNotFound(value, "random seed field not found")
+			}
+			result = append(result, &commonpb.KeyValuePair{Key: "field_id", Value: fmt.Sprint(field.FieldID)})
+		case "seed":
+			number, ok := value.(json.Number)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("random seed must be int")
+			}
+
+			result = append(result, &commonpb.KeyValuePair{Key: key, Value: number.String()})
+		}
+	}
+	return result, nil
+}
+
+func setBoostType(schema *typeutil.SchemaHelper, scorer *planpb.ScoreFunction, params []*commonpb.KeyValuePair) error {
+	scorer.Type = planpb.FunctionType_FunctionTypeWeight
+	for _, param := range params {
+		switch param.GetKey() {
+		case "random_score":
+			{
+				scorer.Type = planpb.FunctionType_FunctionTypeRandom
+				params, err := prepareBoostRandomParams(schema, param.GetValue())
+				if err != nil {
+					return err
+				}
+				scorer.Params = params
+			}
+		default:
+		}
+	}
+	return nil
+}
+
 func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.ScoreFunction, error) {
 	rerankerName := rerank.GetRerankName(function)
 	switch rerankerName {
@@ -290,6 +354,12 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 			return nil, fmt.Errorf("parse function scorer weight params failed with error: {%v}", err)
 		}
 		scorer.Weight = float32(weight)
+
+		err = setBoostType(schema, scorer, function.GetParams())
+		if err != nil {
+			return nil, err
+		}
+
 		return scorer, nil
 	default:
 		// if not boost scorer, regard as normal function scorer

@@ -32,7 +32,7 @@ TEST(Rescorer, Normal) {
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 50;
@@ -128,6 +128,146 @@ TEST(Rescorer, Normal) {
                                 >
                                 scorers: <
                                     weight: 4
+                                >)";
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    }
+
+    // random function with seed
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                        binary_range_expr: <
+                                            column_info: <
+                                                field_id: 101
+                                                data_type: Int8
+                                            >
+                                            lower_inclusive: true,
+                                            upper_inclusive: false,
+                                            lower_value: <
+                                                int64_val: -1
+                                            >
+                                            upper_value: <
+                                                int64_val: 100
+                                            >
+                                        >
+                                    >
+                                    query_info: <
+                                        topk: 10
+                                        metric_type: "L2"
+                                        search_params: "{\"ef\": 50}"
+                                    >
+                                    placeholder_tag: "$0"
+                                >
+                                scorers: <
+                                    type: 1
+                                    weight: 1
+                                    seed: 123
+                                >)";
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    }
+
+    // random function with field as random seed
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                        binary_range_expr: <
+                                            column_info: <
+                                                field_id: 101
+                                                data_type: Int8
+                                            >
+                                            lower_inclusive: true,
+                                            upper_inclusive: false,
+                                            lower_value: <
+                                                int64_val: -1
+                                            >
+                                            upper_value: <
+                                                int64_val: 100
+                                            >
+                                        >
+                                    >
+                                    query_info: <
+                                        topk: 10
+                                        metric_type: "L2"
+                                        search_params: "{\"ef\": 50}"
+                                    >
+                                    placeholder_tag: "$0"
+                                >
+                                scorers: <
+                                    type: 1
+                                    weight: 1
+                                    field: "int64"
+                                >)";
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    }
+
+    // random function with field and seed
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                        binary_range_expr: <
+                                            column_info: <
+                                                field_id: 101
+                                                data_type: Int8
+                                            >
+                                            lower_inclusive: true,
+                                            upper_inclusive: false,
+                                            lower_value: <
+                                                int64_val: -1
+                                            >
+                                            upper_value: <
+                                                int64_val: 100
+                                            >
+                                        >
+                                    >
+                                    query_info: <
+                                        topk: 10
+                                        metric_type: "L2"
+                                        search_params: "{\"ef\": 50}"
+                                    >
+                                    placeholder_tag: "$0"
+                                >
+                                scorers: <
+                                    type: 1
+                                    filter: <
+                                    >
+                                    weight: 1
+                                    seed: 123
                                 >)";
 
         proto::plan::PlanNode plan_node;
