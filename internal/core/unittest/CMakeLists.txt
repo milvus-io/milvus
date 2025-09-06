@@ -115,6 +115,7 @@ set(MILVUS_TEST_FILES
         test_vector_array_storage_v2.cpp
         test_rescore.cpp
         test_vector_array_chunk.cpp
+        test_mphf.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

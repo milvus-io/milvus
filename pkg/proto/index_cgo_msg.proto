@@ -132,3 +132,31 @@ message LoadJsonKeyIndexInfo {
   bool enable_mmap = 9;
   string mmap_dir_path = 10;
 }
+
+message SegmentPrimaryKeys {
+  int64 segment_id = 1;
+  repeated string primary_keys = 2;
+  repeated int64 intprimary_keys = 3;
+}
+
+message BuildPrimaryIndexInfo {
+  string clusterID = 1;
+  int64 buildID = 2;
+  int64 collectionID = 3;
+  string shard_name =4;
+  int64 index_version = 5;
+  int32 current_index_version = 6;
+  StorageConfig storage_config = 7;
+  repeated SegmentPrimaryKeys segment_primary_keys = 8;
+  bool is_int_primary_keys = 9;
+}
+
+message LoadPrimaryIndexInfo {
+  int64 buildID = 1;
+  int64 version = 2;
+  int64 collectionID = 3;
+  string shard_name = 4;
+  repeated string files = 5;
+  common.LoadPriority load_priority = 6;
+  bool is_int_primary_keys = 7;
+}
