@@ -129,11 +129,6 @@ if (LINUX OR MSYS)
                   "-Wno-error"
                   "-Wno-all"
                   )
-    if (USE_ASAN STREQUAL "ON") 
-        message( STATUS "Building Milvus Core Using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         append_flags( CMAKE_CXX_FLAGS
                 "-O3"
@@ -157,6 +152,12 @@ if ( APPLE )
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
             )
 endif ()
+
+if (USE_ASAN STREQUAL "ON") 
+    message( STATUS "Building Milvus Core Using AddressSanitizer")
+    add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fno-common -fsanitize=address)
+    add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fno-common -fsanitize=address)
+endif()
 
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )
