@@ -1,5 +1,6 @@
-use icu_segmenter::WordSegmenter;
+use icu_segmenter::{WordSegmenter};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+use icu_segmenter::options::WordBreakOptions;
 
 pub struct IcuTokenizer {
     segmenter: WordSegmenter,
@@ -8,7 +9,7 @@ pub struct IcuTokenizer {
 impl Clone for IcuTokenizer {
     fn clone(&self) -> Self {
         IcuTokenizer {
-            segmenter: WordSegmenter::new_auto(Default::default()),
+            segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
         }
     }
 }
@@ -41,30 +42,33 @@ impl TokenStream for IcuTokenStream {
 impl IcuTokenizer {
     pub fn new() -> IcuTokenizer {
         IcuTokenizer {
-            segmenter: WordSegmenter::new_auto(Default::default()),
+            segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
         }
     }
 
     fn tokenize(&self, text: &str) -> Vec<Token> {
-        let breakpoints: Vec<usize> = self.segmenter.segment_str(text).collect();
-        let mut tokens = vec![];
+        // Borrow the segmenter for segmentation
+        let borrowed_segmenter = self.segmenter.as_borrowed();
+        let breakpoints: Vec<usize> = borrowed_segmenter.segment_str(text).collect();
+
+        let mut tokens = Vec::with_capacity(breakpoints.len());
         let mut offset = 0;
         let mut position = 0;
-        for breakpoint in breakpoints.iter() {
-            if *breakpoint == offset {
+        for breakpoint in breakpoints {
+            if breakpoint == offset {
                 continue;
             }
-            let token_str: &str = &text[offset..*breakpoint];
+            let token_str = &text[offset..breakpoint];
             let token = Token {
                 text: token_str.to_string(),
                 offset_from: offset,
-                offset_to: *breakpoint,
-                position: position,
+                offset_to: breakpoint,
+                position,
                 position_length: token_str.chars().count(),
             };
 
             tokens.push(token);
-            offset = *breakpoint;
+            offset = breakpoint;
             position += token_str.chars().count();
         }
 
@@ -78,7 +82,7 @@ impl Tokenizer for IcuTokenizer {
     fn token_stream(&mut self, text: &str) -> IcuTokenStream {
         let tokens = self.tokenize(text);
         IcuTokenStream {
-            tokens: tokens,
+            tokens,
             index: 0,
         }
     }
@@ -101,7 +105,7 @@ mod tests {
             results.push(token.text.clone());
         }
 
-        print!("test tokens :{:?}\n", results);
+        println!("test tokens: {:?}", results);
         assert_eq!(results.len(), 24);
     }
 }
