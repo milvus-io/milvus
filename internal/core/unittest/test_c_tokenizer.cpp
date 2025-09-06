@@ -16,7 +16,6 @@
 #include "pb/schema.pb.h"
 #include "segcore/token_stream_c.h"
 #include "segcore/tokenizer_c.h"
-#include "segcore/map_c.h"
 
 using Map = std::map<std::string, std::string>;
 
@@ -40,11 +39,6 @@ TEST(ValidateTextSchema, JieBa) {
     schema.SerializeToArray(buffer.data(), buffer.size());
     auto status = validate_text_schema(buffer.data(), buffer.size());
     ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
-}
-
-void
-set_cmap(CMap m, const std::string& key, const std::string& value) {
-    cmap_set(m, key.c_str(), key.length(), value.c_str(), value.length());
 }
 
 TEST(CTokenizer, Default) {
