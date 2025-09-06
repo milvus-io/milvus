@@ -105,7 +105,9 @@ func TestBroadcaster(t *testing.T) {
 		var result *types.BroadcastAppendResult
 		for {
 			var err error
-			result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
+			b, err := bc.WithResourceKeys(context.Background(), message.NewCollectionNameResourceKey("c7"))
+			assert.NoError(t, err)
+			result, err = b.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
 			if err == nil {
 				break
 			}
@@ -120,7 +122,7 @@ func TestBroadcaster(t *testing.T) {
 	}, 30*time.Second, 10*time.Millisecond)
 
 	bc.Close()
-	_, err = bc.Broadcast(context.Background(), nil)
+	_, err = bc.WithResourceKeys(context.Background())
 	assert.Error(t, err)
 	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t))
 	assert.Error(t, err)

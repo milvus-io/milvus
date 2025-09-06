@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -21,7 +20,7 @@ import (
 
 func TestBroadcast(t *testing.T) {
 	s := newMockServer(t, 0)
-	bs := NewGRPCBroadcastService(walimplstest.WALName, s)
+	bs := NewGRPCBroadcastService(s)
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&message.DropCollectionMessageHeader{}).
 		WithBody(&msgpb.DropCollectionRequest{}).
@@ -42,9 +41,7 @@ func newMockServer(t *testing.T, sendDelay time.Duration) lazygrpc.Service[strea
 	c.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&streamingpb.BroadcastResponse{
 		Results: map[string]*streamingpb.ProduceMessageResponseResult{
 			"v1": {
-				Id: &messagespb.MessageID{
-					Id: walimplstest.NewTestMessageID(1).Marshal(),
-				},
+				Id: walimplstest.NewTestMessageID(1).IntoProto(),
 			},
 		},
 		BroadcastId: 1,

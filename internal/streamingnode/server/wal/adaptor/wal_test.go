@@ -54,7 +54,7 @@ func TestFencedError(t *testing.T) {
 
 func TestWAL(t *testing.T) {
 	initResourceForTest(t)
-	b := registry.MustGetBuilder(walimplstest.WALName,
+	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),

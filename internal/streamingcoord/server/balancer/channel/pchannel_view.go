@@ -22,7 +22,7 @@ func newPChannelView(metas map[ChannelID]*PChannelMeta) *PChannelView {
 			panic(fmt.Sprintf("duplicate rw channel: %s", id.String()))
 		}
 		view.Channels[id] = meta
-		stat := StaticPChannelStatsManager.MustGet().GetPChannelStats(id).View()
+		stat := StaticPChannelStatsManager.Get().GetPChannelStats(id).View()
 		stat.LastAssignTimestamp = meta.LastAssignTimestamp()
 		view.Stats[id] = stat
 	}

@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
@@ -73,7 +74,7 @@ func init() {
 
 // stopRocksmqIfUsed closes the RocksMQ if it is used.
 func stopRocksmqIfUsed() {
-	if name := util.MustSelectWALName(); name == util.WALTypeRocksmq {
+	if name := util.MustSelectWALName(); name == message.WALNameRocksmq {
 		rocksmqimpl.CloseRocksMQ()
 	}
 }
@@ -149,6 +150,7 @@ type MilvusRoles struct {
 	EnableRootCoord     bool `env:"ENABLE_ROOT_COORD"`
 	EnableQueryCoord    bool `env:"ENABLE_QUERY_COORD"`
 	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
+	EnableCDC           bool `env:"ENABLE_CDC"`
 	Local               bool
 	Alias               string
 	Embedded            bool
@@ -205,6 +207,11 @@ func (mr *MilvusRoles) runStreamingNode(ctx context.Context, localMsg bool, wg *
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	return runComponent(ctx, localMsg, wg, components.NewDataNode, metrics.RegisterDataNode)
+}
+
+func (mr *MilvusRoles) runCDC(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewCDC, metrics.RegisterCDC)
 }
 
 func (mr *MilvusRoles) setupLogger() {
@@ -371,6 +378,7 @@ func (mr *MilvusRoles) Run() {
 		mr.EnableRootCoord,
 		mr.EnableQueryCoord,
 		mr.EnableDataCoord,
+		mr.EnableCDC,
 	}
 	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
 		return v
@@ -400,7 +408,7 @@ func (mr *MilvusRoles) Run() {
 
 	componentMap := make(map[string]component)
 	var mixCoord component
-	var proxy, dataNode, queryNode, streamingNode component
+	var proxy, dataNode, queryNode, streamingNode, cdc component
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
@@ -431,6 +439,12 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 		streamingNode = mr.runStreamingNode(ctx, local, &wg)
 		componentMap[typeutil.StreamingNodeRole] = streamingNode
+	}
+
+	if mr.EnableCDC {
+		paramtable.SetLocalComponentEnabled(typeutil.CDCRole)
+		cdc = mr.runCDC(ctx, local, &wg)
+		componentMap[typeutil.CDCRole] = cdc
 	}
 
 	wg.Wait()
@@ -503,7 +517,7 @@ func (mr *MilvusRoles) Run() {
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{streamingNode, queryNode, dataNode}
+	nodes := []component{streamingNode, queryNode, dataNode, cdc}
 	stopNodeWG := &sync.WaitGroup{}
 	for _, node := range nodes {
 		if node != nil {
@@ -545,6 +559,9 @@ func (mr *MilvusRoles) GetRoles() []string {
 	}
 	if mr.EnableDataNode {
 		roles = append(roles, typeutil.DataNodeRole)
+	}
+	if mr.EnableCDC {
+		roles = append(roles, typeutil.CDCRole)
 	}
 	return roles
 }

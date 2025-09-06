@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
@@ -63,6 +64,43 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 		return 0, ErrReadOnlyWAL
 	}
 	return w.GetLatestMVCCTimestamp(ctx, vchannel)
+}
+
+// GetReplicateCheckpoint gets the replicate checkpoint of the wal.
+func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchannel string) (*wal.ReplicateCheckpoint, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "replicate checkpoint"))
+	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			return nil, errors.New("replicate checkpoint can only be read for RW channel")
+		}
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err == nil {
+			return localWAL.GetReplicateCheckpoint()
+		}
+		if !shouldUseRemoteWAL(err) {
+			return nil, err
+		}
+		handlerService, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := handlerService.GetReplicateCheckpoint(ctx, &streamingpb.GetReplicateCheckpointRequest{
+			Pchannel: types.NewProtoFromPChannelInfo(assign.Channel),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return utility.NewReplicateCheckpointFromProto(resp.Checkpoint), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cp.(*wal.ReplicateCheckpoint), nil
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.

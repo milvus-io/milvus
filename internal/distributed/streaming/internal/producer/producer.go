@@ -105,6 +105,9 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 			if sErr.IsUnrecoverable() {
 				return nil, errors.Mark(err, errs.ErrUnrecoverable)
 			}
+			if sErr.IsIgnoredOperation() {
+				return nil, errors.Mark(err, errs.ErrIgnoredOperation)
+			}
 		}
 	}
 }

@@ -25,8 +25,8 @@ type walImpl struct {
 	c client.Client
 }
 
-func (w *walImpl) WALName() string {
-	return WALName
+func (w *walImpl) WALName() message.WALName {
+	return message.WALNameRocksmq
 }
 
 // Append appends a message to the wal.

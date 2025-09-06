@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -30,12 +31,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
 	defaultCollectionNotFoundTolerance = 2
 
 	paramtable.Init()
+	paramtable.SetRole(typeutil.StandaloneRole)
+	paramtable.Get().MQCfg.Type.SwapTempValue(message.WALNameRocksmq.String())
+	util.InitAndSelectWALName()
 	if code := m.Run(); code != 0 {
 		os.Exit(code)
 	}
@@ -143,10 +148,7 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	w := mock_wal.NewMockWAL(t)
-	walName := w.EXPECT().WALName().Return("rocksmq")
-	if maybe {
-		walName.Maybe()
-	}
+	w.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
 	w.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
 	read := w.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, option wal.ReadOption) (wal.Scanner, error) {

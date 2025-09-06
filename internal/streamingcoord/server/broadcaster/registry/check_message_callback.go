@@ -13,8 +13,8 @@ import (
 
 type (
 	// MessageCheckCallback is the callback function for the message type.
-	MessageCheckCallback[H proto.Message, B proto.Message] = func(ctx context.Context, msg message.SpecializedBroadcastMessage[H, B]) error
-	messageInnerCheckCallback                              = func(ctx context.Context, msg message.BroadcastMutableMessage) error
+	MessageCheckCallback[H proto.Message, B proto.Message] = func(ctx context.Context, msg message.SpecializedBroadcastMessage[H, B]) (message.BroadcastMutableMessage, error)
+	messageInnerCheckCallback                              = func(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error)
 )
 
 // messageCheckCallbacks is the map of message type to the callback function.
@@ -31,22 +31,22 @@ func registerMessageCheckCallback[H proto.Message, B proto.Message](callback Mes
 		// only for test, the register callback should be called once and only once
 		return
 	}
-	future.Set(func(ctx context.Context, msg message.BroadcastMutableMessage) error {
+	future.Set(func(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error) {
 		specializedMsg := message.MustAsSpecializedBroadcastMessage[H, B](msg)
 		return callback(ctx, specializedMsg)
 	})
 }
 
 // CallMessageCheckCallback calls the callback function for the message type.
-func CallMessageCheckCallback(ctx context.Context, msg message.BroadcastMutableMessage) error {
+func CallMessageCheckCallback(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error) {
 	callbackFuture, ok := messageCheckCallbacks[msg.MessageTypeWithVersion()]
 	if !ok {
 		// No callback need tobe called, return nil
-		return nil
+		return msg, nil
 	}
 	callback, err := callbackFuture.GetWithContext(ctx)
 	if err != nil {
-		return errors.Wrap(err, "when waiting callback registered")
+		return nil, errors.Wrap(err, "when waiting callback registered")
 	}
 	return callback(ctx, msg)
 }

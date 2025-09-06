@@ -21,8 +21,8 @@ type walImpl struct {
 	consumerConfig kafka.ConfigMap
 }
 
-func (w *walImpl) WALName() string {
-	return walName
+func (w *walImpl) WALName() message.WALName {
+	return message.WALNameKafka
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {

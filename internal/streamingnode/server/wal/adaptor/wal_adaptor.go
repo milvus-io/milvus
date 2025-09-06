@@ -121,6 +121,16 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 	return currentMVCC.Timetick, nil
 }
 
+// GetReplicateCheckpoint returns the replicate checkpoint of the wal.
+func (w *walAdaptorImpl) GetReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+
+	return w.param.ReplicateManager.GetReplicateCheckpoint()
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -188,10 +198,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 
 	// unwrap the messageID if needed.
 	r := &wal.AppendResult{
-		MessageID: messageID,
-		TimeTick:  extraAppendResult.TimeTick,
-		TxnCtx:    extraAppendResult.TxnCtx,
-		Extra:     extra,
+		MessageID:              messageID,
+		LastConfirmedMessageID: extraAppendResult.LastConfirmedMessageID,
+		TimeTick:               extraAppendResult.TimeTick,
+		TxnCtx:                 extraAppendResult.TxnCtx,
+		Extra:                  extra,
 	}
 	appendMetrics.Done(r, nil)
 	return r, nil
