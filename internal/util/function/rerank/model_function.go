@@ -180,7 +180,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 	if searchParams.isGrouping() {
 		return newGroupingIDScores(rerankScores, searchParams, idGroup)
 	}
-	return newIDScores(rerankScores, searchParams), nil
+	return newIDScores(rerankScores, searchParams, true), nil
 }
 
 func (model *ModelFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
