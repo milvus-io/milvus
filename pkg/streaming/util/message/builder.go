@@ -2,6 +2,7 @@ package message
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 
 	"github.com/cockroachdb/errors"
@@ -293,6 +294,9 @@ type ImmutableTxnMessageBuilder struct {
 
 // ExpiredTimeTick returns the expired time tick of the txn.
 func (b *ImmutableTxnMessageBuilder) ExpiredTimeTick() uint64 {
+	if b.txnCtx.Keepalive == TxnKeepaliveInfinite {
+		return math.MaxUint64
+	}
 	if len(b.messages) > 0 {
 		return tsoutil.AddPhysicalDurationOnTs(b.messages[len(b.messages)-1].TimeTick(), b.txnCtx.Keepalive)
 	}

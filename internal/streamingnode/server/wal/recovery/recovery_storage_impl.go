@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -145,6 +146,9 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 			return err
 		}
 	}
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -238,7 +242,7 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
-		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && msg.VChannel() != message.ControlChannel {
+		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
 

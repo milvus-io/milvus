@@ -6,10 +6,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ControlChannel is the name of control channel which is used to identify the control channel from other vchannels.
-// It's just a hint, which is not the real virtual channel name of control channel.
-const ControlChannel string = "__cchan"
-
 // AsImmutableTxnMessage converts an ImmutableMessage to ImmutableTxnMessage
 var AsImmutableTxnMessage = func(msg ImmutableMessage) ImmutableTxnMessage {
 	underlying, ok := msg.(*immutableTxnMessageImpl)
