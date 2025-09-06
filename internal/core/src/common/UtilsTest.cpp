@@ -31,3 +31,14 @@ TEST(Util_Common, GetCommonPrefix) {
     common_prefix = milvus::GetCommonPrefix(str1, str2);
     EXPECT_STREQ(common_prefix.c_str(), "");
 }
+
+TEST(SimilarityCorelation, Naive) {
+    ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::IP));
+    ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::COSINE));
+
+    ASSERT_FALSE(milvus::PositivelyRelated(knowhere::metric::L2));
+    ASSERT_FALSE(milvus::PositivelyRelated(knowhere::metric::HAMMING));
+    ASSERT_FALSE(milvus::PositivelyRelated(knowhere::metric::JACCARD));
+    ASSERT_FALSE(milvus::PositivelyRelated(knowhere::metric::SUBSTRUCTURE));
+    ASSERT_FALSE(milvus::PositivelyRelated(knowhere::metric::SUPERSTRUCTURE));
+}
