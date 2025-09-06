@@ -143,7 +143,8 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	if len(data.Data) == 0 {
 		return nil
 	}
-	idToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	idToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 
@@ -238,7 +239,8 @@ func IsFillableField(field *schemapb.FieldSchema) bool {
 }
 
 func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
-	for _, field := range schema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for _, field := range allFields {
 		if !IsFillableField(field) {
 			continue
 		}

@@ -211,8 +211,9 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		if err != nil {
 			return nil, err
 		}
+		allFields := typeutil.GetAllFieldSchemas(r.schema)
 		// convert record to fieldData
-		for _, field := range r.schema.Fields {
+		for _, field := range allFields {
 			fieldData := insertData.Data[field.GetFieldID()]
 			if fieldData == nil {
 				fieldData, err = storage.NewFieldData(field.GetDataType(), field, 1024)

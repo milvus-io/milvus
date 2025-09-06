@@ -32,8 +32,8 @@ func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
 
 // GetMaxCapacity get max capacity of array field. Maybe also helpful outside.
 func GetMaxCapacity(field *schemapb.FieldSchema) (int64, error) {
-	if !typeutil.IsArrayType(field.GetDataType()) {
-		msg := fmt.Sprintf("%s is not of array type", field.GetDataType())
+	if !typeutil.IsArrayType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
+		msg := fmt.Sprintf("%s is not of array/vector array type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, field.GetDataType(), msg)
 	}
 	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
