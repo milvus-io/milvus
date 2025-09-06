@@ -10,10 +10,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -25,7 +25,7 @@ import (
 )
 
 // recoverRecoveryInfoFromMeta retrieves the recovery info for the given channel.
-func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, walName string, channelInfo types.PChannelInfo, lastTimeTickMessage message.ImmutableMessage) error {
+func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, channelInfo types.PChannelInfo, lastTimeTickMessage message.ImmutableMessage) error {
 	r.metrics.ObserveStateChange(recoveryStorageStatePersistRecovering)
 	r.SetLogger(resource.Resource().Logger().With(
 		log.FieldComponent(componentRecoveryStorage),
@@ -44,7 +44,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, w
 			return errors.Wrap(err, "failed to initialize checkpoint")
 		}
 	}
-	r.checkpoint = newWALCheckpointFromProto(walName, cpProto)
+	r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	r.Logger().Info("recover checkpoint done",
 		zap.String("checkpoint", r.checkpoint.MessageID.String()),
 		zap.Uint64("timetick", r.checkpoint.TimeTick),
@@ -156,9 +156,7 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	}
 	// Use the first timesync message as the initial checkpoint.
 	checkpoint := &streamingpb.WALCheckpoint{
-		MessageId: &messagespb.MessageID{
-			Id: untilMessage.LastConfirmedMessageID().Marshal(),
-		},
+		MessageId:     untilMessage.LastConfirmedMessageID().IntoProto(),
 		TimeTick:      untilMessage.TimeTick(),
 		RecoveryMagic: RecoveryMagicStreamingInitialized,
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -50,8 +51,8 @@ func (id wpID) WoodpeckerMsgId() *wp.LogMessageId {
 	return id.logMsgId
 }
 
-func (id wpID) WALName() string {
-	return WALName
+func (id wpID) WALName() message.WALName {
+	return message.WALNameWoodpecker
 }
 
 func (id wpID) LT(other message.MessageID) bool {
@@ -79,6 +80,13 @@ func (id wpID) EQ(other message.MessageID) bool {
 
 func (id wpID) Marshal() string {
 	return base64.StdEncoding.EncodeToString(id.logMsgId.Serialize())
+}
+
+func (id wpID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      id.Marshal(),
+		WALName: commonpb.WALName(id.WALName()),
+	}
 }
 
 func (id wpID) String() string {

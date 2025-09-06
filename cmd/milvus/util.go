@@ -147,6 +147,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableQueryNode = true
 		role.EnableDataNode = true
 		role.EnableStreamingNode = true
+		role.EnableCDC = true
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
 	case typeutil.MixCoordRole:
@@ -164,6 +165,9 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 			role.EnableQueryNode = true
 			streamingutil.EnableEmbededQueryNode()
 		}
+
+	case typeutil.CDCRole:
+		role.EnableCDC = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", serverType, getHelp())
 		os.Exit(-1)

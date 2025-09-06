@@ -453,18 +453,18 @@ func (_c *MockWAL_Read_Call) RunAndReturn(run func(context.Context, wal.ReadOpti
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockWAL) WALName() string {
+func (_m *MockWAL) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -487,12 +487,12 @@ func (_c *MockWAL_WALName_Call) Run(run func()) *MockWAL_WALName_Call {
 	return _c
 }
 
-func (_c *MockWAL_WALName_Call) Return(_a0 string) *MockWAL_WALName_Call {
+func (_c *MockWAL_WALName_Call) Return(_a0 message.WALName) *MockWAL_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWAL_WALName_Call) RunAndReturn(run func() string) *MockWAL_WALName_Call {
+func (_c *MockWAL_WALName_Call) RunAndReturn(run func() message.WALName) *MockWAL_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

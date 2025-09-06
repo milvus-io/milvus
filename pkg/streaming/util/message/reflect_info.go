@@ -12,23 +12,24 @@ import (
 
 // Export message types
 const (
-	MessageTypeUnknown          MessageType = MessageType(messagespb.MessageType_Unknown)
-	MessageTypeTimeTick         MessageType = MessageType(messagespb.MessageType_TimeTick)
-	MessageTypeInsert           MessageType = MessageType(messagespb.MessageType_Insert)
-	MessageTypeDelete           MessageType = MessageType(messagespb.MessageType_Delete)
-	MessageTypeCreateCollection MessageType = MessageType(messagespb.MessageType_CreateCollection)
-	MessageTypeDropCollection   MessageType = MessageType(messagespb.MessageType_DropCollection)
-	MessageTypeCreatePartition  MessageType = MessageType(messagespb.MessageType_CreatePartition)
-	MessageTypeDropPartition    MessageType = MessageType(messagespb.MessageType_DropPartition)
-	MessageTypeImport           MessageType = MessageType(messagespb.MessageType_Import)
-	MessageTypeCreateSegment    MessageType = MessageType(messagespb.MessageType_CreateSegment)
-	MessageTypeFlush            MessageType = MessageType(messagespb.MessageType_Flush)
-	MessageTypeManualFlush      MessageType = MessageType(messagespb.MessageType_ManualFlush)
-	MessageTypeBeginTxn         MessageType = MessageType(messagespb.MessageType_BeginTxn)
-	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
-	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
-	MessageTypeTxn              MessageType = MessageType(messagespb.MessageType_Txn)
-	MessageTypeSchemaChange     MessageType = MessageType(messagespb.MessageType_SchemaChange)
+	MessageTypeUnknown            MessageType = MessageType(messagespb.MessageType_Unknown)
+	MessageTypeTimeTick           MessageType = MessageType(messagespb.MessageType_TimeTick)
+	MessageTypeInsert             MessageType = MessageType(messagespb.MessageType_Insert)
+	MessageTypeDelete             MessageType = MessageType(messagespb.MessageType_Delete)
+	MessageTypeCreateCollection   MessageType = MessageType(messagespb.MessageType_CreateCollection)
+	MessageTypeDropCollection     MessageType = MessageType(messagespb.MessageType_DropCollection)
+	MessageTypeCreatePartition    MessageType = MessageType(messagespb.MessageType_CreatePartition)
+	MessageTypeDropPartition      MessageType = MessageType(messagespb.MessageType_DropPartition)
+	MessageTypeImport             MessageType = MessageType(messagespb.MessageType_Import)
+	MessageTypeCreateSegment      MessageType = MessageType(messagespb.MessageType_CreateSegment)
+	MessageTypeFlush              MessageType = MessageType(messagespb.MessageType_Flush)
+	MessageTypeManualFlush        MessageType = MessageType(messagespb.MessageType_ManualFlush)
+	MessageTypePutReplicateConfig MessageType = MessageType(messagespb.MessageType_PutReplicateConfig)
+	MessageTypeBeginTxn           MessageType = MessageType(messagespb.MessageType_BeginTxn)
+	MessageTypeCommitTxn          MessageType = MessageType(messagespb.MessageType_CommitTxn)
+	MessageTypeRollbackTxn        MessageType = MessageType(messagespb.MessageType_RollbackTxn)
+	MessageTypeTxn                MessageType = MessageType(messagespb.MessageType_Txn)
+	MessageTypeSchemaChange       MessageType = MessageType(messagespb.MessageType_SchemaChange)
 )
 
 // Export extra message type
@@ -40,38 +41,40 @@ type (
 
 // Export message header and body types
 type (
-	TimeTickMessageHeader         = messagespb.TimeTickMessageHeader
-	TimeTickMsg                   = msgpb.TimeTickMsg
-	InsertMessageHeader           = messagespb.InsertMessageHeader
-	InsertRequest                 = msgpb.InsertRequest
-	DeleteMessageHeader           = messagespb.DeleteMessageHeader
-	DeleteRequest                 = msgpb.DeleteRequest
-	CreateCollectionMessageHeader = messagespb.CreateCollectionMessageHeader
-	CreateCollectionRequest       = msgpb.CreateCollectionRequest
-	DropCollectionMessageHeader   = messagespb.DropCollectionMessageHeader
-	DropCollectionRequest         = msgpb.DropCollectionRequest
-	CreatePartitionMessageHeader  = messagespb.CreatePartitionMessageHeader
-	CreatePartitionRequest        = msgpb.CreatePartitionRequest
-	DropPartitionMessageHeader    = messagespb.DropPartitionMessageHeader
-	DropPartitionRequest          = msgpb.DropPartitionRequest
-	ImportMessageHeader           = messagespb.ImportMessageHeader
-	ImportMsg                     = msgpb.ImportMsg
-	CreateSegmentMessageHeader    = messagespb.CreateSegmentMessageHeader
-	CreateSegmentMessageBody      = messagespb.CreateSegmentMessageBody
-	FlushMessageHeader            = messagespb.FlushMessageHeader
-	FlushMessageBody              = messagespb.FlushMessageBody
-	ManualFlushMessageHeader      = messagespb.ManualFlushMessageHeader
-	ManualFlushMessageBody        = messagespb.ManualFlushMessageBody
-	BeginTxnMessageHeader         = messagespb.BeginTxnMessageHeader
-	BeginTxnMessageBody           = messagespb.BeginTxnMessageBody
-	CommitTxnMessageHeader        = messagespb.CommitTxnMessageHeader
-	CommitTxnMessageBody          = messagespb.CommitTxnMessageBody
-	RollbackTxnMessageHeader      = messagespb.RollbackTxnMessageHeader
-	RollbackTxnMessageBody        = messagespb.RollbackTxnMessageBody
-	TxnMessageHeader              = messagespb.TxnMessageHeader
-	TxnMessageBody                = messagespb.TxnMessageBody
-	SchemaChangeMessageHeader     = messagespb.SchemaChangeMessageHeader
-	SchemaChangeMessageBody       = messagespb.SchemaChangeMessageBody
+	TimeTickMessageHeader           = messagespb.TimeTickMessageHeader
+	TimeTickMsg                     = msgpb.TimeTickMsg
+	InsertMessageHeader             = messagespb.InsertMessageHeader
+	InsertRequest                   = msgpb.InsertRequest
+	DeleteMessageHeader             = messagespb.DeleteMessageHeader
+	DeleteRequest                   = msgpb.DeleteRequest
+	CreateCollectionMessageHeader   = messagespb.CreateCollectionMessageHeader
+	CreateCollectionRequest         = msgpb.CreateCollectionRequest
+	DropCollectionMessageHeader     = messagespb.DropCollectionMessageHeader
+	DropCollectionRequest           = msgpb.DropCollectionRequest
+	CreatePartitionMessageHeader    = messagespb.CreatePartitionMessageHeader
+	CreatePartitionRequest          = msgpb.CreatePartitionRequest
+	DropPartitionMessageHeader      = messagespb.DropPartitionMessageHeader
+	DropPartitionRequest            = msgpb.DropPartitionRequest
+	ImportMessageHeader             = messagespb.ImportMessageHeader
+	ImportMsg                       = msgpb.ImportMsg
+	CreateSegmentMessageHeader      = messagespb.CreateSegmentMessageHeader
+	CreateSegmentMessageBody        = messagespb.CreateSegmentMessageBody
+	FlushMessageHeader              = messagespb.FlushMessageHeader
+	FlushMessageBody                = messagespb.FlushMessageBody
+	ManualFlushMessageHeader        = messagespb.ManualFlushMessageHeader
+	ManualFlushMessageBody          = messagespb.ManualFlushMessageBody
+	PutReplicateConfigMessageHeader = messagespb.PutReplicateConfigMessageHeader
+	PutReplicateConfigMessageBody   = messagespb.PutReplicateConfigMessageBody
+	BeginTxnMessageHeader           = messagespb.BeginTxnMessageHeader
+	BeginTxnMessageBody             = messagespb.BeginTxnMessageBody
+	CommitTxnMessageHeader          = messagespb.CommitTxnMessageHeader
+	CommitTxnMessageBody            = messagespb.CommitTxnMessageBody
+	RollbackTxnMessageHeader        = messagespb.RollbackTxnMessageHeader
+	RollbackTxnMessageBody          = messagespb.RollbackTxnMessageBody
+	TxnMessageHeader                = messagespb.TxnMessageHeader
+	TxnMessageBody                  = messagespb.TxnMessageBody
+	SchemaChangeMessageHeader       = messagespb.SchemaChangeMessageHeader
+	SchemaChangeMessageBody         = messagespb.SchemaChangeMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -514,6 +517,46 @@ var MustAsBroadcastManualFlushMessageV2 = MustAsSpecializedBroadcastMessage[*Man
 // NewManualFlushMessageBuilderV2 creates a new message builder for ManualFlushMessageV2
 var NewManualFlushMessageBuilderV2 = newMutableMessageBuilder[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 
+// Type aliases for PutReplicateConfigMessageV2
+type (
+	MutablePutReplicateConfigMessageV2   = specializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+	ImmutablePutReplicateConfigMessageV2 = SpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+	BroadcastPutReplicateConfigMessageV2 = SpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+)
+
+// MessageTypeWithVersion for PutReplicateConfigMessageV2
+var MessageTypePutReplicateConfigV2 = MessageTypeWithVersion{
+	MessageType: MessageTypePutReplicateConfig,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for PutReplicateConfigMessageV2
+var SpecializedTypePutReplicateConfigV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*PutReplicateConfigMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*PutReplicateConfigMessageHeader)(nil)),
+}
+
+// AsMutablePutReplicateConfigMessageV2 converts a BasicMessage to MutablePutReplicateConfigMessageV2
+var AsMutablePutReplicateConfigMessageV2 = asSpecializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// MustAsMutablePutReplicateConfigMessageV2 converts a BasicMessage to MutablePutReplicateConfigMessageV2, panics on error
+var MustAsMutablePutReplicateConfigMessageV2 = mustAsSpecializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// AsImmutablePutReplicateConfigMessageV2 converts an ImmutableMessage to ImmutablePutReplicateConfigMessageV2
+var AsImmutablePutReplicateConfigMessageV2 = asSpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// MustAsImmutablePutReplicateConfigMessageV2 converts an ImmutableMessage to ImmutablePutReplicateConfigMessageV2, panics on error
+var MustAsImmutablePutReplicateConfigMessageV2 = MustAsSpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// AsBroadcastPutReplicateConfigMessageV2 converts a BasicMessage to BroadcastPutReplicateConfigMessageV2
+var AsBroadcastPutReplicateConfigMessageV2 = asSpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// MustAsBroadcastPutReplicateConfigMessageV2 converts a BasicMessage to BroadcastPutReplicateConfigMessageV2, panics on error
+var MustAsBroadcastPutReplicateConfigMessageV2 = MustAsSpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
+// NewPutReplicateConfigMessageBuilderV2 creates a new message builder for PutReplicateConfigMessageV2
+var NewPutReplicateConfigMessageBuilderV2 = newMutableMessageBuilder[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+
 // Type aliases for BeginTxnMessageV2
 type (
 	MutableBeginTxnMessageV2   = specializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
@@ -695,22 +738,23 @@ var NewSchemaChangeMessageBuilderV2 = newMutableMessageBuilder[*SchemaChangeMess
 
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
-	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):         MessageTypeBeginTxn,
-	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):        MessageTypeCommitTxn,
-	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}): MessageTypeCreateCollection,
-	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):  MessageTypeCreatePartition,
-	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):    MessageTypeCreateSegment,
-	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):           MessageTypeDelete,
-	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):   MessageTypeDropCollection,
-	reflect.TypeOf(&messagespb.DropPartitionMessageHeader{}):    MessageTypeDropPartition,
-	reflect.TypeOf(&messagespb.FlushMessageHeader{}):            MessageTypeFlush,
-	reflect.TypeOf(&messagespb.ImportMessageHeader{}):           MessageTypeImport,
-	reflect.TypeOf(&messagespb.InsertMessageHeader{}):           MessageTypeInsert,
-	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):      MessageTypeManualFlush,
-	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):      MessageTypeRollbackTxn,
-	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):     MessageTypeSchemaChange,
-	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):         MessageTypeTimeTick,
-	reflect.TypeOf(&messagespb.TxnMessageHeader{}):              MessageTypeTxn,
+	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):           MessageTypeBeginTxn,
+	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):          MessageTypeCommitTxn,
+	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):   MessageTypeCreateCollection,
+	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):    MessageTypeCreatePartition,
+	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):      MessageTypeCreateSegment,
+	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):             MessageTypeDelete,
+	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):     MessageTypeDropCollection,
+	reflect.TypeOf(&messagespb.DropPartitionMessageHeader{}):      MessageTypeDropPartition,
+	reflect.TypeOf(&messagespb.FlushMessageHeader{}):              MessageTypeFlush,
+	reflect.TypeOf(&messagespb.ImportMessageHeader{}):             MessageTypeImport,
+	reflect.TypeOf(&messagespb.InsertMessageHeader{}):             MessageTypeInsert,
+	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):        MessageTypeManualFlush,
+	reflect.TypeOf(&messagespb.PutReplicateConfigMessageHeader{}): MessageTypePutReplicateConfig,
+	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):        MessageTypeRollbackTxn,
+	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):       MessageTypeSchemaChange,
+	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):           MessageTypeTimeTick,
+	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                MessageTypeTxn,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -731,40 +775,42 @@ type MessageSpecializedType struct {
 
 // messageTypeVersionSpecializedMap maps MessageTypeWithVersion to MessageSpecializedType
 var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecializedType{
-	MessageTypeBeginTxnV2:         SpecializedTypeBeginTxnV2,
-	MessageTypeCommitTxnV2:        SpecializedTypeCommitTxnV2,
-	MessageTypeCreateCollectionV1: SpecializedTypeCreateCollectionV1,
-	MessageTypeCreatePartitionV1:  SpecializedTypeCreatePartitionV1,
-	MessageTypeCreateSegmentV2:    SpecializedTypeCreateSegmentV2,
-	MessageTypeDeleteV1:           SpecializedTypeDeleteV1,
-	MessageTypeDropCollectionV1:   SpecializedTypeDropCollectionV1,
-	MessageTypeDropPartitionV1:    SpecializedTypeDropPartitionV1,
-	MessageTypeFlushV2:            SpecializedTypeFlushV2,
-	MessageTypeImportV1:           SpecializedTypeImportV1,
-	MessageTypeInsertV1:           SpecializedTypeInsertV1,
-	MessageTypeManualFlushV2:      SpecializedTypeManualFlushV2,
-	MessageTypeRollbackTxnV2:      SpecializedTypeRollbackTxnV2,
-	MessageTypeSchemaChangeV2:     SpecializedTypeSchemaChangeV2,
-	MessageTypeTimeTickV1:         SpecializedTypeTimeTickV1,
-	MessageTypeTxnV2:              SpecializedTypeTxnV2,
+	MessageTypeBeginTxnV2:           SpecializedTypeBeginTxnV2,
+	MessageTypeCommitTxnV2:          SpecializedTypeCommitTxnV2,
+	MessageTypeCreateCollectionV1:   SpecializedTypeCreateCollectionV1,
+	MessageTypeCreatePartitionV1:    SpecializedTypeCreatePartitionV1,
+	MessageTypeCreateSegmentV2:      SpecializedTypeCreateSegmentV2,
+	MessageTypeDeleteV1:             SpecializedTypeDeleteV1,
+	MessageTypeDropCollectionV1:     SpecializedTypeDropCollectionV1,
+	MessageTypeDropPartitionV1:      SpecializedTypeDropPartitionV1,
+	MessageTypeFlushV2:              SpecializedTypeFlushV2,
+	MessageTypeImportV1:             SpecializedTypeImportV1,
+	MessageTypeInsertV1:             SpecializedTypeInsertV1,
+	MessageTypeManualFlushV2:        SpecializedTypeManualFlushV2,
+	MessageTypePutReplicateConfigV2: SpecializedTypePutReplicateConfigV2,
+	MessageTypeRollbackTxnV2:        SpecializedTypeRollbackTxnV2,
+	MessageTypeSchemaChangeV2:       SpecializedTypeSchemaChangeV2,
+	MessageTypeTimeTickV1:           SpecializedTypeTimeTickV1,
+	MessageTypeTxnV2:                SpecializedTypeTxnV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
 var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWithVersion{
-	SpecializedTypeBeginTxnV2:         MessageTypeBeginTxnV2,
-	SpecializedTypeCommitTxnV2:        MessageTypeCommitTxnV2,
-	SpecializedTypeCreateCollectionV1: MessageTypeCreateCollectionV1,
-	SpecializedTypeCreatePartitionV1:  MessageTypeCreatePartitionV1,
-	SpecializedTypeCreateSegmentV2:    MessageTypeCreateSegmentV2,
-	SpecializedTypeDeleteV1:           MessageTypeDeleteV1,
-	SpecializedTypeDropCollectionV1:   MessageTypeDropCollectionV1,
-	SpecializedTypeDropPartitionV1:    MessageTypeDropPartitionV1,
-	SpecializedTypeFlushV2:            MessageTypeFlushV2,
-	SpecializedTypeImportV1:           MessageTypeImportV1,
-	SpecializedTypeInsertV1:           MessageTypeInsertV1,
-	SpecializedTypeManualFlushV2:      MessageTypeManualFlushV2,
-	SpecializedTypeRollbackTxnV2:      MessageTypeRollbackTxnV2,
-	SpecializedTypeSchemaChangeV2:     MessageTypeSchemaChangeV2,
-	SpecializedTypeTimeTickV1:         MessageTypeTimeTickV1,
-	SpecializedTypeTxnV2:              MessageTypeTxnV2,
+	SpecializedTypeBeginTxnV2:           MessageTypeBeginTxnV2,
+	SpecializedTypeCommitTxnV2:          MessageTypeCommitTxnV2,
+	SpecializedTypeCreateCollectionV1:   MessageTypeCreateCollectionV1,
+	SpecializedTypeCreatePartitionV1:    MessageTypeCreatePartitionV1,
+	SpecializedTypeCreateSegmentV2:      MessageTypeCreateSegmentV2,
+	SpecializedTypeDeleteV1:             MessageTypeDeleteV1,
+	SpecializedTypeDropCollectionV1:     MessageTypeDropCollectionV1,
+	SpecializedTypeDropPartitionV1:      MessageTypeDropPartitionV1,
+	SpecializedTypeFlushV2:              MessageTypeFlushV2,
+	SpecializedTypeImportV1:             MessageTypeImportV1,
+	SpecializedTypeInsertV1:             MessageTypeInsertV1,
+	SpecializedTypeManualFlushV2:        MessageTypeManualFlushV2,
+	SpecializedTypePutReplicateConfigV2: MessageTypePutReplicateConfigV2,
+	SpecializedTypeRollbackTxnV2:        MessageTypeRollbackTxnV2,
+	SpecializedTypeSchemaChangeV2:       MessageTypeSchemaChangeV2,
+	SpecializedTypeTimeTickV1:           MessageTypeTimeTickV1,
+	SpecializedTypeTxnV2:                MessageTypeTxnV2,
 }

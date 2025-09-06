@@ -1,0 +1,24 @@
+quiet: False
+with-expecter: True
+inpackage: True
+filename: "mock_{{.InterfaceNameSnake}}.go"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+dir: "{{.InterfaceDir}}"
+packages:
+  github.com/milvus-io/milvus/internal/cdc/cluster:
+    interfaces:
+      ClusterClient:
+      MilvusClient:
+  github.com/milvus-io/milvus/internal/cdc/replication:
+    interfaces:
+      ReplicateManagerClient:
+  github.com/milvus-io/milvus/internal/cdc/replication/replicatestream:
+    interfaces:
+      ReplicateStreamClient:
+  github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager:
+    interfaces:
+      ChannelReplicator:
+  github.com/milvus-io/milvus/internal/cdc/controller:
+    interfaces:
+      Controller:

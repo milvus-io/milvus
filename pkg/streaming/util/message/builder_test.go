@@ -83,3 +83,30 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("test", zap.Object("msg", immutableTxnMsg))
 }
+
+func TestReplicateBuilder(t *testing.T) {
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithBroadcast([]string{"v1", "v2"}).
+		MustBuildBroadcast()
+
+	msgs := msg.WithBroadcastID(1).SplitIntoMutableMessage()
+
+	msgID := walimplstest.NewTestMessageID(1)
+	immutableMsg := msgs[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+
+	replicateMsg := message.NewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
+	assert.NotNil(t, replicateMsg)
+	assert.Equal(t, "by-dev", replicateMsg.ReplicateHeader().ClusterID)
+	assert.Equal(t, uint64(100), replicateMsg.ReplicateHeader().TimeTick)
+	assert.Equal(t, "v1", replicateMsg.ReplicateHeader().VChannel)
+	assert.Equal(t, "v1", replicateMsg.VChannel())
+	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().MessageID))
+	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().LastConfirmedMessageID))
+
+	replicateMsg.OverwriteReplicateVChannel("v11", []string{"v11", "v12"})
+	assert.Equal(t, "v11", replicateMsg.VChannel())
+	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
+	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
+}

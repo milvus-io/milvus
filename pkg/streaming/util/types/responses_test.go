@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -39,7 +40,7 @@ func TestAppendResult_GetExtra(t *testing.T) {
 
 func TestAppendResult_IntoProto(t *testing.T) {
 	msgID := mock_message.NewMockMessageID(t)
-	msgID.EXPECT().Marshal().Return("1")
+	msgID.EXPECT().IntoProto().Return(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameTest), Id: "1"})
 	result := &AppendResult{
 		MessageID: msgID,
 		TimeTick:  12345,

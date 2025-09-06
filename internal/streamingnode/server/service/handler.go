@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
@@ -26,6 +28,11 @@ type HandlerService = streamingpb.StreamingNodeHandlerServiceServer
 // 3. send response to client.
 type handlerServiceImpl struct {
 	walManager walmanager.Manager
+}
+
+// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
+func (hs *handlerServiceImpl) GetReplicateCheckpoint(ctx context.Context, req *streamingpb.GetReplicateCheckpointRequest) (*streamingpb.GetReplicateCheckpointResponse, error) {
+	panic("not implemented") // TODO: sheep, implement it.
 }
 
 // Produce creates a new producer for the channel on this log node.

@@ -49,7 +49,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		StreamingNodeHandlerService_ConsumeServer: streamServer,
 	}
 	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{
-		WalName: l.WALName(),
+		WalName: l.WALName().String(),
 	}); err != nil {
 		return nil, errors.Wrap(err, "at send created")
 	}

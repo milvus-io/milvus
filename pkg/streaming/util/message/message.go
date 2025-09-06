@@ -4,6 +4,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
@@ -59,6 +60,10 @@ type BasicMessage interface {
 	// If the message is not a broadcast message, it will return 0.
 	BroadcastHeader() *BroadcastHeader
 
+	// ReplicateHeader returns the replicate header of current message.
+	// If the message is not a replicate message, it will return nil.
+	ReplicateHeader() *ReplicateHeader
+
 	// IsPersisted returns true if the message is persisted into underlying log storage.
 	IsPersisted() bool
 
@@ -111,6 +116,14 @@ type MutableMessage interface {
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }
 
+// ReplicateMutableMessage is the replicate message interface.
+type ReplicateMutableMessage interface {
+	MutableMessage
+
+	// OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
+	OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string)
+}
+
 // BroadcastMutableMessage is the broadcast message interface.
 // Indicated the message is broadcasted on various vchannels.
 type BroadcastMutableMessage interface {
@@ -130,7 +143,7 @@ type ImmutableMessage interface {
 	BasicMessage
 
 	// WALName returns the name of message related wal.
-	WALName() string
+	WALName() WALName
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
@@ -148,7 +161,7 @@ type ImmutableMessage interface {
 	LastConfirmedMessageID() MessageID
 
 	// IntoImmutableMessageProto converts the message to a protobuf immutable message.
-	IntoImmutableMessageProto() *messagespb.ImmutableMessage
+	IntoImmutableMessageProto() *commonpb.ImmutableMessage
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.
@@ -210,6 +223,9 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 
 	// OverwriteHeader overwrites the message header.
 	OverwriteHeader(header H)
+
+	// OverwriteBody overwrites the message body.
+	OverwriteBody(body B)
 }
 
 // SpecializedImmutableMessage is the specialized immutable message interface.

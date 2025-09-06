@@ -8,23 +8,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
 )
 
-const (
-	WALName = "rocksmq"
-)
-
 func init() {
 	// register the builder to the registry.
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
-	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(message.WALNameRocksmq, UnmarshalMessageID)
 }
 
 // builderImpl is the builder for rmq opener.
 type builderImpl struct{}
 
 // Name of the wal builder, should be a lowercase string.
-func (b *builderImpl) Name() string {
-	return WALName
+func (b *builderImpl) Name() message.WALName {
+	return message.WALNameRocksmq
 }
 
 // Build build a wal instance.

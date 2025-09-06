@@ -298,10 +298,7 @@ func (p *producerImpl) recvLoop() (err error) {
 			var result produceResponse
 			switch produceResp := resp.Produce.Response.(type) {
 			case *streamingpb.ProduceMessageResponse_Result:
-				msgID, err := message.UnmarshalMessageID(
-					p.walName,
-					produceResp.Result.GetId().GetId(),
-				)
+				msgID, err := message.UnmarshalMessageID(produceResp.Result.GetId())
 				if err != nil {
 					return err
 				}

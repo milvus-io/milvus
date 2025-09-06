@@ -14,7 +14,7 @@ var ErrFenced = errors.New("fenced")
 // ROWALImpls is the underlying implementation for a read-only wal.
 type ROWALImpls interface {
 	// WALName returns the name of the wal.
-	WALName() string
+	WALName() message.WALName
 
 	// Channel returns the channel assignment info of the wal.
 	// Should be read-only.

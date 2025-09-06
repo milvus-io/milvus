@@ -34,7 +34,7 @@ func RecoverRecoveryStorage(
 	lastTimeTickMessage message.ImmutableMessage,
 ) (RecoveryStorage, *RecoverySnapshot, error) {
 	rs := newRecoveryStorage(recoveryStreamBuilder.Channel())
-	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.WALName(), recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
+	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
 		rs.Logger().Warn("recovery storage failed", zap.Error(err))
 		return nil, nil, err
 	}
