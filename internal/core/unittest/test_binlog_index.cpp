@@ -117,7 +117,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             {"index_type", index_type},
             {"metric_type", metric_type},
             {"nlist", "64"}};
-        std::map<std::string, std::string> type_params = {{"dim", "128"}};
+        std::map<std::string, std::string> type_params = {{"dim", "4"}};
         FieldIndexMeta fieldIndexMeta(
             vec_field_id, std::move(index_params), std::move(type_params));
         auto& config = SegcoreConfig::default_config();
@@ -166,7 +166,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     std::optional<std::string> dense_vec_intermin_index_type = std::nullopt;
     std::string index_type;
     size_t data_n = 5000;
-    size_t data_d = 128;
+    size_t data_d = 4;
     size_t topk = 10;
     milvus::FieldDataPtr vec_field_data = nullptr;
     milvus::segcore::SegmentSealedUPtr segment = nullptr;
