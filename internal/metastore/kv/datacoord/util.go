@@ -264,9 +264,23 @@ func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string,
 	return key, string(valueBytes), nil
 }
 
+func buildGlobalStatsTaskKv(info *datapb.GlobalStatsTask) (string, string, error) {
+	valueBytes, err := proto.Marshal(info)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+	}
+	key := buildGlobalStatsTaskPath(info)
+	return key, string(valueBytes), nil
+}
+
 // buildPartitionStatsInfoPath
 func buildPartitionStatsInfoPath(info *datapb.PartitionStatsInfo) string {
 	return fmt.Sprintf("%s/%d/%d/%s/%d", PartitionStatsInfoPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
+}
+
+// buildGlobalStatsTaskPath
+func buildGlobalStatsTaskPath(info *datapb.GlobalStatsTask) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d", GlobalStatsTaskPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
 }
 
 func buildCurrentPartitionStatsVersionPath(collID, partID int64, channel string) string {
@@ -351,4 +365,8 @@ func buildAnalyzeTaskKey(taskID int64) string {
 
 func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
+}
+
+func buildGlobalStatsTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", GlobalStatsTaskPrefix, taskID)
 }

@@ -73,6 +73,7 @@ const (
 	DataCoord_AddFileResource_FullMethodName             = "/milvus.proto.data.DataCoord/AddFileResource"
 	DataCoord_RemoveFileResource_FullMethodName          = "/milvus.proto.data.DataCoord/RemoveFileResource"
 	DataCoord_ListFileResources_FullMethodName           = "/milvus.proto.data.DataCoord/ListFileResources"
+	DataCoord_Watch_FullMethodName                       = "/milvus.proto.data.DataCoord/Watch"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -137,6 +138,7 @@ type DataCoordClient interface {
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
+	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (DataCoord_WatchClient, error)
 }
 
 type dataCoordClient struct {
@@ -598,6 +600,38 @@ func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 	return out, nil
 }
 
+func (c *dataCoordClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (DataCoord_WatchClient, error) {
+	stream, err := c.cc.NewStream(ctx, &DataCoord_ServiceDesc.Streams[0], DataCoord_Watch_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &dataCoordWatchClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type DataCoord_WatchClient interface {
+	Recv() (*WatchResponse, error)
+	grpc.ClientStream
+}
+
+type dataCoordWatchClient struct {
+	grpc.ClientStream
+}
+
+func (x *dataCoordWatchClient) Recv() (*WatchResponse, error) {
+	m := new(WatchResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -660,6 +694,7 @@ type DataCoordServer interface {
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
 	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
 	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
+	Watch(*WatchRequest, DataCoord_WatchServer) error
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -815,6 +850,9 @@ func (UnimplementedDataCoordServer) RemoveFileResource(context.Context, *milvusp
 }
 func (UnimplementedDataCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
+}
+func (UnimplementedDataCoordServer) Watch(*WatchRequest, DataCoord_WatchServer) error {
+	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1728,6 +1766,27 @@ func _DataCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DataCoordServer).Watch(m, &dataCoordWatchServer{stream})
+}
+
+type DataCoord_WatchServer interface {
+	Send(*WatchResponse) error
+	grpc.ServerStream
+}
+
+type dataCoordWatchServer struct {
+	grpc.ServerStream
+}
+
+func (x *dataCoordWatchServer) Send(m *WatchResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1936,7 +1995,13 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DataCoord_ListFileResources_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Watch",
+			Handler:       _DataCoord_Watch_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "data_coord.proto",
 }
 

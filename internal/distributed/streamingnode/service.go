@@ -253,6 +253,9 @@ func (s *Server) start() (err error) {
 	// Register current server to etcd.
 	s.registerSessionToETCD()
 
+	// Start watching events
+	s.streamingnode.StartWatching()
+
 	s.componentState.OnInitialized(s.session.ServerID)
 	return nil
 }

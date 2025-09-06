@@ -899,6 +899,10 @@ func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, 
 	panic("implement me")
 }
 
+func (s *mockMixCoord) Watch(req *datapb.WatchRequest, stream datapb.DataCoord_WatchServer) error {
+	panic("implement me")
+}
+
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mockMixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	panic("implement me")

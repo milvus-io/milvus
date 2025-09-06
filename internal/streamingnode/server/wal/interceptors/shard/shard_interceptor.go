@@ -5,7 +5,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -26,6 +30,8 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 type shardInterceptor struct {
 	shardManager shards.ShardManager
 	ops          map[message.MessageType]interceptors.AppendInterceptorCall
+	pkFieldID    int64
+	pkType       int64
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -41,6 +47,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
+		message.MessageTypeCommitTxn:        impl.handleCommitTxn,
 	}
 }
 
@@ -74,6 +81,33 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	if err != nil {
 		return msgID, err
 	}
+
+	createCollectionRequest, err := createCollectionMsg.Body()
+	if err != nil {
+		impl.shardManager.Logger().Error("failed to get create collection request body", zap.Error(err))
+		return msgID, err
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	if err := proto.Unmarshal(createCollectionRequest.GetSchema(), schema); err != nil {
+		impl.shardManager.Logger().Error("failed to unmarshal collection schema", zap.Error(err))
+		return msgID, err
+	}
+
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			impl.pkFieldID = field.FieldID
+			impl.pkType = int64(field.DataType)
+			impl.shardManager.Logger().Info("found primary key field",
+				zap.Int64("fieldID", impl.pkFieldID),
+				zap.Int64("pkType", impl.pkType),
+				zap.String("fieldName", field.Name))
+
+			resource.Resource().PrimaryIndexManager().SetPrimaryKeyInfo(impl.pkFieldID, impl.pkType)
+			break
+		}
+	}
+
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
 	return msgID, nil
 }
@@ -136,9 +170,33 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 // handleInsertMessage handles the insert message.
 func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
+	header := insertMsg.Header()
+	body, _ := insertMsg.Body()
+	var pks []storage.PrimaryKey
+	if resource.Resource().PrimaryIndexManager() != nil {
+		pks, _ = resource.Resource().PrimaryIndexManager().ExtractPrimaryKeyColumn(insertMsg)
+		// if err == nil {
+		// 	duplicateKeys, segmentIDs := resource.Resource().PrimaryIndexManager().CheckDuplicatePrimaryKeys(body.GetShardName(), pks)
+		// 	if duplicateKeys != nil {
+		// 		switch duplicateKeys.GetIdField().(type) {
+		// 		case *schemapb.IDs_IntId:
+		// 			if len(duplicateKeys.GetIntId().GetData()) > 0 {
+		// 				header.DeletePrimaryKeys = duplicateKeys
+		// 				header.SegmentIds = segmentIDs
+		// 			}
+		// 		case *schemapb.IDs_StrId:
+		// 			if len(duplicateKeys.GetStrId().GetData()) > 0 {
+		// 				header.DeletePrimaryKeys = duplicateKeys
+		// 				header.SegmentIds = segmentIDs
+		// 			}
+		// 		}
+		// 	}
+		// }
+	}
+
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
-	header := insertMsg.Header()
+
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
@@ -187,6 +245,10 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		partition.SegmentAssignment = &message.SegmentAssignment{
 			SegmentId: result.SegmentID,
 		}
+
+		if resource.Resource().PrimaryIndexManager() != nil {
+			resource.Resource().PrimaryIndexManager().UpdateBloomFilterFromPrimaryKeys(body.GetShardName(), pks, result.SegmentID)
+		}
 	}
 	// Update the insert message headers.
 	insertMsg.OverwriteHeader(header)
@@ -197,12 +259,21 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
 	header := deleteMessage.Header()
+	var pks []storage.PrimaryKey
+	if resource.Resource().PrimaryIndexManager() != nil {
+		body, _ := deleteMessage.Body()
+		pks = storage.ParseIDs2PrimaryKeys(body.GetPrimaryKeys())
+		deletePks, segmentIDs := resource.Resource().PrimaryIndexManager().CheckDuplicatePrimaryKeys(body.GetShardName(), pks)
+		header.SegmentIds = segmentIDs
+		header.DeletePrimaryKeys = deletePks
+	}
+
 	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
 		// The collection can not be deleted at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
-
 	impl.shardManager.ApplyDelete(deleteMessage)
+	deleteMessage.OverwriteHeader(header)
 	return appendOp(ctx, msg)
 }
 
@@ -255,6 +326,7 @@ func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg messa
 		return nil, err
 	}
 	impl.shardManager.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(msg.IntoImmutableMessage(msgID)))
+
 	return msgID, nil
 }
 
@@ -282,3 +354,8 @@ func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg messag
 
 // Close closes the segment interceptor.
 func (impl *shardInterceptor) Close() {}
+
+func (impl *shardInterceptor) handleCommitTxn(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	log.Info("shardInterceptor handleCommitTxn", zap.Any("msg", msg))
+	return appendOp(ctx, msg)
+}

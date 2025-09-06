@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -13,12 +14,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 // Server is the streamingnode server.
@@ -33,6 +37,10 @@ type Server struct {
 
 	// basic component instances.
 	walManager walmanager.Manager
+
+	// Event watching
+	watchCtx    context.Context
+	watchCancel context.CancelFunc
 }
 
 // Init initializes the streamingnode server.
@@ -57,6 +65,65 @@ func (s *Server) init() {
 	}
 }
 
+// StartWatching starts watching events from MixCoord
+func (s *Server) StartWatching() {
+	s.watchCtx, s.watchCancel = context.WithCancel(context.Background())
+
+	go func() {
+		for {
+			select {
+			case <-s.watchCtx.Done():
+				return
+			default:
+				if err := s.watchEvents(); err != nil {
+					log.Ctx(s.watchCtx).Warn("Event watching failed, retrying...", zap.Error(err))
+					continue
+				}
+			}
+		}
+	}()
+}
+
+func (s *Server) watchEvents() error {
+	mixCoord := resource.Resource().MixCoordClient().Get()
+	if mixCoord == nil {
+		return fmt.Errorf("mixCoord client not ready")
+	}
+
+	ctx := s.watchCtx
+	stream, err := mixCoord.Watch(ctx, &datapb.WatchRequest{
+		EventType: datapb.EventType_EventType_PrimaryKeyIndexBuilt,
+	})
+	if err != nil {
+		return err
+	}
+
+	for {
+		event, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+
+		log.Ctx(ctx).Info("Received event from MixCoord",
+			zap.String("type", event.EventType.String()))
+
+		switch event.EventType {
+		case datapb.EventType_EventType_PrimaryKeyIndexBuilt:
+			s.handlePrimaryKeyIndexBuilt(event.EventData)
+		}
+	}
+}
+
+func (s *Server) handlePrimaryKeyIndexBuilt(data []byte) {
+	var eventData datapb.PrimaryKeyIndexBuiltData
+	if err := proto.Unmarshal(data, &eventData); err != nil {
+		log.Ctx(s.watchCtx).Error("failed to unmarshal primary key index built event data", zap.Error(err))
+		return
+	}
+
+	resource.Resource().PrimaryIndexManager().LoadSealedIndex(&eventData)
+}
+
 // Stop stops the streamingnode server.
 func (s *Server) Stop() {
 	log.Info("stopping streamingnode server...")
@@ -65,6 +132,9 @@ func (s *Server) Stop() {
 	log.Info("release streamingnode resources...")
 	resource.Release()
 	log.Info("streamingnode server stopped")
+	if s.watchCancel != nil {
+		s.watchCancel()
+	}
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.

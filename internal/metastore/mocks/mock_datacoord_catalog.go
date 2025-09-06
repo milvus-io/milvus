@@ -611,6 +611,100 @@ func (_c *DataCoordCatalog_DropCurrentPartitionStatsVersion_Call) RunAndReturn(r
 	return _c
 }
 
+// DropGlobalStatsInfo provides a mock function with given fields: ctx, info
+func (_m *DataCoordCatalog) DropGlobalStatsInfo(ctx context.Context, info *datapb.GlobalStatsTask) error {
+	ret := _m.Called(ctx, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropGlobalStatsInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GlobalStatsTask) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropGlobalStatsInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropGlobalStatsInfo'
+type DataCoordCatalog_DropGlobalStatsInfo_Call struct {
+	*mock.Call
+}
+
+// DropGlobalStatsInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.GlobalStatsTask
+func (_e *DataCoordCatalog_Expecter) DropGlobalStatsInfo(ctx interface{}, info interface{}) *DataCoordCatalog_DropGlobalStatsInfo_Call {
+	return &DataCoordCatalog_DropGlobalStatsInfo_Call{Call: _e.mock.On("DropGlobalStatsInfo", ctx, info)}
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsInfo_Call) Run(run func(ctx context.Context, info *datapb.GlobalStatsTask)) *DataCoordCatalog_DropGlobalStatsInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GlobalStatsTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsInfo_Call) Return(_a0 error) *DataCoordCatalog_DropGlobalStatsInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsInfo_Call) RunAndReturn(run func(context.Context, *datapb.GlobalStatsTask) error) *DataCoordCatalog_DropGlobalStatsInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropGlobalStatsTask provides a mock function with given fields: ctx, taskID
+func (_m *DataCoordCatalog) DropGlobalStatsTask(ctx context.Context, taskID int64) error {
+	ret := _m.Called(ctx, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropGlobalStatsTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropGlobalStatsTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropGlobalStatsTask'
+type DataCoordCatalog_DropGlobalStatsTask_Call struct {
+	*mock.Call
+}
+
+// DropGlobalStatsTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - taskID int64
+func (_e *DataCoordCatalog_Expecter) DropGlobalStatsTask(ctx interface{}, taskID interface{}) *DataCoordCatalog_DropGlobalStatsTask_Call {
+	return &DataCoordCatalog_DropGlobalStatsTask_Call{Call: _e.mock.On("DropGlobalStatsTask", ctx, taskID)}
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsTask_Call) Run(run func(ctx context.Context, taskID int64)) *DataCoordCatalog_DropGlobalStatsTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsTask_Call) Return(_a0 error) *DataCoordCatalog_DropGlobalStatsTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropGlobalStatsTask_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropGlobalStatsTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImportJob provides a mock function with given fields: ctx, jobID
 func (_m *DataCoordCatalog) DropImportJob(ctx context.Context, jobID int64) error {
 	ret := _m.Called(ctx, jobID)
@@ -1326,6 +1420,122 @@ func (_c *DataCoordCatalog_ListFileResource_Call) Return(_a0 []*model.FileResour
 }
 
 func (_c *DataCoordCatalog_ListFileResource_Call) RunAndReturn(run func(context.Context) ([]*model.FileResource, error)) *DataCoordCatalog_ListFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListGlobalStatsInfos provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListGlobalStatsInfos(ctx context.Context) ([]*datapb.GlobalStatsTask, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListGlobalStatsInfos")
+	}
+
+	var r0 []*datapb.GlobalStatsTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.GlobalStatsTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.GlobalStatsTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.GlobalStatsTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListGlobalStatsInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListGlobalStatsInfos'
+type DataCoordCatalog_ListGlobalStatsInfos_Call struct {
+	*mock.Call
+}
+
+// ListGlobalStatsInfos is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListGlobalStatsInfos(ctx interface{}) *DataCoordCatalog_ListGlobalStatsInfos_Call {
+	return &DataCoordCatalog_ListGlobalStatsInfos_Call{Call: _e.mock.On("ListGlobalStatsInfos", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsInfos_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListGlobalStatsInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsInfos_Call) Return(_a0 []*datapb.GlobalStatsTask, _a1 error) *DataCoordCatalog_ListGlobalStatsInfos_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsInfos_Call) RunAndReturn(run func(context.Context) ([]*datapb.GlobalStatsTask, error)) *DataCoordCatalog_ListGlobalStatsInfos_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListGlobalStatsTask provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListGlobalStatsTask(ctx context.Context) ([]*datapb.GlobalStatsTask, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListGlobalStatsTask")
+	}
+
+	var r0 []*datapb.GlobalStatsTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.GlobalStatsTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.GlobalStatsTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.GlobalStatsTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListGlobalStatsTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListGlobalStatsTask'
+type DataCoordCatalog_ListGlobalStatsTask_Call struct {
+	*mock.Call
+}
+
+// ListGlobalStatsTask is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListGlobalStatsTask(ctx interface{}) *DataCoordCatalog_ListGlobalStatsTask_Call {
+	return &DataCoordCatalog_ListGlobalStatsTask_Call{Call: _e.mock.On("ListGlobalStatsTask", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsTask_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListGlobalStatsTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsTask_Call) Return(_a0 []*datapb.GlobalStatsTask, _a1 error) *DataCoordCatalog_ListGlobalStatsTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListGlobalStatsTask_Call) RunAndReturn(run func(context.Context) ([]*datapb.GlobalStatsTask, error)) *DataCoordCatalog_ListGlobalStatsTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2265,6 +2475,100 @@ func (_c *DataCoordCatalog_SaveFileResource_Call) Return(_a0 error) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_SaveFileResource_Call) RunAndReturn(run func(context.Context, *model.FileResource) error) *DataCoordCatalog_SaveFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveGlobalStatsInfo provides a mock function with given fields: ctx, info
+func (_m *DataCoordCatalog) SaveGlobalStatsInfo(ctx context.Context, info *datapb.GlobalStatsTask) error {
+	ret := _m.Called(ctx, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveGlobalStatsInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GlobalStatsTask) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveGlobalStatsInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveGlobalStatsInfo'
+type DataCoordCatalog_SaveGlobalStatsInfo_Call struct {
+	*mock.Call
+}
+
+// SaveGlobalStatsInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.GlobalStatsTask
+func (_e *DataCoordCatalog_Expecter) SaveGlobalStatsInfo(ctx interface{}, info interface{}) *DataCoordCatalog_SaveGlobalStatsInfo_Call {
+	return &DataCoordCatalog_SaveGlobalStatsInfo_Call{Call: _e.mock.On("SaveGlobalStatsInfo", ctx, info)}
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsInfo_Call) Run(run func(ctx context.Context, info *datapb.GlobalStatsTask)) *DataCoordCatalog_SaveGlobalStatsInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GlobalStatsTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsInfo_Call) Return(_a0 error) *DataCoordCatalog_SaveGlobalStatsInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsInfo_Call) RunAndReturn(run func(context.Context, *datapb.GlobalStatsTask) error) *DataCoordCatalog_SaveGlobalStatsInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveGlobalStatsTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveGlobalStatsTask(ctx context.Context, task *datapb.GlobalStatsTask) error {
+	ret := _m.Called(ctx, task)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveGlobalStatsTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GlobalStatsTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveGlobalStatsTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveGlobalStatsTask'
+type DataCoordCatalog_SaveGlobalStatsTask_Call struct {
+	*mock.Call
+}
+
+// SaveGlobalStatsTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *datapb.GlobalStatsTask
+func (_e *DataCoordCatalog_Expecter) SaveGlobalStatsTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveGlobalStatsTask_Call {
+	return &DataCoordCatalog_SaveGlobalStatsTask_Call{Call: _e.mock.On("SaveGlobalStatsTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsTask_Call) Run(run func(ctx context.Context, task *datapb.GlobalStatsTask)) *DataCoordCatalog_SaveGlobalStatsTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GlobalStatsTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsTask_Call) Return(_a0 error) *DataCoordCatalog_SaveGlobalStatsTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveGlobalStatsTask_Call) RunAndReturn(run func(context.Context, *datapb.GlobalStatsTask) error) *DataCoordCatalog_SaveGlobalStatsTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1201,3 +1201,7 @@ func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.Rem
 func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.datacoordServer.ListFileResources(ctx, req)
 }
+
+func (s *mixCoordImpl) Watch(req *datapb.WatchRequest, stream datapb.DataCoord_WatchServer) error {
+	return s.datacoordServer.Watch(req, stream)
+}

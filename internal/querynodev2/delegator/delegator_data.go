@@ -73,6 +73,7 @@ type DeleteData struct {
 	PrimaryKeys []storage.PrimaryKey
 	Timestamps  []uint64
 	RowCount    int64
+	SegmentIDs  []int64
 }
 
 // Append appends another delete data into this one.
@@ -80,6 +81,7 @@ func (d *DeleteData) Append(ad DeleteData) {
 	d.PrimaryKeys = append(d.PrimaryKeys, ad.PrimaryKeys...)
 	d.Timestamps = append(d.Timestamps, ad.Timestamps...)
 	d.RowCount += ad.RowCount
+	d.SegmentIDs = append(d.SegmentIDs, ad.SegmentIDs...)
 }
 
 // ProcessInsert handles insert data in delegator.

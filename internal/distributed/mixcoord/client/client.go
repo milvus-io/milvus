@@ -1893,3 +1893,13 @@ func (c *Client) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 		return client.ListFileResources(ctx, req)
 	})
 }
+
+func (c *Client) Watch(ctx context.Context, req *datapb.WatchRequest, opts ...grpc.CallOption) (datapb.DataCoord_WatchClient, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client MixCoordClient) (any, error) {
+		return client.DataCoordClient.Watch(ctx, req, opts...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(datapb.DataCoord_WatchClient), nil
+}

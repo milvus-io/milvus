@@ -172,7 +172,6 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Int64("storageVersion", st.req.GetStorageVersion()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		zap.Any("storageConfig", st.req.StorageConfig),
 	)
 	return nil
 }

@@ -45,6 +45,8 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
+	// BroadcastEvent broadcasts an event to all watchers
+	BroadcastEvent(eventType datapb.EventType, eventData []byte)
 }
 
 type SegmentsView struct {
@@ -604,4 +606,9 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 
 func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return h.s.listLoadedSegments(ctx)
+}
+
+// BroadcastEvent broadcasts an event to all watchers
+func (h *ServerHandler) BroadcastEvent(eventType datapb.EventType, eventData []byte) {
+	h.s.BroadcastEvent(eventType, eventData)
 }
