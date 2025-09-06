@@ -53,7 +53,7 @@ template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
     bool res;
-    if (!is_index_mode_) {
+    if (!SegmentExpr::CanUseIndex()) {
         use_index_ = res = false;
         return res;
     }
@@ -200,7 +200,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
             auto val_type_inner = FromValCase(val_type);
-            if (CanExecNgramMatchForJson() && !has_offset_input_) {
+            if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch();
                 // If nullopt is returned, it means the query cannot be
                 // optimized by ngram index. Forward it to the normal path.
@@ -1248,7 +1248,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (CanExecNgramMatch()) {
+    } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1441,8 +1441,9 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
             }
             auto valid =
                 (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-                    : ProcessChunksForValid<T>(is_index_mode_);
+                    ? ProcessChunksForValidByOffsets<T>(
+                          SegmentExpr::CanUseIndex(), *input)
+                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1699,11 +1700,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ =
-        is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
-        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
-        // TODO: if multiple indexes are supported, this logic should be changed
-        pinned_ngram_index_.get() == nullptr;
+    use_index_ = SegmentExpr::CanUseIndex() &&
+                 SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
     return use_index_;
 }
 
@@ -1827,12 +1825,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 };
 
 bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatch() {
-    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
-}
-
-bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson() {
+PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
     return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 

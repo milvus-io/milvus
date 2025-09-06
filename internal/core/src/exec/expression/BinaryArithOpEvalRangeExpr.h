@@ -515,7 +515,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     template <typename T>
     bool
     CanUseIndex() {
-        if (is_index_mode_ && IndexHasRawData<T>()) {
+        if (SegmentExpr::CanUseIndex() && IndexHasRawData<T>()) {
             use_index_ = true;
             return true;
         }
