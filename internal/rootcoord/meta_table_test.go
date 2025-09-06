@@ -1737,6 +1737,164 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "new", coll.Name)
 	})
+
+	t.Run("rename collection rename collName with db encryption on", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
+
+		// Create database with encryption enabled
+		encryptedDBProperties := []*commonpb.KeyValuePair{
+			{Key: "cipher.enabled", Value: "true"},
+		}
+		encryptedDB := model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, encryptedDBProperties)
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: encryptedDB,
+			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					DBID:         1,
+					Name:         "old",
+				},
+			},
+		}
+		meta.names.insert(util.DefaultDBName, "old", 1)
+
+		// Should succeed when renaming within the same encrypted database
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
+		assert.NoError(t, err)
+
+		// Verify the collection name was updated
+		id, ok := meta.names.get(util.DefaultDBName, "new")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), id)
+
+		coll, ok := meta.collID2Meta[1]
+		assert.True(t, ok)
+		assert.Equal(t, "new", coll.Name)
+	})
+
+	t.Run("rename collection edit dbname with db encryption on", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+
+		// Test case 1: Source DB has encryption enabled
+		t.Run("source db encrypted", func(t *testing.T) {
+			encryptedDBProperties := []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+			}
+			encryptedDB := model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, encryptedDBProperties)
+			normalDB := model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil)
+
+			meta := &MetaTable{
+				dbName2Meta: map[string]*model.Database{
+					util.DefaultDBName: encryptedDB,
+					"db1":              normalDB,
+				},
+				catalog: catalog,
+				names:   newNameDb(),
+				aliases: newNameDb(),
+				collID2Meta: map[typeutil.UniqueID]*model.Collection{
+					1: {
+						CollectionID: 1,
+						DBID:         1,
+						Name:         "old",
+					},
+				},
+			}
+			meta.names.insert(util.DefaultDBName, "old", 1)
+
+			// Should fail when trying to move collection from encrypted DB to normal DB
+			err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "deny to change collection databases due to at least one database enabled encryption")
+		})
+
+		// Test case 2: Target DB has encryption enabled
+		t.Run("target db encrypted", func(t *testing.T) {
+			normalDB := model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil)
+			encryptedDBProperties := []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+			}
+			encryptedDB := model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, encryptedDBProperties)
+
+			meta := &MetaTable{
+				dbName2Meta: map[string]*model.Database{
+					util.DefaultDBName: normalDB,
+					"db1":              encryptedDB,
+				},
+				catalog: catalog,
+				names:   newNameDb(),
+				aliases: newNameDb(),
+				collID2Meta: map[typeutil.UniqueID]*model.Collection{
+					1: {
+						CollectionID: 1,
+						DBID:         1,
+						Name:         "old",
+					},
+				},
+			}
+			meta.names.insert(util.DefaultDBName, "old", 1)
+
+			// Should fail when trying to move collection from normal DB to encrypted DB
+			err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "deny to change collection databases due to at least one database enabled encryption")
+		})
+
+		// Test case 3: Both DBs have encryption enabled
+		t.Run("both dbs encrypted", func(t *testing.T) {
+			encryptedDBProperties1 := []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+			}
+			encryptedDB1 := model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, encryptedDBProperties1)
+
+			encryptedDBProperties2 := []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+			}
+			encryptedDB2 := model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, encryptedDBProperties2)
+
+			meta := &MetaTable{
+				dbName2Meta: map[string]*model.Database{
+					util.DefaultDBName: encryptedDB1,
+					"db1":              encryptedDB2,
+				},
+				catalog: catalog,
+				names:   newNameDb(),
+				aliases: newNameDb(),
+				collID2Meta: map[typeutil.UniqueID]*model.Collection{
+					1: {
+						CollectionID: 1,
+						DBID:         1,
+						Name:         "old",
+					},
+				},
+			}
+			meta.names.insert(util.DefaultDBName, "old", 1)
+
+			// Should fail when trying to move collection between two different encrypted DBs
+			err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "deny to change collection databases due to at least one database enabled encryption")
+		})
+	})
 }
 
 func TestMetaTable_ChangePartitionState(t *testing.T) {
