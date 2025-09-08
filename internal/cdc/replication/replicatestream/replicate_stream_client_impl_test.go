@@ -89,6 +89,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 				Payload:    []byte("test-payload"),
 				Properties: map[string]string{"key": "value"},
 			})
+			mockMsg.EXPECT().MarshalLogObject(mock.Anything).Return(nil)
 
 			err := replicateClient.Replicate(mockMsg)
 			assert.NoError(t, err)
@@ -206,6 +207,7 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 				Payload:    []byte("test-payload"),
 				Properties: map[string]string{"key": "value"},
 			})
+			mockMsg.EXPECT().MarshalLogObject(mock.Anything).Return(nil)
 
 			err := replicateClient.Replicate(mockMsg)
 			assert.NoError(t, err)
