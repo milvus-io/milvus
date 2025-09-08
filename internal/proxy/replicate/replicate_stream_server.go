@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -112,9 +111,12 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
+	// TODO: sheep, get ts more elegant
+	sourceTs := message.MilvusMessageToImmutableMessage(reqMsg).TimeTick()
 	msg := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
 	log.Debug("recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
+		zap.Uint64("sourceTimeTick", sourceTs),
 		log.FieldMessage(msg),
 	)
 
@@ -126,23 +128,23 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 			return
 		default:
 			// TODO: sheep, append async.
-			appendResult, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+			_, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
 			if err != nil {
 				log.Warn("append replicate message to wal failed", zap.Error(err))
 				continue
 			}
-			p.sendReplicateResult(appendResult)
+			p.sendReplicateResult(sourceTs)
 			return
 		}
 	}
 }
 
 // sendReplicateResult sends the replicate result to client.
-func (p *ReplicateStreamServer) sendReplicateResult(appendResult *wal.AppendResult) {
+func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64) {
 	resp := &milvuspb.ReplicateResponse{
 		Response: &milvuspb.ReplicateResponse_ReplicateConfirmedMessageInfo{
 			ReplicateConfirmedMessageInfo: &milvuspb.ReplicateConfirmedMessageInfo{
-				ConfirmedTimeTick: appendResult.TimeTick,
+				ConfirmedTimeTick: sourceTimeTick,
 			},
 		},
 	}
@@ -150,9 +152,9 @@ func (p *ReplicateStreamServer) sendReplicateResult(appendResult *wal.AppendResu
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.replicateRespCh <- resp:
-		log.Debug("send replicate message response to client", zap.Uint64("confirmedTimeTick", appendResult.TimeTick))
+		log.Debug("send replicate message response to client", zap.Uint64("confirmedTimeTick", sourceTimeTick))
 	case <-p.streamServer.Context().Done():
-		log.Warn("stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", appendResult.TimeTick))
+		log.Warn("stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", sourceTimeTick))
 		return
 	}
 }

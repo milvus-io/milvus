@@ -141,12 +141,14 @@ func (r *channelReplicator) replicateLoop() error {
 		case msg := <-ch:
 			// TODO: Should be done at streamingnode.
 			if msg.MessageType().IsSelfControlled() {
+				logger.Debug("skip self-controlled message", log.FieldMessage(msg))
 				continue
 			}
 			err := rsc.Replicate(msg)
 			if err != nil {
 				panic(fmt.Sprintf("replicate message failed due to unrecoverable error: %v", err))
 			}
+			logger.Debug("replicate message success", log.FieldMessage(msg))
 		}
 	}
 }

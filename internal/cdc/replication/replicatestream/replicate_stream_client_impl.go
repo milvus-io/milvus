@@ -197,10 +197,8 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 				beginMsg := txnMsg.Begin()
 				err := r.sendMessage(beginMsg)
 				if err != nil {
-					logger.Warn("replicate stream send txn begin message failed", zap.Error(err))
 					return err
 				}
-				r.metrics.OnSent(beginMsg)
 
 				// send txn messages
 				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
@@ -208,11 +206,9 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 					if err != nil {
 						return err
 					}
-					r.metrics.OnSent(msg)
 					return nil
 				})
 				if err != nil {
-					logger.Warn("replicate stream send txn message failed", zap.Error(err))
 					return err
 				}
 
@@ -220,23 +216,31 @@ func (r *replicateStreamClient) sendLoop(stopCh <-chan struct{}) error {
 				commitMsg := txnMsg.Commit()
 				err = r.sendMessage(commitMsg)
 				if err != nil {
-					logger.Warn("replicate stream send txn commit message failed", zap.Error(err))
 					return err
 				}
-				r.metrics.OnSent(commitMsg)
 				continue
 			}
 			err = r.sendMessage(msg)
 			if err != nil {
-				logger.Warn("replicate stream send failed", zap.Error(err))
 				return err
 			}
-			r.metrics.OnSent(msg)
 		}
 	}
 }
 
-func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error {
+func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
+	defer func() {
+		logger := log.With(
+			zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+			zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+		)
+		if err != nil {
+			logger.Warn("send message failed", zap.Error(err), log.FieldMessage(msg))
+		} else {
+			r.metrics.OnSent(msg)
+			logger.Debug("send message success", log.FieldMessage(msg))
+		}
+	}()
 	immutableMessage := msg.IntoImmutableMessageProto()
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{

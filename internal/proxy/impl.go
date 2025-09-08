@@ -1740,7 +1740,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	}, nil
 }
 
-func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (resp *milvuspb.GetLoadStateResponse, err error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetLoadStateResponse{Status: merr.Status(err)}, nil
 	}
@@ -1774,7 +1774,10 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	defer func() {
 		log.Debug(
 			rpcDone(method),
-			zap.Any("request", request))
+			zap.Any("request", request),
+			zap.Any("response", resp),
+			zap.Error(err),
+		)
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
