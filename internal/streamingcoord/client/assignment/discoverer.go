@@ -24,6 +24,7 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 		exitCh:                make(chan struct{}),
 		wg:                    sync.WaitGroup{},
 		lastErrorReportedTerm: make(map[string]int64),
+		clusterID:             paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 	}
 	c.executeBackgroundTask()
 	return c
@@ -39,6 +40,7 @@ type assignmentDiscoverClient struct {
 	wg                    sync.WaitGroup
 	streamClient          streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
 	lastErrorReportedTerm map[string]int64
+	clusterID             string
 }
 
 // ReportAssignmentError reports the assignment error to server.
@@ -165,7 +167,7 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				Assignments: newIncomingAssignments,
 				CChannel:    resp.FullAssignment.Cchannel,
 				ReplicateConfigHelper: replicateutil.MustNewConfigHelper(
-					paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+					c.clusterID,
 					resp.FullAssignment.ReplicateConfiguration),
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:
