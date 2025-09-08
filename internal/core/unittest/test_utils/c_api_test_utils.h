@@ -165,7 +165,7 @@ get_default_schema_config() {
                                   data_type: %1%
                                   type_params: <
                                     key: "dim"
-                                    value: "16"
+                                    value: "4"
                                   >
                                   index_params: <
                                     key: "metric_type"
@@ -191,7 +191,7 @@ get_default_schema_config_nullable() {
                                   data_type: FloatVector
                                   type_params: <
                                     key: "dim"
-                                    value: "16"
+                                    value: "4"
                                   >
                                   index_params: <
                                     key: "metric_type"
