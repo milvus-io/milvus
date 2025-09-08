@@ -26,6 +26,9 @@ namespace exec {
 
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span("PhyNullExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("data_type {}", expr_->column_.data_type_));
+
     auto input = context.get_offset_input();
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {

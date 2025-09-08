@@ -28,6 +28,9 @@ namespace exec {
 
 void
 PhyCallExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span("PhyCallExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("function_name {}", expr_->fun_name()));
+
     auto offset_input = context.get_offset_input();
     SetHasOffsetInput(offset_input != nullptr);
     AssertInfo(inputs_.size() == expr_->inputs().size(),

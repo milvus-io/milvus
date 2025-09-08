@@ -15,9 +15,10 @@
 // limitations under the License.
 
 #include "CompareExpr.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 #include <optional>
 #include "query/Relational.h"
-
 namespace milvus {
 namespace exec {
 
@@ -214,6 +215,14 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
 void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyCompareFilterExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(
+        fmt::format("compare_expr: op={}, left_indexed={}, right_indexed={}",
+                    expr_->op_type_,
+                    is_left_indexed_,
+                    is_right_indexed_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     // For segment both fields has no index, can use SIMD to speed up.
