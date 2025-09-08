@@ -11,10 +11,29 @@
 
 #include <gtest/gtest.h>
 
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/Span.h"
+#include "common/VectorTrait.h"
 #include "segcore/SegmentGrowing.h"
 #include "test_utils/DataGen.h"
 
 const int64_t ROW_COUNT = 100 * 1000;
+
+TEST(Common, Span) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    Span<float> s1(nullptr, nullptr, 100);
+    Span<milvus::FloatVector> s2(nullptr, 10, 16 * sizeof(float));
+    SpanBase b1 = s1;
+    SpanBase b2 = s2;
+    auto r1 = static_cast<Span<float>>(b1);
+    auto r2 = static_cast<Span<milvus::FloatVector>>(b2);
+    ASSERT_EQ(r1.row_count(), 100);
+    ASSERT_EQ(r2.row_count(), 10);
+    ASSERT_EQ(r2.element_sizeof(), 16 * sizeof(float));
+}
 
 TEST(Span, Naive) {
     using namespace milvus;
