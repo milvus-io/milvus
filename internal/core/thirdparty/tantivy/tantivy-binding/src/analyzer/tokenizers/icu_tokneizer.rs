@@ -1,4 +1,4 @@
-use icu_segmenter::{WordSegmenter};
+use icu_segmenter::WordSegmenter;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use icu_segmenter::options::WordBreakOptions;
 
@@ -81,10 +81,8 @@ impl Tokenizer for IcuTokenizer {
 
     fn token_stream(&mut self, text: &str) -> IcuTokenStream {
         let tokens = self.tokenize(text);
-        IcuTokenStream {
-            tokens,
-            index: 0,
-        }
+        IcuTokenStream { tokens, index: 0 }
+
     }
 }
 
