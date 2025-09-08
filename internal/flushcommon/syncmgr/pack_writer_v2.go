@@ -29,9 +29,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -113,11 +115,19 @@ func (bw *BulkPackWriterV2) getRootPath() string {
 	return bw.chunkManager.RootPath()
 }
 
+func (bw *BulkPackWriterV2) getBucketName() string {
+	if bw.storageConfig != nil {
+		return bw.storageConfig.BucketName
+	}
+	return paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+}
+
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	columnGroups := storagecommon.SplitBySchema(bw.schema.GetFields())
+	allFields := typeutil.GetAllFieldSchemas(bw.schema)
+	columnGroups := storagecommon.SplitBySchema(allFields)
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
@@ -144,9 +154,25 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	bucketName := bw.getBucketName()
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig)
+	var pluginContextPtr *indexcgopb.StoragePluginContext
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
+		if ez != nil {
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext := indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
+				pluginContextPtr = &pluginContext
+			}
+		}
+	}
+
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +219,9 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	}
 
 	rec := builder.NewRecord()
-	field2Col := make(map[storage.FieldID]int, len(bw.schema.GetFields()))
-
-	for c, field := range bw.schema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(bw.schema)
+	field2Col := make(map[storage.FieldID]int, len(allFields))
+	for c, field := range allFields {
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil

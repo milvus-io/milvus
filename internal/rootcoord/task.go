@@ -56,6 +56,7 @@ type task interface {
 	NotifyDone(err error)
 	IsFinished() bool
 	SetInQueueDuration()
+	GetDurationInQueue() time.Duration
 	GetLockerKey() LockerKey
 }
 
@@ -125,6 +126,10 @@ func (b *baseTask) NotifyDone(err error) {
 
 func (b *baseTask) SetInQueueDuration() {
 	b.queueDur = b.tr.ElapseSpan()
+}
+
+func (b *baseTask) GetDurationInQueue() time.Duration {
+	return b.queueDur
 }
 
 func (b *baseTask) IsFinished() bool {

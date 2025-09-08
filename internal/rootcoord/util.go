@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -42,33 +43,14 @@ import (
 )
 
 // EqualKeyPairArray check whether 2 KeyValuePairs are equal
-func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {
-	if len(p1) != len(p2) {
-		return false
-	}
-	m1 := make(map[string]string)
-	for _, p := range p1 {
-		m1[p.Key] = p.Value
-	}
-	for _, p := range p2 {
-		val, ok := m1[p.Key]
-		if !ok {
-			return false
-		}
-		if val != p.Value {
-			return false
-		}
-	}
-	return ContainsKeyPairArray(p1, p2)
-}
-
-func ContainsKeyPairArray(src []*commonpb.KeyValuePair, target []*commonpb.KeyValuePair) bool {
-	m1 := make(map[string]string)
+func IsSubsetOfProperties(src, target []*commonpb.KeyValuePair) bool {
+	tmpMap := make(map[string]string)
 	for _, p := range target {
-		m1[p.Key] = p.Value
+		tmpMap[p.Key] = p.Value
 	}
 	for _, p := range src {
-		val, ok := m1[p.Key]
+		// new key value in src
+		val, ok := tmpMap[p.Key]
 		if !ok {
 			return false
 		}
@@ -406,7 +388,11 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
 			dtype := fieldSchema.GetDataType()
-			if dtype == schemapb.DataType_Array || dtype == schemapb.DataType_JSON || typeutil.IsVectorType(dtype) {
+			if dtype == schemapb.DataType_Array || typeutil.IsVectorType(dtype) {
+				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			if dtype == schemapb.DataType_JSON && !fieldSchema.IsDynamic {
 				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
@@ -446,6 +432,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if dtype != schemapb.DataType_Double {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
 				}
+			case *schemapb.ValueField_TimestamptzData:
+				if dtype != schemapb.DataType_Timestamptz {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
+				}
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
@@ -458,6 +448,19 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if int64(defaultValueLength) > maxLength {
 					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
 					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+				}
+			case *schemapb.ValueField_BytesData:
+				if dtype != schemapb.DataType_JSON {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_SJON")
+				}
+				defVal := fieldSchema.GetDefaultValue().GetBytesData()
+				jsonData := make(map[string]interface{})
+				if err := json.Unmarshal(defVal, &jsonData); err != nil {
+					log.Info("invalid default json value, milvus only support json map",
+						zap.ByteString("data", defVal),
+						zap.Error(err),
+					)
+					return merr.WrapErrParameterInvalidMsg(err.Error())
 				}
 			default:
 				panic("default value unsupport data type")
@@ -476,9 +479,16 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 
 func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, schema := range schemas {
-		// todo(SpadeA): check struct array field schema
+		if len(schema.GetFields()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("empty fields in StructArrayField is not allowed")
+		}
 
 		for _, field := range schema.GetFields() {
+			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+				msg := fmt.Sprintf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+
 			if field.IsPartitionKey || field.IsPrimaryKey {
 				msg := fmt.Sprintf("partition key or primary key can not be in struct array field. data type:%s, element type:%s, name:%s",
 					field.DataType.String(), field.ElementType.String(), field.Name)
@@ -544,4 +554,14 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		}
 	}
 	return nil
+}
+
+func nextFieldID(coll *model.Collection) int64 {
+	maxFieldID := int64(common.StartOfUserFieldID)
+	for _, field := range coll.Fields {
+		if field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+	return maxFieldID + 1
 }

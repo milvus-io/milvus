@@ -31,6 +31,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const segcore::SealedIndexingRecord& record,
                     const SearchInfo& search_info,
                     const void* query_data,
+                    const size_t* query_lims,
                     int64_t num_queries,
                     const BitsetView& bitset,
                     SearchResult& search_result) {
@@ -39,7 +40,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
-    auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
+    auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
@@ -52,7 +53,18 @@ SearchOnSealedIndex(const Schema& schema,
                field_indexing->metric_type_,
                search_info.metric_type_);
 
-    auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
+    knowhere::DataSetPtr dataset;
+    if (query_lims == nullptr) {
+        dataset = knowhere::GenDataSet(num_queries, dim, query_data);
+    } else {
+        // Rather than non-embedding list search where num_queries equals to the number of vectors,
+        // in embedding list search, multiple vectors form an embedding list and the last element of query_lims
+        // stands for the total number of vectors.
+        auto num_vectors = query_lims[num_queries];
+        dataset = knowhere::GenDataSet(num_vectors, dim, query_data);
+        dataset->SetLims(query_lims);
+    }
+
     dataset->SetIsSparse(is_sparse);
     auto accessor = SemiInlineGet(field_indexing->indexing_->PinCells({0}));
     auto vec_index =
@@ -92,6 +104,7 @@ SearchOnSealedColumn(const Schema& schema,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
                      const void* query_data,
+                     const size_t* query_lims,
                      int64_t num_queries,
                      int64_t row_count,
                      const BitsetView& bitview,
@@ -99,22 +112,27 @@ SearchOnSealedColumn(const Schema& schema,
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
+    auto data_type = field.get_data_type();
+    auto element_type = field.get_element_type();
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-    auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT
-                   ? 0
-                   : field.get_dim();
+    auto dim =
+        data_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : field.get_dim();
 
     query::dataset::SearchDataset query_dataset{search_info.metric_type_,
                                                 num_queries,
                                                 search_info.topk_,
                                                 search_info.round_decimal_,
                                                 dim,
-                                                query_data};
+                                                query_data,
+                                                query_lims};
 
-    auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
 
     if (search_info.iterator_v2_info_.has_value()) {
+        AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                   "vector array(embedding list) is not supported for "
+                   "vector iterator");
+
         CachedSearchIterator cached_iter(
             column, query_dataset, search_info, index_info, bitview, data_type);
         cached_iter.NextBatch(search_info, result);
@@ -135,7 +153,20 @@ SearchOnSealedColumn(const Schema& schema,
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
+
+        PinWrapper<const size_t*> lims_pw;
+        if (data_type == DataType::VECTOR_ARRAY) {
+            AssertInfo(query_lims != nullptr,
+                       "query_lims is nullptr, but data_type is vector array");
+
+            lims_pw = column->VectorArrayLims(i);
+            raw_dataset.raw_data_lims = lims_pw.get();
+        }
+
         if (milvus::exec::UseVectorIterator(search_info)) {
+            AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                       "vector array(embedding list) is not supported for "
+                       "vector iterator");
             auto sub_qr =
                 PackBruteForceSearchIteratorsIntoSubResult(query_dataset,
                                                            raw_dataset,
@@ -150,7 +181,8 @@ SearchOnSealedColumn(const Schema& schema,
                                            search_info,
                                            index_info,
                                            bitview,
-                                           data_type);
+                                           data_type,
+                                           element_type);
             final_qr.merge(sub_qr);
         }
         offset += chunk_size;

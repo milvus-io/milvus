@@ -6,6 +6,6 @@ type scalarIndexChecker struct {
 	baseChecker
 }
 
-func (c scalarIndexChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c scalarIndexChecker) CheckTrain(dataType schemapb.DataType, _ schemapb.DataType, params map[string]string) error {
 	return nil
 }

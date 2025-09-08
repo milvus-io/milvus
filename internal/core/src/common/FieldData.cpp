@@ -209,6 +209,18 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(array_info.first, array_info.second);
         }
+        case DataType::TIMESTAMPTZ: {
+            auto array_info =
+                GetDataInfoFromArray<arrow::Int64Array,
+                                     arrow::Type::type::INT64>(array);
+            if (nullable_) {
+                return FillFieldData(array_info.first,
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(array_info.first, array_info.second);
+        }
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
@@ -284,11 +296,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     array);
             return FillFieldData(array_info.first, array_info.second);
         }
-        case DataType::VECTOR_SPARSE_FLOAT: {
+        case DataType::VECTOR_SPARSE_U32_F32: {
             AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            std::vector<knowhere::sparse::SparseRow<float>> values;
+            std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
             for (size_t index = 0; index < element_count; ++index) {
                 auto view = arr->GetString(index);
                 values.push_back(
@@ -297,18 +309,70 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::VECTOR_ARRAY: {
-            auto array_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            auto list_array =
+                std::dynamic_pointer_cast<arrow::ListArray>(array);
+            AssertInfo(list_array != nullptr,
+                       "Failed to cast to ListArray for VECTOR_ARRAY");
+
+            auto vector_array_field =
+                dynamic_cast<FieldData<VectorArray>*>(this);
+            AssertInfo(vector_array_field != nullptr,
+                       "Failed to cast to FieldData<VectorArray>");
+            int64_t dim = vector_array_field->get_dim();
+            DataType element_type = vector_array_field->get_element_type();
+
+            AssertInfo(dim > 0, "Invalid dimension {} in VECTOR_ARRAY", dim);
+            AssertInfo(element_type != DataType::NONE,
+                       "Element type not set for VECTOR_ARRAY");
+
+            auto values_array = list_array->values();
             std::vector<VectorArray> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                VectorFieldProto field_data;
-                if (array_array->GetString(index) == "") {
-                    ThrowInfo(DataTypeInvalid, "empty vector array");
+
+            switch (element_type) {
+                case DataType::VECTOR_FLOAT: {
+                    auto float_array =
+                        std::dynamic_pointer_cast<arrow::FloatArray>(
+                            values_array);
+                    AssertInfo(
+                        float_array != nullptr,
+                        "Expected FloatArray for VECTOR_FLOAT element type");
+
+                    for (size_t index = 0; index < element_count; ++index) {
+                        int64_t start_offset = list_array->value_offset(index);
+                        int64_t end_offset =
+                            list_array->value_offset(index + 1);
+                        int64_t num_floats = end_offset - start_offset;
+                        AssertInfo(num_floats % dim == 0,
+                                   "Invalid data: number of floats ({}) not "
+                                   "divisible by "
+                                   "dimension ({})",
+                                   num_floats,
+                                   dim);
+
+                        int num_vectors = num_floats / dim;
+                        const float* data_ptr =
+                            float_array->raw_values() + start_offset;
+                        values[index] =
+                            VectorArray(static_cast<const void*>(data_ptr),
+                                        num_vectors,
+                                        dim,
+                                        element_type);
+                    }
+                    break;
                 }
-                auto success =
-                    field_data.ParseFromString(array_array->GetString(index));
-                AssertInfo(success, "parse from string failed");
-                values[index] = VectorArray(field_data);
+                case DataType::VECTOR_BINARY:
+                case DataType::VECTOR_FLOAT16:
+                case DataType::VECTOR_BFLOAT16:
+                case DataType::VECTOR_INT8:
+                    ThrowInfo(
+                        NotImplemented,
+                        "Element type {} in VectorArray not implemented yet",
+                        GetDataTypeName(element_type));
+                    break;
+                default:
+                    ThrowInfo(DataTypeInvalid,
+                              "Unsupported element type {} in VectorArray",
+                              GetDataTypeName(element_type));
             }
             return FillFieldData(values.data(), element_count);
         }
@@ -409,6 +473,17 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
+        case DataType::TIMESTAMPTZ: {
+            FixedVector<int64_t> values(element_count);
+            if (default_value.has_value()) {
+                std::fill(values.begin(),
+                          values.end(),
+                          default_value->timestamptz_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
         case DataType::STRING:
         case DataType::VARCHAR: {
             FixedVector<std::string> values(element_count);
@@ -460,7 +535,8 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
-template class FieldDataImpl<knowhere::sparse::SparseRow<float>, true>;
+template class FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>,
+                             true>;
 template class FieldDataImpl<VectorArray, true>;
 
 FieldDataPtr
@@ -484,6 +560,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
             return std::make_shared<FieldData<float>>(type, nullable, cap_rows);
         case DataType::DOUBLE:
             return std::make_shared<FieldData<double>>(
+                type, nullable, cap_rows);
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
                 type, nullable, cap_rows);
         case DataType::STRING:
         case DataType::VARCHAR:

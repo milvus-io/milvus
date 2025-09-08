@@ -305,8 +305,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
-    PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const override {
+    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(int64_t chunk_id,
+                     std::optional<std::pair<int64_t, int64_t>> offset_len =
+                         std::nullopt) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] VectorArrayViews only supported for "
@@ -314,9 +316,23 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
-        return PinWrapper<std::vector<VectorArrayView>>(
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
             chunk_wrapper,
-            static_cast<VectorArrayChunk*>(chunk.get())->Views());
+            static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
+    }
+
+    PinWrapper<const size_t*>
+    VectorArrayLims(int64_t chunk_id) const override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "VectorArrayLims only supported for "
+                      "ChunkedVectorArrayColumn");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<const size_t*>(
+            chunk_wrapper, static_cast<VectorArrayChunk*>(chunk.get())->Lims());
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -537,6 +553,37 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                                 ->
                                 operator[](offsets_in_chunk[i]);
             fn(Json(str_view.data(), str_view.size()), i, valid);
+        }
+    }
+
+    void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const override {
+        if (data_type_ != DataType::STRING) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "BulkRawBsonAt only supported for ProxyChunkColumn of "
+                      "Bson type");
+        }
+        if (count == 0) {
+            return;
+        }
+
+        AssertInfo(row_offsets != nullptr, "row_offsets is nullptr");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto str_view = static_cast<StringChunk*>(chunk.get())
+                                ->
+                                operator[](offsets_in_chunk[i]);
+            fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size()),
+               row_offsets[i],
+               value_offsets[i]);
         }
     }
 

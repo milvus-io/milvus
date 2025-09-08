@@ -71,10 +71,10 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       fi
   fi
 
-  echo "Running cachinglayer unittest"
-  ${UNITTEST_DIR}/cachinglayer_test
+  echo "Running json_stats unittest"
+  ${UNITTEST_DIR}/json_stats_test
   if [ $? -ne 0 ]; then
-      echo ${UNITTEST_DIR}/cachinglayer_test "run failed"
+      echo ${UNITTEST_DIR}/json_stats_test "run failed"
       exit 1
   fi
 

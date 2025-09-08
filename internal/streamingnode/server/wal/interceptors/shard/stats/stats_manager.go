@@ -11,12 +11,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type (
 	SegmentStats         = utils.SegmentStats
-	InsertMetrics        = utils.InsertMetrics
+	ModifiedMetrics      = utils.ModifiedMetrics
 	SegmentBelongs       = utils.SegmentBelongs
 	SyncOperationMetrics = utils.SyncOperationMetrics
 	SealOperator         = utils.SealOperator
@@ -35,9 +36,9 @@ type StatsManager struct {
 	worker        *sealWorker
 	mu            sync.Mutex
 	cfg           statsConfig
-	totalStats    InsertMetrics
-	pchannelStats map[string]*InsertMetrics
-	vchannelStats map[string]*InsertMetrics
+	totalStats    *aggregatedMetrics
+	pchannelStats map[string]*aggregatedMetrics
+	vchannelStats map[string]*aggregatedMetrics
 	segmentStats  map[int64]*SegmentStats       // map[SegmentID]SegmentStats
 	segmentIndex  map[int64]SegmentBelongs      // map[SegmentID]channels
 	pchannelIndex map[string]map[int64]struct{} // map[PChannel]SegmentID
@@ -60,9 +61,9 @@ func NewStatsManager() *StatsManager {
 	m := &StatsManager{
 		mu:            sync.Mutex{},
 		cfg:           cfg,
-		totalStats:    InsertMetrics{},
-		pchannelStats: make(map[string]*InsertMetrics),
-		vchannelStats: make(map[string]*InsertMetrics),
+		totalStats:    newAggregatedMetrics(),
+		pchannelStats: make(map[string]*aggregatedMetrics),
+		vchannelStats: make(map[string]*aggregatedMetrics),
 		segmentStats:  make(map[int64]*SegmentStats),
 		segmentIndex:  make(map[int64]SegmentBelongs),
 		pchannelIndex: make(map[string]map[int64]struct{}),
@@ -155,24 +156,24 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 		m.pchannelIndex[belongs.PChannel] = make(map[int64]struct{})
 	}
 	m.pchannelIndex[belongs.PChannel][segmentID] = struct{}{}
-	m.totalStats.Collect(stats.Insert)
+	m.totalStats.Collect(stats.Level, stats.Modified)
 	if _, ok := m.pchannelStats[belongs.PChannel]; !ok {
-		m.pchannelStats[belongs.PChannel] = &InsertMetrics{}
+		m.pchannelStats[belongs.PChannel] = newAggregatedMetrics()
 	}
-	m.pchannelStats[belongs.PChannel].Collect(stats.Insert)
+	m.pchannelStats[belongs.PChannel].Collect(stats.Level, stats.Modified)
 
 	if _, ok := m.vchannelStats[belongs.VChannel]; !ok {
-		m.vchannelStats[belongs.VChannel] = &InsertMetrics{}
+		m.vchannelStats[belongs.VChannel] = newAggregatedMetrics()
 	}
-	m.vchannelStats[belongs.VChannel].Collect(stats.Insert)
+	m.vchannelStats[belongs.VChannel].Collect(stats.Level, stats.Modified)
 
-	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, *m.pchannelStats[belongs.PChannel])
+	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, m.pchannelStats[belongs.PChannel])
 }
 
 // AllocRows alloc number of rows on current segment.
 // AllocRows will check if the segment has enough space to insert.
 // Must be called after RegisterGrowingSegment and before UnregisterGrowingSegment.
-func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) error {
+func (m *StatsManager) AllocRows(segmentID int64, insert ModifiedMetrics) error {
 	if insert.Rows == 0 || insert.BinarySize == 0 {
 		panic(fmt.Sprintf("insert rows or binary size cannot be 0, rows: %d, binary: %d", insert.Rows, insert.BinarySize))
 	}
@@ -189,7 +190,7 @@ func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) error {
 }
 
 // allocRows allocates number of rows on current segment.
-func (m *StatsManager) allocRows(segmentID int64, insert InsertMetrics) (bool, error) {
+func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -203,17 +204,17 @@ func (m *StatsManager) allocRows(segmentID int64, insert InsertMetrics) (bool, e
 
 	// update the total stats if inserted.
 	if inserted {
-		m.totalStats.Collect(insert)
+		m.totalStats.Collect(stat.Level, insert)
 		if _, ok := m.pchannelStats[info.PChannel]; !ok {
-			m.pchannelStats[info.PChannel] = &InsertMetrics{}
+			m.pchannelStats[info.PChannel] = newAggregatedMetrics()
 		}
-		m.pchannelStats[info.PChannel].Collect(insert)
+		m.pchannelStats[info.PChannel].Collect(stat.Level, insert)
 		if _, ok := m.vchannelStats[info.VChannel]; !ok {
-			m.vchannelStats[info.VChannel] = &InsertMetrics{}
+			m.vchannelStats[info.VChannel] = newAggregatedMetrics()
 		}
-		m.vchannelStats[info.VChannel].Collect(insert)
+		m.vchannelStats[info.VChannel].Collect(stat.Level, insert)
 
-		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, *m.pchannelStats[info.PChannel])
+		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel])
 		return stat.ShouldBeSealed(), nil
 	}
 	if stat.IsEmpty() {
@@ -225,7 +226,7 @@ func (m *StatsManager) allocRows(segmentID int64, insert InsertMetrics) (bool, e
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.
 func (m *StatsManager) notifyIfTotalGrowingBytesOverHWM() {
 	m.mu.Lock()
-	size := m.totalStats.BinarySize
+	size := m.totalStats.Total().BinarySize
 	notify := size > uint64(m.cfg.growingBytesHWM)
 	m.mu.Unlock()
 
@@ -299,7 +300,7 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 
 	stats := m.segmentStats[segmentID]
 
-	m.totalStats.Subtract(stats.Insert)
+	m.totalStats.Subtract(stats.Level, stats.Modified)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
 	if _, ok := m.pchannelIndex[info.PChannel]; ok {
@@ -310,15 +311,15 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 	}
 
 	if _, ok := m.pchannelStats[info.PChannel]; ok {
-		m.pchannelStats[info.PChannel].Subtract(stats.Insert)
-		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, *m.pchannelStats[info.PChannel])
+		m.pchannelStats[info.PChannel].Subtract(stats.Level, stats.Modified)
+		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel])
 		if m.pchannelStats[info.PChannel].IsZero() {
 			// If the binary size is 0, it means the segment is empty, we can delete it.
 			delete(m.pchannelStats, info.PChannel)
 		}
 	}
 	if _, ok := m.vchannelStats[info.VChannel]; ok {
-		m.vchannelStats[info.VChannel].Subtract(stats.Insert)
+		m.vchannelStats[info.VChannel].Subtract(stats.Level, stats.Modified)
 		if m.vchannelStats[info.VChannel].IsZero() {
 			delete(m.vchannelStats, info.VChannel)
 		}
@@ -334,13 +335,21 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 	now := time.Now()
 	sealSegmentIDs := make(map[int64]policy.SealPolicy, 0)
 	for segmentID, stat := range m.segmentStats {
-		if now.Sub(stat.CreateTime) > m.cfg.maxLifetime {
-			sealSegmentIDs[segmentID] = policy.PolicyLifetime(m.cfg.maxLifetime)
-			continue
-		}
-		if stat.Insert.BinarySize > uint64(m.cfg.minSizeFromIdleTime) && now.Sub(stat.LastModifiedTime) > m.cfg.maxIdleTime {
-			sealSegmentIDs[segmentID] = policy.PolicyIdle(m.cfg.maxIdleTime, uint64(m.cfg.minSizeFromIdleTime))
-			continue
+		switch stat.Level {
+		case datapb.SegmentLevel_L1:
+			if now.Sub(stat.CreateTime) > m.cfg.l1MaxLifetime {
+				sealSegmentIDs[segmentID] = policy.PolicyLifetime(m.cfg.l1MaxLifetime)
+				continue
+			}
+			if stat.Modified.BinarySize > uint64(m.cfg.l1MinSizeFromIdleTime) && now.Sub(stat.LastModifiedTime) > m.cfg.l1MaxIdleTime {
+				sealSegmentIDs[segmentID] = policy.PolicyIdle(m.cfg.l1MaxIdleTime, uint64(m.cfg.l1MinSizeFromIdleTime))
+				continue
+			}
+		case datapb.SegmentLevel_L0:
+			if now.Sub(stat.CreateTime) > m.cfg.l0MaxLifetime {
+				sealSegmentIDs[segmentID] = policy.PolicyLifetime(m.cfg.l0MaxLifetime)
+				continue
+			}
 		}
 	}
 	return sealSegmentIDs
@@ -349,7 +358,7 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 // selectSegmentsUntilLessThanLWM selects segments until the total size is less than the threshold.
 func (m *StatsManager) selectSegmentsUntilLessThanLWM() []int64 {
 	m.mu.Lock()
-	restSpace := int64(m.totalStats.BinarySize) - m.cfg.growingBytesLWM
+	restSpace := int64(m.totalStats.Total().BinarySize) - m.cfg.growingBytesLWM
 	m.mu.Unlock()
 
 	if restSpace <= 0 {
@@ -376,10 +385,10 @@ func (m *StatsManager) createStatsSlice() []segmentWithBinarySize {
 
 	stats := make([]segmentWithBinarySize, 0, len(m.segmentStats))
 	for id, stat := range m.segmentStats {
-		if stat.Insert.BinarySize > 0 {
+		if stat.Modified.BinarySize > 0 {
 			stats = append(stats, segmentWithBinarySize{
 				segmentID:  id,
-				binarySize: stat.Insert.BinarySize,
+				binarySize: stat.Modified.BinarySize,
 			})
 		}
 	}

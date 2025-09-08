@@ -58,6 +58,8 @@ type indexBuildTask struct {
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
 	manager        *TaskManager
+
+	pluginContext *indexcgopb.StoragePluginContext
 }
 
 func NewIndexBuildTask(ctx context.Context,
@@ -65,15 +67,17 @@ func NewIndexBuildTask(ctx context.Context,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	manager *TaskManager,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *indexBuildTask {
 	t := &indexBuildTask{
-		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
-		cancel:  cancel,
-		ctx:     ctx,
-		cm:      cm,
-		req:     req,
-		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
-		manager: manager,
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
+		cancel:        cancel,
+		ctx:           ctx,
+		cm:            cm,
+		req:           req,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
+		manager:       manager,
+		pluginContext: pluginContext,
 	}
 
 	t.parseParams()
@@ -264,10 +268,11 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
 	for _, optField := range it.req.GetOptionalScalarFields() {
 		optFields = append(optFields, &indexcgopb.OptionalFieldInfo{
-			FieldID:   optField.GetFieldID(),
-			FieldName: optField.GetFieldName(),
-			FieldType: optField.GetFieldType(),
-			DataPaths: optField.GetDataPaths(),
+			FieldID:     optField.GetFieldID(),
+			FieldName:   optField.GetFieldName(),
+			FieldType:   optField.GetFieldType(),
+			ElementType: optField.GetElementType(),
+			DataPaths:   optField.GetDataPaths(),
 		})
 	}
 
@@ -297,6 +302,10 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		StorageVersion:            it.req.GetStorageVersion(),
 	}
 
+	if it.pluginContext != nil {
+		buildIndexParams.StoragePluginContext = it.pluginContext
+	}
+
 	if buildIndexParams.StorageVersion == storage.StorageV2 {
 		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
@@ -305,7 +314,6 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())
 	}
-
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)

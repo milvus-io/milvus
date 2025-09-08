@@ -201,6 +201,11 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config);
 
+// for unused
+void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {
+    ThrowInfo(ErrorCode::UnexpectedError, "SetBitsetUnused is not supported");
+}
+
 // For sealed segment, the doc_id is guaranteed to be less than bitset size which equals to the doc count of tantivy before querying.
 void inline SetBitsetSealed(void* bitset, const uint32_t* doc_id, uintptr_t n) {
     TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);
@@ -226,6 +231,23 @@ void inline SetBitsetGrowing(void* bitset,
             continue;
         }
         (*bitmap)[id] = true;
+    }
+}
+
+inline size_t
+vector_element_size(const DataType data_type) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT:
+            return sizeof(float);
+        case DataType::VECTOR_FLOAT16:
+            return sizeof(float16);
+        case DataType::VECTOR_BFLOAT16:
+            return sizeof(bfloat16);
+        case DataType::VECTOR_INT8:
+            return sizeof(int8);
+        default:
+            ThrowInfo(UnexpectedError,
+                      fmt::format("invalid data type: {}", data_type));
     }
 }
 

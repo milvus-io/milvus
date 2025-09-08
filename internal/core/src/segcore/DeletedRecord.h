@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -46,7 +47,6 @@ struct Comparator {
 using SortedDeleteList =
     folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
 
-static int32_t DUMP_BATCH_SIZE = 10000;
 static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
 
 template <bool is_sealed = false>
@@ -66,6 +66,10 @@ class DeletedRecord {
     }
 
     ~DeletedRecord() {
+        if constexpr (is_sealed) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {estimated_memory_size_, 0});
+        }
     }
 
     DeletedRecord(DeletedRecord<is_sealed>&& delete_record) = delete;
@@ -118,7 +122,9 @@ class DeletedRecord {
             }
         }
         search_pk_func_(
-            pks, timestamps, [&](SegOffset offset, Timestamp delete_ts) {
+            pks,
+            timestamps,
+            [&](const SegOffset offset, const Timestamp delete_ts) {
                 auto row_id = offset.get();
                 // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
@@ -144,6 +150,25 @@ class DeletedRecord {
 
         n_.fetch_add(removed_num);
         mem_size_.fetch_add(mem_add);
+
+        if constexpr (is_sealed) {
+            // update estimated memory size to caching layer only when the delta is large enough (64KB)
+            constexpr int64_t MIN_DELTA_SIZE = 64 * 1024;
+            auto new_estimated_size = size();
+            if (std::abs(new_estimated_size - estimated_memory_size_) >
+                MIN_DELTA_SIZE) {
+                auto delta_size = new_estimated_size - estimated_memory_size_;
+                if (delta_size >= 0) {
+                    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+                        {delta_size, 0});
+                } else {
+                    cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                        {-delta_size, 0});
+                }
+                estimated_memory_size_ = new_estimated_size;
+            }
+        }
+
         return max_timestamp;
     }
 
@@ -166,7 +191,7 @@ class DeletedRecord {
             // find last meeted snapshot
             if (!snapshots_.empty()) {
                 int loc = snapshots_.size() - 1;
-                while (snapshots_[loc].first > query_timestamp && loc >= 0) {
+                while (loc >= 0 && snapshots_[loc].first > query_timestamp) {
                     loc--;
                 }
                 if (loc >= 0) {
@@ -180,31 +205,9 @@ class DeletedRecord {
             }
         }
 
-        auto start_iter = hit_snapshot ? next_iter : accessor.begin();
-        auto end_iter =
-            accessor.lower_bound(std::make_pair(query_timestamp, 0));
+        auto it = hit_snapshot ? next_iter : accessor.begin();
 
-        auto it = start_iter;
-
-        // when end_iter point to skiplist end, concurrent delete may append new value
-        // after lower_bound() called, so end_iter is not logical valid.
-        if (end_iter == accessor.end()) {
-            while (it != accessor.end() && it->first <= query_timestamp) {
-                if (it->second < insert_barrier) {
-                    bitset.set(it->second);
-                }
-                it++;
-            }
-            return;
-        }
-
-        while (it != accessor.end() && it != end_iter) {
-            if (it->second < insert_barrier) {
-                bitset.set(it->second);
-            }
-            it++;
-        }
-        while (it != accessor.end() && it->first == query_timestamp) {
+        while (it != accessor.end() && it->first <= query_timestamp) {
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
             }
@@ -231,9 +234,9 @@ class DeletedRecord {
     DumpSnapshot() {
         SortedDeleteList::Accessor accessor(deleted_lists_);
         int total_size = accessor.size();
-        int dumped_size = snapshots_.empty() ? 0 : GetSnapshotBitsSize();
 
-        while (total_size - dumped_size > DUMP_BATCH_SIZE) {
+        while (total_size - dumped_entry_count_.load() >
+               DELETE_DUMP_BATCH_SIZE) {
             int32_t bitsize = 0;
             if constexpr (is_sealed) {
                 bitsize = sealed_row_count_;
@@ -251,15 +254,16 @@ class DeletedRecord {
                                              snapshots_.back().second.size());
             }
 
-            while (total_size - dumped_size > DUMP_BATCH_SIZE &&
+            while (total_size - dumped_entry_count_.load() >
+                       DELETE_DUMP_BATCH_SIZE &&
                    it != accessor.end()) {
                 Timestamp dump_ts = 0;
 
-                for (auto size = 0; size < DUMP_BATCH_SIZE; ++it, ++size) {
+                for (auto size = 0;
+                     size < DELETE_DUMP_BATCH_SIZE && it != accessor.end();
+                     ++it, ++size) {
                     bitmap.set(it->second);
-                    if (size == DUMP_BATCH_SIZE - 1) {
-                        dump_ts = it->first;
-                    }
+                    dump_ts = it->first;
                 }
 
                 {
@@ -275,20 +279,19 @@ class DeletedRecord {
                         Assert(it != accessor.end() && it.good());
                         snap_next_iter_.push_back(it);
                     }
-
-                    LOG_INFO(
-                        "dump delete record snapshot at ts: {}, cursor: {}, "
-                        "total size:{} "
-                        "current snapshot size: {} for segment: {}",
-                        dump_ts,
-                        dumped_size + DUMP_BATCH_SIZE,
-                        total_size,
-                        snapshots_.size(),
-                        segment_id_);
-                    last_dump_ts = dump_ts;
                 }
 
-                dumped_size += DUMP_BATCH_SIZE;
+                dumped_entry_count_.fetch_add(DELETE_DUMP_BATCH_SIZE);
+                LOG_INFO(
+                    "dump delete record snapshot at ts: {}, cursor: {}, "
+                    "total size:{} "
+                    "current snapshot size: {} for segment: {}",
+                    dump_ts,
+                    dumped_entry_count_.load(),
+                    total_size,
+                    snapshots_.size(),
+                    segment_id_);
+                last_dump_ts = dump_ts;
             }
         }
     }
@@ -323,7 +326,8 @@ class DeletedRecord {
  public:
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
-    InsertRecord<is_sealed>* insert_record_;
+    std::conditional_t<is_sealed, InsertRecordSealed, InsertRecordGrowing>*
+        insert_record_;
     std::function<void(const std::vector<PkType>& pks,
                        const Timestamp* timestamps,
                        std::function<void(SegOffset offset, Timestamp ts)>)>
@@ -341,6 +345,10 @@ class DeletedRecord {
     std::vector<std::pair<Timestamp, BitsetType>> snapshots_;
     // next delete record iterator that follows every snapshot
     std::vector<SortedDeleteList::iterator> snap_next_iter_;
+    // total number of delete entries that have been incorporated into snapshots
+    std::atomic<int64_t> dumped_entry_count_{0};
+    // estimated memory size of DeletedRecord, only used for sealed segment
+    int64_t estimated_memory_size_{0};
 };
 
 }  // namespace milvus::segcore

@@ -23,6 +23,7 @@
 
 const int64_t INVALID_FIELD_ID = -1;
 const int64_t INVALID_SEG_OFFSET = -1;
+const int64_t INVALID_ARRAY_INDEX = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
 // TODO: default field start id, could get from config.yaml
 const int64_t START_USER_FIELDID = 100;
@@ -36,6 +37,8 @@ const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 const char NULLABLE[] = "nullable";
+const char EDEK[] = "edek";
+const char EZID[] = "encryption_zone";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
@@ -49,23 +52,32 @@ const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
+// json stats related
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
+constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
+constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "2";
+constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
+constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
+constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
+// store key layout type in parquet file metadata
+inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
+    "key_layout_type_map";
+// start json stats field id for mock column
+const int64_t START_JSON_STATS_FIELD_ID = 1000;
+const int64_t END_JSON_STATS_FIELD_ID = 10000;
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
 const char DEFAULT_TASK_ID[] = "0";
 
 const int64_t DEFAULT_FIELD_MAX_MEMORY_LIMIT = 128 << 20;  // bytes
-const float DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10.0;
-const float DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5.0;
-const float DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1.0;
 
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 16 << 20;  // bytes
 
-const int DEFAULT_CPU_NUM = 1;
-
 const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
+
+const int64_t DEFAULT_DELETE_DUMP_BATCH_SIZE = 10000;
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
@@ -87,7 +99,6 @@ const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
-const int64_t DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL = 200;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 
 // index config related
@@ -97,6 +108,7 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
@@ -106,3 +118,6 @@ const int64_t STORAGE_V2 = 2;
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
 
 const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
+
+// VectorArray related, used for fetch metadata from Arrow schema
+const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";

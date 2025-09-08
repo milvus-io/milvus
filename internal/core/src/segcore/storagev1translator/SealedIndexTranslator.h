@@ -30,7 +30,8 @@ class SealedIndexTranslator
     num_cells() const override;
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
-    milvus::cachinglayer::ResourceUsage
+    std::pair<milvus::cachinglayer::ResourceUsage,
+              milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
     const std::string&
     key() const override;
@@ -45,12 +46,15 @@ class SealedIndexTranslator
         bool enable_mmap;
         std::string mmap_dir_path;
         DataType field_type;
+        DataType element_type;
         std::map<std::string, std::string> index_params;
         int64_t index_size;
         int64_t index_engine_version;
         std::string index_id;
         std::string segment_id;
         std::string field_id;
+        int64_t num_rows;
+        int64_t dim;
     };
 
     milvus::index::CreateIndexInfo index_info_;

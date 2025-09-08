@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -177,12 +179,13 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName}) {
+	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {
 		log.Ctx(ctx).Error("schema contains system field",
 			zap.String("RowIDFieldName", RowIDFieldName),
 			zap.String("TimeStampFieldName", TimeStampFieldName),
-			zap.String("MetaFieldName", MetaFieldName))
-		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
+			zap.String("MetaFieldName", MetaFieldName),
+			zap.String("NamespaceFieldName", NamespaceFieldName))
+		msg := fmt.Sprintf("schema contains system field: %s, %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
 
@@ -210,6 +213,8 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for _, field := range structArrayField.GetFields() {
 			field.FieldID = int64(idx + StartOfUserFieldID)
 			idx++
+			// Also register sub-field names in name2id map
+			name2id[field.GetName()] = field.GetFieldID()
 		}
 	}
 
@@ -249,6 +254,77 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 	}
 }
 
+func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	if !Params.CommonCfg.EnableNamespace.GetAsBool() {
+		return nil
+	}
+
+	hasIsolation := hasIsolationProperty(t.Req.Properties...)
+	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
+	hasPartitionKey := err == nil
+	enabled, has, err := parseNamespaceProp(t.Req.Properties...)
+	if err != nil {
+		return err
+	}
+	if !has || !enabled {
+		return nil
+	}
+
+	if hasIsolation {
+		iso, err := common.IsPartitionKeyIsolationKvEnabled(t.Req.Properties...)
+		if err != nil {
+			return err
+		}
+		if !iso {
+			return merr.WrapErrCollectionIllegalSchema(t.Req.CollectionName,
+				"isolation property is false when namespace enabled")
+		}
+	}
+
+	if hasPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+	}
+
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name:           common.NamespaceFieldName,
+		IsPartitionKey: true,
+		DataType:       schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
+		},
+	})
+	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.PartitionKeyIsolationKey,
+		Value: "true",
+	})
+	log.Ctx(ctx).Info("added namespace field",
+		zap.String("collectionName", t.Req.CollectionName),
+		zap.String("fieldName", common.NamespaceFieldName))
+	return nil
+}
+
+func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
+	for _, p := range props {
+		if p.GetKey() == common.NamespaceEnabledKey {
+			value, err := strconv.ParseBool(p.GetValue())
+			if err != nil {
+				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
+			}
+			return value, true, nil
+		}
+	}
+	return false, false, nil
+}
+
+func hasIsolationProperty(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.PartitionKeyIsolationKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema) {
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID:      int64(RowIDField),
@@ -275,10 +351,16 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 	t.appendDynamicField(ctx, &schema)
+	if err := t.handleNamespaceField(ctx, &schema); err != nil {
+		return err
+	}
 
 	if err := t.assignFieldAndFunctionID(&schema); err != nil {
 		return err
 	}
+
+	// Set properties for persistent
+	schema.Properties = t.Req.GetProperties()
 
 	t.appendSysFields(&schema)
 	t.schema = &schema
@@ -377,6 +459,10 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = reqProperties
 	}
 	t.dbProperties = db.Properties
+
+	if hookutil.GetEzPropByDBProperties(t.dbProperties) != nil {
+		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(t.dbProperties))
+	}
 
 	if err := t.validate(ctx); err != nil {
 		return err

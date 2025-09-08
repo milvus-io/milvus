@@ -32,7 +32,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  int64_t part_upload_size,
                                  CColumnGroups column_groups,
                                  CStorageConfig c_storage_config,
-                                 CPackedWriter* c_packed_writer);
+                                 CPackedWriter* c_packed_writer,
+                                 CPluginContext* c_plugin_context);
 
 CStatus
 NewPackedWriter(struct ArrowSchema* schema,
@@ -41,11 +42,13 @@ NewPackedWriter(struct ArrowSchema* schema,
                 int64_t num_paths,
                 int64_t part_upload_size,
                 CColumnGroups column_groups,
-                CPackedWriter* c_packed_writer);
+                CPackedWriter* c_packed_writer,
+                CPluginContext* c_plugin_context);
 
 CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
-                 struct ArrowArray* array,
+                 struct ArrowArray* arrays,
+                 struct ArrowSchema* array_schemas,
                  struct ArrowSchema* schema);
 
 CStatus

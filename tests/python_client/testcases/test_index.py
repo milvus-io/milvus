@@ -1164,9 +1164,8 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         collection_w.drop_index(check_task=CheckTasks.err_res,
-                                check_items={"err_code": 999,
-                                             "err_msg": "index cannot be dropped, collection is "
-                                                        "loaded, please release it first"})
+                                check_items={ct.err_code: 1100,
+                                             ct.err_msg: "vector index cannot be dropped on loaded collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("n_trees", [-1, 1025, 'a'])
@@ -2359,12 +2358,12 @@ class TestBitmapIndex(TestcaseBase):
         method:
             1. build and drop `BITMAP` index on an empty collection
             2. rebuild `BITMAP` index on loaded collection
-            3. drop index on loaded collection and raises expected error
+            3. drop index on loaded collection
             4. re-build the same index on loaded collection
         expected:
             1. build and drop index successful on a not loaded collection
             2. build index successful on non-indexed and loaded fields
-            3. can not drop index on loaded collection
+            3. can drop index on loaded collection
         """
         # init params
         collection_name, nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
@@ -2401,9 +2400,7 @@ class TestBitmapIndex(TestcaseBase):
         self.collection_wrap.load()
 
         # re-drop scalars' index
-        self.drop_multi_index(index_names=list(set(index_params.keys()) - {DataType.FLOAT_VECTOR.name}),
-                              check_task=CheckTasks.err_res,
-                              check_items={ct.err_code: 65535, ct.err_msg: iem.DropLoadedIndex})
+        self.drop_multi_index(index_names=list(set(index_params.keys()) - {DataType.FLOAT_VECTOR.name}))
 
         # re-build loaded index
         self.build_multi_index(index_params=index_params)

@@ -123,9 +123,6 @@ type Server struct {
 	enableActiveStandBy bool
 	activateFunc        func() error
 
-	nodeUpEventChan chan int64
-	notifyNodeUp    chan struct{}
-
 	// proxy client manager
 	proxyCreator       proxyutil.ProxyCreator
 	proxyWatcher       proxyutil.ProxyWatcherInterface
@@ -137,12 +134,10 @@ type Server struct {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:             ctx,
-		cancel:          cancel,
-		nodeUpEventChan: make(chan int64, 10240),
-		notifyNodeUp:    make(chan struct{}),
-		balancerMap:     make(map[string]balance.Balance),
-		metricsRequest:  metricsinfo.NewMetricsRequest(),
+		ctx:            ctx,
+		cancel:         cancel,
+		balancerMap:    make(map[string]balance.Balance),
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -160,6 +155,19 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	return nil
+}
+
+func (s *Server) ServerExist(serverID int64) bool {
+	sessions, _, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
 }
 
 func (s *Server) registerMetricsRequest() {
@@ -411,10 +419,7 @@ func (s *Server) initMeta() error {
 		return err
 	}
 
-	s.dist = &meta.DistributionManager{
-		SegmentDistManager: meta.NewSegmentDistManager(),
-		ChannelDistManager: meta.NewChannelDistManager(),
-	}
+	s.dist = meta.NewDistributionManager(s.nodeMgr)
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
@@ -473,27 +478,14 @@ func (s *Server) startQueryCoord() error {
 	if err != nil {
 		return err
 	}
-	for _, node := range sessions {
-		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-			NodeID:   node.ServerID,
-			Address:  node.Address,
-			Hostname: node.HostName,
-			Version:  node.Version,
-			Labels:   node.GetServerLabel(),
-		}))
-		s.taskScheduler.AddExecutor(node.ServerID)
 
-		if node.Stopping {
-			s.nodeMgr.Stopping(node.ServerID)
-		}
-	}
-	s.checkNodeStateInRG()
-	for _, node := range sessions {
-		s.handleNodeUp(node.ServerID)
+	log.Info("rewatch nodes", zap.Any("sessions", sessions))
+	err = s.rewatchNodes(sessions)
+	if err != nil {
+		return err
 	}
 
-	s.wg.Add(2)
-	go s.handleNodeUpLoop()
+	s.wg.Add(1)
 	go s.watchNodes(revision)
 
 	// check whether old node exist, if yes suspend auto balance until all old nodes down
@@ -641,7 +633,7 @@ func (s *Server) watchNodes(revision int64) {
 	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
-	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, nil)
+	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, s.rewatchNodes)
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -661,14 +653,15 @@ func (s *Server) watchNodes(revision int64) {
 				return
 			}
 
+			nodeID := event.Session.ServerID
+			addr := event.Session.Address
+			log := log.With(
+				zap.Int64("nodeID", nodeID),
+				zap.String("nodeAddr", addr),
+			)
+
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
-				nodeID := event.Session.ServerID
-				addr := event.Session.Address
-				log.Info("add node to NodeManager",
-					zap.Int64("nodeID", nodeID),
-					zap.String("nodeAddr", addr),
-				)
 				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 					NodeID:   nodeID,
 					Address:  addr,
@@ -676,91 +669,90 @@ func (s *Server) watchNodes(revision int64) {
 					Version:  event.Session.Version,
 					Labels:   event.Session.GetServerLabel(),
 				}))
-				s.nodeUpEventChan <- nodeID
-				select {
-				case s.notifyNodeUp <- struct{}{}:
-				default:
-				}
+				s.handleNodeUp(nodeID)
 
 			case sessionutil.SessionUpdateEvent:
-				nodeID := event.Session.ServerID
-				addr := event.Session.Address
-				log.Info("stopping the node",
-					zap.Int64("nodeID", nodeID),
-					zap.String("nodeAddr", addr),
-				)
+				log.Info("stopping the node")
 				s.nodeMgr.Stopping(nodeID)
-				s.checkerController.Check()
-				s.meta.ResourceManager.HandleNodeStopping(context.Background(), nodeID)
+				s.handleNodeStopping(nodeID)
 
 			case sessionutil.SessionDelEvent:
-				nodeID := event.Session.ServerID
-				log.Info("a node down, remove it", zap.Int64("nodeID", nodeID))
+				log.Info("a node down, remove it")
 				s.nodeMgr.Remove(nodeID)
 				s.handleNodeDown(nodeID)
-				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}
 }
 
-func (s *Server) handleNodeUpLoop() {
-	log := log.Ctx(s.ctx)
-	defer s.wg.Done()
-	ticker := time.NewTicker(Params.QueryCoordCfg.CheckHealthInterval.GetAsDuration(time.Millisecond))
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.ctx.Done():
-			log.Info("handle node up loop exit due to context done")
-			return
-		case <-s.notifyNodeUp:
-			s.tryHandleNodeUp()
-		case <-ticker.C:
-			s.tryHandleNodeUp()
-		}
-	}
-}
+// rewatchNodes is used to re-watch nodes when querycoord restart or reconnect to etcd
+// Note: may apply same node multiple times, so rewatchNodes must be idempotent
+func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
 
-func (s *Server) tryHandleNodeUp() {
-	log := log.Ctx(s.ctx).WithRateGroup("qcv2.Server", 1, 60)
-	ctx, cancel := context.WithTimeout(s.ctx, Params.QueryCoordCfg.CheckHealthRPCTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-	reasons, err := s.checkNodeHealth(ctx)
-	if err != nil {
-		log.RatedWarn(10, "unhealthy node exist, node up will be delayed",
-			zap.Int("delayedNodeUpEvents", len(s.nodeUpEventChan)),
-			zap.Int("unhealthyNodeNum", len(reasons)),
-			zap.Strings("unhealthyReason", reasons))
-		return
-	}
-	for len(s.nodeUpEventChan) > 0 {
-		nodeID := <-s.nodeUpEventChan
-		if s.nodeMgr.Get(nodeID) != nil {
-			// only if all nodes are healthy, node up event will be handled
-			s.handleNodeUp(nodeID)
-			s.metricsCacheManager.InvalidateSystemInfoMetrics()
-			s.checkerController.Check()
-		} else {
-			log.Warn("node already down",
-				zap.Int64("nodeID", nodeID))
+	// first remove all offline nodes
+	for _, node := range s.nodeMgr.GetAll() {
+		nodeSession, ok := sessionMap[node.ID()]
+		if !ok {
+			// node in node manager but session not exist, means it's offline
+			s.nodeMgr.Remove(node.ID())
+			s.handleNodeDown(node.ID())
+		} else if nodeSession.Stopping && !node.IsStoppingState() {
+			// node in node manager but session is stopping, means it's stopping
+			s.nodeMgr.Stopping(node.ID())
+			s.handleNodeStopping(node.ID())
 		}
 	}
+
+	// then add all on new online nodes
+	for _, nodeSession := range sessionMap {
+		nodeInfo := s.nodeMgr.Get(nodeSession.ServerID)
+		if nodeInfo == nil {
+			s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+				NodeID:   nodeSession.GetServerID(),
+				Address:  nodeSession.GetAddress(),
+				Hostname: nodeSession.HostName,
+				Version:  nodeSession.Version,
+				Labels:   nodeSession.GetServerLabel(),
+			}))
+
+			if nodeSession.Stopping {
+				s.nodeMgr.Stopping(nodeSession.ServerID)
+				s.handleNodeStopping(nodeSession.ServerID)
+			} else {
+				s.handleNodeUp(nodeSession.GetServerID())
+			}
+		}
+	}
+
+	// Note: Node manager doesn't persist node list, so after query coord restart, we cannot
+	// update all node statuses in resource manager based on session and node manager's node list.
+	// Therefore, manual status checking of all nodes in resource manager is needed.
+	s.meta.ResourceManager.CheckNodesInResourceGroup(s.ctx)
+
+	return nil
 }
 
 func (s *Server) handleNodeUp(node int64) {
 	nodeInfo := s.nodeMgr.Get(node)
 	if nodeInfo == nil {
+		log.Ctx(s.ctx).Warn("node already down", zap.Int64("nodeID", node))
 		return
 	}
+
+	// add executor to task scheduler
 	s.taskScheduler.AddExecutor(node)
+
+	// start dist handler
 	s.distController.StartDistInstance(s.ctx, node)
-	if nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
-		// The querynode embedded in the streaming node can not work with streaming node.
-		return
-	}
+
 	// need assign to new rg and replica
 	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
+
+	s.metricsCacheManager.InvalidateSystemInfoMetrics()
+	s.checkerController.Check()
 }
 
 func (s *Server) handleNodeDown(node int64) {
@@ -775,20 +767,21 @@ func (s *Server) handleNodeDown(node int64) {
 	s.taskScheduler.RemoveByNode(node)
 
 	s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
+
+	// clean node's metrics
+	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
+	s.metricsCacheManager.InvalidateSystemInfoMetrics()
 }
 
-func (s *Server) checkNodeStateInRG() {
-	for _, rgName := range s.meta.ListResourceGroups(s.ctx) {
-		rg := s.meta.ResourceManager.GetResourceGroup(s.ctx, rgName)
-		for _, node := range rg.GetNodes() {
-			info := s.nodeMgr.Get(node)
-			if info == nil {
-				s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
-			} else if info.IsStoppingState() {
-				s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
-			}
-		}
-	}
+func (s *Server) handleNodeStopping(node int64) {
+	// mark node as stopping in node manager
+	s.nodeMgr.Stopping(node)
+
+	// mark node as stopping in resource manager
+	s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
+
+	// trigger checker to check stopping node
+	s.checkerController.Check()
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
@@ -801,7 +794,8 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second))
+		interval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -813,6 +807,16 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 				success := s.updateBalanceConfig()
 				if success {
 					return
+				}
+				// apply dynamic update only when changed
+				newInterval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+				if newInterval != interval {
+					interval = newInterval
+					select {
+					case <-ticker.C:
+					default:
+					}
+					ticker.Reset(interval)
 				}
 			}
 		}

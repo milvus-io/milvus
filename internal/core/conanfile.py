@@ -13,9 +13,9 @@ class MilvusConan(ConanFile):
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
-        "arrow/17.0.0@milvus/dev",
+        "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
         "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
-        "aws-sdk-cpp/1.9.234#28d6d2c175975900ce292bafe8022c88",
+        "aws-sdk-cpp/1.11.352@milvus/dev",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
@@ -48,6 +48,7 @@ class MilvusConan(ConanFile):
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
+        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -68,11 +69,14 @@ class MilvusConan(ConanFile):
         "arrow:with_boost": True,
         "arrow:with_thrift": True,
         "arrow:with_jemalloc": True,
+        "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_s3": True,
+        "arrow:encryption": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
+        "aws-sdk-cpp:s3-crt": True,
         "gtest:build_gmock": True,
         "boost:without_locale": False,
         "boost:without_test": True,

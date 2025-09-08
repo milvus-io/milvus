@@ -17,7 +17,9 @@
 #include "storage/IndexData.h"
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
+#include "log/Log.h"
 #include "storage/Event.h"
+#include "storage/PluginLoader.h"
 
 namespace milvus::storage {
 
@@ -47,7 +49,7 @@ IndexData::Serialize(StorageType medium) {
 }
 
 std::vector<uint8_t>
-IndexData::serialize_to_remote_file() {
+IndexData::serialize_to_remote_file(std::shared_ptr<CPluginContext> context) {
     AssertInfo(field_data_meta_.has_value(), "field data meta not exist");
     AssertInfo(index_meta_.has_value(), "index meta not exist");
     // create descriptor event
@@ -78,6 +80,18 @@ IndexData::serialize_to_remote_file() {
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp
     des_event_header.timestamp_ = 0;
+
+    std::shared_ptr<milvus::storage::plugin::IEncryptor> encryptor;
+    if (context) {
+        auto cipherPlugin =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        auto pair =
+            cipherPlugin->GetEncryptor(context->ez_id, context->collection_id);
+        encryptor = pair.first;
+        des_event_data.extras[EDEK] = pair.second;
+        des_event_data.extras[EZID] = context->ez_id;
+    }
+
     // serialize descriptor event data
     auto des_event_bytes = descriptor_event.Serialize();
 
@@ -96,9 +110,23 @@ IndexData::serialize_to_remote_file() {
 
     // serialize insert event
     auto index_event_bytes = index_event.Serialize();
-    des_event_bytes.insert(des_event_bytes.end(),
-                           index_event_bytes.begin(),
-                           index_event_bytes.end());
+    if (encryptor) {
+        std::string plain_text(index_event_bytes.begin(),
+                               index_event_bytes.end());
+        auto cipher_text = encryptor->Encrypt(plain_text);
+        des_event_bytes.insert(
+            des_event_bytes.end(), cipher_text.begin(), cipher_text.end());
+        LOG_INFO(
+            "Cipher plugin encrypts index, ez {}, plain text length {}, cipher "
+            "text length {}",
+            context->ez_id,
+            plain_text.size(),
+            cipher_text.size());
+    } else {
+        des_event_bytes.insert(des_event_bytes.end(),
+                               index_event_bytes.begin(),
+                               index_event_bytes.end());
+    }
     return des_event_bytes;
 }
 

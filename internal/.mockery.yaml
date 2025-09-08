@@ -24,6 +24,7 @@ packages:
     interfaces:
       Client:
       BroadcastService:
+      AssignmentService:
   github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast:
     interfaces:
       Watcher:
@@ -105,6 +106,3 @@ packages:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:
-  google.golang.org/grpc/balancer:
-    interfaces:
-      SubConn:

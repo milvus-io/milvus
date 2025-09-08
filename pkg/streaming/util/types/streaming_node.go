@@ -13,6 +13,7 @@ import (
 var (
 	ErrStopping = errors.New("streaming node is stopping")
 	ErrNotAlive = errors.New("streaming node is not alive")
+	ErrFrozen   = errors.New("streaming node is frozen")
 )
 
 // AssignmentDiscoverWatcher is the interface for watching the assignment discovery.
@@ -36,6 +37,12 @@ type AssignmentRebalanceTrigger interface {
 type VersionedStreamingNodeAssignments struct {
 	Version     typeutil.VersionInt64Pair
 	Assignments map[int64]StreamingNodeAssignment
+	CChannel    *streamingpb.CChannelAssignment
+}
+
+// PChannelOfCChannel returns the pchannel of the cchannel.
+func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
+	return v.CChannel.Meta.Pchannel
 }
 
 // StreamingNodeAssignment is the relation between server and channels.

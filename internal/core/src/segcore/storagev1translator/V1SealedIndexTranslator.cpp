@@ -13,6 +13,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
           load_index_info->enable_mmap,
           load_index_info->mmap_dir_path,
           load_index_info->field_type,
+          load_index_info->element_type,
           load_index_info->index_params,
           load_index_info->index_files,
           load_index_info->index_size,
@@ -49,10 +50,11 @@ V1SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 V1SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    return {0, 0};
+    return {{0, 0}, {0, 0}};
 }
 
 const std::string&
@@ -122,7 +124,11 @@ V1SealedIndexTranslator::LoadVecIndex() {
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info, fileManagerContext);
-        index->SetCellSize(index_load_info_.index_size);
+        if (!index_load_info_.enable_mmap) {
+            index->SetCellSize({index_load_info_.index_size, 0});
+        } else {
+            index->SetCellSize({0, index_load_info_.index_size});
+        }
         index->Load(*binary_set_, config);
         return index;
     } catch (std::exception& e) {
@@ -161,7 +167,11 @@ V1SealedIndexTranslator::LoadScalarIndex() {
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info, milvus::storage::FileManagerContext());
-        index->SetCellSize(index_load_info_.index_size);
+        if (!index_load_info_.enable_mmap) {
+            index->SetCellSize({index_load_info_.index_size, 0});
+        } else {
+            index->SetCellSize({0, index_load_info_.index_size});
+        }
         index->Load(*binary_set_);
         return index;
     } catch (std::exception& e) {

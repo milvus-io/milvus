@@ -319,7 +319,7 @@ dense_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 sparse_metrics = ["IP", "BM25"]
-all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
+# all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 
 
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default_L0_metric}

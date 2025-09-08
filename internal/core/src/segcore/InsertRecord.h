@@ -24,10 +24,13 @@
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
+#include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
+#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
+#include <type_traits>
 
 namespace milvus::segcore {
 
@@ -36,6 +39,8 @@ constexpr int64_t NoLimit = 0;
 // If `bitset_count * 100` > `total_count * BruteForceSelectivity`, we use pk index.
 // Otherwise, we use bruteforce to retrieve all the pks and then sort them.
 constexpr int64_t BruteForceSelectivity = 10;
+
+using Condition = std::function<bool(int64_t)>;
 
 class OffsetMap {
  public:
@@ -46,6 +51,12 @@ class OffsetMap {
 
     virtual std::vector<int64_t>
     find(const PkType& pk) const = 0;
+
+    virtual void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const = 0;
 
     virtual void
     insert(const PkType& pk, int64_t offset) = 0;
@@ -63,11 +74,20 @@ class OffsetMap {
 
     virtual void
     clear() = 0;
+
+    virtual size_t
+    size() const = 0;
 };
 
 template <typename T>
 class OffsetOrderedMap : public OffsetMap {
  public:
+    using OrderedMap = std::map<
+        T,
+        std::vector<int64_t>,
+        std::less<>,
+        TrackingStdAllocator<std::pair<const T, std::vector<int64_t>>>>;
+
     bool
     contain(const PkType& pk) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
@@ -82,6 +102,65 @@ class OffsetOrderedMap : public OffsetMap {
         auto offset_vector = map_.find(std::get<T>(pk));
         return offset_vector != map_.end() ? offset_vector->second
                                            : std::vector<int64_t>();
+    }
+
+    void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        const T& target = std::get<T>(pk);
+
+        if (op == proto::plan::OpType::Equal) {
+            auto it = map_.find(target);
+            if (it != map_.end()) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterEqual) {
+            auto it = map_.lower_bound(target);
+            for (; it != map_.end(); ++it) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterThan) {
+            auto it = map_.upper_bound(target);
+            for (; it != map_.end(); ++it) {
+                for (auto offset : it->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::LessEqual) {
+            auto it = map_.upper_bound(target);
+            for (auto ptr = map_.begin(); ptr != it; ++ptr) {
+                for (auto offset : ptr->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else if (op == proto::plan::OpType::LessThan) {
+            auto it = map_.lower_bound(target);
+            for (auto ptr = map_.begin(); ptr != it; ++ptr) {
+                for (auto offset : ptr->second) {
+                    if (condition(offset) && offset < bitset.size()) {
+                        bitset[offset] = true;
+                    }
+                }
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      fmt::format("unsupported op type {}", op));
+        }
     }
 
     void
@@ -124,6 +203,12 @@ class OffsetOrderedMap : public OffsetMap {
         map_.clear();
     }
 
+    size_t
+    size() const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        return map_.get_allocator().total_allocated();
+    }
+
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_by_index(int64_t limit, const BitsetType& bitset) const {
@@ -156,7 +241,6 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
  private:
-    using OrderedMap = std::map<T, std::vector<int64_t>, std::less<>>;
     OrderedMap map_;
     mutable std::shared_mutex mtx_;
 };
@@ -195,6 +279,68 @@ class OffsetOrderedArray : public OffsetMap {
         }
 
         return offset_vector;
+    }
+
+    void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const override {
+        check_search();
+        auto lower_bound_comp = [](const std::pair<T, int64_t>& elem,
+                                   const T& value) {
+            return elem.first < value;
+        };
+        auto upper_bound_comp = [](const T& value,
+                                   const std::pair<T, int64_t>& elem) {
+            return value < elem.first;
+        };
+
+        const T& target = std::get<T>(pk);
+        if (op == proto::plan::OpType::Equal) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (; it != array_.end() && it->first == target; ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterEqual) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (; it < array_.end(); ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterThan) {
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
+            for (; it < array_.end(); ++it) {
+                if (condition(it->second)) {
+                    bitset[it->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::LessEqual) {
+            auto it = std::upper_bound(
+                array_.begin(), array_.end(), target, upper_bound_comp);
+            for (auto ptr = array_.begin(); ptr < it; ++ptr) {
+                if (condition(ptr->second)) {
+                    bitset[ptr->second] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::LessThan) {
+            auto it = std::lower_bound(
+                array_.begin(), array_.end(), target, lower_bound_comp);
+            for (auto ptr = array_.begin(); ptr < it; ++ptr) {
+                if (condition(ptr->second)) {
+                    bitset[ptr->second] = true;
+                }
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      fmt::format("unsupported op type {}", op));
+        }
     }
 
     void
@@ -237,6 +383,11 @@ class OffsetOrderedArray : public OffsetMap {
         is_sealed = false;
     }
 
+    size_t
+    size() const override {
+        return sizeof(std::pair<T, int32_t>) * array_.capacity();
+    }
+
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_by_index(int64_t limit, const BitsetType& bitset) const {
@@ -274,24 +425,20 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
-template <bool is_sealed>
-struct InsertRecord {
+class InsertRecordSealed {
  public:
-    InsertRecord(
-        const Schema& schema,
-        const int64_t size_per_chunk,
-        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        bool called_from_subclass = false)
+    InsertRecordSealed(const Schema& schema,
+                       const int64_t size_per_chunk,
+                       const storage::MmapChunkDescriptorPtr
+                       /* mmap_descriptor */
+                       = nullptr)
         : timestamps_(size_per_chunk) {
-        if (called_from_subclass) {
-            return;
-        }
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         // for sealed segment, only pk field is added.
         for (auto& field : schema) {
             auto field_id = field.first;
-            auto& field_meta = field.second;
             if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
+                auto& field_meta = field.second;
                 AssertInfo(!field_meta.is_nullable(),
                            "Primary key should not be nullable");
                 switch (field_meta.get_data_type()) {
@@ -339,6 +486,17 @@ struct InsertRecord {
             }
         }
         return res_offsets;
+    }
+
+    void
+    search_pk_range(const PkType& pk,
+                    Timestamp timestamp,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        auto condition = [this, timestamp](int64_t offset) {
+            return timestamps_[offset] <= timestamp;
+        };
+        pk2offset_->find_range(pk, op, bitset, condition);
     }
 
     void
@@ -390,6 +548,25 @@ struct InsertRecord {
     seal_pks() {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->seal();
+        // update estimated memory size to caching layer
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(pk2offset_->size()), 0});
+        estimated_memory_size_ += pk2offset_->size();
+    }
+
+    void
+    init_timestamps(const std::vector<Timestamp>& timestamps,
+                    const TimestampIndex& timestamp_index) {
+        std::lock_guard lck(shared_mutex_);
+        timestamps_.set_data_raw(0, timestamps.data(), timestamps.size());
+        timestamp_index_ = std::move(timestamp_index);
+        AssertInfo(timestamps_.num_chunk() == 1,
+                   "num chunk not equal to 1 for sealed segment");
+        size_t size =
+            timestamps.size() * sizeof(Timestamp) + timestamp_index_.size();
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(size), 0});
+        estimated_memory_size_ += size;
     }
 
     const ConcurrentVector<Timestamp>&
@@ -397,44 +574,38 @@ struct InsertRecord {
         return timestamps_;
     }
 
-    virtual void
+    void
     clear() {
         timestamps_.clear();
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         reserved = 0;
-    }
-
-    size_t
-    CellByteSize() const {
-        return 0;
+        cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            {static_cast<int64_t>(estimated_memory_size_), 0});
+        estimated_memory_size_ = 0;
     }
 
  public:
     ConcurrentVector<Timestamp> timestamps_;
-
     std::atomic<int64_t> reserved = 0;
-
     // used for timestamps index of sealed segment
     TimestampIndex timestamp_index_;
-
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;
+    // estimated memory size of InsertRecord, only used for sealed segment
+    int64_t estimated_memory_size_{0};
 
  protected:
-    storage::MmapChunkDescriptorPtr mmap_descriptor_;
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     mutable std::shared_mutex shared_mutex_{};
 };
 
-template <>
-struct InsertRecord<false> : public InsertRecord<true> {
+class InsertRecordGrowing {
  public:
-    InsertRecord(
+    InsertRecordGrowing(
         const Schema& schema,
         const int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
-        : InsertRecord<true>(schema, size_per_chunk, mmap_descriptor, true) {
+        : timestamps_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         for (auto& field : schema) {
             auto field_id = field.first;
@@ -455,7 +626,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                     }
                     default: {
                         ThrowInfo(DataTypeInvalid,
-                                  fmt::format("unsupported pk type",
+                                  fmt::format("unsupported pk type: {}",
                                               field_meta.get_data_type()));
                     }
                 }
@@ -463,6 +634,43 @@ struct InsertRecord<false> : public InsertRecord<true> {
             append_field_meta(
                 field_id, field_meta, size_per_chunk, mmap_descriptor);
         }
+    }
+
+    bool
+    contain(const PkType& pk) const {
+        return pk2offset_->contain(pk);
+    }
+
+    std::vector<SegOffset>
+    search_pk(const PkType& pk,
+              Timestamp timestamp,
+              bool include_same_ts = true) const {
+        std::shared_lock<std::shared_mutex> lck(shared_mutex_);
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = pk2offset_->find(pk);
+        auto timestamp_hit =
+            include_same_ts ? [](const Timestamp& ts1,
+                                 const Timestamp& ts2) { return ts1 <= ts2; }
+                            : [](const Timestamp& ts1, const Timestamp& ts2) {
+                                  return ts1 < ts2;
+                              };
+        for (auto offset : offset_iter) {
+            if (timestamp_hit(timestamps_[offset], timestamp)) {
+                res_offsets.emplace_back(offset);
+            }
+        }
+        return res_offsets;
+    }
+
+    void
+    search_pk_range(const PkType& pk,
+                    Timestamp timestamp,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        auto condition = [this, timestamp](int64_t offset) {
+            return timestamps_[offset] <= timestamp;
+        };
+        pk2offset_->find_range(pk, op, bitset, condition);
     }
 
     void
@@ -496,6 +704,34 @@ struct InsertRecord<false> : public InsertRecord<true> {
                 }
             }
         }
+    }
+
+    bool
+    empty_pks() const {
+        std::shared_lock lck(shared_mutex_);
+        return pk2offset_->empty();
+    }
+
+    void
+    seal_pks() {
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_
+            ->seal();  // will throw for growing map, consistent with previous behavior
+    }
+
+    const ConcurrentVector<Timestamp>&
+    timestamps() const {
+        return timestamps_;
+    }
+
+    void
+    clear() {
+        timestamps_.clear();
+        timestamp_index_ = TimestampIndex();
+        pk2offset_->clear();
+        reserved = 0;
+        data_.clear();
+        ack_responder_.clear();
     }
 
     void
@@ -561,7 +797,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                                                   dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_SPARSE_FLOAT) {
+                       DataType::VECTOR_SPARSE_U32_F32) {
                 this->append_data<SparseFloatVector>(
                     field_id, size_per_chunk, vec_mmap_descriptor);
                 return;
@@ -616,6 +852,11 @@ struct InsertRecord<false> : public InsertRecord<true> {
             }
             case DataType::DOUBLE: {
                 this->append_data<double>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::TIMESTAMPTZ: {
+                this->append_data<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
@@ -766,20 +1007,25 @@ struct InsertRecord<false> : public InsertRecord<true> {
     empty() const {
         return pk2offset_->empty();
     }
-    void
-    clear() override {
-        InsertRecord<true>::clear();
-        data_.clear();
-        ack_responder_.clear();
-    }
 
  public:
+    ConcurrentVector<Timestamp> timestamps_;
+    std::atomic<int64_t> reserved = 0;
+    TimestampIndex timestamp_index_;
+    std::unique_ptr<OffsetMap> pk2offset_;
+
     // used for preInsert of growing segment
     AckResponder ack_responder_;
 
  private:
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
+    mutable std::shared_mutex shared_mutex_{};
 };
+
+// Keep the original template API via alias
+template <bool is_sealed>
+using InsertRecord =
+    std::conditional_t<is_sealed, InsertRecordSealed, InsertRecordGrowing>;
 
 }  // namespace milvus::segcore

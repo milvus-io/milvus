@@ -106,6 +106,11 @@ class LocalChunkManager : public ChunkManager {
         return path_prefix_;
     }
 
+    virtual std::string
+    GetBucketName() const {
+        return "";
+    }
+
     bool
     CreateFile(const std::string& filepath);
 

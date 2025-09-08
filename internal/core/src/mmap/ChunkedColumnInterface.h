@@ -17,7 +17,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-
+#include "common/bson_view.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
@@ -81,8 +81,14 @@ class ChunkedColumnInterface {
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const = 0;
+    virtual PinWrapper<
+        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<const size_t*>
+    VectorArrayLims(int64_t chunk_id) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -152,6 +158,16 @@ class ChunkedColumnInterface {
     }
 
     virtual void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "BulkRawBsonAt only supported for ChunkColumnInterface of "
+                  "Bson type");
+    }
+
+    virtual void
     BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
@@ -214,6 +230,22 @@ class ChunkedColumnInterface {
             }
         }
         return GetChunkIDsByOffsets(offsets, count);
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<uint32_t>>
+    ToChunkIdAndOffset(const uint32_t* offsets, int64_t count) const {
+        AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        std::vector<milvus::cachinglayer::cid_t> cids;
+        cids.reserve(count);
+        std::vector<uint32_t> offsets_in_chunk;
+        offsets_in_chunk.reserve(count);
+
+        for (int64_t i = 0; i < count; i++) {
+            auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
+            cids.push_back(chunk_id);
+            offsets_in_chunk.push_back(offset_in_chunk);
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
 };
 

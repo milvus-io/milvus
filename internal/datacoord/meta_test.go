@@ -128,6 +128,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				},
 			},
 		}, nil)
+
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -173,6 +175,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -833,20 +836,6 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
-	})
-
-	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMeta(&datacoord.Catalog{}, withIndexMeta(createIndexMeta(&datacoord.Catalog{})))
-		ret := meta.SetStoredIndexFileSizeMetric()
-		assert.Equal(t, uint64(0), ret)
-
-		meta.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		meta.collections.Insert(100, &collectionInfo{
-			ID:           100,
-			DatabaseName: "db",
-		})
-		ret = meta.SetStoredIndexFileSizeMetric()
-		assert.Equal(t, uint64(11), ret)
 	})
 
 	t.Run("Test AddAllocation", func(t *testing.T) {

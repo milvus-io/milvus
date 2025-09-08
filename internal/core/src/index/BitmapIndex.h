@@ -23,6 +23,7 @@
 
 #include "common/RegexQuery.h"
 #include "index/ScalarIndex.h"
+#include "pb/common.pb.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 
@@ -93,7 +94,7 @@ class BitmapIndex : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
-    const TargetBitmap
+    TargetBitmap
     IsNotNull() override;
 
     const TargetBitmap
@@ -252,7 +253,8 @@ class BitmapIndex : public ScalarIndex<T> {
     MMapIndexData(const std::string& filepath,
                   const uint8_t* data,
                   size_t data_size,
-                  size_t index_length);
+                  size_t index_length,
+                  milvus::proto::common::LoadPriority priority);
 
     void
     UnmapIndexData();

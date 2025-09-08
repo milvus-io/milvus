@@ -39,7 +39,7 @@
 #include "futures/Future.h"
 #include "futures/future_c.h"
 #include "test_utils/DataGen.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -51,6 +51,7 @@
 #include "test_utils/DataGen.h"
 #include "segcore/vector_index_c.h"
 #include "common/jsmn.h"
+#include "exec/expression/Element.h"
 
 using namespace milvus;
 using namespace milvus::test;
@@ -62,7 +63,7 @@ using milvus::index::VectorIndex;
 using milvus::segcore::LoadIndexInfo;
 
 namespace {
-// const int DIM = 16;
+// const int DIM = 4;
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
@@ -129,7 +130,7 @@ get_default_index_meta() {
                                   index_name: "test-index"
                                   type_params: <
                                     key: "dim"
-                                    value: "16"
+                                    value: "4"
                                   >
                                   index_params: <
                                     key: "index_type"
@@ -202,6 +203,11 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema2->set_name("doubleField");
     other_field_schema2->set_fieldid(102);
     other_field_schema2->set_data_type(schema::DataType::Double);
+
+    auto other_field_schema3 = collection_schema.add_fields();
+    other_field_schema3->set_name("timestamptzField");
+    other_field_schema3->set_fieldid(103);
+    other_field_schema3->set_data_type(schema::DataType::Timestamptz);
 
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(
@@ -945,7 +951,7 @@ TEST(CApiTest, SearchTestWhenNullable) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, 111, &segment, false);
+    auto status = NewSegment(collection, Growing, 112, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1043,6 +1049,40 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, TestMultiElement) {
+    std::vector<std::string> params;
+    for (int i = 0; i < 100; i++) {
+        params.push_back(std::to_string(i));
+    }
+    auto multi_element =
+        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
+    std::string target = "50";
+    auto res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "30";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "40";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "100";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+    target = "1000";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+
+    std::string_view target_view = "30";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "40";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "50";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
@@ -1891,7 +1931,7 @@ TEST(CApiTest, LoadIndexInfo) {
         c_load_index_info, index_param_key2.data(), index_param_value2.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
-    status = AppendFieldInfo(
+    status = AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, false, "");
     ASSERT_EQ(status.error_code, Success);
     AppendIndexEngineVersionToLoadInfo(
@@ -1936,6 +1976,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
     auto index = std::make_unique<VectorMemIndex<float>>(
+        DataType::NONE,
         index_params["index_type"],
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -2068,7 +2109,7 @@ Test_Indexing_Without_Predicate() {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, TraitType::c_data_type, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2224,7 +2265,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2402,7 +2443,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2582,7 +2623,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2754,7 +2795,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2927,7 +2968,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2965,12 +3006,13 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 }
 
 TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
+    auto dim = 16;
     // insert data to segment
     constexpr auto TOPK = 5;
 
     std::string schema_string =
         generate_collection_schema<milvus::BinaryVector>(
-            knowhere::metric::JACCARD, DIM);
+            knowhere::metric::JACCARD, dim);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
@@ -2981,7 +3023,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * dim / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3040,7 +3082,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
-        num_queries, DIM, query_ptr);
+        num_queries, dim, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -3072,11 +3114,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                                    DataType::VECTOR_BINARY,
                                    knowhere::metric::JACCARD,
                                    IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                   DIM,
+                                   dim,
                                    N);
 
     // gen query dataset
-    auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
@@ -3108,7 +3150,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3148,10 +3190,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
+    auto dim = 16;
 
     std::string schema_string =
         generate_collection_schema<milvus::BinaryVector>(
-            knowhere::metric::JACCARD, DIM);
+            knowhere::metric::JACCARD, dim);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
@@ -3162,7 +3205,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * dim / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3220,7 +3263,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
-        num_queries, DIM, query_ptr);
+        num_queries, dim, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -3253,11 +3296,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                    DataType::VECTOR_BINARY,
                                    knowhere::metric::JACCARD,
                                    IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                   DIM,
+                                   dim,
                                    N);
 
     // gen query dataset
-    auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
@@ -3289,7 +3332,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3329,10 +3372,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
+    auto dim = 16;
 
     std::string schema_string =
         generate_collection_schema<milvus::BinaryVector>(
-            knowhere::metric::JACCARD, DIM);
+            knowhere::metric::JACCARD, dim);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
@@ -3343,7 +3387,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * dim / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3397,7 +3441,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     int num_queries = 5;
     int topK = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
-        num_queries, DIM, query_ptr);
+        num_queries, dim, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -3428,11 +3472,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                    DataType::VECTOR_BINARY,
                                    knowhere::metric::JACCARD,
                                    IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                   DIM,
+                                   dim,
                                    N);
 
     // gen query dataset
-    auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
@@ -3464,7 +3508,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3527,10 +3571,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
+    auto dim = 16;
 
     std::string schema_string =
         generate_collection_schema<milvus::BinaryVector>(
-            knowhere::metric::JACCARD, DIM);
+            knowhere::metric::JACCARD, dim);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
@@ -3541,7 +3586,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * dim / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3594,7 +3639,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     int num_queries = 5;
     int topK = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
-        num_queries, DIM, query_ptr);
+        num_queries, dim, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -3626,11 +3671,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                    DataType::VECTOR_BINARY,
                                    knowhere::metric::JACCARD,
                                    IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                   DIM,
+                                   dim,
                                    N);
 
     // gen query dataset
-    auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
@@ -3662,7 +3707,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3817,7 +3862,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -4048,7 +4093,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,

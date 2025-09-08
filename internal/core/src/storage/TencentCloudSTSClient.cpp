@@ -34,11 +34,6 @@ class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
 
-namespace Client {
-Aws::String
-ComputeUserAgentString();
-}
-
 namespace Internal {
 
 static const char STS_RESOURCE_CLIENT_LOG_TAG[] =

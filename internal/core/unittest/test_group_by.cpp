@@ -20,7 +20,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -63,12 +63,14 @@ TEST(GroupBY, SealedIndex) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);  // id 101
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    auto timestamptz_fid =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     schema->set_primary_field_id(str_fid);
     size_t N = 50;
 
@@ -392,6 +394,54 @@ TEST(GroupBY, SealedIndex) {
             }
         }
         ASSERT_TRUE(bools_map.size() == 2);  //bool values cannot exceed two
+    }
+
+    //10. search group by timestamptz
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 100
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 107
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+
+         >)";
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        CheckGroupBySearchResult(*search_result, topK, num_queries, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        int size = group_by_values.size();
+        ASSERT_EQ(20, size);
+        //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
+        //so there will be 20 items returned
+
+        std::unordered_map<int64_t, int> timestamptz_map;
+        float lastDistance = 0.0;
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+                int16_t g_val = std::get<int64_t>(group_by_values[i].value());
+                timestamptz_map[g_val] += 1;
+                ASSERT_TRUE(timestamptz_map[g_val] <= group_size);
+                auto distance = search_result->distances_.at(i);
+                ASSERT_TRUE(lastDistance <= distance);
+                lastDistance = distance;
+            }
+        }
+        ASSERT_TRUE(timestamptz_map.size() == 7);
     }
 }
 

@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -963,7 +963,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			"mock.apikey": "mock",
 		}
 	}
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{
@@ -3548,6 +3548,278 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			assert.ErrorContains(t, err, "failed to parse input last bound")
 		})
 	})
+
+	t.Run("check vector array unsupported features", func(t *testing.T) {
+		// Helper function to create a schema with vector array field
+		createSchemaWithVectorArray := func(annsFieldName string) *schemapb.CollectionSchema {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "id",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID:  101,
+						Name:     "normal_vector",
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+					{
+						FieldID:  102,
+						Name:     "group_field",
+						DataType: schemapb.DataType_VarChar,
+					},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						FieldID: 103,
+						Name:    "struct_array_field",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:     104,
+								Name:        annsFieldName,
+								DataType:    schemapb.DataType_ArrayOfVector,
+								ElementType: schemapb.DataType_FloatVector,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.DimKey, Value: "128"},
+								},
+							},
+						},
+					},
+				},
+			}
+		}
+
+		// Helper function to create search params with anns field
+		createSearchParams := func(annsFieldName string) []*commonpb.KeyValuePair {
+			return []*commonpb.KeyValuePair{
+				{
+					Key:   AnnsFieldKey,
+					Value: annsFieldName,
+				},
+				{
+					Key:   TopKKey,
+					Value: "10",
+				},
+				{
+					Key:   common.MetricTypeKey,
+					Value: metric.MaxSim,
+				},
+				{
+					Key:   ParamsKey,
+					Value: `{"nprobe": 10}`,
+				},
+				{
+					Key:   RoundDecimalKey,
+					Value: "-1",
+				},
+				{
+					Key:   IgnoreGrowingKey,
+					Value: "false",
+				},
+			}
+		}
+
+		t.Run("vector array with range search", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+
+			// Add radius parameter for range search
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			fmt.Println(err.Error())
+			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
+		})
+
+		t.Run("vector array with group by", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+
+			// Add group by parameter
+			params = append(params, &commonpb.KeyValuePair{
+				Key:   GroupByFieldKey,
+				Value: "group_field",
+			})
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "embeddings_list")
+		})
+
+		t.Run("vector array with iterator", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+
+			// Add iterator parameter
+			params = append(params, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "embeddings_list")
+		})
+
+		t.Run("vector array with iterator v2", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+
+			// Add iterator v2 parameters
+			params = append(params,
+				&commonpb.KeyValuePair{
+					Key:   SearchIterV2Key,
+					Value: "True",
+				},
+				&commonpb.KeyValuePair{
+					Key:   IteratorField,
+					Value: "True",
+				},
+				&commonpb.KeyValuePair{
+					Key:   SearchIterBatchSizeKey,
+					Value: "10",
+				},
+			)
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "embeddings_list")
+		})
+
+		t.Run("normal search on vector array should succeed", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+		})
+
+		t.Run("normal vector field with range search should succeed", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("normal_vector")
+
+			// Add radius parameter for range search
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+		})
+
+		t.Run("normal vector field with group by should succeed", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("normal_vector")
+
+			// Add group by parameter
+			params = append(params, &commonpb.KeyValuePair{
+				Key:   GroupByFieldKey,
+				Value: "group_field",
+			})
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+			assert.Equal(t, int64(102), searchInfo.planInfo.GroupByFieldId)
+		})
+
+		t.Run("normal vector field with iterator should succeed", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("normal_vector")
+
+			// Add iterator parameter
+			params = append(params, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+		})
+
+		t.Run("vector array with range search", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("embeddings_list")
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			// Should fail on range search first
+			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
+		})
+
+		t.Run("no anns field specified", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := getValidSearchParams()
+			// Don't specify anns field
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			// Should not trigger vector array validation without anns field
+		})
+
+		t.Run("non-existent anns field", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+			params := createSearchParams("non_existent_field")
+
+			searchInfo, err := parseSearchInfo(params, schema, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			// Should not trigger vector array validation for non-existent field
+		})
+
+		t.Run("hybrid search with outer group by on vector array", func(t *testing.T) {
+			schema := createSchemaWithVectorArray("embeddings_list")
+
+			// Create rank params with group by
+			rankParams := getValidSearchParams()
+			rankParams = append(rankParams,
+				&commonpb.KeyValuePair{
+					Key:   GroupByFieldKey,
+					Value: "group_field",
+				},
+				&commonpb.KeyValuePair{
+					Key:   LimitKey,
+					Value: "100",
+				},
+			)
+
+			parsedRankParams, err := parseRankParams(rankParams, schema)
+			assert.NoError(t, err)
+
+			searchParams := createSearchParams("embeddings_list")
+			// Parse search info with rank params
+			searchInfo, err := parseSearchInfo(searchParams, schema, parsedRankParams)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
+		})
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
@@ -4300,4 +4572,111 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 		}
 	}
 	return result
+}
+
+func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "regular_vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+			{FieldID: 102, Name: "regular_scalar", DataType: schemapb.DataType_Int32},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "structArray",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "struct_vec_array", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}}},
+					{FieldID: 105, Name: "struct_scalar_array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				},
+			},
+		},
+	}
+
+	schemaInfo := newSchemaInfo(schema)
+
+	tests := []struct {
+		name            string
+		outputFields    []string
+		expectedRequery bool
+		description     string
+	}{
+		{
+			name:            "regular_vector_field",
+			outputFields:    []string{"pk", "regular_vec"},
+			expectedRequery: true,
+			description:     "Should require requery when regular vector field in output",
+		},
+		{
+			name:            "struct_array_vector_field",
+			outputFields:    []string{"pk", "struct_vec_array"},
+			expectedRequery: true,
+			description:     "Should require requery when struct array vector field in output (tests GetAllFieldSchemas)",
+		},
+		{
+			name:            "both_vector_fields",
+			outputFields:    []string{"pk", "regular_vec", "struct_vec_array"},
+			expectedRequery: true,
+			description:     "Should require requery when both regular and struct array vector fields in output",
+		},
+		{
+			name:            "struct_scalar_array_only",
+			outputFields:    []string{"pk", "struct_scalar_array"},
+			expectedRequery: false,
+			description:     "Should not require requery when only struct scalar array field in output",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &searchTask{
+				ctx:            ctx,
+				collectionName: "test_collection",
+				SearchRequest: &internalpb.SearchRequest{
+					CollectionID:     1,
+					PartitionIDs:     []int64{1},
+					Dsl:              "",
+					PlaceholderGroup: nil,
+					DslType:          commonpb.DslType_BoolExprV1,
+					OutputFieldsId:   []int64{},
+				},
+				request: &milvuspb.SearchRequest{
+					CollectionName: "test_collection",
+					OutputFields:   tt.outputFields,
+					Dsl:            "",
+					SearchParams: []*commonpb.KeyValuePair{
+						{Key: AnnsFieldKey, Value: "regular_vec"},
+						{Key: TopKKey, Value: "10"},
+						{Key: common.MetricTypeKey, Value: metric.L2},
+						{Key: ParamsKey, Value: `{"nprobe": 10}`},
+					},
+					PlaceholderGroup: nil,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+				},
+				schema:                 schemaInfo,
+				translatedOutputFields: tt.outputFields,
+				tr:                     timerecord.NewTimeRecorder("test"),
+				queryInfos:             []*planpb.QueryInfo{{}},
+			}
+
+			// Set translated output field IDs based on the schema
+			outputFieldIDs := []int64{}
+			allFields := typeutil.GetAllFieldSchemas(schema)
+			for _, fieldName := range tt.outputFields {
+				for _, field := range allFields {
+					if field.Name == fieldName {
+						outputFieldIDs = append(outputFieldIDs, field.FieldID)
+						break
+					}
+				}
+			}
+			task.SearchRequest.OutputFieldsId = outputFieldIDs
+
+			err := task.initSearchRequest(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedRequery, task.needRequery, tt.description)
+		})
+	}
 }

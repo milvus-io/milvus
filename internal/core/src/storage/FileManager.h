@@ -22,11 +22,11 @@
 
 #include "common/Consts.h"
 #include "boost/filesystem/path.hpp"
-#include "knowhere/file_manager.h"
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "filemanager/FileManager.h"
 
 namespace milvus::storage {
 
@@ -56,11 +56,17 @@ struct FileManagerContext {
         for_loading_index = value;
     }
 
+    void
+    set_plugin_context(std::shared_ptr<CPluginContext> context) {
+        plugin_context = context;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
     bool for_loading_index{false};
+    std::shared_ptr<CPluginContext> plugin_context;
 };
 
 #define FILEMANAGER_TRY try {
@@ -75,7 +81,7 @@ struct FileManagerContext {
         return false;
 #define FILEMANAGER_END }
 
-class FileManagerImpl : public knowhere::FileManager {
+class FileManagerImpl : public milvus::FileManager {
  public:
     explicit FileManagerImpl(const FieldDataMeta& field_mata,
                              IndexMeta index_meta)
@@ -90,7 +96,7 @@ class FileManagerImpl : public knowhere::FileManager {
      * @return false if any error, or return true.
      */
     virtual bool
-    LoadFile(const std::string& filename) noexcept = 0;
+    LoadFile(const std::string& filename) override = 0;
 
     /**
      * @brief Add file to FileManager to manipulate it.
@@ -99,7 +105,7 @@ class FileManagerImpl : public knowhere::FileManager {
      * @return false if any error, or return true.
      */
     virtual bool
-    AddFile(const std::string& filename) noexcept = 0;
+    AddFile(const std::string& filename) override = 0;
 
     /**
      * @brief Check if a file exists.
@@ -108,7 +114,7 @@ class FileManagerImpl : public knowhere::FileManager {
      * @return std::nullopt if any error, or return if the file exists.
      */
     virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept = 0;
+    IsExisted(const std::string& filename) override = 0;
 
     /**
      * @brief Delete a file from FileManager.
@@ -117,7 +123,16 @@ class FileManagerImpl : public knowhere::FileManager {
      * @return false if any error, or return true.
      */
     virtual bool
-    RemoveFile(const std::string& filename) noexcept = 0;
+    RemoveFile(const std::string& filename) override = 0;
+
+    virtual bool
+    AddFileMeta(const FileMeta& file_meta) override = 0;
+
+    virtual std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& filename) override = 0;
+
+    virtual std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& filename) override = 0;
 
  public:
     virtual std::string
@@ -160,6 +175,17 @@ class FileManagerImpl : public knowhere::FileManager {
     }
 
     virtual std::string
+    GetRemoteIndexFilePrefixV2() const {
+        boost::filesystem::path bucket = rcm_->GetBucketName();
+        std::string v1_prefix = GetRemoteIndexObjectPrefix();
+        if (bucket.empty()) {
+            return v1_prefix;
+        } else {
+            return (bucket / v1_prefix).string();
+        }
+    }
+
+    virtual std::string
     GetRemoteTextLogPrefix() const {
         boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
@@ -181,6 +207,7 @@ class FileManagerImpl : public knowhere::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::shared_ptr<CPluginContext> plugin_context_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

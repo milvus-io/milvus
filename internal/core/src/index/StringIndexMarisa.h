@@ -74,7 +74,7 @@ class StringIndexMarisa : public StringIndex {
     const TargetBitmap
     IsNull() override;
 
-    const TargetBitmap
+    TargetBitmap
     IsNotNull() override;
 
     const TargetBitmap

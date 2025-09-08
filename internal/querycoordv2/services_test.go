@@ -149,8 +149,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	suite.store = querycoord.NewCatalog(suite.kv)
-	suite.dist = meta.NewDistributionManager()
 	suite.nodeMgr = session.NewNodeManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
@@ -186,7 +186,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.targetMgr,
 	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
-	suite.distMgr = meta.NewDistributionManager()
+	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
 
 	suite.collectionObserver = observers.NewCollectionObserver(
@@ -220,6 +220,17 @@ func (suite *ServiceSuite) SetupTest() {
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 		proxyClientManager:  suite.proxyManager,
 	}
+
+	// Initialize checkerController to prevent nil pointer dereference in handleNodeUp
+	suite.server.checkerController = checkers.NewCheckerController(
+		suite.meta,
+		suite.dist,
+		suite.targetMgr,
+		suite.nodeMgr,
+		suite.taskScheduler,
+		suite.broker,
+		suite.server.getBalancerFunc,
+	)
 
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

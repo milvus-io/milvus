@@ -31,6 +31,8 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "folly/SharedMutex.h"
+#include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
@@ -38,10 +40,10 @@
 #include "pb/segcore.pb.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/JsonKeyStatsInvertedIndex.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -131,6 +133,9 @@ class SegmentInterface {
     HasRawData(int64_t field_id) const = 0;
 
     virtual bool
+    HasFieldData(FieldId field_id) const = 0;
+
+    virtual bool
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
@@ -139,12 +144,19 @@ class SegmentInterface {
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
 
-    virtual PinWrapper<index::IndexBase*>
-    GetJsonIndex(FieldId field_id, std::string path) const {
-        return nullptr;
+    virtual std::vector<PinWrapper<const index::IndexBase*>>
+    PinJsonIndex(FieldId field_id,
+                 const std::string& path,
+                 DataType data_type,
+                 bool any_type,
+                 bool is_array) const {
+        return {};
     }
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const = 0;
+
+    virtual std::vector<PinWrapper<const index::IndexBase*>>
+    PinIndex(FieldId field_id, bool include_ngram = false) const {
+        return {};
+    };
 
     virtual void
     BulkGetJsonData(FieldId field_id,
@@ -159,12 +171,8 @@ class SegmentInterface {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const = 0;
 
-    virtual bool
-    HasNgramIndex(FieldId field_id) const = 0;
-
-    virtual bool
-    HasNgramIndexForJson(FieldId field_id,
-                         const std::string& nested_path) const = 0;
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -202,6 +210,8 @@ class SegmentInternalInterface : public SegmentInterface {
             return chunk_string_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+            return chunk_vector_array_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_view_impl(field_id, chunk_id, offset_len);
             auto [string_views, valid_data] = pw.get();
@@ -257,45 +267,11 @@ class SegmentInternalInterface : public SegmentInterface {
         }
     }
 
-    template <typename T>
-    PinWrapper<const index::ScalarIndex<T>*>
-    chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
-        static_assert(IsScalar<T>);
-        using IndexType = index::ScalarIndex<T>;
-        auto pw = chunk_index_impl(field_id, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(pw.get());
-        AssertInfo(ptr, "entry mismatch");
-        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
-    }
-
-    // We should not expose this interface directly, but access the index through chunk_scalar_index.
-    // However, chunk_scalar_index requires specifying a template parameter, which makes it impossible to return JsonFlatIndex.
-    // A better approach would be to have chunk_scalar_index return a pointer to a base class,
-    // and then use dynamic_cast to convert it. But this would cause a lot of code changes, so for now, we will do it this way.
-    PinWrapper<const index::IndexBase*>
-    chunk_json_index(FieldId field_id,
-                     std::string& json_path,
-                     int64_t chunk_id) const {
-        return chunk_index_impl(field_id, json_path, chunk_id);
-    }
-
     // union(segment_id, field_id) as unique id
     virtual std::string
     GetUniqueFieldId(int64_t field_id) const {
         return std::to_string(get_segment_id()) + "_" +
                std::to_string(field_id);
-    }
-
-    template <typename T>
-    PinWrapper<const index::ScalarIndex<T>*>
-    chunk_scalar_index(FieldId field_id,
-                       std::string path,
-                       int64_t chunk_id) const {
-        using IndexType = index::ScalarIndex<T>;
-        auto pw = chunk_index_impl(field_id, path, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(pw.get());
-        AssertInfo(ptr, "entry mismatch");
-        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
     }
 
     std::unique_ptr<SearchResult>
@@ -331,16 +307,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
-    virtual bool
-    HasIndex(FieldId field_id,
-             const std::string& nested_path,
-             DataType data_type,
-             bool any_type = false,
-             bool is_array = false) const = 0;
-
-    virtual bool
-    HasFieldData(FieldId field_id) const = 0;
-
     virtual std::string
     debug() const = 0;
 
@@ -375,9 +341,6 @@ class SegmentInternalInterface : public SegmentInterface {
     index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const override;
 
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const override;
-
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
 
@@ -385,17 +348,18 @@ class SegmentInternalInterface : public SegmentInterface {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
 
-    virtual bool
-    HasNgramIndex(FieldId field_id) const override;
-
-    virtual bool
-    HasNgramIndexForJson(FieldId field_id,
-                         const std::string& nested_path) const override;
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override;
 
  public:
+    // `query_lims` is not null only for vector array (embedding list) search
+    // where it denotes the number of vectors in each embedding list. The length
+    // of `query_lims` is the number of queries in the search plus one (the first
+    // element in query_lims is 0).
     virtual void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
+                  const size_t* query_lims,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
@@ -405,10 +369,6 @@ class SegmentInternalInterface : public SegmentInterface {
     mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const = 0;
-
-    // count of chunk that has index available
-    virtual int64_t
-    num_chunk_index(FieldId field_id) const = 0;
 
     // count of chunk that has raw data
     virtual int64_t
@@ -440,7 +400,14 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
 
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    /**
+     * search offset by possible pk values and mvcc timestamp
+     *
+     * @param id_array possible pk values
+     * @param timestamp mvcc timestamp 
+     * @return all the hit entries in vector of offsets
+     */
+    virtual std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
     /**
@@ -522,6 +489,13 @@ class SegmentInternalInterface : public SegmentInterface {
                               offset_len = std::nullopt) const = 0;
 
     virtual PinWrapper<
+        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    chunk_vector_array_view_impl(FieldId field_id,
+                                 int64_t chunk_id,
+                                 std::optional<std::pair<int64_t, int64_t>>
+                                     offset_len = std::nullopt) const = 0;
+
+    virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
         FieldId field_id,
@@ -533,9 +507,6 @@ class SegmentInternalInterface : public SegmentInterface {
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
 
-    // internal API: return chunk_index in span, support scalar index only
-    virtual PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
     virtual void
     check_search(const query::Plan* plan) const = 0;
 
@@ -543,13 +514,6 @@ class SegmentInternalInterface : public SegmentInterface {
     get_timestamps() const = 0;
 
  public:
-    virtual PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id,
-                     const std::string& path,
-                     int64_t chunk_id) const {
-        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
-    };
-
     virtual bool
     is_field_exist(FieldId field_id) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
@@ -575,6 +539,12 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
 
+    virtual void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const = 0;
+
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
@@ -589,9 +559,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
 
-    std::unordered_map<FieldId,
-                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
-        json_indexes_;
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+        json_stats_;
 };
 
 }  // namespace milvus::segcore

@@ -70,12 +70,17 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
              DataType::VECTOR_BINARY},
             {knowhere::IndexEnum::INDEX_HNSW, DataType::VECTOR_FLOAT},
             {knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-             DataType::VECTOR_SPARSE_FLOAT},
+             DataType::VECTOR_SPARSE_U32_F32},
             {knowhere::IndexEnum::INDEX_SPARSE_WAND,
-             DataType::VECTOR_SPARSE_FLOAT},
+             DataType::VECTOR_SPARSE_U32_F32},
         };
 
         vec_field_data_type = index_to_vec_type[index_type];
+
+        // Set correct dimension for binary vectors
+        if (vec_field_data_type == DataType::VECTOR_BINARY) {
+            config["dim"] = std::to_string(BINARY_DIM);
+        }
     }
 
     void
@@ -128,14 +133,17 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         vec_field_data_type, config, file_manager_context);
     knowhere::DataSetPtr xb_dataset;
     if (vec_field_data_type == DataType::VECTOR_BINARY) {
-        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
+        auto dataset =
+            GenFieldData(NB, metric_type, vec_field_data_type, BINARY_DIM);
         auto bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
-        xb_dataset = knowhere::GenDataSet(NB, DIM, bin_vecs.data());
+        xb_dataset = knowhere::GenDataSet(NB, BINARY_DIM, bin_vecs.data());
         ASSERT_NO_THROW(index->Build(xb_dataset));
-    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
+    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_U32_F32) {
         auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
-        auto sparse_vecs = dataset.get_col<knowhere::sparse::SparseRow<float>>(
-            milvus::FieldId(100));
+        auto sparse_vecs =
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    milvus::FieldId(100));
         xb_dataset =
             knowhere::GenDataSet(NB, kTestSparseDim, sparse_vecs.data());
         xb_dataset->SetIsSparse(true);
@@ -159,7 +167,9 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
             vec_field_data_type, config, file_manager_context);
     auto vec_index =
         static_cast<milvus::indexbuilder::VecIndexCreator*>(copy_index.get());
-    if (vec_field_data_type != DataType::VECTOR_SPARSE_FLOAT) {
+    if (vec_field_data_type == DataType::VECTOR_BINARY) {
+        ASSERT_EQ(vec_index->dim(), BINARY_DIM);
+    } else if (vec_field_data_type != DataType::VECTOR_SPARSE_U32_F32) {
         ASSERT_EQ(vec_index->dim(), DIM);
     }
 
@@ -177,22 +187,26 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         auto xq_dataset =
             knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
-    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
+    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_U32_F32) {
         auto dataset = GenFieldData(NQ, metric_type, vec_field_data_type);
-        auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
-            milvus::FieldId(100));
+        auto xb_data =
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    milvus::FieldId(100));
         auto xq_dataset =
             knowhere::GenDataSet(NQ, kTestSparseDim, xb_data.data());
         xq_dataset->SetIsSparse(true);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     } else {
         auto nb_for_nq = NQ + query_offset;
-        auto dataset =
-            GenFieldData(nb_for_nq, metric_type, DataType::VECTOR_BINARY);
+        auto dataset = GenFieldData(
+            nb_for_nq, metric_type, DataType::VECTOR_BINARY, BINARY_DIM);
         auto xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
         // offset of binary vector is 8-aligned bit-wise representation.
         auto xq_dataset = knowhere::GenDataSet(
-            NQ, DIM, xb_bin_data.data() + ((DIM + 7) / 8) * query_offset);
+            NQ,
+            BINARY_DIM,
+            xb_bin_data.data() + ((BINARY_DIM + 7) / 8) * query_offset);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     }
 

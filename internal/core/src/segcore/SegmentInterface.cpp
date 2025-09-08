@@ -18,7 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {
@@ -501,6 +501,18 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_timestamptz_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] =
+                        field_meta.default_value()->timestamptz_data();
+                }
+                break;
+            }
             case DataType::VARCHAR: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
@@ -508,6 +520,17 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
                 for (int64_t i = 0; i < count; ++i) {
                     data_ptr->at(i) = field_meta.default_value()->string_data();
+                }
+                break;
+            }
+            // for enabling dynamic field, normal json not support default value yet
+            case DataType::JSON: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_json_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
                 }
                 break;
             }
@@ -526,16 +549,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     return result;
 }
 
-index::JsonKeyStatsInvertedIndex*
-SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = json_indexes_.find(field_id);
-    if (iter == json_indexes_.end()) {
-        return nullptr;
-    }
-    return iter->second.get();
-}
-
 // Only sealed segment has ngram index
 PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
@@ -548,15 +561,14 @@ SegmentInternalInterface::GetNgramIndexForJson(
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
-bool
-SegmentInternalInterface::HasNgramIndex(FieldId field_id) const {
-    return false;
-}
-
-bool
-SegmentInternalInterface::HasNgramIndexForJson(
-    FieldId field_id, const std::string& nested_path) const {
-    return false;
+index::JsonKeyStats*
+SegmentInternalInterface::GetJsonStats(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = json_stats_.find(field_id);
+    if (iter == json_stats_.end()) {
+        return nullptr;
+    }
+    return iter->second.get();
 }
 
 }  // namespace milvus::segcore

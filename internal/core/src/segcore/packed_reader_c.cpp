@@ -17,6 +17,10 @@
 #include "milvus-storage/common/log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/config.h"
+#include "parquet/encryption/encryption.h"
+#include "storage/PluginLoader.h"
+#include "storage/KeyRetriever.h"
+#include "log/Log.h"
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
@@ -32,7 +36,8 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
                                  CStorageConfig c_storage_config,
-                                 CPackedReader* c_packed_reader) {
+                                 CPackedReader* c_packed_reader,
+                                 CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -66,8 +71,20 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto plugin_ptr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
+            plugin_ptr->Update(c_plugin_context->ez_id,
+                               c_plugin_context->collection_id,
+                               std::string(c_plugin_context->key));
+        }
+
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs, truePaths, trueSchema, buffer_size);
+            trueFs,
+            truePaths,
+            trueSchema,
+            buffer_size,
+            milvus::storage::GetReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -80,7 +97,8 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
-                CPackedReader* c_packed_reader) {
+                CPackedReader* c_packed_reader,
+                CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -93,8 +111,21 @@ NewPackedReader(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+
+        auto plugin_ptr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
+            plugin_ptr->Update(c_plugin_context->ez_id,
+                               c_plugin_context->collection_id,
+                               std::string(c_plugin_context->key));
+        }
+
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs, truePaths, trueSchema, buffer_size);
+            trueFs,
+            truePaths,
+            trueSchema,
+            buffer_size,
+            milvus::storage::GetReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

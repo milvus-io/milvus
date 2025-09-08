@@ -15,10 +15,13 @@ import (
 )
 
 var (
-	addr                = flag.String("addr", "localhost:19530", "server host and port")
+	addr                = flag.String("addr", "http://localhost:19530", "server host and port")
 	user                = flag.String("user", "root", "user")
 	password            = flag.String("password", "Milvus", "password")
 	logLevel            = flag.String("log.level", "info", "log level for test")
+	teiEndpoint         = flag.String("tei_endpoint", "http://text-embeddings-service.milvus-ci.svc.cluster.local:80", "TEI service endpoint for text embedding tests")
+	teiRerankerEndpoint = flag.String("tei_reranker_uri", "http://text-rerank-service.milvus-ci.svc.cluster.local:80", "TEI reranker service endpoint")
+	teiModelDim         = flag.Int("tei_model_dim", 768, "Vector dimension for text embedding model")
 	defaultClientConfig *client.ClientConfig
 )
 
@@ -40,6 +43,18 @@ func GetUser() string {
 
 func GetPassword() string {
 	return *password
+}
+
+func GetTEIEndpoint() string {
+	return *teiEndpoint
+}
+
+func GetTEIRerankerEndpoint() string {
+	return *teiRerankerEndpoint
+}
+
+func GetTEIModelDim() int {
+	return *teiModelDim
 }
 
 func parseLogConfig() {

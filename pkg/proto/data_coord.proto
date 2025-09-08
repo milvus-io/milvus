@@ -102,6 +102,11 @@ service DataCoord {
   rpc ImportV2(internal.ImportRequestInternal) returns(internal.ImportResponse){}
   rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
   rpc ListImports(internal.ListImportsRequestInternal) returns(internal.ListImportsResponse){}
+
+  // File Resource Management
+  rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
+  rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
+  rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
 }
 
 service DataNode {
@@ -675,6 +680,7 @@ message CompactionPlan {
   IDRange pre_allocated_logIDs = 21;
   string json_params = 22;
   int32 current_scalar_index_version = 23;
+  repeated common.KeyValuePair plugin_context = 29;
 }
 
 message CompactionSegment {
@@ -854,6 +860,7 @@ message PreImportRequest {
   repeated common.KeyValuePair options = 9;
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
+  repeated common.KeyValuePair plugin_context = 12;
 }
 
 message IDRange {
@@ -883,6 +890,7 @@ message ImportRequest {
   index.StorageConfig storage_config = 13;
   int64 task_slot = 14;
   int64 storage_version = 15;
+  repeated common.KeyValuePair plugin_context = 16;
 }
 
 message QueryPreImportRequest {
@@ -1082,4 +1090,11 @@ message PartitionStatsInfo {
 
 message DropCompactionPlanRequest {
   int64 planID = 1;
+}
+
+message FileResourceInfo {
+  string name = 1;
+  string path = 2;
+  int64 resource_id = 3;
+  common.FileResourceType type = 4;
 }

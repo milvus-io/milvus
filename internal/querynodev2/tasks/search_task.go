@@ -366,6 +366,7 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 	if err := proto.Unmarshal(t.placeholderGroup, ret); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid search vector placeholder: %v", err)
 	}
+
 	if len(ret.GetPlaceholders()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("empty search vector is not allowed")
 	}

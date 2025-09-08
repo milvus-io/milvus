@@ -16,12 +16,14 @@
 
 #include "storage/storage_c.h"
 #include "storage/FileWriter.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
+#include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/ThreadPools.h"
 #include "monitor/scope_metric.h"
+#include "common/EasyAssert.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -118,18 +120,16 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 }
 
 CStatus
-InitFileWriterConfig(const char* mode,
-                     uint64_t buffer_size_kb,
-                     int nr_threads) {
+InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
     try {
-        std::string mode_str(mode);
+        std::string mode_str(c_disk_write_config.mode);
         if (mode_str == "direct") {
             milvus::storage::FileWriter::SetMode(
                 milvus::storage::FileWriter::WriteMode::DIRECT);
             // buffer size checking is done in FileWriter::SetBufferSize,
             // and it will try to find a proper and valid buffer size
             milvus::storage::FileWriter::SetBufferSize(
-                buffer_size_kb * 1024);  // convert to bytes
+                c_disk_write_config.buffer_size_kb * 1024);  // convert to bytes
         } else if (mode_str == "buffered") {
             milvus::storage::FileWriter::SetMode(
                 milvus::storage::FileWriter::WriteMode::BUFFERED);
@@ -138,7 +138,15 @@ InitFileWriterConfig(const char* mode,
                                           "Invalid mode");
         }
         milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
-            nr_threads);
+            c_disk_write_config.nr_threads);
+        // configure rate limiter
+        milvus::storage::io::WriteRateLimiter::GetInstance().Configure(
+            c_disk_write_config.rate_limiter_config.refill_period_us,
+            c_disk_write_config.rate_limiter_config.avg_bps,
+            c_disk_write_config.rate_limiter_config.max_burst_bps,
+            c_disk_write_config.rate_limiter_config.high_priority_ratio,
+            c_disk_write_config.rate_limiter_config.middle_priority_ratio,
+            c_disk_write_config.rate_limiter_config.low_priority_ratio);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -154,4 +162,46 @@ void
 ResizeTheadPool(int64_t priority, float ratio) {
     milvus::ThreadPools::ResizeThreadPool(
         static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+}
+
+void
+CleanPluginLoader() {
+    milvus::storage::PluginLoader::GetInstance().unloadAll();
+}
+
+CStatus
+InitPluginLoader(const char* plugin_path) {
+    try {
+        milvus::storage::PluginLoader::GetInstance().load(plugin_path);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+PutOrRefPluginContext(CPluginContext c_plugin_context) {
+    auto cipherPluginPtr =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipherPluginPtr) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "cipher plugin not loaded");
+    }
+    cipherPluginPtr->Update(c_plugin_context.ez_id,
+                            c_plugin_context.collection_id,
+                            std::string(c_plugin_context.key));
+    return milvus::SuccessCStatus();
+}
+
+CStatus
+UnRefPluginContext(CPluginContext c_plugin_context) {
+    auto cipherPluginPtr =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipherPluginPtr) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "cipher plugin not loaded");
+    }
+    cipherPluginPtr->Update(
+        c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+    return milvus::SuccessCStatus();
 }

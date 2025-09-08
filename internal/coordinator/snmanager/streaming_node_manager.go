@@ -26,7 +26,6 @@ func newStreamingNodeManager() *StreamingNodeManager {
 		balancer:            syncutil.NewFuture[balancer.Balancer](),
 		cond:                syncutil.NewContextCond(&sync.Mutex{}),
 		latestAssignments:   make(map[string]types.PChannelInfoAssigned),
-		streamingNodes:      typeutil.NewUniqueSet(),
 		nodeChangedNotifier: syncutil.NewVersionedNotifier(),
 	}
 	go snm.execute()
@@ -69,8 +68,7 @@ type StreamingNodeManager struct {
 	// The coord is merged after 2.6, so we don't need to make distribution safe.
 	cond                *syncutil.ContextCond
 	latestAssignments   map[string]types.PChannelInfoAssigned // The latest assignments info got from streaming coord balance module.
-	streamingNodes      typeutil.UniqueSet
-	nodeChangedNotifier *syncutil.VersionedNotifier // used to notify that node in streaming node manager has been changed.
+	nodeChangedNotifier *syncutil.VersionedNotifier           // used to notify that node in streaming node manager has been changed.
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
@@ -131,9 +129,19 @@ func (s *StreamingNodeManager) GetWALLocated(vChannel string) int64 {
 
 // GetStreamingQueryNodeIDs returns the server ids of the streaming query nodes.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
-	s.cond.L.Lock()
-	defer s.cond.L.Unlock()
-	return s.streamingNodes.Clone()
+	balancer, err := s.balancer.GetWithContext(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	streamingNodes, err := balancer.GetAllStreamingNodes(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	streamingNodeIDs := typeutil.NewUniqueSet()
+	for _, streamingNode := range streamingNodes {
+		streamingNodeIDs.Insert(streamingNode.ServerID)
+	}
+	return streamingNodeIDs
 }
 
 // ListenNodeChanged returns a listener for node changed event.
@@ -149,24 +157,19 @@ func (s *StreamingNodeManager) SetBalancerReady(b balancer.Balancer) {
 func (s *StreamingNodeManager) execute() (err error) {
 	defer s.notifier.Finish(struct{}{})
 
-	balancer, err := s.balancer.GetWithContext(s.notifier.Context())
+	b, err := s.balancer.GetWithContext(s.notifier.Context())
 	if err != nil {
 		return errors.Wrap(err, "failed to wait balancer ready")
 	}
 	for {
-		if err := balancer.WatchChannelAssignments(s.notifier.Context(), func(
-			version typeutil.VersionInt64Pair,
-			relations []types.PChannelInfoAssigned,
-		) error {
+		if err := b.WatchChannelAssignments(s.notifier.Context(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 			s.cond.LockAndBroadcast()
 			s.latestAssignments = make(map[string]types.PChannelInfoAssigned)
-			s.streamingNodes = typeutil.NewUniqueSet()
-			for _, relation := range relations {
+			for _, relation := range param.Relations {
 				s.latestAssignments[relation.Channel.Name] = relation
-				s.streamingNodes.Insert(relation.Node.ServerID)
 			}
 			s.nodeChangedNotifier.NotifyAll()
-			log.Info("streaming node manager updated", zap.Any("assignments", s.latestAssignments), zap.Any("streamingNodes", s.streamingNodes))
+			log.Info("streaming node manager updated", zap.Any("assignments", s.latestAssignments))
 			s.cond.L.Unlock()
 			return nil
 		}); err != nil {

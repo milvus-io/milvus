@@ -148,7 +148,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
-			InsertMetrics: stats.InsertMetrics{
+			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       partition.GetRows(),
 				BinarySize: partition.GetBinarySize(),
 			},
@@ -227,7 +227,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 
 // handleSchemaChange handles the schema change message.
 func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	schemaChangeMsg := message.MustAsMutableCollectionSchemaChangeV2(msg)
+	schemaChangeMsg := message.MustAsMutableSchemaChangeMessageV2(msg)
 	header := schemaChangeMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {

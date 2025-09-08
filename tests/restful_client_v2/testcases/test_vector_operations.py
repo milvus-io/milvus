@@ -3109,9 +3109,8 @@ class TestHybridSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [5000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("limit", [100])
-    @pytest.mark.parametrize("large_offset", [10000, 16384])
-    @pytest.mark.skip(reason="issue: https://github.com/milvus-io/milvus/issues/43639")
-    def test_hybrid_search_vector_with_large_offset(self, nb, dim, limit, large_offset, auto_id):
+    @pytest.mark.parametrize("large_offset", [10000, 16385])
+    def test_hybrid_search_vector_with_large_offset(self, nb, dim, limit, large_offset):
         """
         Test hybrid search with large offset values
         """
@@ -3190,7 +3189,7 @@ class TestHybridSearchVector(TestBase):
             assert rsp['code'] == 65535
             assert "exceeds" in rsp['message'] or "invalid" in rsp['message'].lower()
         # When offset is larger than the available results
-        if large_offset >= nb:
+        elif large_offset >= nb:
             # Should return empty results or handle gracefully
             assert rsp['code'] == 0
             assert len(rsp['data']) == 0

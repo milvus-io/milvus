@@ -133,7 +133,7 @@ class QueryConfig : public MemConfig {
     int64_t
     get_expr_batch_size() const {
         return BaseConfig::Get<int64_t>(kExprEvalBatchSize,
-                                        EXEC_EVAL_EXPR_BATCH_SIZE);
+                                        EXEC_EVAL_EXPR_BATCH_SIZE.load());
     }
 };
 
@@ -178,6 +178,7 @@ class QueryContext : public Context {
                  milvus::Timestamp timestamp,
                  milvus::Timestamp collection_ttl = 0,
                  int32_t consistency_level = 0,
+                 const query::PlanOptions& plan_options = query::PlanOptions(),
                  std::shared_ptr<QueryConfig> query_config =
                      std::make_shared<QueryConfig>(),
                  folly::Executor* executor = nullptr,
@@ -191,7 +192,8 @@ class QueryContext : public Context {
           collection_ttl_timestamp_(collection_ttl),
           query_config_(query_config),
           executor_(executor),
-          consistency_level_(consistency_level) {
+          consistency_level_(consistency_level),
+          plan_options_(plan_options) {
     }
 
     folly::Executor*
@@ -284,6 +286,11 @@ class QueryContext : public Context {
         return consistency_level_;
     }
 
+    const query::PlanOptions&
+    get_plan_options() const {
+        return plan_options_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -307,6 +314,8 @@ class QueryContext : public Context {
     milvus::RetrieveResult retrieve_result_;
 
     int32_t consistency_level_ = 0;
+
+    query::PlanOptions plan_options_;
 };
 
 // Represent the state of one thread of query execution.

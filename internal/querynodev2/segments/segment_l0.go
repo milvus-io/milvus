@@ -121,6 +121,10 @@ func (s *L0Segment) HasRawData(fieldID int64) bool {
 	return false
 }
 
+func (s *L0Segment) DropIndex(ctx context.Context, indexID int64) error {
+	return nil
+}
+
 func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
@@ -197,6 +201,6 @@ func (s *L0Segment) RemoveUnusedFieldFiles() error {
 	panic("not implemented")
 }
 
-func (s *L0Segment) GetFieldJSONIndexStats() []int64 {
+func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return nil
 }

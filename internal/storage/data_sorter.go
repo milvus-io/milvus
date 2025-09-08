@@ -19,6 +19,7 @@ package storage
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // DataSorter sorts insert data
@@ -52,11 +53,7 @@ func (ds *DataSorter) Len() int {
 // Swap swaps each field's i-th and j-th element
 func (ds *DataSorter) Swap(i, j int) {
 	if ds.AllFields == nil {
-		allFields := ds.InsertCodec.Schema.Schema.Fields
-		for _, field := range ds.InsertCodec.Schema.Schema.StructArrayFields {
-			allFields = append(allFields, field.Fields...)
-		}
-		ds.AllFields = allFields
+		ds.AllFields = typeutil.GetAllFieldSchemas(ds.InsertCodec.Schema.Schema)
 	}
 	for _, field := range ds.AllFields {
 		singleData, has := ds.InsertData.Data[field.FieldID]
@@ -84,6 +81,9 @@ func (ds *DataSorter) Swap(i, j int) {
 			data[i], data[j] = data[j], data[i]
 		case schemapb.DataType_Double:
 			data := singleData.(*DoubleFieldData).Data
+			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_Timestamptz:
+			data := singleData.(*TimestamptzFieldData).Data
 			data[i], data[j] = data[j], data[i]
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			data := singleData.(*StringFieldData).Data

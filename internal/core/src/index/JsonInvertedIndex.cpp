@@ -70,7 +70,7 @@ JsonInvertedIndex<T>::build_index_for_json(
 }
 
 template <typename T>
-const TargetBitmap
+TargetBitmap
 JsonInvertedIndex<T>::Exists() {
     int64_t count = this->Count();
     TargetBitmap bitset(count, true);
@@ -107,11 +107,15 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             return boost::filesystem::path(file).filename().string() ==
                    INDEX_NON_EXIST_OFFSET_FILE_NAME;
         });
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     if (non_exist_offset_file_itr != index_files.end()) {
         // null offset file is not sliced
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
-            {*non_exist_offset_file_itr}, config[milvus::LOAD_PRIORITY]);
+            {*non_exist_offset_file_itr}, load_priority);
         auto non_exist_offset_data =
             std::move(index_datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
         fill_non_exist_offset(non_exist_offset_data->PayloadData(),
@@ -129,7 +133,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     if (non_exist_offset_files.size() > 0) {
         // null offset file is sliced
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
-            non_exist_offset_files, config[milvus::LOAD_PRIORITY]);
+            non_exist_offset_files, load_priority);
 
         auto non_exist_offset_data = CompactIndexDatas(index_datas);
         auto non_exist_offset_data_codecs = std::move(

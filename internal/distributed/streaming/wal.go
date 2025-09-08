@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -59,6 +58,10 @@ type walAccesserImpl struct {
 	dispatchExecutionPool *conc.Pool[struct{}]
 }
 
+func (w *walAccesserImpl) Balancer() Balancer {
+	return balancerImpl{w}
+}
+
 func (w *walAccesserImpl) WALName() string {
 	return util.MustSelectWALName()
 }
@@ -80,7 +83,7 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 }
 
 // Read returns a scanner for reading records from the wal.
-func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
+func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		newErrScanner(ErrWALAccesserClosed)
 	}
@@ -91,7 +94,10 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 	}
 
 	if opts.VChannel != "" {
-		pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
+		pchannel, err := w.routePChannel(ctx, opts.VChannel)
+		if err != nil {
+			panic(err)
+		}
 		if opts.PChannel != "" && opts.PChannel != pchannel {
 			panic("pchannel is not match with vchannel")
 		}

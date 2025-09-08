@@ -723,14 +723,14 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 };
 
 class FieldDataSparseVectorImpl
-    : public FieldDataImpl<knowhere::sparse::SparseRow<float>, true> {
+    : public FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>, true> {
  public:
     explicit FieldDataSparseVectorImpl(DataType data_type,
                                        int64_t total_num_rows = 0)
-        : FieldDataImpl<knowhere::sparse::SparseRow<float>, true>(
+        : FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>, true>(
               /*dim=*/1, data_type, false, total_num_rows),
           vec_dim_(0) {
-        AssertInfo(data_type == DataType::VECTOR_SPARSE_FLOAT,
+        AssertInfo(data_type == DataType::VECTOR_SPARSE_U32_F32,
                    "invalid data type for sparse vector");
     }
 
@@ -753,7 +753,7 @@ class FieldDataSparseVectorImpl
     }
 
     // source is a pointer to element_count of
-    // knowhere::sparse::SparseRow<float>
+    // knowhere::sparse::SparseRow<SparseValueType>
     void
     FillFieldData(const void* source, ssize_t element_count) override {
         if (element_count == 0) {
@@ -765,7 +765,8 @@ class FieldDataSparseVectorImpl
             resize_field_data(length_ + element_count);
         }
         auto ptr =
-            static_cast<const knowhere::sparse::SparseRow<float>*>(source);
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+                source);
         for (int64_t i = 0; i < element_count; ++i) {
             auto& row = ptr[i];
             vec_dim_ = std::max(vec_dim_, row.dim());
@@ -774,7 +775,7 @@ class FieldDataSparseVectorImpl
         length_ += element_count;
     }
 
-    // each binary in array is a knowhere::sparse::SparseRow<float>
+    // each binary in array is a knowhere::sparse::SparseRow<SparseValueType>
     void
     FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
         auto n = array->length();

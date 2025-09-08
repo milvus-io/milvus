@@ -83,15 +83,43 @@ class FieldData<Array> : public FieldDataArrayImpl {
 template <>
 class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
-        : FieldDataVectorArrayImpl(data_type, buffered_num_rows) {
+    explicit FieldData(int64_t dim,
+                       DataType element_type,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataVectorArrayImpl(DataType::VECTOR_ARRAY, buffered_num_rows),
+          dim_(dim),
+          element_type_(element_type) {
+        AssertInfo(element_type != DataType::NONE,
+                   "element_type must be specified for VECTOR_ARRAY");
     }
 
     int64_t
     get_dim() const override {
-        ThrowInfo(Unsupported,
-                  "Call get_dim on FieldData<VectorArray> is not supported");
+        return dim_;
     }
+
+    DataType
+    get_element_type() const {
+        return element_type_;
+    }
+
+    void
+    set_element_type(DataType element_type) {
+        element_type_ = element_type;
+    }
+
+    const VectorArray*
+    value_at(ssize_t offset) const {
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
+        return &data_[offset];
+    }
+
+ private:
+    int64_t dim_;
+    DataType element_type_;
 };
 
 template <>

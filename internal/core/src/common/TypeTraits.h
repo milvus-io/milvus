@@ -36,8 +36,9 @@ constexpr bool IsScalar =
     std::is_same_v<T, proto::plan::Array>;
 
 template <typename T>
-constexpr bool IsSparse = std::is_same_v<T, SparseFloatVector> ||
-                          std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
+constexpr bool IsSparse =
+    std::is_same_v<T, SparseFloatVector> ||
+    std::is_same_v<T, knowhere::sparse::SparseRow<SparseValueType>>;
 
 template <typename T>
 constexpr bool IsVariableType =
@@ -47,11 +48,12 @@ constexpr bool IsVariableType =
     IsSparse<T> || std::is_same_v<T, VectorArray> ||
     std::is_same_v<T, VectorArrayView>;
 
+// todo(SpadeA): support vector array
 template <typename T>
 constexpr bool IsVariableTypeSupportInChunk =
     std::is_same_v<T, std::string> || std::is_same_v<T, Array> ||
     std::is_same_v<T, Json> ||
-    std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
+    std::is_same_v<T, knowhere::sparse::SparseRow<SparseValueType>>;
 
 template <typename T>
 using ChunkViewType = std::conditional_t<

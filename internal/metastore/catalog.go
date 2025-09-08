@@ -180,6 +180,11 @@ type DataCoordCatalog interface {
 	ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error)
 	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
 	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	// Analyzer Resource
+	SaveFileResource(ctx context.Context, resource *model.FileResource) error
+	RemoveFileResource(ctx context.Context, resourceID int64) error
+	ListFileResource(ctx context.Context) ([]*model.FileResource, error)
 }
 
 type QueryCoordCatalog interface {
@@ -204,6 +209,12 @@ type QueryCoordCatalog interface {
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	// GetCChannel get the control channel from metastore.
+	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
+
+	// SaveCChannel save the control channel to metastore.
+	SaveCChannel(ctx context.Context, info *streamingpb.CChannelMeta) error
+
 	// GetVersion get the streaming version from metastore.
 	GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
 

@@ -65,4 +65,11 @@ func TestValidateMmapTypeParams(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+
+	t.Run("stl_mmap mmap enable", func(t *testing.T) {
+		err := ValidateMmapIndexParams(IndexNGRAM, map[string]string{
+			common.MmapEnabledKey: "true",
+		})
+		assert.NoError(t, err)
+	})
 }

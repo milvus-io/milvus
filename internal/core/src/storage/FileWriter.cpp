@@ -16,12 +16,15 @@
 
 #include <utility>
 #include "folly/futures/Future.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "storage/FileWriter.h"
 
 namespace milvus::storage {
 
-FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
+FileWriter::FileWriter(std::string filename, io::Priority priority)
+    : filename_(std::move(filename)),
+      priority_(priority),
+      rate_limiter_(io::WriteRateLimiter::GetInstance()) {
     auto mode = GetMode();
     use_direct_io_ = mode == WriteMode::DIRECT;
     auto open_flags = O_CREAT | O_RDWR | O_TRUNC;
@@ -115,12 +118,38 @@ void
 FileWriter::PositionedWriteWithCheck(const void* data,
                                      size_t nbyte,
                                      size_t file_offset) {
-    if (!PositionedWrite(data, nbyte, file_offset)) {
-        Cleanup();
-        ThrowInfo(ErrorCode::FileWriteFailed,
-                  "Failed to write to file: {}, error: {}",
-                  filename_,
-                  strerror(errno));
+    size_t bytes_to_write = nbyte;
+    int32_t empty_loops = 0;
+    int64_t total_wait_us = 0;
+    size_t alignment_bytes = use_direct_io_ ? ALIGNMENT_BYTES : 1;
+    while (bytes_to_write != 0) {
+        auto allowed_bytes =
+            rate_limiter_.Acquire(bytes_to_write, alignment_bytes, priority_);
+        if (allowed_bytes == 0) {
+            ++empty_loops;
+            // if the empty loops is too large or the total wait time is too long, we should write the data directly
+            if (empty_loops > MAX_EMPTY_LOOPS || total_wait_us > MAX_WAIT_US) {
+                allowed_bytes = rate_limiter_.GetBytesPerPeriod();
+                empty_loops = 0;
+                total_wait_us = 0;
+            } else {
+                int64_t wait_us = (1 << (empty_loops / 10)) *
+                                  rate_limiter_.GetRateLimitPeriod();
+                std::this_thread::sleep_for(std::chrono::microseconds(wait_us));
+                total_wait_us += wait_us;
+                continue;
+            }
+        }
+        if (!PositionedWrite(data, allowed_bytes, file_offset)) {
+            Cleanup();
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write to file: {}, error: {}",
+                      filename_,
+                      strerror(errno));
+        }
+        file_offset += allowed_bytes;
+        bytes_to_write -= allowed_bytes;
+        data = static_cast<const char*>(data) + allowed_bytes;
     }
 }
 

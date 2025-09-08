@@ -18,6 +18,7 @@ package typeutil
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -1676,7 +1677,7 @@ func TestCalcColumnSize(t *testing.T) {
 	for _, field := range schema.GetFields() {
 		values := fieldValues[field.GetFieldID()]
 		fieldData := genFieldData(field.GetName(), field.GetFieldID(), field.GetDataType(), values, 0)
-		size := CalcColumnSize(fieldData)
+		size := CalcScalarSize(fieldData)
 		expected := 0
 		switch field.GetDataType() {
 		case schemapb.DataType_VarChar:
@@ -2979,4 +2980,642 @@ func TestGetDataIterator(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateFieldData(t *testing.T) {
+	const (
+		Dim                  = 8
+		BoolFieldName        = "BoolField"
+		Int64FieldName       = "Int64Field"
+		FloatFieldName       = "FloatField"
+		StringFieldName      = "StringField"
+		FloatVectorFieldName = "FloatVectorField"
+		BoolFieldID          = common.StartOfUserFieldID + 1
+		Int64FieldID         = common.StartOfUserFieldID + 2
+		FloatFieldID         = common.StartOfUserFieldID + 3
+		StringFieldID        = common.StartOfUserFieldID + 4
+		FloatVectorFieldID   = common.StartOfUserFieldID + 5
+	)
+
+	t.Run("update scalar fields", func(t *testing.T) {
+		// Create base data
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Bool,
+				FieldName: BoolFieldName,
+				FieldId:   BoolFieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: []bool{true, false, true, false},
+							},
+						},
+					},
+				},
+			},
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: Int64FieldName,
+				FieldId:   Int64FieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+			{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: StringFieldName,
+				FieldId:   StringFieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"a", "b", "c", "d"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Create update data (only update some fields)
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Bool,
+				FieldName: BoolFieldName,
+				FieldId:   BoolFieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: []bool{false, true, false, true}, // Updated values
+							},
+						},
+					},
+				},
+			},
+			{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: StringFieldName,
+				FieldId:   StringFieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"x", "y", "z", "w"}, // Updated values
+							},
+						},
+					},
+				},
+			},
+			// Note: Int64Field is not in update, so it should remain unchanged
+		}
+
+		// Update index 1
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Check results
+		// Bool field should be updated at index 1
+		assert.Equal(t, true, baseData[0].GetScalars().GetBoolData().Data[1])
+		// Int64 field should remain unchanged at index 1
+		assert.Equal(t, int64(2), baseData[1].GetScalars().GetLongData().Data[1])
+		// String field should be updated at index 1
+		assert.Equal(t, "y", baseData[2].GetScalars().GetStringData().Data[1])
+
+		// Other indices should remain unchanged
+		assert.Equal(t, true, baseData[0].GetScalars().GetBoolData().Data[0])
+		assert.Equal(t, int64(1), baseData[1].GetScalars().GetLongData().Data[0])
+		assert.Equal(t, "a", baseData[2].GetScalars().GetStringData().Data[0])
+	})
+
+	t.Run("update vector fields", func(t *testing.T) {
+		// Create base vector data
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: FloatVectorFieldName,
+				FieldId:   FloatVectorFieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: Dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{
+									1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, // vector 0
+									9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, // vector 1
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Create update data
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: FloatVectorFieldName,
+				FieldId:   FloatVectorFieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: Dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{
+									100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, // vector 0
+									900.0, 1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, // vector 1
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Update index 1 (second vector)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Check results
+		vectorData := baseData[0].GetVectors().GetFloatVector().Data
+
+		// First vector should remain unchanged
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(i+1), vectorData[i])
+		}
+
+		// Second vector should be updated
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(900+i*100), vectorData[Dim+i])
+		}
+	})
+
+	t.Run("no update fields", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: Int64FieldName,
+				FieldId:   Int64FieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Empty update data
+		updateData := []*schemapb.FieldData{}
+
+		// Update should succeed but change nothing
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Data should remain unchanged
+		assert.Equal(t, int64(2), baseData[0].GetScalars().GetLongData().Data[1])
+	})
+
+	t.Run("update with ValidData", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: Int64FieldName,
+				FieldId:   Int64FieldID,
+				ValidData: []bool{true, true, true, true},
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: Int64FieldName,
+				FieldId:   Int64FieldID,
+				ValidData: []bool{false, false, true, false},
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{30},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Update index 1
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+		err = UpdateFieldData(baseData, updateData, 2, 2)
+		require.NoError(t, err)
+
+		// Check that ValidData was updated
+		assert.Equal(t, false, baseData[0].ValidData[1])
+		// Check that data was updated
+		assert.Equal(t, int64(2), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(30), baseData[0].GetScalars().GetLongData().Data[2])
+	})
+
+	t.Run("update dynamic json field", func(t *testing.T) {
+		// Create base data with dynamic JSON field
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"key1": "value1", "key2": 123}`),
+									[]byte(`{"key3": true, "key4": 456.789}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Create update data
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"key2": 999, "key5": "new_value"}`),
+									[]byte(`{"key4": 111.222, "key6": false}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating first row
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		// Verify first row was correctly merged
+		firstRow := baseData[0].GetScalars().GetJsonData().Data[0]
+		var result map[string]interface{}
+		err = json.Unmarshal(firstRow, &result)
+		require.NoError(t, err)
+
+		// Check merged values
+		assert.Equal(t, "value1", result["key1"])
+		assert.Equal(t, float64(999), result["key2"]) // Updated value
+		assert.Equal(t, "new_value", result["key5"])  // New value
+
+		// Test updating second row
+		err = UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Verify second row was correctly merged
+		secondRow := baseData[0].GetScalars().GetJsonData().Data[1]
+		err = json.Unmarshal(secondRow, &result)
+		require.NoError(t, err)
+
+		// Check merged values
+		assert.Equal(t, true, result["key3"])
+		assert.Equal(t, float64(111.222), result["key4"]) // Updated value
+		assert.Equal(t, false, result["key6"])            // New value
+	})
+
+	t.Run("update non-dynamic json field", func(t *testing.T) {
+		// Create base data with non-dynamic JSON field
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"key1": "value1"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Create update data
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"key2": "value2"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		// For non-dynamic fields, the update should completely replace the old value
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		assert.Equal(t, []byte(`{"key2": "value2"}`), result)
+	})
+
+	t.Run("invalid json data", func(t *testing.T) {
+		// Create base data with invalid JSON
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`invalid json`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"key": "value"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating with invalid base JSON
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to unmarshal base json")
+
+		// Create base data with valid JSON but invalid update
+		baseData[0].GetScalars().GetJsonData().Data[0] = []byte(`{"key": "value"}`)
+		updateData[0].GetScalars().GetJsonData().Data[0] = []byte(`invalid json`)
+
+		// Test updating with invalid update JSON
+		err = UpdateFieldData(baseData, updateData, 0, 0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to unmarshal update json")
+	})
+
+	t.Run("nullable field with valid data index mapping", func(t *testing.T) {
+		// Test the new logic for nullable fields where updateIdx needs to be mapped to actual data index
+		// Scenario: data=[1,2,3], valid_data=[true, false, true]
+		// updateIdx=1 should map to data index 0 (first valid data), updateIdx=2 should map to data index 1 (second valid data)
+
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "nullable_int_field",
+				FieldId:   1,
+				ValidData: []bool{true, true, true}, // All base data is valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{100, 200, 300},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "nullable_int_field",
+				FieldId:   1,
+				ValidData: []bool{true, false, true}, // Only indices 0 and 2 are valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{999, 888, 777}, // Only indices 0 and 2 will be used
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating at index 1 (which maps to data index 0 due to valid_data[1] = false)
+		err := UpdateFieldData(baseData, updateData, 0, 1)
+		require.NoError(t, err)
+
+		// Since valid_data[1] = false, no data should be updated
+		assert.Equal(t, int64(100), baseData[0].GetScalars().GetLongData().Data[0])
+		assert.Equal(t, false, baseData[0].ValidData[0])
+
+		// Test updating at index 2 (which maps to data index 1 due to valid_data[2] = true)
+		err = UpdateFieldData(baseData, updateData, 1, 2)
+		require.NoError(t, err)
+
+		// Index 2 maps to data index 1 because valid_data[0] = true, valid_data[1] = false
+		// So updateFieldIdx = 0 + 1 = 1, which means we use data[1] = 888
+		assert.Equal(t, int64(888), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, true, baseData[0].ValidData[1])
+	})
+
+	t.Run("nullable field with complex valid data pattern", func(t *testing.T) {
+		// Test more complex pattern: data=[1,2,3,4,5], valid_data=[false, true, false, true, false]
+		// This tests the index mapping logic more thoroughly
+
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Float,
+				FieldName: "complex_nullable_field",
+				FieldId:   2,
+				ValidData: []bool{true, true, true, true, true},
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Float,
+				FieldName: "complex_nullable_field",
+				FieldId:   2,
+				ValidData: []bool{false, true, false, true, false}, // Only indices 1 and 3 are valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: []float32{999.9, 888.8},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating at index 1 (valid_data[1] = true, so data[1] = 999.9)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+		assert.Equal(t, float32(999.9), baseData[0].GetScalars().GetFloatData().Data[1])
+		assert.Equal(t, true, baseData[0].ValidData[0])
+
+		// Test updating at index 3 (valid_data[3] = true, so data[3] = 888.8)
+		err = UpdateFieldData(baseData, updateData, 3, 3)
+		require.NoError(t, err)
+		assert.Equal(t, float32(888.8), baseData[0].GetScalars().GetFloatData().Data[3])
+		assert.Equal(t, true, baseData[0].ValidData[1])
+
+		// Test updating at index 0 (valid_data[0] = false, so no data update, only ValidData update)
+		err = UpdateFieldData(baseData, updateData, 2, 2)
+		require.NoError(t, err)
+		assert.Equal(t, float32(3.3), baseData[0].GetScalars().GetFloatData().Data[2]) // Should remain unchanged
+		assert.Equal(t, false, baseData[0].ValidData[2])
+	})
+}
+
+func TestAppendFieldDataWithNullData(t *testing.T) {
+	// Test data with nullable fields
+	createTestFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, validData []bool) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+			ValidData: validData,
+		}
+
+		switch dataType {
+		case schemapb.DataType_Int32:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data.([]int32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: data.([]float32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Bool:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: data.([]bool),
+						},
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("TestAppendFieldDataWithNullData_SkipNullValues", func(t *testing.T) {
+		// Case 1: Before validateUtil.fillWithValue - skip null values
+		// Data: [1, null, 2] = [1, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 2, 3}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, true) // skipAppendNullData = true, idx = 0
+
+		// Should append value at index 0 (valid)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
+	})
+
+	t.Run("TestAppendFieldDataWithNullData_IncludeNullValues", func(t *testing.T) {
+		// Case 2: After validateUtil.fillWithValue - include null values with zero values
+		// Data: [1, null, 2] = [1, 0, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 0, 2}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, false) // skipAppendNullData = false, idx = 0
+
+		// Should append value at index 0 (including null values)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
+	})
 }

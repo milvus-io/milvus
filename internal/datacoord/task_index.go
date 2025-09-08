@@ -250,7 +250,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	schema := collectionInfo.Schema
 	var field *schemapb.FieldSchema
 
-	for _, f := range schema.Fields {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for _, f := range allFields {
 		if f.FieldID == fieldID {
 			field = f
 			break
@@ -263,7 +264,11 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1
-	if typeutil.IsFixDimVectorType(field.GetDataType()) {
+	dataType := field.GetDataType()
+	if typeutil.IsVectorArrayType(dataType) {
+		dataType = field.GetElementType()
+	}
+	if typeutil.IsFixDimVectorType(dataType) {
 		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
 			log.Warn("failed to get dim from field type params",
 				zap.String("field type", field.GetDataType().String()), zap.Error(err))
@@ -324,6 +329,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		InsertLogs:                segment.GetBinlogs(),
 	}
 
+	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+
 	return req, nil
 }
 
@@ -339,10 +346,11 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 		partitionKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 		if partitionKeyField != nil && typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
 			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-				FieldID:   partitionKeyField.FieldID,
-				FieldName: partitionKeyField.Name,
-				FieldType: int32(partitionKeyField.DataType),
-				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+				FieldID:     partitionKeyField.FieldID,
+				FieldName:   partitionKeyField.Name,
+				FieldType:   int32(partitionKeyField.DataType),
+				ElementType: int32(partitionKeyField.GetElementType()),
+				DataIds:     getBinLogIDs(segment, partitionKeyField.FieldID),
 			})
 
 			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)

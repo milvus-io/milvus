@@ -144,12 +144,16 @@ TextMatchIndex::Load(const Config& config) {
             return file.substr(file.find_last_of('/') + 1) ==
                    "index_null_offset";
         });
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
     if (it != files_value.end()) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(
-            file, config[milvus::LOAD_PRIORITY]);
+        auto index_datas =
+            mem_file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         // clear index_datas to free memory early
@@ -160,8 +164,7 @@ TextMatchIndex::Load(const Config& config) {
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
-    disk_file_manager_->CacheTextLogToDisk(files_value,
-                                           config[milvus::LOAD_PRIORITY]);
+    disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
 

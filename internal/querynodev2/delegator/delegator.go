@@ -91,6 +91,7 @@ type ShardDelegator interface {
 	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
 	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
+	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
@@ -945,6 +946,11 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	// already safe to search
 	latestTSafe := sd.latestTsafe.Load()
 	if latestTSafe >= ts {
+		return latestTSafe, nil
+	}
+	// check whethertsafe downgraded
+	if paramtable.Get().QueryNodeCfg.DowngradeTsafe.GetAsBool() {
+		log.WithRateGroup("downgradeTsafe", 1, 60).RatedWarn(10, "downgrade tsafe", zap.Uint64("latestTSafe", latestTSafe), zap.Uint64("ts", ts))
 		return latestTSafe, nil
 	}
 	// check lag duration too large

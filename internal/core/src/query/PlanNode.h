@@ -25,12 +25,19 @@ class PlanNode;
 namespace milvus::query {
 
 class PlanNodeVisitor;
+
+struct PlanOptions {
+    bool expr_use_json_stats = true;
+};
+
 // Base of all Nodes
 struct PlanNode {
  public:
     virtual ~PlanNode() = default;
     virtual void
     accept(PlanNodeVisitor&) = 0;
+
+    PlanOptions plan_options_;
 };
 
 using PlanNodePtr = std::unique_ptr<PlanNode>;
@@ -72,6 +79,12 @@ struct SparseFloatVectorANNS : VectorPlanNode {
 };
 
 struct Int8VectorANNS : VectorPlanNode {
+ public:
+    void
+    accept(PlanNodeVisitor&) override;
+};
+
+struct EmbListFloatVectorANNS : VectorPlanNode {
  public:
     void
     accept(PlanNodeVisitor&) override;

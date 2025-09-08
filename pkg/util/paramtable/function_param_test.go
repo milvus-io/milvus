@@ -38,22 +38,50 @@ func TestFunctionConfig(t *testing.T) {
 		"azure_openai.credential",
 		"azure_openai.url",
 		"azure_openai.resource_name",
+		"azure_openai.enable",
 		"openai.credential",
 		"openai.url",
+		"openai.enable",
 		"dashscope.credential",
 		"dashscope.url",
+		"dashscope.enable",
 		"cohere.credential",
 		"cohere.url",
+		"cohere.enable",
 		"voyageai.credential",
 		"voyageai.url",
+		"voyageai.enable",
 		"siliconflow.url",
 		"siliconflow.credential",
+		"siliconflow.enable",
 		"bedrock.credential",
+		"bedrock.enable",
 		"vertexai.url",
 		"vertexai.credential",
+		"vertexai.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
 	}
 	assert.True(t, cfg.TextEmbeddingProviders.GetDoc("Unknow") == "")
+
+	keys = []string{
+		"tei.enable",
+		"tei.credential",
+		"vllm.enable",
+		"vllm.credential",
+		"cohere.credential",
+		"cohere.url",
+		"cohere.enable",
+		"voyageai.credential",
+		"voyageai.url",
+		"voyageai.enable",
+		"siliconflow.url",
+		"siliconflow.credential",
+		"siliconflow.enable",
+	}
+	for _, key := range keys {
+		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")
+	}
+	assert.True(t, cfg.RerankModelProviders.GetDoc("Unknow") == "")
 }

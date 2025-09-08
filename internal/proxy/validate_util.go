@@ -131,7 +131,8 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 
 		case schemapb.DataType_ArrayOfStruct:
 			panic("unreachable, array of struct should have been flattened")
-
+		case schemapb.DataType_Timestamptz:
+			// TODO: Add check logic for timestamptz data
 		default:
 		}
 	}
@@ -284,6 +285,27 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
+
+		case schemapb.DataType_ArrayOfVector:
+			f, err := schema.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			dataDim := field.GetVectors().GetVectorArray().GetDim()
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
+
+			n := uint64(len(field.GetVectors().GetVectorArray().GetData()))
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n)
+			}
+
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldDataWithSchema(field, schema)
@@ -376,6 +398,12 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 				return err
 			}
 
+		case *schemapb.ScalarField_TimestamptzData:
+			sd.TimestamptzData.Data, err = fillWithNullValueImpl(sd.TimestamptzData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
 		case *schemapb.ScalarField_StringData:
 			sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
 			if err != nil {
@@ -464,6 +492,17 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			sd.DoubleData.Data, err = fillWithDefaultValueImpl(sd.DoubleData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
+			}
+
+		case *schemapb.ScalarField_TimestamptzData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetTimestamptzData()
+			sd.TimestamptzData.Data, err = fillWithDefaultValueImpl(sd.TimestamptzData.Data, defaultValue, field.GetValidData())
+			if err != nil {
+				return nil
 			}
 
 		case *schemapb.ScalarField_StringData:
@@ -772,6 +811,16 @@ func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 		return typeutil.VerifyFloats64(data)
 	}
 
+	return nil
+}
+
+func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetScalars().GetTimestamptzData().GetData()
+	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need long int array", "got nil", msg)
+	}
+	// TODO: Additional checks?
 	return nil
 }
 

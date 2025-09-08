@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,6 +42,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -83,11 +84,6 @@ type component interface {
 	Run() error
 	Stop() error
 }
-
-const (
-	TmpInvertedIndexPrefix = "/tmp/milvus/inverted-index/"
-	TmpTextLogPrefix       = "/tmp/milvus/text-log/"
-)
 
 func cleanLocalDir(path string) {
 	_, statErr := os.Stat(path)
@@ -192,17 +188,12 @@ func (mr *MilvusRoles) runMixCoord(ctx context.Context, localMsg bool, wg *sync.
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	// clear local storage
-	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
-	cleanLocalDir(queryDataLocalPath)
-	// clear mmap dir
-	mmapDir := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDir) > 0 {
-		cleanLocalDir(mmapDir)
+	queryDataLocalPath := pathutil.GetPath(pathutil.RootCachePath, 0)
+	if !paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
+		// under non-posix mode, we need to clean local storage when starting query node
+		// under posix mode, this clean task will be done by mixcoord
+		cleanLocalDir(queryDataLocalPath)
 	}
-	cleanLocalDir(TmpInvertedIndexPrefix)
-	cleanLocalDir(TmpTextLogPrefix)
-
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
 
@@ -244,7 +235,12 @@ func (mr *MilvusRoles) setupLogger() {
 		if !event.HasUpdated || event.EventType == config.DeleteType {
 			return
 		}
-		logLevel, err := zapcore.ParseLevel(event.Value)
+		v := event.Value
+		// trace is not a valid log level for non-segcore part, so we convert it to debug
+		if strings.EqualFold(v, "trace") {
+			v = "debug"
+		}
+		logLevel, err := zapcore.ParseLevel(v)
 		if err != nil {
 			log.Warn("failed to parse log level", zap.Error(err))
 			return
@@ -318,9 +314,6 @@ func (mr *MilvusRoles) Run() {
 	thw.Start()
 	defer thw.Stop()
 
-	internalmetrics.InitHolmes()
-	defer internalmetrics.CloseHolmes()
-
 	// only standalone enable localMsg
 	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
@@ -354,6 +347,9 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+
+	internalmetrics.InitHolmes()
+	defer internalmetrics.CloseHolmes()
 
 	// init tracer before run any component
 	tracer.Init()

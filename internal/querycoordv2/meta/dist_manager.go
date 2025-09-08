@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
@@ -29,10 +30,10 @@ type DistributionManager struct {
 	ChannelDistManager ChannelDistManagerInterface
 }
 
-func NewDistributionManager() *DistributionManager {
+func NewDistributionManager(nodeManager *session.NodeManager) *DistributionManager {
 	return &DistributionManager{
 		SegmentDistManager: NewSegmentDistManager(),
-		ChannelDistManager: NewChannelDistManager(),
+		ChannelDistManager: NewChannelDistManager(nodeManager),
 	}
 }
 

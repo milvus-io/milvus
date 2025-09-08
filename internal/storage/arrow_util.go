@@ -232,6 +232,41 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			b.Append(val)
 			return uint64(len(val)), nil
 		}
+	case *array.ListBuilder:
+		// Handle ListBuilder for ArrayOfVector type
+		if a == nil {
+			b.AppendNull()
+			return 0, nil
+		}
+		la, ok := a.(*array.List)
+		if !ok {
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+		}
+		if la.IsNull(idx) {
+			b.AppendNull()
+			return 0, nil
+		}
+
+		start, end := la.ValueOffsets(idx)
+		b.Append(true)
+
+		valuesArray := la.ListValues()
+		valueBuilder := b.ValueBuilder()
+
+		var totalSize uint64 = 0
+		switch vb := valueBuilder.(type) {
+		case *array.Float32Builder:
+			if floatArray, ok := valuesArray.(*array.Float32); ok {
+				for i := start; i < end; i++ {
+					vb.Append(floatArray.Value(int(i)))
+					totalSize += 4
+				}
+			}
+		default:
+			return 0, fmt.Errorf("unsupported value builder type in ListBuilder: %T", valueBuilder)
+		}
+
+		return totalSize, nil
 	default:
 		return 0, fmt.Errorf("unsupported builder type: %T", builder)
 	}
@@ -247,7 +282,12 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", schema.Name))
 	}
 	dim, _ := typeutil.GetDim(schema)
-	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim))) // serdeEntry[schema.GetDataType()].newBuilder()
+
+	elementType := schemapb.DataType_None
+	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
+		elementType = schema.GetElementType()
+	}
+	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)) // serdeEntry[schema.GetDataType()].newBuilder()
 	if schema.GetDefaultValue() != nil {
 		switch schema.GetDataType() {
 		case schemapb.DataType_Bool:
@@ -285,6 +325,13 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) float64 { return schema.GetDefaultValue().GetDoubleData() }),
 				nil)
+
+		case schemapb.DataType_Timestamptz:
+			bd := builder.(*array.Int64Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int64 { return schema.GetDefaultValue().GetTimestamptzData() }),
+				nil)
+
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			bd := builder.(*array.StringBuilder)
 			bd.AppendValues(
@@ -369,7 +416,13 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 	builders := make([]array.Builder, len(fields))
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
-		builders[i] = array.NewBuilder(memory.DefaultAllocator, serdeMap[field.DataType].arrowType(int(dim)))
+
+		elementType := schemapb.DataType_None
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = field.GetElementType()
+		}
+		arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
+		builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 	}
 
 	return &RecordBuilder{

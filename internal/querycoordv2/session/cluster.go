@@ -52,6 +52,7 @@ type Cluster interface {
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
+	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
 	Start()
 	Stop()
 }
@@ -95,7 +96,8 @@ func (c *QueryCluster) Stop() {
 
 func (c *QueryCluster) updateLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second))
+	interval := paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -108,6 +110,16 @@ func (c *QueryCluster) updateLoop() {
 				if c.nodeManager.Get(id) == nil {
 					c.clients.close(id)
 				}
+			}
+			// apply dynamic update only when changed
+			newInterval := paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second)
+			if newInterval != interval {
+				interval = newInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
 			}
 		}
 	}
@@ -250,6 +262,20 @@ func (c *QueryCluster) GetComponentStates(ctx context.Context, nodeID int64) (*m
 	)
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		resp, err = cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
+	var (
+		resp *commonpb.Status
+		err  error
+	)
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.DropIndex(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

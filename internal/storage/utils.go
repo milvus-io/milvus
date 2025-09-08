@@ -371,6 +371,16 @@ func readDoubleArray(blobReaders []io.Reader) []float64 {
 	return ret
 }
 
+func readTimestamptzArray(blobReaders []io.Reader) []int64 {
+	ret := make([]int64, 0)
+	for _, r := range blobReaders {
+		var v int64
+		ReadBinary(r, &v, schemapb.DataType_Timestamptz) // DataType is only used for logging
+		ret = append(ret, v)
+	}
+	return ret
+}
+
 func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema, skipFunction bool) (idata *InsertData, err error) {
 	blobReaders := make([]io.Reader, 0)
 	for _, blob := range msg.RowData {
@@ -506,6 +516,11 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_Double:
 			idata.Data[field.FieldID] = &DoubleFieldData{
 				Data: readDoubleArray(blobReaders),
+			}
+
+		case schemapb.DataType_Timestamptz:
+			idata.Data[field.FieldID] = &TimestamptzFieldData{
+				Data: readTimestamptzArray(blobReaders),
 			}
 		}
 	}
@@ -692,6 +707,16 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &DoubleFieldData{
+				Data:      srcData,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
+		case schemapb.DataType_Timestamptz:
+			srcData := srcField.GetScalars().GetTimestamptzData().GetData()
+			validData := srcField.GetValidData()
+
+			fieldData = &TimestamptzFieldData{
 				Data:      srcData,
 				ValidData: validData,
 				Nullable:  field.GetNullable(),
@@ -891,6 +916,19 @@ func mergeDoubleField(data *InsertData, fid FieldID, field *DoubleFieldData) {
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
+func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &TimestamptzFieldData{
+			Data:      nil,
+			ValidData: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*TimestamptzFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
@@ -1019,6 +1057,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeFloatField(data, fid, field)
 	case *DoubleFieldData:
 		mergeDoubleField(data, fid, field)
+	case *TimestamptzFieldData:
+		mergeTimestamptzField(data, fid, field)
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:
@@ -1254,6 +1294,21 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_DoubleData{
 							DoubleData: &schemapb.DoubleArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+				ValidData: rawData.ValidData,
+			}
+		case *TimestamptzFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Timestamptz,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimestamptzData{
+							TimestamptzData: &schemapb.TimestamptzArray{
 								Data: rawData.Data,
 							},
 						},
@@ -1522,6 +1577,8 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetDoubleData()
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return fieldSchema.GetDefaultValue().GetStringData()
+	case schemapb.DataType_Timestamptz:
+		return fieldSchema.GetDefaultValue().GetTimestamptzData()
 	default:
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
@@ -1532,7 +1589,9 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData) error {
 	batchRows := int64(insertData.GetRowNum())
 
-	for _, field := range schema.Fields {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+
+	for _, field := range allFields {
 		// Skip function output fields and system fields
 		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
 			continue

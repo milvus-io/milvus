@@ -54,6 +54,9 @@ class ProtoParser {
     ParseExprs(const proto::plan::Expr& expr_pb,
                TypeCheckFunction type_check = TypeIsBool);
 
+    std::shared_ptr<rescores::Scorer>
+    ParseScorer(const proto::plan::ScoreFunction& function);
+
  private:
     expr::TypedExprPtr
     CreateAlwaysTrueExprs();
@@ -97,6 +100,10 @@ class ProtoParser {
 
     expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
+
+    void
+    PlanOptionsFromProto(const proto::plan::PlanOption& plan_option_proto,
+                         PlanOptions& plan_options);
 
  private:
     const SchemaPtr schema;

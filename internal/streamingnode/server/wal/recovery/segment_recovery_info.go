@@ -44,13 +44,15 @@ func NewSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 		StorageVersion:     header.StorageVersion,
 		CheckpointTimeTick: msg.TimeTick(),
 		Stat: &streamingpb.SegmentAssignmentStat{
+			MaxRows:               header.MaxRows,
 			MaxBinarySize:         header.MaxSegmentSize,
-			InsertedRows:          0,
-			InsertedBinarySize:    0,
+			ModifiedRows:          0,
+			ModifiedBinarySize:    0,
 			CreateTimestamp:       now,
 			LastModifiedTimestamp: now,
 			BinlogCounter:         0,
 			CreateSegmentTimeTick: msg.TimeTick(),
+			Level:                 header.Level,
 		},
 	}
 }
@@ -73,12 +75,12 @@ func (info *segmentRecoveryInfo) CreateSegmentTimeTick() uint64 {
 
 // Rows returns the number of rows in the segment.
 func (info *segmentRecoveryInfo) Rows() uint64 {
-	return info.meta.Stat.InsertedRows
+	return info.meta.Stat.ModifiedRows
 }
 
 // BinarySize returns the binary size of the segment.
 func (info *segmentRecoveryInfo) BinarySize() uint64 {
-	return info.meta.Stat.InsertedBinarySize
+	return info.meta.Stat.ModifiedBinarySize
 }
 
 // ObserveInsert is called when an insert message is observed.
@@ -89,8 +91,8 @@ func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *mess
 		// Consistent state is guaranteed by the recovery storage's mutex.
 		return
 	}
-	info.meta.Stat.InsertedBinarySize += assignment.BinarySize
-	info.meta.Stat.InsertedRows += assignment.Rows
+	info.meta.Stat.ModifiedBinarySize += assignment.BinarySize
+	info.meta.Stat.ModifiedRows += assignment.Rows
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
 	info.meta.CheckpointTimeTick = timetick
 	info.dirty = true

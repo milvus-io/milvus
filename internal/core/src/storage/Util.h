@@ -59,7 +59,7 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
 
 std::shared_ptr<arrow::ArrayBuilder>
-CreateArrowBuilder(DataType data_type, int dim);
+CreateArrowBuilder(DataType data_type, DataType element_type, int dim);
 
 /// \brief Utility function to create arrow:Scalar from FieldMeta.default_value
 ///
@@ -80,19 +80,29 @@ CreateArrowSchema(DataType data_type, bool nullable);
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
 
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(DataType data_type, int dim, DataType element_type);
+
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
                              DataType data_type);
-
-int
-GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
-                           DataType data_type);
 
 std::string
 GenIndexPathIdentifier(int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id);
+
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
+std::string
+GenIndexPathPrefixByType(ChunkManagerPtr cm,
+                         int64_t build_id,
+                         int64_t index_version,
+                         int64_t segment_id,
+                         int64_t field_id,
+                         const std::string& index_type,
+                         bool is_temp);
 
 // is_temp: true for temporary path used during index building,
 // false for path to store pre-built index contents downloaded from remote storage
@@ -114,24 +124,31 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t field_id,
                        bool is_temp);
 
-// is_temp: true for temporary path used during index building,
-// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                          int64_t build_id,
-                          int64_t index_version,
-                          int64_t segment_id,
-                          int64_t field_id,
-                          bool is_temp);
+GenJsonStatsPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       bool is_temp);
 
 std::string
-GenRemoteJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                                int64_t build_id,
-                                int64_t index_version,
-                                int64_t collection_id,
-                                int64_t partition_id,
-                                int64_t segment_id,
-                                int64_t field_id);
+GenJsonStatsPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t collection_id,
+                           int64_t partition_id,
+                           int64_t segment_id,
+                           int64_t field_id);
+
+std::string
+GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
+                             int64_t build_id,
+                             int64_t index_version,
+                             int64_t collection_id,
+                             int64_t partition_id,
+                             int64_t segment_id,
+                             int64_t field_id);
+
 std::string
 GenNgramIndexPrefix(ChunkManagerPtr cm,
                     int64_t build_id,
@@ -154,7 +171,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           int64_t batch_size,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
-                          std::string object_key);
+                          std::string object_key,
+                          std::shared_ptr<CPluginContext> plugin_context);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(
@@ -167,6 +185,7 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
+                           DataType element_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
 
@@ -176,7 +195,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
-             IndexMeta& index_meta);
+             IndexMeta& index_meta,
+             std::shared_ptr<CPluginContext> plugin_context);
 
 int64_t
 GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
@@ -195,6 +215,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
 FieldDataPtr
 CreateFieldData(const DataType& type,
+                const DataType& element_type,
                 bool nullable = false,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);

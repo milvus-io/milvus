@@ -73,7 +73,7 @@ jobs:
           fetch-depth: 0
       - name: 'Check Changed files'
         id: changed-files-cpp
-        uses: tj-actions/changed-files@v41
+        uses: tj-actions/changed-files@v46
         with:
           since_last_remote_commit: 'true'
           files: |
@@ -96,7 +96,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp && chmod -R a+rwx /home/milvus/.conan"
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code

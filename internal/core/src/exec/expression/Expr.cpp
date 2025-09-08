@@ -33,7 +33,7 @@
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "expr/ITypeExpr.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 #include <memory>
 
@@ -68,7 +68,7 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                                              enable_constant_folding));
     }
 
-    if (OPTIMIZE_EXPR_ENABLED) {
+    if (OPTIMIZE_EXPR_ENABLED.load()) {
         OptimizeCompiledExprs(context, exprs);
     }
 
@@ -462,6 +462,42 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     expr->Reorder(reorder);
 }
 
+inline std::shared_ptr<PhyLogicalUnaryExpr>
+ConvertMultiNotEqualToNotInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
+                                std::vector<size_t> indices,
+                                ExecContext* context) {
+    std::vector<proto::plan::GenericValue> values;
+    auto type = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
+    for (auto& i : indices) {
+        auto expr = std::static_pointer_cast<PhyUnaryRangeFilterExpr>(exprs[i])
+                        ->GetLogicalExpr();
+        if (type == proto::plan::GenericValue::ValCase::VAL_NOT_SET) {
+            type = expr->val_.val_case();
+        }
+        if (type != expr->val_.val_case()) {
+            return nullptr;
+        }
+        values.push_back(expr->val_);
+    }
+    auto logical_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        exprs[indices[0]]->GetColumnInfo().value(), values);
+    auto query_context = context->get_query_context();
+    auto term_expr = std::make_shared<PhyTermFilterExpr>(
+        std::vector<std::shared_ptr<Expr>>{},
+        logical_expr,
+        "PhyTermFilterExpr",
+        query_context->get_segment(),
+        query_context->get_active_count(),
+        query_context->get_query_timestamp(),
+        query_context->query_config()->get_expr_batch_size(),
+        query_context->get_consistency_level());
+    return std::make_shared<PhyLogicalUnaryExpr>(
+        std::vector<std::shared_ptr<Expr>>{term_expr},
+        std::make_shared<milvus::expr::LogicalUnaryExpr>(
+            milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, logical_expr),
+        "PhyLogicalUnaryExpr");
+}
+
 inline std::shared_ptr<PhyTermFilterExpr>
 ConvertMultiOrToInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
                        std::vector<size_t> indices,
@@ -496,6 +532,7 @@ ConvertMultiOrToInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
 inline void
 RewriteConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                     ExecContext* context) {
+    // covert A = .. or A = .. or A = .. to A in (.., .., ..)
     if (expr->IsOr()) {
         auto& inputs = expr->GetInputsRef();
         std::map<expr::ColumnInfo, std::vector<size_t>> expr_indices;
@@ -529,6 +566,50 @@ RewriteConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                 (!IsNumericDataType(column.data_type_) && indices.size() > 1)) {
                 auto new_expr =
                     ConvertMultiOrToInExpr(inputs, indices, context);
+                if (new_expr) {
+                    inputs[indices[0]] = new_expr;
+                    for (size_t j = 1; j < indices.size(); j++) {
+                        inputs[indices[j]] = nullptr;
+                    }
+                }
+            }
+        }
+        inputs.erase(std::remove(inputs.begin(), inputs.end(), nullptr),
+                     inputs.end());
+    }
+
+    // convert A != .. and A != .. and A != .. to not A in (.., .., ..)
+    if (expr->IsAnd()) {
+        auto& inputs = expr->GetInputsRef();
+        std::map<expr::ColumnInfo, std::vector<size_t>> expr_indices;
+        for (size_t i = 0; i < inputs.size(); i++) {
+            auto input = inputs[i];
+            if (input->name() == "PhyUnaryRangeFilterExpr") {
+                auto phy_expr =
+                    std::static_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+                if (phy_expr->GetOpType() == proto::plan::OpType::NotEqual) {
+                    auto column = phy_expr->GetColumnInfo().value();
+                    if (expr_indices.find(column) != expr_indices.end()) {
+                        expr_indices[column].push_back(i);
+                    } else {
+                        expr_indices[column] = {i};
+                    }
+                }
+
+                if (input->name() == "PhyConjunctFilterExpr") {
+                    auto expr = std::static_pointer_cast<
+                        milvus::exec::PhyConjunctFilterExpr>(input);
+                    RewriteConjunctExpr(expr, context);
+                }
+            }
+        }
+
+        for (auto& [column, indices] : expr_indices) {
+            if ((IsNumericDataType(column.data_type_) &&
+                 indices.size() > DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT) ||
+                (!IsNumericDataType(column.data_type_) && indices.size() > 1)) {
+                auto new_expr =
+                    ConvertMultiNotEqualToNotInExpr(inputs, indices, context);
                 if (new_expr) {
                     inputs[indices[0]] = new_expr;
                     for (size_t j = 1; j < indices.size(); j++) {

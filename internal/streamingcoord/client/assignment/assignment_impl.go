@@ -47,6 +47,29 @@ type AssignmentServiceImpl struct {
 	logger         *log.MLogger
 }
 
+// GetLatestAssignments returns the latest assignment discovery result.
+func (c *AssignmentServiceImpl) GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("assignment service client is closing")
+	}
+	defer c.lifetime.Done()
+
+	return c.watcher.GetLatestDiscover(ctx)
+}
+
+func (c *AssignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("assignment service client is closing")
+	}
+	defer c.lifetime.Done()
+
+	service, err := c.service.GetService(c.ctx)
+	if err != nil {
+		return nil, err
+	}
+	return service.UpdateWALBalancePolicy(ctx, req)
+}
+
 // AssignmentDiscover watches the assignment discovery.
 func (c *AssignmentServiceImpl) AssignmentDiscover(ctx context.Context, cb func(*types.VersionedStreamingNodeAssignments) error) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {

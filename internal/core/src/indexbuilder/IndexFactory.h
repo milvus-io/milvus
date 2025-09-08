@@ -68,13 +68,10 @@ class IndexFactory {
             case DataType::VECTOR_FLOAT16:
             case DataType::VECTOR_BFLOAT16:
             case DataType::VECTOR_BINARY:
-            case DataType::VECTOR_SPARSE_FLOAT:
+            case DataType::VECTOR_SPARSE_U32_F32:
             case DataType::VECTOR_INT8:
-                return std::make_unique<VecIndexCreator>(type, config, context);
-
             case DataType::VECTOR_ARRAY:
-                ThrowInfo(DataTypeInvalid,
-                          fmt::format("VECTOR_ARRAY is not implemented"));
+                return std::make_unique<VecIndexCreator>(type, config, context);
 
             default:
                 ThrowInfo(DataTypeInvalid,

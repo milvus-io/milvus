@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -58,6 +59,7 @@ func (b *builderImpl) getPulsarClientOptions() (pulsar.ClientOptions, error) {
 		URL:              cfg.Address.GetValue(),
 		OperationTimeout: cfg.RequestTimeout.GetAsDuration(time.Second),
 		Authentication:   auth,
+		Logger:           pulsarlog.NewLogger(),
 	}
 	if cfg.EnableClientMetrics.GetAsBool() {
 		// Enable client metrics if config.EnableClientMetrics is true, use pkg-defined registerer.

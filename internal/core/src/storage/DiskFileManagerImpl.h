@@ -43,18 +43,27 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    bool
+    AddFileMeta(const FileMeta& file_meta) override;
+
     std::optional<bool>
     IsExisted(const std::string& filename) noexcept override;
 
     bool
     RemoveFile(const std::string& filename) noexcept override;
 
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& filename) override;
+
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& filename) override;
+
  public:
     bool
     AddTextLog(const std::string& filename) noexcept;
 
     bool
-    AddJsonKeyIndexLog(const std::string& filename) noexcept;
+    AddJsonSharedIndexLog(const std::string& filename) noexcept;
 
  public:
     std::string
@@ -78,16 +87,20 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalTempTextIndexPrefix();
 
-    // Used for loading index, using this index prefix dir to store index.
     std::string
-    GetLocalJsonKeyIndexPrefix();
+    GetLocalJsonStatsPrefix();
 
     std::string
-    GetLocalTempJsonKeyIndexPrefix();
+    GetLocalTempJsonStatsPrefix();
 
-    // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
-    GetRemoteJsonKeyLogPrefix();
+    GetLocalJsonStatsShreddingPrefix();
+
+    std::string
+    GetLocalJsonStatsSharedIndexPrefix();
+
+    std::string
+    GetLocalJsonStatsShreddingPath(const std::string& file_name);
 
     // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
@@ -96,6 +109,16 @@ class DiskFileManagerImpl : public FileManagerImpl {
     // Used for loading index, using this index prefix dir to store index.
     std::string
     GetLocalTempNgramIndexPrefix();
+
+    std::string
+    GetRemoteJsonStatsLogPrefix();
+
+    std::string
+    GetRemoteJsonStatsShreddingPrefix();
+
+    std::string
+    GetRemoteJsonStatsSharedIndexPath(const std::string& file_name,
+                                      int64_t slice_num);
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -119,10 +142,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
                        milvus::proto::common::LoadPriority priority);
 
     void
-    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files,
-                            milvus::proto::common::LoadPriority priority);
-
-    void
     CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
                           milvus::proto::common::LoadPriority priority);
 
@@ -133,7 +152,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveTextLogFiles();
 
     void
-    RemoveJsonKeyIndexFiles();
+    RemoveJsonStatsFiles();
+
+    void
+    CacheJsonStatsSharedIndexToDisk(
+        const std::vector<std::string>& remote_files,
+        milvus::proto::common::LoadPriority priority);
 
     void
     RemoveNgramIndexFiles();
@@ -149,7 +173,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheRawDataToDisk(const Config& config);
 
     std::string
-    CacheOptFieldToDisk(OptFieldT& fields_map);
+    CacheOptFieldToDisk(const Config& config);
 
     std::string
     GetRemoteIndexPrefix() const {
@@ -164,6 +188,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetFileName(const std::string& localfile);
 
+    std::string
+    GetRemoteIndexFilePrefixV2() const override;
+
  private:
     int64_t
     GetIndexBuildId() {
@@ -173,11 +200,16 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
 
+    /**
+     * @brief Get the Remote Index Path V2
+     * @param file_name; v2 will not split the file with slice_num
+     * @return std::string
+     */
     std::string
-    GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
+    GetRemoteIndexPathV2(const std::string& file_name) const;
 
     std::string
-    GetRemoteJsonKeyIndexPath(const std::string& file_name, int64_t slice_num);
+    GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
 
     bool
     AddFileInternal(const std::string& file_name,
