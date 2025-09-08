@@ -900,34 +900,11 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		zap.String("newName", newName),
 	)
 
-	// backward compatibility for rolling  upgrade
-	if dbName == "" {
-		log.Warn("db name is empty")
-		dbName = util.DefaultDBName
-	}
-
-	// No target DB provided, use collection's original DB
-	if newDBName == "" {
-		newDBName = dbName
-	}
-
+	// DB name already filled in rename collection task prepare
 	// get target db
 	targetDB, ok := mt.dbName2Meta[newDBName]
 	if !ok {
 		return fmt.Errorf("target database:%s not found", newDBName)
-	}
-
-	// old collection should not be an alias
-	_, ok = mt.aliases.get(dbName, oldName)
-	if ok {
-		log.Warn("unsupported use a alias to rename collection")
-		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", oldName)
-	}
-
-	_, ok = mt.aliases.get(newDBName, newName)
-	if ok {
-		log.Warn("cannot rename collection to an existing alias")
-		return fmt.Errorf("cannot rename collection to an existing alias: %s", newName)
 	}
 
 	// check if new name already belongs to another existing collection
@@ -946,13 +923,6 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	if err != nil {
 		log.Warn("fail to find collection with old name", zap.Error(err))
 		return err
-	}
-
-	// Cannot rename a collection with aliases
-	aliases := mt.listAliasesByID(oldColl.CollectionID)
-	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
-		log.Warn("cannot change a collection's database when it has aliases")
-		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection %s before rename", oldName)
 	}
 
 	newColl := oldColl.Clone()

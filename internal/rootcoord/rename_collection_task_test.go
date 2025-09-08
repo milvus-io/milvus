@@ -64,7 +64,7 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 			Name: "db1",
 			ID:   1,
 			Properties: []*commonpb.KeyValuePair{
-				{Key: "milvus.storage.encryption.enabled", Value: "true"},
+				{Key: "cipher.enabled", Value: "true"},
 			},
 		}
 		newDB := &model.Database{
@@ -76,12 +76,12 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 		meta.On("GetDatabaseByName",
 			mock.Anything,
 			"db1",
-			mock.Anything,
+			mock.AnythingOfType("uint64"),
 		).Return(oldDB, nil)
 		meta.On("GetDatabaseByName",
 			mock.Anything,
 			"db2",
-			mock.Anything,
+			mock.AnythingOfType("uint64"),
 		).Return(newDB, nil)
 
 		core := newTestCore(withMeta(meta))
@@ -97,7 +97,11 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 				NewName:   "new_collection",
 			},
 		}
+		// First call Prepare to set default values
 		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		// Then call Execute where encryption validation happens
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "deny to change collection databases due to at least one database enabled encryption")
 	})
@@ -111,20 +115,54 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 			Name: "db2",
 			ID:   2,
 		}
+		collectionID := int64(111)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetDatabaseByName",
 			mock.Anything,
 			"db1",
-			mock.Anything,
+			mock.AnythingOfType("uint64"),
 		).Return(oldDB, nil)
 		meta.On("GetDatabaseByName",
 			mock.Anything,
 			"db2",
-			mock.Anything,
+			mock.AnythingOfType("uint64"),
 		).Return(newDB, nil)
+		// Mock additional methods called in Execute after encryption check
+		meta.On("IsAlias",
+			mock.Anything,
+			"db1",
+			"old_collection",
+		).Return(false)
+		meta.On("GetCollectionID",
+			mock.Anything,
+			"db1",
+			"old_collection",
+		).Return(collectionID)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+			collectionID,
+		).Return([]string{})
+		meta.On("IsAlias",
+			mock.Anything,
+			"db2",
+			"new_collection",
+		).Return(false)
+		meta.On("GetCollectionID",
+			mock.Anything,
+			"db2",
+			"new_collection",
+		).Return(int64(0))
+		meta.On("RenameCollection",
+			mock.Anything,
+			"db1",
+			"old_collection",
+			"db2",
+			"new_collection",
+			mock.Anything,
+		).Return(nil)
 
-		core := newTestCore(withMeta(meta))
+		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{
@@ -137,7 +175,11 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 				NewName:   "new_collection",
 			},
 		}
+		// First call Prepare to set default values
 		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		// Then call Execute - should pass encryption check and proceed
+		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
 }
@@ -146,14 +188,19 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 	t.Run("collection not found", func(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+			oldName,
+		).Return(false)
 		meta.On("GetCollectionID",
 			mock.Anything,
 			mock.Anything,
-			mock.Anything,
+			oldName,
 		).Return(int64(0))
-		
+
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -165,7 +212,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -173,26 +223,41 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+			oldName,
+		).Return(false)
 		meta.On("GetCollectionID",
 			mock.Anything,
 			mock.Anything,
-			mock.Anything,
+			oldName,
 		).Return(collectionID)
 		meta.On("ListAliasesByID",
 			mock.Anything,
-			mock.Anything,
+			collectionID,
 		).Return([]string{})
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+			newName,
+		).Return(false)
+		meta.On("GetCollectionID",
+			mock.Anything,
+			mock.Anything,
+			newName,
+		).Return(int64(0))
 		meta.On("RenameCollection",
 			mock.Anything,
 			mock.Anything,
+			oldName,
 			mock.Anything,
-			mock.Anything,
-			mock.Anything,
+			newName,
 			mock.Anything,
 		).Return(errors.New("failed to rename collection"))
-		
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -204,7 +269,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -212,26 +280,41 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+			oldName,
+		).Return(false)
 		meta.On("GetCollectionID",
 			mock.Anything,
 			mock.Anything,
-			mock.Anything,
+			oldName,
 		).Return(collectionID)
 		meta.On("ListAliasesByID",
 			mock.Anything,
-			mock.Anything,
+			collectionID,
 		).Return([]string{})
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+			newName,
+		).Return(false)
+		meta.On("GetCollectionID",
+			mock.Anything,
+			mock.Anything,
+			newName,
+		).Return(int64(0))
 		meta.On("RenameCollection",
 			mock.Anything,
 			mock.Anything,
+			oldName,
 			mock.Anything,
-			mock.Anything,
-			mock.Anything,
+			newName,
 			mock.Anything,
 		).Return(nil)
-		
+
 		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -243,7 +326,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -252,7 +338,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
 		aliases := []string{"alias1", "alias2"}
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
 			mock.Anything,
@@ -286,7 +372,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -299,7 +385,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
 
@@ -308,8 +397,29 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
 		aliases := []string{"alias1", "alias2"}
-		
+
+		oldDB := &model.Database{
+			Name: "db1",
+			ID:   1,
+		}
+		newDB := &model.Database{
+			Name: "db2",
+			ID:   2,
+		}
+
 		meta := mockrootcoord.NewIMetaTable(t)
+		// Mock for encryption check
+		meta.On("GetDatabaseByName",
+			mock.Anything,
+			"db1",
+			mock.AnythingOfType("uint64"),
+		).Return(oldDB, nil)
+		meta.On("GetDatabaseByName",
+			mock.Anything,
+			"db2",
+			mock.AnythingOfType("uint64"),
+		).Return(newDB, nil)
+		// Mock for collection checks
 		meta.On("IsAlias",
 			mock.Anything,
 			"db1",
@@ -320,21 +430,11 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			"db1",
 			oldName,
 		).Return(collectionID)
-		meta.On("IsAlias",
-			mock.Anything,
-			"db2",
-			newName,
-		).Return(false)
-		meta.On("GetCollectionID",
-			mock.Anything,
-			"db2",
-			newName,
-		).Return(int64(0))
 		meta.On("ListAliasesByID",
 			mock.Anything,
-			mock.Anything,
+			collectionID,
 		).Return(aliases)
-		
+
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -348,7 +448,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName:   newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must drop all aliases")
 	})
@@ -356,14 +459,14 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 	t.Run("rename using alias as old name should fail", func(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
 			oldName,
 		).Return(true)
-		
+
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -375,7 +478,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		// Call Prepare to set default values
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported use an alias to rename collection")
 	})
@@ -384,7 +490,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
 			mock.Anything,
@@ -396,12 +502,16 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(collectionID)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+			collectionID,
+		).Return([]string{})
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
 			newName,
 		).Return(true)
-		
+
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -413,7 +523,9 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot rename collection to an existing alias")
 	})
@@ -423,7 +535,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
 		existingCollID := int64(222)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
 			mock.Anything,
@@ -435,6 +547,10 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(collectionID)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+			collectionID,
+		).Return([]string{})
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
@@ -445,7 +561,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			newName,
 		).Return(existingCollID)
-		
+
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -457,7 +573,9 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicated new collection name")
 	})
@@ -468,8 +586,27 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		oldDB := "db1"
 		newDB := "db2"
 		collectionID := int64(111)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
+		// Mock for encryption check
+		meta.On("GetDatabaseByName",
+			mock.Anything,
+			oldDB,
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Database{
+			ID:         1,
+			Name:       oldDB,
+			Properties: []*commonpb.KeyValuePair{},
+		}, nil)
+		meta.On("GetDatabaseByName",
+			mock.Anything,
+			newDB,
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Database{
+			ID:         2,
+			Name:       newDB,
+			Properties: []*commonpb.KeyValuePair{},
+		}, nil)
 		meta.On("IsAlias",
 			mock.Anything,
 			oldDB,
@@ -502,7 +639,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -524,7 +661,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		oldName := funcutil.GenRandomStr()
 		newName := funcutil.GenRandomStr()
 		collectionID := int64(111)
-		
+
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("IsAlias",
 			mock.Anything,
@@ -558,7 +695,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -570,7 +707,9 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				NewName: newName,
 			},
 		}
-		err := task.Execute(context.Background())
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
 }
@@ -578,16 +717,8 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 func Test_renameCollectionTask_GetLockerKey(t *testing.T) {
 	oldName := funcutil.GenRandomStr()
 	newName := funcutil.GenRandomStr()
-	collectionID := int64(111)
-	
-	meta := mockrootcoord.NewIMetaTable(t)
-	meta.On("GetCollectionID",
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-	).Return(collectionID)
-	
-	core := newTestCore(withMeta(meta))
+
+	core := newTestCore()
 	task := &renameCollectionTask{
 		baseTask: newBaseTask(context.Background(), core),
 		Req: &milvuspb.RenameCollectionRequest{
@@ -599,7 +730,7 @@ func Test_renameCollectionTask_GetLockerKey(t *testing.T) {
 			NewName: newName,
 		},
 	}
-	
+
 	key := task.GetLockerKey()
 	assert.NotNil(t, key)
 }

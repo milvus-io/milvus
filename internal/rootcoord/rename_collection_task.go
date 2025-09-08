@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
 type renameCollectionTask struct {
@@ -37,60 +37,53 @@ func (t *renameCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	// Check if renaming across databases with encryption enabled
-	if t.Req.GetNewDBName() != "" && t.Req.GetNewDBName() != t.Req.GetDbName() {
-		if err := t.validateEncryption(ctx); err != nil {
-			return err
-		}
+	if t.Req.GetDbName() == "" {
+		t.Req.DbName = util.DefaultDBName
+	}
+
+	if t.Req.GetNewDBName() == "" {
+		t.Req.NewDBName = t.Req.GetDbName()
 	}
 
 	return nil
 }
 
 func (t *renameCollectionTask) Execute(ctx context.Context) error {
-	// 1. Use defaultDB if oldDBName is empty
-	// If DBName changed:
-	//  1.1 Check target DB exsits
-	//  1.2 Check that new or old DBs are not encrypted
-	// If CollectionName changed:
-	// 2. Check Old Collection Exists
-	// 3. Check both new and old collections are not aliases
-	// 4. Check no-alias for old collection
-	// 5. Check New Collection for target DB doesn't exsits
+	// Check if renaming across databases with encryption enabled
+	if t.Req.GetNewDBName() != t.Req.GetDbName() {
+		if err := t.validateEncryption(ctx); err != nil {
+			return err
+		}
+	}
+
+	targetDB := t.Req.GetNewDBName()
+
+	// check old collection isn't alias and exists in old db
 	if t.core.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetOldName()) {
 		return fmt.Errorf("unsupported use an alias to rename collection, alias: %s", t.Req.GetOldName())
 	}
 
-	// Get collection ID
 	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetOldName())
 	if collID == 0 {
 		return fmt.Errorf("collection %s not found in database %s", t.Req.GetOldName(), t.Req.GetDbName())
 	}
 
-	targetDB := t.Req.GetNewDBName()
-	if targetDB == "" {
-		targetDB = t.Req.GetDbName()
-	}
-
-	// Check if new name is an existing alias in target database
-	if t.core.meta.IsAlias(ctx, targetDB, t.Req.GetNewName()) {
-		return fmt.Errorf("cannot rename collection to an existing alias: %s", t.Req.GetNewName())
-	}
-
-	// Check if new name already exists as a collection in target database
-	if existingCollID := t.core.meta.GetCollectionID(ctx, targetDB, t.Req.GetNewName()); existingCollID != 0 {
-		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", targetDB, t.Req.GetNewName())
-	}
-
+	// check old collection doesn't have aliases if renaming databases
 	aliases := t.core.meta.ListAliasesByID(ctx, collID)
-
-	// Check if renaming across databases with aliases
 	if len(aliases) > 0 && targetDB != t.Req.GetDbName() {
 		return fmt.Errorf("fail to rename collection to different database, must drop all aliases of collection %s before rename", t.Req.GetOldName())
 	}
 
-	ts := t.GetTs()
+	// check new collection isn't alias and not exists in new db
+	if t.core.meta.IsAlias(ctx, targetDB, t.Req.GetNewName()) {
+		return fmt.Errorf("cannot rename collection to an existing alias: %s", t.Req.GetNewName())
+	}
 
+	if existingCollID := t.core.meta.GetCollectionID(ctx, targetDB, t.Req.GetNewName()); existingCollID != 0 {
+		return fmt.Errorf("duplicated new collection name %s in database %s", t.Req.GetNewName(), targetDB)
+	}
+
+	ts := t.GetTs()
 	redoTask := newBaseRedoTask(t.core.stepExecutor)
 
 	// Step 1: Rename collection in metadata catalog
@@ -113,40 +106,19 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)},
 	})
 
-	// Step 3: If renamed to different database, expire cache for new name in target database
-	if t.Req.GetNewDBName() != "" && t.Req.GetNewDBName() != t.Req.GetDbName() {
-		redoTask.AddSyncStep(&expireCacheStep{
-			baseStep:        baseStep{core: t.core},
-			dbName:          t.Req.GetNewDBName(),
-			collectionNames: []string{t.Req.GetNewName()},
-			collectionID:    collID,
-			ts:              ts,
-			opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)},
-		})
-	}
-
 	return redoTask.Execute(ctx)
 }
 
 func (t *renameCollectionTask) validateEncryption(ctx context.Context) error {
+	// old and new DB names are filled in Prepare, shouldn't be empty here
 	oldDBName := t.Req.GetDbName()
 	newDBName := t.Req.GetNewDBName()
 
-	// Get original database
 	originalDB, err := t.core.meta.GetDatabaseByName(ctx, oldDBName, 0)
 	if err != nil {
-		if merr.IsErrDatabaseNotFound(err) && oldDBName == "" {
-			// Use default database if not specified
-			originalDB, err = t.core.meta.GetDatabaseByName(ctx, "default", 0)
-			if err != nil {
-				return fmt.Errorf("failed to get original database: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get original database: %w", err)
-		}
+		return fmt.Errorf("failed to get original database: %w", err)
 	}
 
-	// Get target database
 	targetDB, err := t.core.meta.GetDatabaseByName(ctx, newDBName, 0)
 	if err != nil {
 		return fmt.Errorf("target database %s not found: %w", newDBName, err)
@@ -154,7 +126,7 @@ func (t *renameCollectionTask) validateEncryption(ctx context.Context) error {
 
 	// Check if either database has encryption enabled
 	if hookutil.IsDBEncryptionEnabled(originalDB.Properties) || hookutil.IsDBEncryptionEnabled(targetDB.Properties) {
-		return fmt.Errorf("deny to change collection databases due to at least one database enabled encryption")
+		return fmt.Errorf("deny to change collection databases due to at least one database enabled encryption, original DB: %s, target DB: %s", oldDBName, newDBName)
 	}
 
 	return nil
