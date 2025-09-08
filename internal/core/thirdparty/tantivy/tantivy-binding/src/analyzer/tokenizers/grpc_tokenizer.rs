@@ -273,7 +273,7 @@ impl GrpcTokenizer {
                                 offset_to: token.offset_to as usize,
                                 position: token.position as usize,
                                 text: token.text,
-                                position_length: (token.offset_to - token.offset_from) as usize,
+                                position_length: token.position_length as usize,
                             });
                         }
                         tokens
