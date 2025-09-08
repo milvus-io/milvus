@@ -57,6 +57,10 @@ TEST(ExprResCacheManagerTest, PutGetBasic) {
     ASSERT_EQ(got.result->size(), 128);
     ASSERT_TRUE(got.valid_result);
     ASSERT_EQ(got.valid_result->size(), 128);
+
+    // restore global state
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
 }
 
 TEST(ExprResCacheManagerTest, LruEvictionByCapacity) {
@@ -81,6 +85,10 @@ TEST(ExprResCacheManagerTest, LruEvictionByCapacity) {
     ASSERT_FALSE(mgr.Get({1, "expr:0"}, out));
     ASSERT_TRUE(mgr.Get({1, "expr:1"}, out));
     ASSERT_TRUE(mgr.Get({1, "expr:2"}, out));
+
+    // restore global state
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
 }
 
 TEST(ExprResCacheManagerTest, EraseSegment) {
@@ -106,6 +114,10 @@ TEST(ExprResCacheManagerTest, EraseSegment) {
     ASSERT_FALSE(mgr.Get(k1, out));
     ASSERT_FALSE(mgr.Get(k2, out));
     ASSERT_TRUE(mgr.Get(k3, out));
+
+    // restore global state
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
 }
 
 TEST(ExprResCacheManagerTest, EnableDisable) {
@@ -127,4 +139,8 @@ TEST(ExprResCacheManagerTest, EnableDisable) {
     ExprResCacheManager::SetEnabled(true);
     mgr.Put(k, v);
     ASSERT_TRUE(mgr.Get(k, out));
+
+    // restore global state
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
 }

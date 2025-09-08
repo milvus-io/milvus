@@ -300,6 +300,9 @@ func (node *QueryNode) InitSegcore() error {
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.SetDefaultExprEvalBatchSize(cExprBatchSize)
 
+	cDeleteDumpBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.GetAsInt64())
+	C.SetDefaultDeleteDumpBatchSize(cDeleteDumpBatchSize)
+
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 

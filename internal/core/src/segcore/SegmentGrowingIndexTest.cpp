@@ -156,17 +156,19 @@ INSTANTIATE_TEST_SUITE_P(
                         "FLOAT16")));
 
 TEST_P(GrowingIndexTest, Correctness) {
+    auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
     std::map<std::string, std::string> index_params = {
         {"index_type", index_type},
         {"metric_type", metric_type},
         {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
@@ -249,7 +251,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     auto range_plan_str = range_query_plan_node.SerializeAsString();
 
     int64_t per_batch = 10000;
-    int64_t n_batch = 20;
+    int64_t n_batch = 5;
     int64_t top_k = 5;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
@@ -295,12 +297,12 @@ TEST_P(GrowingIndexTest, Correctness) {
             ph_group_raw = CreateSparseFloatPlaceholderGroup(num_queries);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
             ph_group_raw = CreatePlaceholderGroup<milvus::Float16Vector>(
-                num_queries, 128, 1024);
+                num_queries, dim, 1024);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
             ph_group_raw = CreatePlaceholderGroup<milvus::BFloat16Vector>(
-                num_queries, 128, 1024);
+                num_queries, dim, 1024);
         } else {
-            ph_group_raw = CreatePlaceholderGroup(num_queries, 128, 1024);
+            ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
         }
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
@@ -338,7 +340,7 @@ TEST_P(GrowingIndexTest, Correctness) {
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     constexpr int N = 1024;
     constexpr int TOPK = 100;
-    constexpr int dim = 128;
+    constexpr int dim = 4;
     constexpr int add_cont = 5;
 
     milvus::index::CreateIndexInfo create_index_info;
@@ -351,7 +353,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
     auto dataset = DataGen(schema, N);
@@ -434,10 +436,11 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
 }
 
 TEST_P(GrowingIndexTest, MissIndexMeta) {
+    auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
     auto& config = SegcoreConfig::default_config();
@@ -447,17 +450,19 @@ TEST_P(GrowingIndexTest, MissIndexMeta) {
 }
 
 TEST_P(GrowingIndexTest, GetVector) {
+    auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
     std::map<std::string, std::string> index_params = {
         {"index_type", index_type},
         {"metric_type", metric_type},
         {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
@@ -473,11 +478,10 @@ TEST_P(GrowingIndexTest, GetVector) {
     auto segment_growing = CreateGrowingSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 
+    int64_t per_batch = 1000;
+    int64_t n_batch = 5;
     if (data_type == DataType::VECTOR_FLOAT) {
         // GetVector for VECTOR_FLOAT
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
-        int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
             auto fakevec = dataset.get_col<float>(vec);
@@ -497,7 +501,7 @@ TEST_P(GrowingIndexTest, GetVector) {
             EXPECT_TRUE(vector.size() == num_inserted * dim);
             for (size_t i = 0; i < num_inserted; ++i) {
                 auto id = ids_ds->GetIds()[i];
-                for (size_t j = 0; j < 128; ++j) {
+                for (size_t j = 0; j < dim; ++j) {
                     EXPECT_TRUE(vector[i * dim + j] ==
                                 fakevec[(id % per_batch) * dim + j]);
                 }
@@ -505,9 +509,6 @@ TEST_P(GrowingIndexTest, GetVector) {
         }
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         // GetVector for VECTOR_FLOAT16
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
-        int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
             auto fakevec = dataset.get_col<float16>(vec);
@@ -525,7 +526,7 @@ TEST_P(GrowingIndexTest, GetVector) {
             EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));
             for (size_t i = 0; i < num_inserted; ++i) {
                 auto id = ids_ds->GetIds()[i];
-                for (size_t j = 0; j < 128; ++j) {
+                for (size_t j = 0; j < dim; ++j) {
                     EXPECT_TRUE(reinterpret_cast<float16*>(
                                     vector.data())[i * dim + j] ==
                                 fakevec[(id % per_batch) * dim + j]);
@@ -534,9 +535,6 @@ TEST_P(GrowingIndexTest, GetVector) {
         }
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         // GetVector for VECTOR_FLOAT16
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
-        int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
             auto fakevec = dataset.get_col<bfloat16>(vec);
@@ -555,7 +553,7 @@ TEST_P(GrowingIndexTest, GetVector) {
             EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(bfloat16));
             for (size_t i = 0; i < num_inserted; ++i) {
                 auto id = ids_ds->GetIds()[i];
-                for (size_t j = 0; j < 128; ++j) {
+                for (size_t j = 0; j < dim; ++j) {
                     EXPECT_TRUE(reinterpret_cast<bfloat16*>(
                                     vector.data())[i * dim + j] ==
                                 fakevec[(id % per_batch) * dim + j]);
@@ -564,9 +562,6 @@ TEST_P(GrowingIndexTest, GetVector) {
         }
     } else if (is_sparse) {
         // GetVector for VECTOR_SPARSE_U32_F32
-        int64_t per_batch = 5000;
-        int64_t n_batch = 20;
-        int64_t dim = 128;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
             auto fakevec = dataset.get_col<

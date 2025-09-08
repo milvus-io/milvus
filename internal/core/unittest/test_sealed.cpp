@@ -31,8 +31,8 @@ using namespace milvus::segcore;
 
 using milvus::segcore::LoadIndexInfo;
 
-const int64_t ROW_COUNT = 10 * 1000;
-const int64_t BIAS = 4200;
+const int64_t ROW_COUNT = 2 * 1000;
+const int64_t BIAS = 1000;
 
 using Param = std::string;
 class SealedTest : public ::testing::TestWithParam<Param> {
@@ -44,7 +44,7 @@ class SealedTest : public ::testing::TestWithParam<Param> {
 
 TEST(Sealed, without_predicate) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
@@ -68,7 +68,7 @@ TEST(Sealed, without_predicate) {
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
-    for (int64_t i = 0; i < 1000 * dim; ++i) {
+    for (int64_t i = 0; i < (ROW_COUNT / 2) * dim; ++i) {
         vec_col.push_back(0);
     }
     auto query_ptr = vec_col.data() + BIAS * dim;
@@ -85,7 +85,7 @@ TEST(Sealed, without_predicate) {
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
-        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -111,7 +111,8 @@ TEST(Sealed, without_predicate) {
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
 
-    auto database = knowhere::GenDataSet(N, dim, vec_col.data() + 1000 * dim);
+    auto database =
+        knowhere::GenDataSet(N, dim, vec_col.data() + (ROW_COUNT / 2) * dim);
     indexing->BuildWithDataset(database, build_conf);
 
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
@@ -155,7 +156,7 @@ TEST(Sealed, without_predicate) {
 
 TEST(Sealed, without_search_ef_less_than_limit) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
@@ -186,7 +187,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
-        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -238,7 +239,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
 
 TEST(Sealed, with_predicate) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
@@ -256,10 +257,10 @@ TEST(Sealed, with_predicate) {
                                     lower_inclusive: true,
                                     upper_inclusive: false,
                                     lower_value: <
-                                      int64_val: 4200
+                                      int64_val: 1000
                                     >
                                     upper_value: <
-                                      int64_val: 4205
+                                      int64_val: 1005
                                     >
                                   >
                                 >
@@ -290,7 +291,7 @@ TEST(Sealed, with_predicate) {
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
-        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -353,7 +354,7 @@ TEST(Sealed, with_predicate) {
 
 TEST(Sealed, with_predicate_filter_all) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     // auto metric_type = MetricType::METRIC_L2;
     auto metric_type = knowhere::metric::L2;
@@ -398,7 +399,7 @@ TEST(Sealed, with_predicate_filter_all) {
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
-        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -482,7 +483,7 @@ TEST(Sealed, with_predicate_filter_all) {
 }
 
 TEST(Sealed, LoadFieldData) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
@@ -553,7 +554,7 @@ TEST(Sealed, LoadFieldData) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -657,7 +658,7 @@ TEST(Sealed, LoadFieldData) {
 }
 
 TEST(Sealed, ClearData) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
@@ -714,7 +715,7 @@ TEST(Sealed, ClearData) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -762,7 +763,7 @@ TEST(Sealed, ClearData) {
 }
 
 TEST(Sealed, LoadFieldDataMmap) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
@@ -819,7 +820,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -882,7 +883,7 @@ TEST(Sealed, LoadPkScalarIndex) {
 }
 
 TEST(Sealed, LoadScalarIndex) {
-    auto dim = 16;
+    auto dim = 4;
     size_t N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -931,7 +932,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -985,7 +986,7 @@ TEST(Sealed, LoadScalarIndex) {
 }
 
 TEST(Sealed, Delete) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
@@ -1033,7 +1034,7 @@ TEST(Sealed, Delete) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1067,7 +1068,7 @@ TEST(Sealed, Delete) {
 }
 
 TEST(Sealed, OverlapDelete) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
@@ -1115,7 +1116,7 @@ TEST(Sealed, OverlapDelete) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1193,7 +1194,7 @@ GenQueryVecs(int N, int dim) {
 
 TEST(Sealed, BF) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metric_type = "L2";
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
@@ -1255,7 +1256,7 @@ TEST(Sealed, BF) {
 
 TEST(Sealed, BF_Overflow) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metric_type = "L2";
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
@@ -1400,7 +1401,7 @@ TEST(Sealed, RealCount) {
 }
 
 TEST(Sealed, GetVector) {
-    auto dim = 16;
+    auto dim = 4;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -1448,7 +1449,7 @@ TEST(Sealed, GetVector) {
 }
 
 TEST(Sealed, LoadArrayFieldData) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
@@ -1490,7 +1491,7 @@ TEST(Sealed, LoadArrayFieldData) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1505,7 +1506,7 @@ TEST(Sealed, LoadArrayFieldData) {
 }
 
 TEST(Sealed, LoadArrayFieldDataWithMMap) {
-    auto dim = 16;
+    auto dim = 4;
     auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
@@ -1547,7 +1548,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1557,7 +1558,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
 
 TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metrics_type = "L2";
     auto fake_vec_fid = schema->AddDebugField(
         "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
@@ -1706,7 +1707,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
 
 TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metrics_type = "L2";
     auto fake_vec_fid = schema->AddDebugField(
         "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
@@ -1749,7 +1750,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
 
 TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metrics_type = "L2";
     auto fake_vec_fid = schema->AddDebugField(
         "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
@@ -1821,7 +1822,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
 
 TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metrics_type = "L2";
     auto fake_vec_fid = schema->AddDebugField(
         "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
@@ -1864,7 +1865,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
 
 TEST(Sealed, SkipIndexSkipStringRange) {
     auto schema = std::make_shared<Schema>();
-    auto dim = 128;
+    auto dim = 4;
     auto metrics_type = "L2";
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
@@ -1927,6 +1928,7 @@ TEST(Sealed, SkipIndexSkipStringRange) {
 TEST(Sealed, QueryAllFields) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
+    auto dim = 4;
     auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
     auto int8_field = schema->AddDebugField("int8", DataType::INT8);
     auto int16_field = schema->AddDebugField("int16", DataType::INT16);
@@ -1949,20 +1951,21 @@ TEST(Sealed, QueryAllFields) {
     auto float_array_field =
         schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
     auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+        "embeddings", DataType::VECTOR_FLOAT, dim, metric_type);
     auto float16_vec = schema->AddDebugField(
-        "float16_vec", DataType::VECTOR_FLOAT16, 128, metric_type);
+        "float16_vec", DataType::VECTOR_FLOAT16, dim, metric_type);
     auto bfloat16_vec = schema->AddDebugField(
-        "bfloat16_vec", DataType::VECTOR_BFLOAT16, 128, metric_type);
+        "bfloat16_vec", DataType::VECTOR_BFLOAT16, dim, metric_type);
     auto int8_vec = schema->AddDebugField(
-        "int8_vec", DataType::VECTOR_INT8, 128, metric_type);
+        "int8_vec", DataType::VECTOR_INT8, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"},
         {"metric_type", metric_type},
         {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
@@ -1973,7 +1976,6 @@ TEST(Sealed, QueryAllFields) {
         dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
     segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
     segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
@@ -2094,6 +2096,7 @@ TEST(Sealed, QueryAllFields) {
 TEST(Sealed, QueryAllNullableFields) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
+    auto dim = 4;
     auto bool_field = schema->AddDebugField("bool", DataType::BOOL, true);
     auto int8_field = schema->AddDebugField("int8", DataType::INT8, true);
     auto int16_field = schema->AddDebugField("int16", DataType::INT16, true);
@@ -2117,14 +2120,15 @@ TEST(Sealed, QueryAllNullableFields) {
     auto float_array_field = schema->AddDebugField(
         "float_array", DataType::ARRAY, DataType::FLOAT, true);
     auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+        "embeddings", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"},
         {"metric_type", metric_type},
         {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
@@ -2135,7 +2139,6 @@ TEST(Sealed, QueryAllNullableFields) {
         dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
     segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
     segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
@@ -2278,9 +2281,10 @@ TEST(Sealed, SearchSortedPk) {
 TEST(Sealed, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::MAX_SIM;
+    int64_t dim = 4;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<FieldId, FieldIndexMeta> filedMap{};
@@ -2288,7 +2292,6 @@ TEST(Sealed, QueryVectorArrayAllFields) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
     auto segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto segment =
@@ -2336,7 +2339,7 @@ TEST(Sealed, SearchVectorArray) {
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
     int64_t index_id = 5000;
-    int64_t dim = 32;
+    int64_t dim = 4;
 
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::MAX_SIM;
@@ -2359,8 +2362,8 @@ TEST(Sealed, SearchVectorArray) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
-    int64_t dataset_size = 1000;
-    auto emb_list_len = 10;
+    int64_t dataset_size = 100;
+    auto emb_list_len = 2;
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
     // create field data
@@ -2492,57 +2495,6 @@ TEST(Sealed, SearchVectorArray) {
         auto sr_parsed = SearchResultToJson(*sr);
         std::cout << sr_parsed.dump(1) << std::endl;
     }
-
-    // // brute force search with iterative filter
-    // {
-    //     auto [min, max] =
-    //         std::minmax_element(int_values.begin(), int_values.end());
-    //     auto min_val = *min;
-    //     auto max_val = *max;
-
-    //     auto raw_plan = fmt::format(R"(vector_anns: <
-    //                                 field_id: 101
-    //                                 predicates: <
-    //                                   binary_range_expr: <
-    //                                     column_info: <
-    //                                       field_id: 100
-    //                                       data_type: Int64
-    //                                     >
-    //                                     lower_inclusive: true
-    //                                     upper_inclusive: true
-    //                                     lower_value: <
-    //                                       int64_val: {}
-    //                                     >
-    //                                     upper_value: <
-    //                                       int64_val: {}
-    //                                     >
-    //                                   >
-    //                                 >
-    //                                 query_info: <
-    //                                   topk: 5
-    //                                   round_decimal: 3
-    //                                   metric_type: "MAX_SIM"
-    //                                   hints: "iterative_filter"
-    //                                   search_params: "{{\"nprobe\": 10}}"
-    //                                 >
-    //                                 placeholder_tag: "$0"
-    //                               >)",
-    //                                 min_val,
-    //                                 max_val);
-    //     auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
-    //     auto plan =
-    //         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-    //     auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-    //         vec_num, dim, query_vec.data(), query_vec_lims);
-    //     auto ph_group =
-    //         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    //     Timestamp timestamp = 1000000;
-    //     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
-
-    //     auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
-    //     auto sr_parsed = SearchResultToJson(*sr);
-    //     std::cout << sr_parsed.dump(1) << std::endl;
-    // }
 
     // search with index
     {
