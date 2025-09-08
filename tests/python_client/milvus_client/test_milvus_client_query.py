@@ -487,7 +487,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_partitions(client, collection_name, partition_name1)
         # 3. query on partition without loading
-        error = {ct.err_code: 65535, ct.err_msg: f"partition name {partition_name2} not found"}
+        error = {ct.err_code: 65535, ct.err_msg: f"partition not loaded"}
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name2],
                    check_task=CheckTasks.err_res, check_items=error)
         # 4. clean up
