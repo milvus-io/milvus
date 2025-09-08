@@ -381,7 +381,7 @@ pull_request_rules:
     conditions:
       - or: *BRANCHES
       - or:
-        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
         - body=^$
     actions:
       label:
@@ -402,6 +402,7 @@ pull_request_rules:
             - `test`: for add tests to existing functionality.
             - `doc`: for modifying documentation.
             - `auto`: for the pull request from bot.
+            - `build(deps)`: for dependency updates from Dependabot.
 
           2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
 
@@ -423,7 +424,7 @@ pull_request_rules:
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
       - or: *BRANCHES
-      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
     actions:
