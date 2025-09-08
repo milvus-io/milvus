@@ -8,13 +8,18 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // MessageAckCallback is the callback function for the message type.
 type (
-	MessageAckCallback[H proto.Message, B proto.Message] = func(ctx context.Context, params ...message.SpecializedImmutableMessage[H, B]) error
-	messageInnerAckCallback                              = func(ctx context.Context, msgs ...message.ImmutableMessage) error
+	MessageAckCallback[H proto.Message, B proto.Message] = func(ctx context.Context, params AckCallbackParam[H, B]) error
+	messageInnerAckCallback                              = func(ctx context.Context, msgs message.BroadcastMutableMessage, result *types.BroadcastAppendResult) error
+	AckCallbackParam[H, B proto.Message]                 struct {
+		Message message.SpecializedBroadcastMessage[H, B]
+		Result  *types.BroadcastAppendResult
+	}
 )
 
 // messageAckCallbacks is the map of message type to the callback function.
@@ -31,18 +36,17 @@ func registerMessageAckCallback[H proto.Message, B proto.Message](callback Messa
 		// only for test, the register callback should be called once and only once
 		return
 	}
-	future.Set(func(ctx context.Context, msgs ...message.ImmutableMessage) error {
-		specializedMsgs := make([]message.SpecializedImmutableMessage[H, B], 0, len(msgs))
-		for _, msg := range msgs {
-			specializedMsgs = append(specializedMsgs, message.MustAsSpecializedImmutableMessage[H, B](msg))
-		}
-		return callback(ctx, specializedMsgs...)
+	future.Set(func(ctx context.Context, msgs message.BroadcastMutableMessage, result *types.BroadcastAppendResult) error {
+		return callback(ctx, AckCallbackParam[H, B]{
+			Message: message.MustAsSpecializedBroadcastMessage[H, B](msgs),
+			Result:  result,
+		})
 	})
 }
 
 // CallMessageAckCallback calls the callback function for the message type.
-func CallMessageAckCallback(ctx context.Context, msg ...message.ImmutableMessage) error {
-	version := msg[0].MessageTypeWithVersion()
+func CallMessageAckCallback(ctx context.Context, msg message.BroadcastMutableMessage, result *types.BroadcastAppendResult) error {
+	version := msg.MessageTypeWithVersion()
 	callbackFuture, ok := messageAckCallbacks[version]
 	if !ok {
 		// No callback need tobe called, return nil
@@ -52,5 +56,5 @@ func CallMessageAckCallback(ctx context.Context, msg ...message.ImmutableMessage
 	if err != nil {
 		return errors.Wrap(err, "when waiting callback registered")
 	}
-	return callback(ctx, msg...)
+	return callback(ctx, msg, result)
 }

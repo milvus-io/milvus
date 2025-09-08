@@ -11,6 +11,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
+// errFastLockFailed is the error for fast lock failed.
+var errFastLockFailed = errors.New("fast lock failed")
+
 // newResourceKeyLocker creates a new resource key locker.
 func newResourceKeyLocker(metrics *broadcasterMetrics) *resourceKeyLocker {
 	return &resourceKeyLocker{
@@ -87,8 +90,9 @@ func (r *resourceKeyLocker) FastLock(broadcastID uint64, keys ...message.Resourc
 			continue
 		}
 		g.Unlock()
-		return nil, errors.Errorf(
-			"unreachable: dirty recovery info in metastore, broadcast ids: [%d, %d]",
+		return nil, errors.Wrapf(
+			errFastLockFailed,
+			"fast lock failed, broadcastID: %d, sem: %d",
 			broadcastID,
 			r.sem[key],
 		)

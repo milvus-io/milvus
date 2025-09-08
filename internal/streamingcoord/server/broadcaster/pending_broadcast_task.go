@@ -10,22 +10,21 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var errBroadcastTaskIsNotDone = errors.New("broadcast task is not done")
 
 // newPendingBroadcastTask creates a new pendingBroadcastTask.
-func newPendingBroadcastTask(
-	task *broadcastTask,
-) *pendingBroadcastTask {
+func newPendingBroadcastTask(task *broadcastTask) *pendingBroadcastTask {
 	msgs := task.PendingBroadcastMessages()
+	if len(msgs) == 0 {
+		return nil
+	}
 	return &pendingBroadcastTask{
 		broadcastTask:   task,
 		pendingMessages: msgs,
 		appendResult:    make(map[string]*types.AppendResult, len(msgs)),
-		future:          syncutil.NewFuture[*types.BroadcastAppendResult](),
 		BackoffWithInstant: typeutil.NewBackoffWithInstant(typeutil.BackoffTimerConfig{
 			Default: 10 * time.Second,
 			Backoff: typeutil.BackoffConfig{
@@ -42,7 +41,6 @@ type pendingBroadcastTask struct {
 	*broadcastTask
 	pendingMessages []message.MutableMessage
 	appendResult    map[string]*types.AppendResult
-	future          *syncutil.Future[*types.BroadcastAppendResult]
 	metrics         *taskMetricsGuard
 	*typeutil.BackoffWithInstant
 }
@@ -53,7 +51,6 @@ type pendingBroadcastTask struct {
 func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	if err := b.broadcastTask.InitializeRecovery(ctx); err != nil {
 		b.Logger().Warn("broadcast task initialize recovery failed", zap.Error(err))
-		b.UpdateInstantWithNextBackOff()
 		return err
 	}
 
@@ -74,22 +71,13 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	}
 	if len(b.pendingMessages) == 0 {
 		if err := b.broadcastTask.BroadcastDone(ctx, b.appendResult); err != nil {
-			b.UpdateInstantWithNextBackOff()
+			b.Logger().Warn("broadcast task save task failed", zap.Error(err))
 			return err
 		}
-		b.future.Set(&types.BroadcastAppendResult{
-			BroadcastID:   b.Header().BroadcastID,
-			AppendResults: b.appendResult,
-		})
 		return nil
 	}
 	b.UpdateInstantWithNextBackOff()
 	return errBroadcastTaskIsNotDone
-}
-
-// BlockUntilTaskDone blocks until the task is done.
-func (b *pendingBroadcastTask) BlockUntilTaskDone(ctx context.Context) (*types.BroadcastAppendResult, error) {
-	return b.future.GetWithContext(ctx)
 }
 
 // pendingBroadcastTaskArray is a heap of pendingBroadcastTask.

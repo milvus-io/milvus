@@ -7,15 +7,27 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// RecoverBroadcaster recovers the broadcaster from the recovery info.
+func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
+	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return newBroadcastTaskManager(tasks), nil
+}
+
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
-func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTaskManager, []*pendingBroadcastTask) {
+// return the manager, the pending broadcast tasks and the pending ack callback tasks.
+func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker(metrics)
@@ -28,40 +40,58 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 	}
 	tasks := make(map[uint64]*broadcastTask, len(recoveryTasks))
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
+	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	for _, task := range recoveryTasks {
-		guards, err := rkLocker.FastLock(task.Header().BroadcastID, task.Header().ResourceKeys.Collect()...)
-		if err != nil {
-			panic(err)
+		switch task.task.State {
+		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
+			guards, err := rkLocker.FastLock(task.Header().BroadcastID, task.Header().ResourceKeys.Collect()...)
+			if err != nil {
+				panic(err)
+			}
+			task.WithResourceKeyLockGuards(guards)
+
+			if newPending := newPendingBroadcastTask(task); newPending != nil {
+				// if there's some pending messages that is not appended, it should be continued to be appended.
+				pendingTasks = append(pendingTasks, newPending)
+			} else {
+				// if there's no pending messages, it should be added to the pending ack callback tasks.
+				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
+			}
+		case streamingpb.BroadcastTaskState_BORADCAST_TASK_STATE_REPLICATED:
+			// The task is recovered from the remote cluster, so it doesn't hold the resource lock.
+			// but the task execution order should be protected by the order of broadcastID (by ackCallbackScheduler)
+			pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 		}
-		task.WithResourceKeyLockGuards(guards)
 		tasks[task.Header().BroadcastID] = task
-		if task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING {
-			// only the task is pending need to be reexecuted.
-			pendingTasks = append(pendingTasks, newPendingBroadcastTask(task))
-		}
 	}
 	m := &broadcastTaskManager{
-		Binder:            log.Binder{},
-		mu:                &sync.Mutex{},
-		tasks:             tasks,
-		resourceKeyLocker: rkLocker,
-		metrics:           metrics,
+		lifetime:           typeutil.NewLifetime(),
+		mu:                 &sync.Mutex{},
+		tasks:              tasks,
+		resourceKeyLocker:  rkLocker,
+		metrics:            metrics,
+		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
+		ackScheduler:       newAckCallbackScheduler(pendingAckCallbackTasks, logger),
 	}
 	m.SetLogger(logger)
-	return m, pendingTasks
+	return m
 }
 
 // broadcastTaskManager is the manager of the broadcast task.
 type broadcastTaskManager struct {
 	log.Binder
-	mu                *sync.Mutex
-	tasks             map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	resourceKeyLocker *resourceKeyLocker
-	metrics           *broadcasterMetrics
+
+	lifetime           *typeutil.Lifetime
+	mu                 *sync.Mutex
+	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	resourceKeyLocker  *resourceKeyLocker
+	metrics            *broadcasterMetrics
+	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
+	ackScheduler       *ackCallbackScheduler // the scheduler of the ack task
 }
 
-// AcquireResourceKeys acquires the resource keys for the broadcast task.
-func (bm *broadcastTaskManager) AcquireResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (*lockGuards, error) {
+// WithResourceKeys acquires the resource keys for the broadcast task.
+func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "allocate new id failed")
@@ -70,13 +100,26 @@ func (bm *broadcastTaskManager) AcquireResourceKeys(ctx context.Context, resourc
 	if err != nil {
 		return nil, err
 	}
-	return guards, nil
+	return &broadcasterWithRK{
+		broadcaster: bm,
+		guards:      guards,
+	}, nil
 }
 
-// AddTask adds a new broadcast task into the manager.
-func (bm *broadcastTaskManager) AddTask(ctx context.Context, msg message.BroadcastMutableMessage, guards *lockGuards) *pendingBroadcastTask {
-	task := bm.addBroadcastTask(ctx, msg, guards)
-	return newPendingBroadcastTask(task)
+// broadcast broadcasts the message to all vchannels.
+// it will block until the message is broadcasted to all vchannels
+func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, guards *lockGuards) (*types.BroadcastAppendResult, error) {
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		guards.Unlock()
+		return nil, status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+
+	task := bm.addBroadcastTask(msg, guards)
+	pendingTask := newPendingBroadcastTask(task)
+
+	// Add it into broadcast scheduler to broadcast the message into all vchannels.
+	return bm.broadcastScheduler.AddTask(ctx, pendingTask)
 }
 
 // LegacyAck is the legacy ack function for the broadcast task.
@@ -97,30 +140,41 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 
 // Ack acknowledges the message at the specified vchannel.
 func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMessage) error {
-	if err := registry.CallMessageAckCallback(ctx, msg); err != nil {
-		bm.Logger().Warn("message ack callback failed", log.FieldMessage(msg), zap.Error(err))
-		return err
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
 	}
-	bm.Logger().Warn("message ack callback success", log.FieldMessage(msg))
+	defer bm.lifetime.Done()
 
-	broadcastID := msg.BroadcastHeader().BroadcastID
-	vchannel := msg.VChannel()
-	task, ok := bm.getBroadcastTaskByID(broadcastID)
+	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
-		bm.Logger().Info("broadcast task not found, it may already acked or not replicate from the different milvus cluster", zap.Uint64("broadcastID", broadcastID), zap.String("vchannel", vchannel))
+		bm.Logger().Debug(
+			"task is tombstone, ignored the ack request",
+			zap.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
+			zap.String("vchannel", msg.VChannel()))
 		return nil
 	}
-	if err := task.Ack(ctx, msg); err != nil {
+	firstAllDone, err := t.Ack(ctx, msg)
+	if err != nil {
 		return err
 	}
-	if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
-		bm.removeBroadcastTask(broadcastID)
+	if firstAllDone {
+		// add it into ack scheduler to ack the message if all the vchannels are acked at first time.
+		bm.ackScheduler.AddTask(t)
 	}
 	return nil
 }
 
+// Close closes the broadcast task manager.
+func (bm *broadcastTaskManager) Close() {
+	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+	bm.lifetime.Wait()
+
+	bm.broadcastScheduler.Close()
+	bm.ackScheduler.Close()
+}
+
 // addBroadcastTask adds the broadcast task into the manager.
-func (bm *broadcastTaskManager) addBroadcastTask(ctx context.Context, msg message.BroadcastMutableMessage, guards *lockGuards) *broadcastTask {
+func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage, guards *lockGuards) *broadcastTask {
 	msg = msg.OverwriteBroadcastHeader(guards.BroadcastID(), guards.ResourceKeys()...)
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics)
 	newIncomingTask.SetLogger(bm.Logger())
@@ -130,6 +184,29 @@ func (bm *broadcastTaskManager) addBroadcastTask(ctx context.Context, msg messag
 	bm.tasks[guards.BroadcastID()] = newIncomingTask
 	bm.mu.Unlock()
 	return newIncomingTask
+}
+
+// getOrCreateBroadcastTask returns the task by the broadcastID
+// return false if the task is tombstone.
+// if the task is not found, it will create a new task.
+func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMessage) (*broadcastTask, bool) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	bh := msg.BroadcastHeader()
+	t, ok := bm.tasks[msg.BroadcastHeader().BroadcastID]
+	if ok {
+		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	}
+	if msg.ReplicateHeader() != nil {
+		bm.Logger().Warn("try to recover task from the wal from non-replicate message, ignore it")
+		return nil, false
+	}
+
+	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics)
+	newBroadcastTask.SetLogger(bm.Logger())
+	bm.tasks[bh.BroadcastID] = newBroadcastTask
+	return newBroadcastTask, true
 }
 
 // getBroadcastTaskByID return the task by the broadcastID.

@@ -19,6 +19,7 @@ packages:
   github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
       Broadcaster:
+      BroadcastAPI:
       AppendOperator:
       Watcher:
   github.com/milvus-io/milvus/internal/streamingcoord/client:
