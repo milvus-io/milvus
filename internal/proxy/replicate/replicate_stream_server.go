@@ -111,9 +111,8 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
-	// TODO: sheep, get ts more elegant
-	sourceTs := message.MilvusMessageToImmutableMessage(reqMsg).TimeTick()
 	msg := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
+	sourceTs := msg.ReplicateHeader().TimeTick
 	log.Debug("recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
 		zap.Uint64("sourceTimeTick", sourceTs),
