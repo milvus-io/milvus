@@ -12,15 +12,13 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// export CPLUS_INCLUDE_PATH=/opt/homebrew/Cellar/boost/1.81.0_1/include/
+// limitations under the License.
 
 #pragma once
 
 #include <iostream>
-#include <stdlib.h>
 #include <string>
 #include <vector>
-#include "storage/azure-blob-storage/AzureBlobChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "log/Log.h"
@@ -53,10 +51,6 @@ ThrowAzureError(const std::string& func,
     throw SegcoreError(S3Error, error_message);
 }
 
-void
-AzureLogger(Azure::Core::Diagnostics::Logger::Level level,
-            std::string const& msg);
-
 /**
  * @brief This AzureChunkManager is responsible for read and write file in blob.
    */
@@ -71,60 +65,54 @@ class AzureChunkManager : public ChunkManager {
  public:
     virtual ~AzureChunkManager();
 
-    virtual bool
-    Exist(const std::string& filepath);
+    bool
+    Exist(const std::string& filepath) override;
 
-    virtual uint64_t
-    Size(const std::string& filepath);
+    uint64_t
+    Size(const std::string& filepath) override;
 
-    virtual uint64_t
+    uint64_t
     Read(const std::string& filepath,
          uint64_t offset,
          void* buf,
-         uint64_t len) {
+         uint64_t len) override {
         ThrowInfo(NotImplemented, GetName() + "Read with offset not implement");
     }
 
-    virtual void
+    void
     Write(const std::string& filepath,
           uint64_t offset,
           void* buf,
-          uint64_t len) {
+          uint64_t len) override {
         ThrowInfo(NotImplemented,
                   GetName() + "Write with offset not implement");
     }
 
-    virtual uint64_t
-    Read(const std::string& filepath, void* buf, uint64_t len);
+    uint64_t
+    Read(const std::string& filepath, void* buf, uint64_t len) override;
 
-    virtual void
-    Write(const std::string& filepath, void* buf, uint64_t len);
+    void
+    Write(const std::string& filepath, void* buf, uint64_t len) override;
 
-    virtual std::vector<std::string>
-    ListWithPrefix(const std::string& filepath);
+    std::vector<std::string>
+    ListWithPrefix(const std::string& filepath) override;
 
-    virtual void
-    Remove(const std::string& filepath);
+    void
+    Remove(const std::string& filepath) override;
 
-    virtual std::string
-    GetName() const {
+    std::string
+    GetName() const override {
         return "AzureChunkManager";
     }
 
-    virtual std::string
-    GetRootPath() const {
-        return path_prefix_;
-    }
+    std::string
+    GetRootPath() const override;
 
-    virtual std::string
-    GetBucketName() const {
-        return default_bucket_name_;
-    }
+    std::string
+    GetBucketName() const override;
 
     inline void
-    SetBucketName(const std::string& bucket_name) {
-        default_bucket_name_ = bucket_name;
-    }
+    SetBucketName(const std::string& bucket_name);
 
     bool
     BucketExists(const std::string& bucket_name);
@@ -159,15 +147,11 @@ class AzureChunkManager : public ChunkManager {
                     void* buf,
                     uint64_t size);
     std::vector<std::string>
-    ListObjects(const std::string& bucket_name,
-                const std::string& prefix = nullptr);
+    ListObjects(const std::string& bucket_name, const std::string& prefix = "");
 
  private:
-    static std::atomic<size_t> init_count_;
-    static std::mutex client_mutex_;
-    std::shared_ptr<azure::AzureBlobChunkManager> client_;
-    std::string default_bucket_name_;
-    std::string path_prefix_;
+    class Impl;
+    std::unique_ptr<Impl> pImpl;
 };
 
 using AzureChunkManagerPtr = std::unique_ptr<AzureChunkManager>;
