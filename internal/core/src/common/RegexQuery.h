@@ -37,7 +37,7 @@ struct PatternMatchTranslator {
 template <>
 inline std::string
 PatternMatchTranslator::operator()<std::string>(const std::string& pattern) {
-    return translate_pattern_match_to_regex(pattern);
+    return pattern;
 }
 
 struct RegexMatcher {

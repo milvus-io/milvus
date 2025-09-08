@@ -128,7 +128,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnNonStringField) {
 }
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
@@ -155,7 +155,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
 }
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("json"));
     auto column_info = test::GenColumnInfo(
         str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
@@ -314,7 +314,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
@@ -341,7 +341,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnJsonField) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("json"));
     auto column_info = test::GenColumnInfo(
         str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
@@ -450,7 +450,7 @@ TEST_F(SealedSegmentRegexQueryTest, InnerMatchOnInvertedIndexStringField) {
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
@@ -509,7 +509,7 @@ TEST_F(SealedSegmentRegexQueryTest, PostfixMatchOnInvertedIndexStringField) {
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnUnsupportedIndex) {
-    std::string operand = "a%";
+    std::string operand = "a[\\s\\S]*";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
