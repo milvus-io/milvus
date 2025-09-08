@@ -21,10 +21,9 @@
 #include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
-#include "common/type_c.h"
-#include "mmap/ChunkedColumnInterface.h"
 #include "milvus-storage/common/metadata.h"
 #include "common/ChunkWriter.h"
+#include "exec/expression/Element.h"
 
 namespace milvus {
 
@@ -42,44 +41,33 @@ using ReverseMetricsDataType =
     std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
 enum class FieldChunkMetricType {
-    MINMAX,           // 最小最大值统计
-    SET,              // 唯一值集合统计（低基数）
-    BLOOM_FILTER,     // 布隆过滤器（高基数存在性检查）
-    NGRAM_FILTER,     // N-gram 布隆过滤器（文本搜索）
-    TOKEN_FILTER,     // 分词布隆过滤器（全文检索）
-    COUNT_DISTINCT,   // 唯一值计数
-    NULL_COUNT,       // 空值统计
+    MINMAX,        // 最小最大值统计
+    SET,           // 唯一值集合统计（低基数）
+    BLOOM_FILTER,  // 布隆过滤器（高基数存在性检查）
+    NGRAM_FILTER,  // N-gram 布隆过滤器（文本搜索）
+    TOKEN_FILTER,  // 分词布隆过滤器（全文检索）
 };
 
 class FieldChunkMetric {
-public: 
+ public:
     virtual ~FieldChunkMetric() = default;
-    virtual FieldChunkMetricType GetType() const = 0;
-    virtual std::string Serialize() const = 0;
-    virtual void Deserialize(const std::string& data) = 0;
+    virtual FieldChunkMetricType
+    GetType() const = 0;
+    virtual std::string
+    Serialize() const = 0;
+    virtual void
+    Deserialize(const std::string& data) = 0;
 
     bool hasValue_ = false;
 };
 
-template<typename T>
+template <typename T>
 class MinMaxFieldChunkMetric : public FieldChunkMetric {
-public:
-    Metrics min_;
-    Metrics max_;
-    int64_t null_count_;
-
-    MinMaxFieldChunkMetric(std::shared_ptr<Chunk> chunk) {
-        if constexpr (std::is_same_v<T, std::string>) {
-            ProcessStringFieldMetrics(chunk);
-        } else {
-            ProcessFieldMetrics(chunk);
-        }
-    };
+ public:
+    MinMaxFieldChunkMetric<T>(T min, T max) : min_(min), max_(max){};
 
     std::pair<MetricsDataType<T>, MetricsDataType<T>>
     GetMinMax() const {
-        AssertInfo(hasValue_,
-                   "GetMinMax should never be called when hasValue_ is false");
         MetricsDataType<T> lower_bound;
         MetricsDataType<T> upper_bound;
         try {
@@ -91,8 +79,8 @@ public:
         return {lower_bound, upper_bound};
     }
 
-    bool CanSkipUnaryRange(OpType op_type,
-                      const T& val) const {
+    bool
+    CanSkipUnaryRange(OpType op_type, const T& val) const {
         auto [lower_bound, upper_bound] = GetMinMax();
         if (lower_bound == MetricsDataType<T>() ||
             upper_bound == MetricsDataType<T>()) {
@@ -101,7 +89,32 @@ public:
         return RangeShouldSkip(val, lower_bound, upper_bound, op_type);
     }
 
-    bool CanSkipBinaryRange(const T& lower_val,
+    bool
+    CanSkipIn(std::shared_ptr<milvus::exec::SetElement<T>> set) const {
+        if (set->Empty() || !hasValue_)
+            return false;
+        T min_val;
+        T max_val;
+        bool has_value = false;
+        for (const auto& v : set->values_) {
+            if (!has_value) {
+                min_val = v;
+                max_val = v;
+                has_value = true;
+                continue;
+            }
+            if (v < min_val) {
+                min_val = v;
+            }
+            if (v > max_val) {
+                max_val = v;
+            }
+        }
+        return CanSkipBinaryRange(min_val, max_val, true, true);
+    }
+
+    bool
+    CanSkipBinaryRange(const T& lower_val,
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
@@ -127,101 +140,19 @@ public:
         return should_skip;
     }
 
-    FieldChunkMetricType GetType() const override {
+    FieldChunkMetricType
+    GetType() const override {
         return FieldChunkMetricType::MINMAX;
     }
-    std::string Serialize() const override {
-        return "";
+    std::string
+    Serialize() const override {
+        return std::string("");
     }
-    void Deserialize(const std::string& data) override {
+    void
+    Deserialize(const std::string& data) override {
     }
 
  private:
-    void ProcessFieldMetrics(std::shared_ptr<Chunk> chunk) {
-        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-        auto span = fixed_chunk->Span();
-        const int8_t* chunk_data = static_cast<const int8_t*>(span.data());
-        const bool* valid_data = span.valid_data();
-        int num_rows = span.row_count();
-
-        //double check to avoid crash
-        if (chunk_data == nullptr || num_rows == 0) {
-            return;
-        }
-        // find first not null value
-        int64_t start = 0;
-        for (int64_t i = start; i < num_rows; i++) {
-            if (valid_data != nullptr && !valid_data[i]) {
-                start++;
-                continue;
-            }
-            break;
-        }
-        if (start > num_rows - 1) {
-            return;
-        }
-        T minValue = chunk_data[start];
-        T maxValue = chunk_data[start];
-        int64_t null_count = start;
-        for (int64_t i = start; i < num_rows; i++) {
-            T value = chunk_data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
-                null_count++;
-                continue;
-            }
-            if (value < minValue) {
-                minValue = value;
-            }
-            if (value > maxValue) {
-                maxValue = value;
-            }
-        }
-        min_ = Metrics(minValue);
-        max_ = Metrics(maxValue);
-        null_count_ = null_count;
-        hasValue_ = true;
-    }
-
-    void ProcessStringFieldMetrics(std::shared_ptr<Chunk> chunk) {
-        auto string_chunk = static_cast<StringChunk*>(chunk.get());
-        int num_rows = string_chunk->RowNums();
-        if (num_rows == 0) {
-            return;
-        }
-        int64_t start = 0;
-        for (int64_t i = start; i < num_rows; i++) {
-            if (!string_chunk->isValid(i)) {
-                start++;
-                continue;
-            }
-            break;
-        }
-        // all captured by reference
-        std::string_view min_string;
-        std::string_view max_string;
-        int64_t null_count = start;
-
-        for (int64_t i = 0; i < num_rows; ++i) {
-            bool is_valid = string_chunk->isValid(i);
-            if (!is_valid) {
-                null_count++;
-                continue;
-            }
-            auto value = string_chunk->operator[](i);
-            if (value < min_string) {
-                min_string = value;
-            }
-            if (value > max_string) {
-                max_string = value;
-            }
-        }
-        // The field data may later be released, so we need to copy the string to avoid invalid memory access.
-        min_ = Metrics(std::string(min_string));
-        max_ = Metrics(std::string(max_string));
-        null_count_ = null_count;
-        hasValue_ = true;
-    }
-
     bool
     RangeShouldSkip(const T& value,
                     const MetricsDataType<T> lower_bound,
@@ -255,355 +186,344 @@ public:
         }
         return should_skip;
     }
+
+    T min_;
+    T max_;
 };
 
-template<typename T>
+template <typename T>
 class SetFieldChunkMetric : public FieldChunkMetric {
-private:
-    std::set<T> unique_values_;
-    int64_t null_count_;
-    int64_t total_count_;
-    bool is_complete_;
-
-public:
-    SetFieldChunkMetric(std::shared_ptr<Chunk> chunk) 
-        : null_count_(0), total_count_(0), is_complete_(true) {
-        if constexpr (std::is_same_v<T, std::string>) {
-            ProcessStringChunk(chunk);
-        } else {
-            ProcessNumericChunk(chunk);
-        }
+ public:
+    SetFieldChunkMetric(ankerl::unordered_dense::set<T> unique_values)
+        : unique_values_(std::move(unique_values)) {
     }
 
-    bool CanSkipEqual(const T& value) const {
-        if (!is_complete_) return false;
+    bool
+    CanSkipEqual(const T& value) const {
         return unique_values_.find(value) == unique_values_.end();
     }
 
-    bool CanSkipIn(const std::vector<T>& values) const {
-        if (!is_complete_) return false;
-        
-        for (const auto& value : values) {
-            if (unique_values_.find(value) != unique_values_.end()) {
-                return false;  // 找到匹配值，不能跳过
+    bool
+    CanSkipIn(std::shared_ptr<milvus::exec::SetElement<T>> set) const {
+        for (const auto& value : set->values_) {
+            if (unique_values_.count(value)) {
+                return false;  // 找到一个匹配值，不能跳过
             }
         }
         return true;  // 没有找到任何匹配值，可以跳过
     }
 
-    FieldChunkMetricType GetType() const override {
+    FieldChunkMetricType
+    GetType() const override {
         return FieldChunkMetricType::SET;
     }
 
-    std::string Serialize() const override {
+    std::string
+    Serialize() const override {
         // TODO: 实现序列化
         return "";
     }
 
-    void Deserialize(const std::string& data) override {
+    void
+    Deserialize(const std::string& data) override {
         // TODO: 实现反序列化
     }
 
-private:
-    void ProcessNumericChunk(std::shared_ptr<Chunk> chunk) {
-        auto fixed_chunk = std::dynamic_pointer_cast<FixedWidthChunk>(chunk);
-        if (!fixed_chunk) return;
-
-        auto span = fixed_chunk->Span();
-        const T* data = static_cast<const T*>(span.data());
-        const bool* valid_data = span.valid_data();
-        total_count_ = span.row_count();
-
-        static constexpr size_t MAX_SET_SIZE = 256;
-
-        for (int64_t i = 0; i < total_count_; ++i) {
-            if (valid_data && !valid_data[i]) {
-                null_count_++;
-                continue;
-            }
-
-            T value = data[i];
-            
-            if (unique_values_.size() >= MAX_SET_SIZE) {
-                is_complete_ = false;
-                break;
-            }
-            
-            unique_values_.insert(value);
-        }
-
-        hasValue_ = is_complete_ && !unique_values_.empty();
-    }
-
-    void ProcessStringChunk(std::shared_ptr<Chunk> chunk) {
-        auto string_chunk = std::dynamic_pointer_cast<StringChunk>(chunk);
-        if (!string_chunk) return;
-
-        total_count_ = string_chunk->RowNums();
-        static constexpr size_t MAX_SET_SIZE = 256;
-
-        for (int64_t i = 0; i < total_count_; ++i) {
-            if (!string_chunk->isValid(i)) {
-                null_count_++;
-                continue;
-            }
-
-            if (unique_values_.size() >= MAX_SET_SIZE) {
-                is_complete_ = false;
-                break;
-            }
-
-            auto value = std::string(string_chunk->operator[](i));
-            unique_values_.insert(value);
-        }
-
-        hasValue_ = is_complete_ && !unique_values_.empty();
-    }
+ private:
+    ankerl::unordered_dense::set<T> unique_values_;
 };
 
-class NgramFieldChunkMetric : public FieldChunkMetric {
-private:
-    std::vector<uint64_t> bit_array_;
-    size_t ngram_size_;
-    size_t hash_count_;
-    size_t bit_size_;
-    
-public:
-    NgramFieldChunkMetric(std::shared_ptr<Chunk> chunk, size_t ngram_size = 3) 
-        : ngram_size_(ngram_size), hash_count_(3) {
-        ProcessStringChunk(chunk);
-    }
-    
-    bool CanSkipSubstringMatch(const std::string& pattern) const {
-        if (!hasValue_ || pattern.length() < ngram_size_) {
-            return false;
+template <typename T>
+class BloomFilter {
+ public:
+    // 用于从头构建
+    BloomFilter(const ankerl::unordered_dense::set<T>& items, double p = 0.01) {
+        Initialize(items.size(), p);
+        if (bit_size_ == 0)
+            return;
+        for (const auto& item : items) {
+            Add(item);
         }
-        
-        // 检查模式的所有N-gram是否都可能存在
-        for (size_t i = 0; i <= pattern.length() - ngram_size_; ++i) {
-            std::string ngram = pattern.substr(i, ngram_size_);
-            if (!MightContainNgram(ngram)) {
-                return true;  // 确定不包含此子串，可以跳过
-            }
-        }
-        return false;  // 可能包含，不能跳过
-    }
-    
-    bool CanSkipPrefixMatch(const std::string& prefix) const {
-        return CanSkipSubstringMatch(prefix);
-    }
-    
-    bool CanSkipPostfixMatch(const std::string& suffix) const {
-        return CanSkipSubstringMatch(suffix);
-    }
-    
-    FieldChunkMetricType GetType() const override {
-        return FieldChunkMetricType::NGRAM_FILTER;
-    }
-    
-    std::string Serialize() const override {
-        return "";
-    }
-    
-    void Deserialize(const std::string& data) override {
-        
     }
 
-private:
-    void ProcessStringChunk(std::shared_ptr<Chunk> chunk) {
-        auto string_chunk = std::dynamic_pointer_cast<StringChunk>(chunk);
-        if (!string_chunk) return;
-        
-        // 估算N-gram数量来确定布隆过滤器大小
-        size_t estimated_ngrams = EstimateNgramCount(string_chunk.get());
-        InitializeBloomFilter(estimated_ngrams);
-        
-        // 处理所有字符串
-        for (int64_t i = 0; i < string_chunk->RowNums(); ++i) {
-            if (string_chunk->isValid(i)) {
-                auto text = std::string(string_chunk->operator[](i));
-                AddStringToFilter(text);
-            }
-        }
-        
-        hasValue_ = true;
+    // 用于反序列化
+    BloomFilter(size_t hash_count,
+                size_t bit_size,
+                std::vector<uint64_t> bit_array)
+        : hash_count_(hash_count),
+          bit_size_(bit_size),
+          bit_array_(std::move(bit_array)) {
     }
-    
-    void InitializeBloomFilter(size_t estimated_ngrams) {
-        // 根据估算的N-gram数量和期望误报率计算最优大小
-        double false_positive_rate = 0.01;  // 1%误报率
-        bit_size_ = static_cast<size_t>(
-            -1.0 * estimated_ngrams * std::log(false_positive_rate) / 
-            (std::log(2) * std::log(2))
-        );
-        
-        // 确保是64的倍数以便于存储
-        bit_size_ = ((bit_size_ + 63) / 64) * 64;
-        bit_array_.resize(bit_size_ / 64, 0);
-    }
-    
-    void AddStringToFilter(const std::string& text) {
-        for (size_t i = 0; i <= text.length() - ngram_size_; ++i) {
-            std::string ngram = text.substr(i, ngram_size_);
-            AddNgram(ngram);
-        }
-    }
-    
-    void AddNgram(const std::string& ngram) {
-        uint64_t hash1 = std::hash<std::string>{}(ngram);
-        uint64_t hash2 = hash1 >> 32;
-        
+
+    void
+    Add(const T& item) {
+        if (bit_size_ == 0)
+            return;
+        uint64_t hash1 = Hash(item, 0x9e3779b9);
+        uint64_t hash2 = Hash(item, hash1);
         for (size_t i = 0; i < hash_count_; ++i) {
             size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            size_t word_index = bit_pos / 64;
-            size_t bit_index = bit_pos % 64;
-            bit_array_[word_index] |= (1ULL << bit_index);
+            bit_array_[bit_pos / 64] |= (1ULL << (bit_pos % 64));
         }
     }
-    
-    bool MightContainNgram(const std::string& ngram) const {
-        uint64_t hash1 = std::hash<std::string>{}(ngram);
-        uint64_t hash2 = hash1 >> 32;
-        
+
+    bool
+    MightContain(const T& item) const {
+        if (bit_size_ == 0)
+            return true;
+        uint64_t hash1 = Hash(item, 0x9e3779b9);
+        uint64_t hash2 = Hash(item, hash1);
         for (size_t i = 0; i < hash_count_; ++i) {
             size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            size_t word_index = bit_pos / 64;
-            size_t bit_index = bit_pos % 64;
-            if (!(bit_array_[word_index] & (1ULL << bit_index))) {
+            if (!(bit_array_[bit_pos / 64] & (1ULL << (bit_pos % 64)))) {
                 return false;
             }
         }
         return true;
     }
-    
-    size_t EstimateNgramCount(const StringChunk* chunk) {
-        size_t total_ngrams = 0;
-        size_t sample_size = std::min(100L, chunk->RowNums());  // 采样100个字符串
-        
-        for (int64_t i = 0; i < sample_size; ++i) {
-            if (chunk->isValid(i)) {
-                auto text = chunk->operator[](i);
-                if (text.length() >= ngram_size_) {
-                    total_ngrams += text.length() - ngram_size_ + 1;
+
+    // 暴露内部状态用于序列化
+    const std::vector<uint64_t>&
+    GetBitArray() const {
+        return bit_array_;
+    }
+    size_t
+    GetHashCount() const {
+        return hash_count_;
+    }
+    size_t
+    GetBitSize() const {
+        return bit_size_;
+    }
+    bool
+    IsValid() const {
+        return bit_size_ > 0 && !bit_array_.empty();
+    }
+
+ private:
+    void
+    Initialize(size_t n, double p) {
+        if (n == 0) {
+            bit_size_ = 0;
+            hash_count_ = 0;
+            return;
+        }
+        bit_size_ = static_cast<size_t>(-1.0 * n * std::log(p) /
+                                        (std::log(2) * std::log(2)));
+        hash_count_ = static_cast<size_t>((static_cast<double>(bit_size_) / n) *
+                                          std::log(2));
+        if (hash_count_ < 1)
+            hash_count_ = 1;
+        if (hash_count_ > 10)
+            hash_count_ = 10;
+        bit_size_ = ((bit_size_ + 63) / 64) * 64;
+        if (bit_size_ > 0) {
+            bit_array_.assign(bit_size_ / 64, 0);
+        }
+    }
+
+    uint64_t
+    Hash(const T& item, uint64_t seed) const {
+        if constexpr (std::is_same_v<T, std::string>) {
+            return std::hash<std::string>{}(item) ^ seed;
+        } else {
+            return std::hash<T>{}(item) ^ seed;
+        }
+    }
+
+    std::vector<uint64_t> bit_array_;
+    size_t hash_count_;
+    size_t bit_size_;
+};
+
+template <typename T>
+class BloomFilterFieldChunkMetric : public FieldChunkMetric {
+ private:
+    std::unique_ptr<BloomFilter<T>> filter_;
+
+ public:
+    BloomFilterFieldChunkMetric(ankerl::unordered_dense::set<T> unique_values) {
+        filter_ = std::make_unique<BloomFilter<T>>(unique_values);
+        hasValue_ = filter_->IsValid();
+    }
+
+    BloomFilterFieldChunkMetric() = default;
+
+    bool
+    CanSkipEqual(const T& value) const {
+        if (!hasValue_)
+            return false;
+        return !filter_->MightContain(value);
+    }
+
+    bool
+    CanSkipIn(const std::vector<T>& values) const {
+        if (!hasValue_)
+            return false;
+        for (const auto& value : values) {
+            if (filter_->MightContain(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    FieldChunkMetricType
+    GetType() const override {
+        return FieldChunkMetricType::BLOOM_FILTER;
+    }
+
+    std::string
+    Serialize() const override {
+        return std::string("");
+    }
+
+    void
+    Deserialize(const std::string& data) override {
+    }
+};
+
+class NgramFieldChunkMetric : public FieldChunkMetric {
+ private:
+    std::unique_ptr<BloomFilter<std::string>> filter_;
+    size_t ngram_size_;
+
+ public:
+    NgramFieldChunkMetric(
+        ankerl::unordered_dense::set<std::string> unique_values,
+        size_t ngram_size = 3)
+        : ngram_size_(ngram_size) {
+        // 步骤1: 预处理，提取所有唯一的 N-grams
+        ankerl::unordered_dense::set<std::string> unique_ngrams;
+        for (const auto& text : unique_values) {
+            if (text.length() >= ngram_size_) {
+                for (size_t j = 0; j <= text.length() - ngram_size_; ++j) {
+                    unique_ngrams.insert(text.substr(j, ngram_size_));
                 }
             }
         }
-        
-        // 按比例估算总数
-        return (total_ngrams * chunk->RowNums()) / sample_size;
+
+        // 步骤2: 使用提取出的 N-grams 构建通用的布隆过滤器
+        filter_ = std::make_unique<BloomFilter<std::string>>(unique_ngrams);
+        hasValue_ = filter_->IsValid();
+    }
+
+    bool
+    CanSkipSubstringMatch(const std::string& pattern) const {
+        if (!hasValue_ || pattern.length() < ngram_size_) {
+            return false;
+        }
+
+        for (size_t i = 0; i <= pattern.length() - ngram_size_; ++i) {
+            std::string ngram = pattern.substr(i, ngram_size_);
+            // 步骤3: 查询逻辑委托给内部的 filter_
+            if (!filter_->MightContain(ngram)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool
+    CanSkipPrefixMatch(const std::string& prefix) const {
+        return CanSkipSubstringMatch(prefix);
+    }
+
+    bool
+    CanSkipPostfixMatch(const std::string& suffix) const {
+        return CanSkipSubstringMatch(suffix);
+    }
+
+    FieldChunkMetricType
+    GetType() const override {
+        return FieldChunkMetricType::NGRAM_FILTER;
+    }
+
+    std::string
+    Serialize() const override {
+        return "";
+    }
+
+    void
+    Deserialize(const std::string& data) override {
     }
 };
 
 class TokenFieldChunkMetric : public FieldChunkMetric {
-private:
-    std::vector<uint64_t> bit_array_;
-    size_t hash_count_;
-    size_t bit_size_;
-    
-public:
-    TokenFieldChunkMetric(std::shared_ptr<Chunk> chunk) : hash_count_(3) {
-        ProcessStringChunk(chunk);
+ private:
+    std::unique_ptr<BloomFilter<std::string>> filter_;
+
+ public:
+    TokenFieldChunkMetric(
+        ankerl::unordered_dense::set<std::string> unique_values) {
+        // 步骤1: 预处理，提取所有唯一的 Tokens
+        ankerl::unordered_dense::set<std::string> unique_tokens;
+        for (const auto& text : unique_values) {
+            auto tokens = TokenizeText(text);
+            for (const auto& token : tokens) {
+                unique_tokens.insert(token);
+            }
+        }
+
+        // 步骤2: 使用提取出的 Tokens 构建通用的布隆过滤器
+        filter_ = std::make_unique<BloomFilter<std::string>>(unique_tokens);
+        hasValue_ = filter_->IsValid();
     }
-    
-    bool CanSkipFullTextSearch(const std::vector<std::string>& search_tokens) const {
-        if (!hasValue_) return false;
-        
+
+    // 用于反序列化
+    TokenFieldChunkMetric() = default;
+
+    bool
+    CanSkipFullTextSearch(const std::vector<std::string>& search_tokens) const {
+        if (!hasValue_)
+            return false;
+
         // 检查是否包含所有搜索词
         for (const auto& token : search_tokens) {
-            if (!MightContainToken(token)) {
+            // 委托给内部的 filter_
+            if (!filter_->MightContain(token)) {
                 return true;  // 确定不包含某个词，可以跳过
             }
         }
         return false;  // 可能包含所有词，不能跳过
     }
-    
-    bool CanSkipAnyTokenMatch(const std::vector<std::string>& search_tokens) const {
-        if (!hasValue_) return false;
-        
+
+    bool
+    CanSkipAnyTokenMatch(const std::vector<std::string>& search_tokens) const {
+        if (!hasValue_)
+            return false;
+
         // 检查是否包含任意搜索词
         for (const auto& token : search_tokens) {
-            if (MightContainToken(token)) {
+            // 委托给内部的 filter_
+            if (filter_->MightContain(token)) {
                 return false;  // 找到可能匹配的词，不能跳过
             }
         }
         return true;  // 确定不包含任何词，可以跳过
     }
-    
-    FieldChunkMetricType GetType() const override {
+
+    FieldChunkMetricType
+    GetType() const override {
         return FieldChunkMetricType::TOKEN_FILTER;
     }
-    
-    std::string Serialize() const override {
-        // BinarySerializer serializer;
-        // serializer.Write<size_t>(hash_count_);
-        // serializer.Write<size_t>(bit_size_);
-        // serializer.Write<size_t>(bit_array_.size());
-        
-        // for (uint64_t bits : bit_array_) {
-        //     serializer.Write<uint64_t>(bits);
-        // }
-        
-        // return serializer.GetResult();
-        return "";
-    }
-    
-    void Deserialize(const std::string& data) override {
-        // BinaryDeserializer deserializer(data);
-        // hash_count_ = deserializer.Read<size_t>();
-        // bit_size_ = deserializer.Read<size_t>();
-        
-        // size_t array_size = deserializer.Read<size_t>();
-        // bit_array_.clear();
-        // bit_array_.reserve(array_size);
-        
-        // for (size_t i = 0; i < array_size; ++i) {
-        //     bit_array_.push_back(deserializer.Read<uint64_t>());
-        // }
-        
-        // hasValue_ = !bit_array_.empty();
+
+    std::string
+    Serialize() const override {
+        return std::string("");
     }
 
-private:
-    void ProcessStringChunk(std::shared_ptr<Chunk> chunk) {
-        auto string_chunk = std::dynamic_pointer_cast<StringChunk>(chunk);
-        if (!string_chunk) return;
-        
-        // 估算Token数量
-        size_t estimated_tokens = EstimateTokenCount(string_chunk.get());
-        InitializeBloomFilter(estimated_tokens);
-        
-        // 处理所有字符串
-        for (int64_t i = 0; i < string_chunk->RowNums(); ++i) {
-            if (string_chunk->isValid(i)) {
-                auto text = std::string(string_chunk->operator[](i));
-                AddStringToFilter(text);
-            }
-        }
-        
-        hasValue_ = true;
+    void
+    Deserialize(const std::string& data) override {
     }
-    
-    void InitializeBloomFilter(size_t estimated_tokens) {
-        double false_positive_rate = 0.01;
-        bit_size_ = static_cast<size_t>(
-            -1.0 * estimated_tokens * std::log(false_positive_rate) / 
-            (std::log(2) * std::log(2))
-        );
-        bit_size_ = ((bit_size_ + 63) / 64) * 64;
-        bit_array_.resize(bit_size_ / 64, 0);
-    }
-    
-    void AddStringToFilter(const std::string& text) {
-        auto tokens = TokenizeText(text);
-        for (const auto& token : tokens) {
-            AddToken(token);
-        }
-    }
-    
-    std::vector<std::string> TokenizeText(const std::string& text) {
+
+ private:
+    // 分词逻辑保持不变，作为一个私有辅助函数
+    std::vector<std::string>
+    TokenizeText(const std::string& text) {
         std::vector<std::string> tokens;
         std::string current_token;
-        
+
         for (char c : text) {
             if (std::isalnum(c)) {
                 current_token += std::tolower(c);
@@ -614,374 +534,54 @@ private:
                 }
             }
         }
-        
+
         if (!current_token.empty()) {
             tokens.push_back(current_token);
         }
-        
+
         return tokens;
-    }
-    
-    void AddToken(const std::string& token) {
-        uint64_t hash1 = std::hash<std::string>{}(token);
-        uint64_t hash2 = hash1 >> 32;
-        
-        for (size_t i = 0; i < hash_count_; ++i) {
-            size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            size_t word_index = bit_pos / 64;
-            size_t bit_index = bit_pos % 64;
-            bit_array_[word_index] |= (1ULL << bit_index);
-        }
-    }
-    
-    bool MightContainToken(const std::string& token) const {
-        uint64_t hash1 = std::hash<std::string>{}(token);
-        uint64_t hash2 = hash1 >> 32;
-        
-        for (size_t i = 0; i < hash_count_; ++i) {
-            size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            size_t word_index = bit_pos / 64;
-            size_t bit_index = bit_pos % 64;
-            if (!(bit_array_[word_index] & (1ULL << bit_index))) {
-                return false;
-            }
-        }
-        return true;
-    }
-    
-    size_t EstimateTokenCount(const StringChunk* chunk) {
-        size_t total_tokens = 0;
-        size_t sample_size = std::min(100L, chunk->RowNums());
-        
-        for (int64_t i = 0; i < sample_size; ++i) {
-            if (chunk->isValid(i)) {
-                auto text = std::string(chunk->operator[](i));
-                auto tokens = TokenizeText(text);
-                total_tokens += tokens.size();
-            }
-        }
-        
-        return (total_tokens * chunk->RowNums()) / sample_size;
-    }
-};
-
-template<typename T>
-struct DataMetrics {
-    int64_t total_rows = 0;
-    int64_t null_count = 0;
-    T min_value;
-    T max_value;
-    std::set<T> unique_values;
-    size_t unique_count = 0;
-    double cardinality_ratio = 0.0;
-    
-    // 字符串特有的指标
-    double avg_string_length = 0.0;
-    size_t max_string_length = 0;
-    std::set<std::string> sample_ngrams;
-    std::set<std::string> sample_tokens;
-    bool has_spaces = false;
-    bool is_complete_sample = true;  // 是否完整采样了所有唯一值
-    
-    // 基数分类
-    bool IsLowCardinality() const {
-        return cardinality_ratio < 0.1 && unique_count <= 256 && is_complete_sample;
-    }
-    
-    bool IsMediumCardinality() const {
-        return cardinality_ratio >= 0.1 && cardinality_ratio <= 0.7 && unique_count <= 10000;
-    }
-    
-    bool IsHighCardinality() const {
-        return cardinality_ratio > 0.7 || unique_count > 10000;
-    }
-    
-    // 文本特征判断
-    bool ShouldUseNgramFilter() const {
-        if constexpr (std::is_same_v<T, std::string>) {
-            return avg_string_length >= 4.0 && 
-                   avg_string_length <= 1000.0 && 
-                   sample_ngrams.size() >= 10;
-        }
-        return false;
-    }
-    
-    bool ShouldUseTokenFilter() const {
-        if constexpr (std::is_same_v<T, std::string>) {
-            return avg_string_length >= 8.0 && 
-                   sample_tokens.size() >= 3 &&
-                   has_spaces;
-        }
-        return false;
-    }
-};
-
-template<typename T>
-class DataAnalyzer {
-public:
-    static DataMetrics<T> AnalyzeChunk(std::shared_ptr<Chunk> chunk) {
-        if constexpr (std::is_same_v<T, std::string>) {
-            return AnalyzeStringChunk(chunk);
-        } else {
-            return AnalyzeNumericChunk(chunk);
-        }
-    }
-
-private:
-    static DataMetrics<T> AnalyzeNumericChunk(std::shared_ptr<Chunk> chunk) {
-        auto fixed_chunk = std::dynamic_pointer_cast<FixedWidthChunk>(chunk);
-        if (!fixed_chunk) return {};
-        
-        DataMetrics<T> metrics;
-        auto span = fixed_chunk->Span();
-        const T* data = static_cast<const T*>(span.data());
-        const bool* valid_data = span.valid_data();
-        metrics.total_rows = span.row_count();
-        
-        if (metrics.total_rows == 0) return metrics;
-        
-        bool has_first_valid = false;
-        static constexpr size_t MAX_UNIQUE_SAMPLE = 1000;  // 最大采样唯一值数量
-        
-        for (int64_t i = 0; i < metrics.total_rows; ++i) {
-            if (valid_data && !valid_data[i]) {
-                metrics.null_count++;
-                continue;
-            }
-            
-            T value = data[i];
-            
-            // 更新min/max
-            if (!has_first_valid) {
-                metrics.min_value = metrics.max_value = value;
-                has_first_valid = true;
-            } else {
-                if (value < metrics.min_value) metrics.min_value = value;
-                if (value > metrics.max_value) metrics.max_value = value;
-            }
-            
-            // 采样唯一值
-            if (metrics.unique_values.size() < MAX_UNIQUE_SAMPLE) {
-                metrics.unique_values.insert(value);
-            } else {
-                metrics.is_complete_sample = false;
-            }
-        }
-        
-        metrics.unique_count = metrics.unique_values.size();
-        if (metrics.total_rows > metrics.null_count) {
-            metrics.cardinality_ratio = static_cast<double>(metrics.unique_count) / 
-                                       (metrics.total_rows - metrics.null_count);
-        }
-        
-        return metrics;
-    }
-    
-    static DataMetrics<std::string> AnalyzeStringChunk(std::shared_ptr<Chunk> chunk) {
-        auto string_chunk = std::dynamic_pointer_cast<StringChunk>(chunk);
-        if (!string_chunk) return {};
-        
-        DataMetrics<std::string> metrics;
-        metrics.total_rows = string_chunk->RowNums();
-        
-        if (metrics.total_rows == 0) return metrics;
-        
-        bool has_first_valid = false;
-        double total_length = 0.0;
-        int64_t valid_count = 0;
-        static constexpr size_t MAX_UNIQUE_SAMPLE = 500;
-        static constexpr size_t MAX_NGRAM_SAMPLE = 1000;
-        static constexpr size_t MAX_TOKEN_SAMPLE = 500;
-        
-        for (int64_t i = 0; i < metrics.total_rows; ++i) {
-            if (!string_chunk->isValid(i)) {
-                metrics.null_count++;
-                continue;
-            }
-            
-            auto text_view = string_chunk->operator[](i);
-            std::string text(text_view);
-            valid_count++;
-            total_length += text.length();
-            metrics.max_string_length = std::max(metrics.max_string_length, text.length());
-            
-            // 检查是否包含空格
-            if (!metrics.has_spaces && text.find(' ') != std::string::npos) {
-                metrics.has_spaces = true;
-            }
-            
-            // 更新min/max
-            if (!has_first_valid) {
-                metrics.min_value = metrics.max_value = text;
-                has_first_valid = true;
-            } else {
-                if (text < metrics.min_value) metrics.min_value = text;
-                if (text > metrics.max_value) metrics.max_value = text;
-            }
-            
-            // 采样唯一值
-            if (metrics.unique_values.size() < MAX_UNIQUE_SAMPLE) {
-                metrics.unique_values.insert(text);
-            } else {
-                metrics.is_complete_sample = false;
-            }
-            
-            // 采样N-gram
-            if (metrics.sample_ngrams.size() < MAX_NGRAM_SAMPLE) {
-                ExtractNgrams(text, metrics.sample_ngrams, 3);
-            }
-            
-            // 采样Token
-            if (metrics.sample_tokens.size() < MAX_TOKEN_SAMPLE) {
-                ExtractTokens(text, metrics.sample_tokens);
-            }
-        }
-        
-        if (valid_count > 0) {
-            metrics.avg_string_length = total_length / valid_count;
-        }
-        
-        metrics.unique_count = metrics.unique_values.size();
-        if (valid_count > 0) {
-            metrics.cardinality_ratio = static_cast<double>(metrics.unique_count) / valid_count;
-        }
-        
-        return metrics;
-    }
-    
-    static void ExtractNgrams(const std::string& text, std::set<std::string>& ngrams, size_t n) {
-        if (text.length() < n) return;
-        for (size_t i = 0; i <= text.length() - n; ++i) {
-            ngrams.insert(text.substr(i, n));
-        }
-    }
-    
-    static void ExtractTokens(const std::string& text, std::set<std::string>& tokens) {
-        std::string current_token;
-        for (char c : text) {
-            if (std::isalnum(c)) {
-                current_token += std::tolower(c);
-            } else {
-                if (!current_token.empty()) {
-                    tokens.insert(current_token);
-                    current_token.clear();
-                }
-            }
-        }
-        if (!current_token.empty()) {
-            tokens.insert(current_token);
-        }
-    }
-};
-
-class MetricsDecisionEngine {
-public:
-    template<typename T>
-    static std::vector<FieldChunkMetricType> DecideMetrics(
-        const DataMetrics<T>& metrics, DataType data_type) {
-        
-        std::vector<FieldChunkMetricType> result;
-        
-        // MinMax：总是创建（基础统计）
-        result.push_back(FieldChunkMetricType::MINMAX);
-        
-        if constexpr (std::is_same_v<T, std::string>) {
-            // 字符串类型的决策
-            DecideStringMetrics(metrics, result);
-        } else {
-            // 数值类型的决策
-            DecideNumericMetrics(metrics, result);
-        }
-        
-        return result;
-    }
-
-private:
-    template<typename T>
-    static void DecideNumericMetrics(const DataMetrics<T>& metrics, 
-                                   std::vector<FieldChunkMetricType>& result) {
-        if (metrics.IsLowCardinality()) {
-            // 低基数：使用SET统计
-            result.push_back(FieldChunkMetricType::SET);
-        } else if (metrics.IsMediumCardinality() || metrics.IsHighCardinality()) {
-            // 中高基数：使用BloomFilter
-            result.push_back(FieldChunkMetricType::BLOOM_FILTER);
-        }
-    }
-    
-    static void DecideStringMetrics(const DataMetrics<std::string>& metrics, 
-                                  std::vector<FieldChunkMetricType>& result) {
-        if (metrics.IsLowCardinality()) {
-            // 低基数字符串：使用SET
-            result.push_back(FieldChunkMetricType::SET);
-        } else {
-            // 高基数字符串：使用BloomFilter作为基础
-            result.push_back(FieldChunkMetricType::BLOOM_FILTER);
-            
-            // 根据文本特征决定是否添加文本搜索索引
-            if (metrics.ShouldUseNgramFilter()) {
-                result.push_back(FieldChunkMetricType::NGRAM_FILTER);
-            }
-            
-            if (metrics.ShouldUseTokenFilter()) {
-                result.push_back(FieldChunkMetricType::TOKEN_FILTER);
-            }
-        }
     }
 };
 
 class FieldChunkSkipIndex {
-public:
-    explicit FieldChunkSkipIndex(DataType data_type) : data_type_(data_type) {}
+ public:
+    explicit FieldChunkSkipIndex(DataType data_type) : data_type_(data_type) {
+    }
 
-    void Load(std::shared_ptr<Chunk> chunk) {
+    void
+    Load(std::shared_ptr<Chunk> chunk) {
         switch (data_type_) {
             case DataType::INT8:
-                LoadTypedMetrics<int8_t>(chunk);
+                LoadMetrics<int8_t>(chunk);
                 break;
             case DataType::INT16:
-                LoadTypedMetrics<int16_t>(chunk);
+                LoadMetrics<int16_t>(chunk);
                 break;
             case DataType::INT32:
-                LoadTypedMetrics<int32_t>(chunk);
+                LoadMetrics<int32_t>(chunk);
                 break;
             case DataType::INT64:
-                LoadTypedMetrics<int64_t>(chunk);
+                LoadMetrics<int64_t>(chunk);
                 break;
             case DataType::FLOAT:
-                LoadTypedMetrics<float>(chunk);
+                LoadMetrics<float>(chunk);
                 break;
             case DataType::DOUBLE:
-                LoadTypedMetrics<double>(chunk);
+                LoadMetrics<double>(chunk);
                 break;
             case DataType::VARCHAR:
             case DataType::STRING:
-                LoadTypedMetrics<std::string>(chunk);
+                LoadStringMetrics(chunk);
                 break;
             default:
                 return;
         }
     }
 
-    template<typename T>
-    void LoadTypedMetrics(std::shared_ptr<Chunk> chunk) {
-        auto data_metrics = DataAnalyzer<T>::AnalyzeChunk(chunk);
-        auto metric_types = MetricsDecisionEngine::DecideMetrics(data_metrics, data_type_);
-        
-        for (auto type : metric_types) {
-            auto metric = CreateMetricFromAnalysis<T>(type, data_metrics, chunk);
-            if (metric && metric->hasValue_) {
-                Add(type, metric);
-            }
-        }
-        
-        // 5. 记录决策日志
-        LogDecision(metric_types, data_metrics);
-    }
-
     // 获取特定类型的统计
-    template<typename MetricType>
-    std::shared_ptr<MetricType> GetMetric(FieldChunkMetricType type) const {
+    template <typename MetricType>
+    std::shared_ptr<MetricType>
+    GetMetric(FieldChunkMetricType type) const {
         for (const auto& [metric_type, metric] : metrics_) {
             if (metric_type == type) {
                 return std::dynamic_pointer_cast<MetricType>(metric);
@@ -991,113 +591,224 @@ public:
     }
 
     // 检查是否包含某种类型
-    bool HasMetricType(FieldChunkMetricType type) const {
+    bool
+    HasMetricType(FieldChunkMetricType type) const {
         for (const auto& [metric_type, metric] : metrics_) {
-            if (metric_type == type) return true;
+            if (metric_type == type)
+                return true;
         }
         return false;
     }
 
-    std::vector<std::pair<FieldChunkMetricType, std::shared_ptr<FieldChunkMetric>>> GetMetrics() const {
+    std::vector<
+        std::pair<FieldChunkMetricType, std::shared_ptr<FieldChunkMetric>>>
+    GetMetrics() const {
         return metrics_;
     }
 
-    size_t Size() const {
+    size_t
+    Size() const {
         return metrics_.size();
     }
 
-    std::string Serialize() const {
+    std::string
+    Serialize() const {
         // TODO: 实现序列化
         return "";
     }
 
-    void Deserialize(const std::string& data) {
+    void
+    Deserialize(const std::string& data) {
         // TODO: 实现反序列化
     }
 
-private:
-    template<typename T>
-    std::shared_ptr<FieldChunkMetric> CreateMetricFromAnalysis(
-        FieldChunkMetricType type, const DataMetrics<T>& data_metrics, std::shared_ptr<Chunk> chunk) {
-        
-        switch (type) {
-            case FieldChunkMetricType::MINMAX:
-                return CreateMinMaxFromAnalysis<T>(data_metrics);
-            case FieldChunkMetricType::SET:
-                return CreateSetFromAnalysis<T>(data_metrics, chunk);
-            case FieldChunkMetricType::BLOOM_FILTER:
-                return CreateBloomFilterFromAnalysis<T>(data_metrics, chunk);
-            case FieldChunkMetricType::NGRAM_FILTER:
-                if constexpr (std::is_same_v<T, std::string>) {
-                    return std::make_shared<NgramFieldChunkMetric>(chunk, 3);
-                }
-                break;
-            case FieldChunkMetricType::TOKEN_FILTER:
-                if constexpr (std::is_same_v<T, std::string>) {
-                    return std::make_shared<TokenFieldChunkMetric>(chunk);
-                }
-                break;
+ private:
+    template <typename T>
+    struct metricsInfo {
+        int64_t total_rows = 0;
+        int64_t null_count = 0;
+
+        T min_value;
+        T max_value;
+
+        ankerl::unordered_dense::set<T> unique_values;
+
+        // 字符串特有的指标
+        size_t avg_string_length = 0;
+        size_t max_string_length = 0;
+        bool has_spaces = false;
+    };
+
+    template <typename T>
+    void
+    LoadMetrics(std::shared_ptr<Chunk> chunk) {
+        auto info = ProcessFieldChunk<T>(chunk);
+        if (info.total_rows - info.null_count < 10) {
+            return;
         }
-        return nullptr;
-    }
-
-    template<typename T>
-    std::shared_ptr<FieldChunkMetric> CreateMinMaxFromAnalysis(const DataMetrics<T>& data_metrics) {
-        auto metric = std::make_shared<MinMaxFieldChunkMetric<T>>();
-        metric->min_ = Metrics(data_metrics.min_value);
-        metric->max_ = Metrics(data_metrics.max_value);
-        metric->null_count_ = data_metrics.null_count;
-        metric->hasValue_ = true;
-        return metric;
-    }
-
-    template<typename T>
-    std::shared_ptr<FieldChunkMetric> CreateSetFromAnalysis(
-        const DataMetrics<T>& data_metrics, std::shared_ptr<Chunk> chunk) {
-        // 只有在完整采样且低基数时才创建SET
-        if (!data_metrics.is_complete_sample || !data_metrics.IsLowCardinality()) {
-            return nullptr;
+        metrics_.emplace_back(FieldChunkMetricType::MINMAX,
+                              std::make_shared<MinMaxFieldChunkMetric<T>>(
+                                  info.min_value, info.max_value));
+        if (info.unique_values.size() * 10 <
+            info.total_rows - info.null_count) {
+            metrics_.emplace_back(
+                FieldChunkMetricType::SET,
+                std::make_shared<SetFieldChunkMetric<T>>(info.unique_values));
+        } else {
+            metrics_.emplace_back(
+                FieldChunkMetricType::BLOOM_FILTER,
+                std::make_shared<BloomFilterFieldChunkMetric<T>>(
+                    info.unique_values));
         }
-        return std::make_shared<SetFieldChunkMetric<T>>(chunk);
     }
 
-    template<typename T>
-    std::shared_ptr<FieldChunkMetric> CreateBloomFilterFromAnalysis(
-        const DataMetrics<T>& data_metrics, std::shared_ptr<Chunk> chunk) {
-        // 只有在中高基数时才创建BloomFilter
-        if (data_metrics.IsLowCardinality()) {
-            return nullptr;
+    void
+    LoadStringMetrics(std::shared_ptr<Chunk> chunk) {
+        auto info = ProcessStringFieldChunk(chunk);
+        int64_t valid_count = info.total_rows - info.null_count;
+        if (valid_count < 20) {
+            return;
         }
-        // TODO: 实现BloomFilterFieldChunkMetrics
-        return nullptr; // 暂时返回nullptr
+        metrics_.emplace_back(
+            FieldChunkMetricType::MINMAX,
+            std::make_shared<MinMaxFieldChunkMetric<std::string>>(
+                info.min_value, info.max_value));
+        if (info.unique_values.size() * 10 < valid_count &&
+            info.avg_string_length < 20) {
+            metrics_.emplace_back(
+                FieldChunkMetricType::SET,
+                std::make_shared<SetFieldChunkMetric<std::string>>(
+                    info.unique_values));
+        } else {
+            metrics_.emplace_back(
+                FieldChunkMetricType::BLOOM_FILTER,
+                std::make_shared<BloomFilterFieldChunkMetric<std::string>>(
+                    info.unique_values));
+        }
     }
 
-    void Add(FieldChunkMetricType type, std::shared_ptr<FieldChunkMetric> metric) {
-        metrics_.emplace_back(type, std::move(metric));
+    template <typename T>
+    metricsInfo<T>
+    ProcessFieldChunk(std::shared_ptr<Chunk> chunk) {
+        auto fixed_chunk = std::dynamic_pointer_cast<FixedWidthChunk>(chunk);
+        if (!fixed_chunk)
+            return {};
+
+        metricsInfo<T> metrics;
+        auto span = fixed_chunk->Span();
+        const T* data = static_cast<const T*>(span.data());
+        const bool* valid_data = span.valid_data();
+        metrics.total_rows = span.row_count();
+
+        if (metrics.total_rows == 0)
+            return metrics;
+
+        bool has_first_valid = false;
+
+        for (int64_t i = 0; i < metrics.total_rows; ++i) {
+            if (valid_data && !valid_data[i]) {
+                metrics.null_count++;
+                continue;
+            }
+
+            T value = data[i];
+
+            // 更新min/max
+            if (!has_first_valid) {
+                metrics.min_value = metrics.max_value = value;
+                has_first_valid = true;
+            } else {
+                if (value < metrics.min_value)
+                    metrics.min_value = value;
+                if (value > metrics.max_value)
+                    metrics.max_value = value;
+            }
+            metrics.unique_values.insert(value);
+        }
+
+        return metrics;
     }
 
-    std::vector<std::pair<FieldChunkMetricType, std::shared_ptr<FieldChunkMetric>>> metrics_;
+    metricsInfo<std::string>
+    ProcessStringFieldChunk(std::shared_ptr<Chunk> chunk) {
+        auto string_chunk = std::dynamic_pointer_cast<StringChunk>(chunk);
+        if (!string_chunk)
+            return {};
+
+        metricsInfo<std::string> metrics;
+        metrics.total_rows = string_chunk->RowNums();
+
+        if (metrics.total_rows == 0)
+            return metrics;
+
+        bool has_first_valid = false;
+        double total_length = 0.0;
+        int64_t valid_count = 0;
+
+        for (int64_t i = 0; i < metrics.total_rows; ++i) {
+            if (!string_chunk->isValid(i)) {
+                metrics.null_count++;
+                continue;
+            }
+
+            auto text_view = string_chunk->operator[](i);
+            std::string text(text_view);
+            valid_count++;
+            total_length += text.length();
+            metrics.max_string_length =
+                std::max(metrics.max_string_length, text.length());
+
+            // 检查是否包含空格
+            if (!metrics.has_spaces && text.find(' ') != std::string::npos) {
+                metrics.has_spaces = true;
+            }
+
+            // 更新min/max
+            if (!has_first_valid) {
+                metrics.min_value = metrics.max_value = text;
+                has_first_valid = true;
+            } else {
+                if (text < metrics.min_value)
+                    metrics.min_value = text;
+                if (text > metrics.max_value)
+                    metrics.max_value = text;
+            }
+
+            // 采样唯一值
+            metrics.unique_values.insert(text);
+        }
+
+        if (valid_count > 0) {
+            metrics.avg_string_length = total_length / valid_count;
+        }
+
+        return metrics;
+    }
+
+    std::vector<
+        std::pair<FieldChunkMetricType, std::shared_ptr<FieldChunkMetric>>>
+        metrics_;
     DataType data_type_;
-    std::string analysis_summary_;  // 存储分析摘要
 };
 
 class ChunkSkipIndex : public milvus_storage::Metadata {
-   public:
-
+ public:
     ChunkSkipIndex() = default;
 
-    ChunkSkipIndex(const std::shared_ptr<arrow::Table>& table, const std::unordered_map<FieldId, FieldMeta>& field_metas) {
+    ChunkSkipIndex(const std::shared_ptr<arrow::Table>& table,
+                   const std::unordered_map<FieldId, FieldMeta>& field_metas) {
         field_chunk_metrics_.reserve(field_metas.size());
 
         std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
         std::vector<FieldId> field_list;
         std::vector<std::unique_ptr<FieldChunkMetric>> field_chunk_metrics;
         for (int i = 0; i < table->schema()->num_fields(); ++i) {
-            auto field_id = std::stoll(table->schema()
-                                           ->field(i)
-                                           ->metadata()
-                                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
-                                           ->data());
+            auto field_id =
+                std::stoll(table->schema()
+                               ->field(i)
+                               ->metadata()
+                               ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                               ->data());
             auto fid = milvus::FieldId(field_id);
             if (fid == RowFieldID) {
                 // ignore row id field
@@ -1110,39 +821,54 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             const arrow::ArrayVector& array_vec = table->column(i)->chunks();
             std::shared_ptr<Chunk> chunk = create_chunk(field_meta, array_vec);
 
-            auto field_metrics = std::make_shared<FieldChunkSkipIndex>(data_type);
+            auto field_metrics =
+                std::make_shared<FieldChunkSkipIndex>(data_type);
             field_metrics->Load(chunk);
 
-            field_chunk_metrics_.emplace_back(std::make_pair(fid, field_metrics));
-        }    
+            field_chunk_metrics_.emplace_back(
+                std::make_pair(fid, field_metrics));
+        }
     }
 
-    explicit ChunkSkipIndex(std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>> field_chunk_metrics)
-        : field_chunk_metrics_(std::move(field_chunk_metrics)) {}
+    explicit ChunkSkipIndex(
+        std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>>
+            field_chunk_metrics)
+        : field_chunk_metrics_(std::move(field_chunk_metrics)) {
+    }
 
-    std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>> GetFieldChunkMetrics() const {
+    std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>>
+    GetFieldChunkMetrics() const {
         return field_chunk_metrics_;
     }
 
-    std::string Serialize() const override {
+    std::string
+    Serialize() const override {
         return "";
     };
 
-    void Deserialize(const std::string &data) override {
+    void
+    Deserialize(const std::string& data) override{
         // Implement deserialization logic here
     };
 
  private:
-    std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>> field_chunk_metrics_;
+    std::vector<std::pair<FieldId, std::shared_ptr<FieldChunkSkipIndex>>>
+        field_chunk_metrics_;
 };
 
-class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder<ChunkSkipIndexBuilder, ChunkSkipIndex> {
+class ChunkSkipIndexBuilder
+    : public milvus_storage::MetadataBuilder<ChunkSkipIndexBuilder,
+                                             ChunkSkipIndex> {
  public:
     ChunkSkipIndexBuilder() = default;
-    ChunkSkipIndexBuilder(const std::unordered_map<FieldId, FieldMeta>& field_metas)
-        : field_metas_(field_metas) {}
+    ChunkSkipIndexBuilder(
+        const std::unordered_map<FieldId, FieldMeta>& field_metas)
+        : field_metas_(field_metas) {
+    }
+
  protected:
-    std::shared_ptr<ChunkSkipIndex> BuildImpl(const std::shared_ptr<arrow::Table>& table) override {
+    std::shared_ptr<ChunkSkipIndex>
+    BuildImpl(const std::shared_ptr<arrow::Table>& table) override {
         return std::make_shared<ChunkSkipIndex>(table, field_metas_);
     }
 
@@ -1175,12 +901,23 @@ class SkipIndex {
             return false;
         }
         if (op_type == OpType::Equal) {
-            if (auto set_metrics = field_chunk_skipindex->GetMetric<SetFieldChunkMetric<T>>(FieldChunkMetricType::SET);
+            if (auto set_metrics =
+                    field_chunk_skipindex->GetMetric<SetFieldChunkMetric<T>>(
+                        FieldChunkMetricType::SET);
                 set_metrics) {
                 return set_metrics->CanSkipEqual(val);
             }
+            if (auto bloom_metrics =
+                    field_chunk_skipindex
+                        ->GetMetric<BloomFilterFieldChunkMetric<T>>(
+                            FieldChunkMetricType::BLOOM_FILTER);
+                bloom_metrics) {
+                return bloom_metrics->CanSkipEqual(val);
+            }
         }
-        if (auto minmax_metrics = field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(FieldChunkMetricType::MINMAX);
+        if (auto minmax_metrics =
+                field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
+                    FieldChunkMetricType::MINMAX);
             minmax_metrics) {
             return minmax_metrics->CanSkipUnaryRange(op_type, val);
         }
@@ -1211,9 +948,12 @@ class SkipIndex {
         if (!field_chunk_skipindex) {
             return false;
         }
-        if (auto minmax_metric = field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(FieldChunkMetricType::MINMAX);
+        if (auto minmax_metric =
+                field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
+                    FieldChunkMetricType::MINMAX);
             minmax_metric) {
-            return minmax_metric->CanSkipBinaryRange(lower_val, upper_val, lower_inclusive, upper_inclusive);
+            return minmax_metric->CanSkipBinaryRange(
+                lower_val, upper_val, lower_inclusive, upper_inclusive);
         }
         return false;
     }
@@ -1229,55 +969,133 @@ class SkipIndex {
         return false;
     }
 
+    template <typename T>
+    std::enable_if_t<IsAllowedType<T>::value, bool>
+    CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const T& value,
+                            const T& right_operand) const {
+        bool can_skip = false;
+        // switch (arith_type) {
+        //     case ArithOpType::Add: {
+        //         can_skip = CanSkipUnaryRange(field_id, chunk_id, op_type, right_operand - value);
+        //         break;
+        //     }
+        //     case ArithOpType::Sub: {
+        //         can_skip = CanSkipUnaryRange(field_id, chunk_id, op_type, right_operand + value);
+        //         break;
+        //     }
+        //     case ArithOpType::Mul: {
+        //         if (right_operand == 0) {
+        //             can_skip = false;
+        //         } else if (right_operand > 0) {
+        //             can_skip = CanSkipUnaryRange(field_id, chunk_id, op_type, value / right_operand);
+        //         } else {
+        //             auto new_op_type = op_type;
+        //             switch (op_type) {
+        //                 case OpType::GreaterThan:
+        //                     new_op_type = OpType::LessThan;
+        //                     break;
+        //                 case OpType::GreaterEqual:
+        //                     new_op_type = OpType::LessEqual;
+        //                     break;
+        //                 case OpType::LessThan:
+        //                     new_op_type = OpType::GreaterThan;
+        //                     break;
+        //                 case OpType::LessEqual:
+        //                     new_op_type = OpType::GreaterEqual;
+        //                     break;
+        //                 default:
+        //                     break;
+        //             }
+        //             can_skip = CanSkipUnaryRange(field_id, chunk_id, new_op_type, value / right_operand);
+        //         }
+        //     }
+        //     case ArithOpType::Div: {
+        //         if (right_operand == 0) {
+        //             can_skip = false;
+        //         } else if (right_operand > 0) {
+        //             can_skip = CanSkipUnaryRange(field_id, chunk_id, op_type, value * right_operand);
+        //         } else {
+        //             auto new_op_type = op_type;
+        //             switch (op_type) {
+        //                 case OpType::GreaterThan:
+        //                     new_op_type = OpType::LessThan;
+        //                     break;
+        //                 case OpType::GreaterEqual:
+        //                     new_op_type = OpType::LessEqual;
+        //                     break;
+        //                 case OpType::LessThan:
+        //                     new_op_type = OpType::GreaterThan;
+        //                     break;
+        //                 case OpType::LessEqual:
+        //                     new_op_type = OpType::GreaterEqual;
+        //                     break;
+        //                 default:
+        //                     break;
+        //             }
+
+        //             can_skip = CanSkipUnaryRange(field_id, chunk_id, new_op_type, value * right_operand);
+        //         }
+        //     }
+        //     default:
+        //         can_skip = false;
+        // }
+        return can_skip;
+    }
+
+    template <typename T>
+    std::enable_if_t<!IsAllowedType<T>::value, bool>
+    CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const T& value,
+                            const T& right_operand) const {
+        return false;
+    }
+
     // IN查询优化
     template <typename T>
     std::enable_if_t<IsAllowedType<T>::value, bool>
-    CanSkipInQuery(FieldId field_id, int64_t chunk_id, const std::vector<T>& values) const {
+    CanSkipInQuery(FieldId field_id,
+                   int64_t chunk_id,
+                   std::shared_ptr<milvus::exec::MultiElement> values) const {
+        auto set = std::dynamic_pointer_cast<exec::SetElement<T>>(values);
         auto field_chunk_skipindex = GetFieldChunkMetrics(field_id, chunk_id);
-        if (!field_chunk_skipindex) return false;
+        if (!field_chunk_skipindex)
+            return false;
 
         // IN查询优先使用SET统计
-        if (auto set_metric = field_chunk_skipindex->GetMetric<SetFieldChunkMetric<T>>(FieldChunkMetricType::SET)) {
-            return set_metric->CanSkipIn(values);
+        if (auto set_metric =
+                field_chunk_skipindex->GetMetric<SetFieldChunkMetric<T>>(
+                    FieldChunkMetricType::SET)) {
+            return set_metric->CanSkipIn(set);
+        }
+
+        if (auto bloom_metric = field_chunk_skipindex
+                                    ->GetMetric<BloomFilterFieldChunkMetric<T>>(
+                                        FieldChunkMetricType::BLOOM_FILTER)) {
+            return bloom_metric->CanSkipIn(set);
         }
 
         // 降级到MinMax：计算值范围
-        if (auto minmax_metric = field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(FieldChunkMetricType::MINMAX)) {
-            if (values.empty()) return false;
-            
-            auto min_val = *std::min_element(values.begin(), values.end());
-            auto max_val = *std::max_element(values.begin(), values.end());
-            return minmax_metric->CanSkipBinaryRange(min_val, max_val, true, true);
+        if (auto minmax_metric =
+                field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
+                    FieldChunkMetricType::MINMAX)) {
+            return minmax_metric->CanSkipIn(set);
         }
 
         return false;
     }
 
-    // 子串匹配查询
-    bool CanSkipSubstringMatch(FieldId field_id, int64_t chunk_id, 
-                              const std::string& pattern) const {
-        auto field_chunk_skipindex = GetFieldChunkMetrics(field_id, chunk_id);
-        if (!field_chunk_skipindex) {
-            return false;
-        }
-        if (auto ngram_metric = field_chunk_skipindex->GetMetric<NgramFieldChunkMetric>(FieldChunkMetricType::NGRAM_FILTER);
-            ngram_metric) {
-            return ngram_metric->CanSkipSubstringMatch(pattern);
-        }
-        return false;
-    }
-    
-    // 全文搜索查询
-    bool CanSkipFullTextSearch(FieldId field_id, int64_t chunk_id,
-                              const std::vector<std::string>& keywords) const {
-        auto field_chunk_skipindex = GetFieldChunkMetrics(field_id, chunk_id);
-        if (!field_chunk_skipindex) {
-            return false;
-        }
-        if (auto token_metric = field_chunk_skipindex->GetMetric<TokenFieldChunkMetric>(FieldChunkMetricType::TOKEN_FILTER);
-            token_metric) {
-            return token_metric->CanSkipFullTextSearch(keywords);
-        }
+    template <typename T>
+    std::enable_if_t<!IsAllowedType<T>::value, bool>
+    CanSkipInQuery(FieldId field_id,
+                   int64_t chunk_id,
+                   std::shared_ptr<exec::MultiElement> values) const {
         return false;
     }
 
@@ -1288,10 +1106,12 @@ class SkipIndex {
         }
         size_t size = chunk_skipindex.size();
         for (size_t i = 0; i < size; ++i) {
-            const auto& field_chunk_metrics = chunk_skipindex[i]->GetFieldChunkMetrics();
+            const auto& field_chunk_metrics =
+                chunk_skipindex[i]->GetFieldChunkMetrics();
             for (const auto& [field_id, metrics] : field_chunk_metrics) {
                 if (i == 0) {
-                    fieldChunkMetrics_[field_id] = std::vector<std::shared_ptr<FieldChunkSkipIndex>>{};
+                    fieldChunkMetrics_[field_id] =
+                        std::vector<std::shared_ptr<FieldChunkSkipIndex>>{};
                     fieldChunkMetrics_[field_id].reserve(size);
                 }
                 fieldChunkMetrics_[field_id].emplace_back(metrics);
@@ -1300,11 +1120,14 @@ class SkipIndex {
     }
 
  private:
-    std::shared_ptr<FieldChunkSkipIndex> GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
+    std::shared_ptr<FieldChunkSkipIndex>
+    GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
         return fieldChunkMetrics_.at(field_id).at(chunk_id);
     }
 
-    std::unordered_map<FieldId, std::vector<std::shared_ptr<FieldChunkSkipIndex>>> fieldChunkMetrics_;
-    mutable std::shared_mutex mutex_;
+    std::unordered_map<FieldId,
+                       std::vector<std::shared_ptr<FieldChunkSkipIndex>>>
+        fieldChunkMetrics_;
+    // mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus

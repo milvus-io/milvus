@@ -261,7 +261,8 @@ EnableSkipIndex(int64_t group_id,
                 c_packed_writer);
         auto col = static_cast<milvus::segcore::Collection*>(c_collection);
 
-        auto field_id_list = std::vector<int64_t>(field_ids, field_ids + length);
+        auto field_id_list =
+            std::vector<int64_t>(field_ids, field_ids + length);
         std::vector<milvus::FieldId> milvus_field_ids;
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(milvus::FieldId(field_id_list[i]));
@@ -269,10 +270,14 @@ EnableSkipIndex(int64_t group_id,
         auto schema = col->get_schema();
         auto field_meta = schema->get_field_metas(milvus_field_ids);
 
-        auto builder = std::make_unique<milvus::ChunkSkipIndexBuilder>(field_meta);
-        auto builder_wrapper = std::make_unique<milvus_storage::MetadataBuilderWrapper>(std::move(builder));
+        auto builder =
+            std::make_unique<milvus::ChunkSkipIndexBuilder>(field_meta);
+        auto builder_wrapper =
+            std::make_unique<milvus_storage::MetadataBuilderWrapper>(
+                std::move(builder));
 
-        packed_writer->AddMetadataBuilder(group_id, "skip_index", std::move(builder_wrapper));
+        packed_writer->AddMetadataBuilder(
+            group_id, "skip_index", std::move(builder_wrapper));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
