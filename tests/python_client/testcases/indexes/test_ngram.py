@@ -260,7 +260,6 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                                         "count(*)": expected_count})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="skip for issue #44164")
     def test_ngram_alter_index_mmap_and_gram_values(self):
         """
         Test the alter index with mmap and gram values
@@ -303,7 +302,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         # Release collection before alter ngram index
         self.release_collection(client, collection_name)
         # Alter index mmap properties
-        self.alter_index_properties(client, collection_name, index_name="content_ngram", properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, index_name="content_ngram",
+                                    properties={"mmap.enabled": True})
         res = self.describe_index(client, collection_name, index_name="content_ngram")[0]
         assert res.get('mmap.enabled', None) == 'True'
         # Load the collection and query again
@@ -314,8 +314,9 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Alter index gram value properties is not supported
         self.release_collection(client, collection_name)
-        error = {ct.err_code: 1, ct.err_msg: "invalid mmap.enabled value: True, expected: true, false"}
-        self.alter_index_properties(client, collection_name, index_name="content_ngram", properties={"min_gram": 3, "max_gram": 4},
+        error = {ct.err_code: 1, ct.err_msg: "min_gram is not a configable index property"}
+        self.alter_index_properties(client, collection_name, index_name="content_ngram",
+                                    properties={"min_gram": 3, "max_gram": 4},
                                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
