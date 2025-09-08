@@ -172,21 +172,25 @@ class ChunkedColumnGroup {
         return memory_size;
     }
 
-    std::vector<std::shared_ptr<ChunkSkipIndex>> GetSkipIndex(
-        const std::vector<std::string>& insert_files,
-        const std::shared_ptr<arrow::Schema>& arrow_schema,
-        milvus_storage::ArrowFileSystemPtr fs) {
-        auto meta = static_cast<
-            milvus::segcore::storagev2translator::GroupCTMeta*>(slot_->meta());
-        
+    std::vector<std::shared_ptr<ChunkSkipIndex>>
+    GetSkipIndex(const std::vector<std::string>& insert_files,
+                 const std::shared_ptr<arrow::Schema>& arrow_schema,
+                 milvus_storage::ArrowFileSystemPtr fs) {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+
         std::vector<std::shared_ptr<ChunkSkipIndex>> field_chunk_skipindex;
-        field_chunk_skipindex.reserve(meta->num_rows_until_chunk_.size());  
-        
+        field_chunk_skipindex.reserve(meta->num_rows_until_chunk_.size());
+
         for (const auto& insert_file : insert_files) {
-            auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-                fs, insert_file, arrow_schema);
-            
-            auto skip_index_metadata = file_reader->file_metadata()->GetMetadataArray<ChunkSkipIndex>("skip_index");
+            auto file_reader =
+                std::make_shared<milvus_storage::FileRowGroupReader>(
+                    fs, insert_file, arrow_schema);
+
+            auto skip_index_metadata =
+                file_reader->file_metadata()->GetMetadataArray<ChunkSkipIndex>(
+                    "skip_index");
             if (skip_index_metadata) {
                 auto extracted = skip_index_metadata->ExtractAll();
                 // 使用移动迭代器避免不必要的拷贝
@@ -195,11 +199,11 @@ class ChunkedColumnGroup {
                     std::make_move_iterator(extracted.begin()),
                     std::make_move_iterator(extracted.end()));
             }
-            
+
             auto status = file_reader->Close();
             AssertInfo(status.ok(),
-                    "failed to close file reader when get skipindex from {}",
-                    insert_file);
+                       "failed to close file reader when get skipindex from {}",
+                       insert_file);
         }
         return field_chunk_skipindex;
     }
