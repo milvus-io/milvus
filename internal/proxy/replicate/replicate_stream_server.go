@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -98,7 +99,10 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 		}
 		switch req := req.Request.(type) {
 		case *milvuspb.ReplicateRequest_ReplicateMessage:
-			p.handleReplicateMessage(req)
+			err := p.handleReplicateMessage(req)
+			if err != nil {
+				return err
+			}
 		default:
 			log.Warn("unknown request type", zap.Any("request", req))
 		}
@@ -106,7 +110,7 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 }
 
 // handleReplicateMessage handles the replicate message request.
-func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRequest_ReplicateMessage) {
+func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRequest_ReplicateMessage) error {
 	// TODO: sheep, update metrics.
 	p.wg.Add(1)
 	defer p.wg.Done()
@@ -120,22 +124,18 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	)
 
 	// Append message to wal.
-	// Keep retrying until the message is appended successfully or the stream is closed.
-	for {
-		select {
-		case <-p.streamServer.Context().Done():
-			return
-		default:
-			// TODO: sheep, append async.
-			_, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
-			if err != nil {
-				log.Warn("append replicate message to wal failed", zap.Error(err))
-				continue
-			}
-			p.sendReplicateResult(sourceTs)
-			return
-		}
+	_, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+	if err == nil {
+		p.sendReplicateResult(sourceTs)
+		return nil
 	}
+	if status.AsStreamingError(err).IsIgnoredOperation() {
+		log.Info("append replicate message to wal ignored", log.FieldMessage(msg), zap.Error(err))
+		return nil
+	}
+	// unexpected error, will close the stream and wait for client to reconnect.
+	log.Warn("append replicate message to wal failed", log.FieldMessage(msg), zap.Error(err))
+	return err
 }
 
 // sendReplicateResult sends the replicate result to client.
