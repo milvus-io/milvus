@@ -200,7 +200,7 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 }
 
 // GetCompactionTo returns the segment that the provided segment is compacted to.
-// Return (nil, false) if given segmentID can not found in the meta.
+// Return (nil, false) if given segmentID can not found in the meta and compact to is nil.
 // Return (nil, true) if given segmentID can be found with no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
 func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
