@@ -172,22 +172,20 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 // Return (nil, true) if given segmentID can be found with no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
 func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
-	if _, ok := s.segments[fromSegmentID]; !ok {
-		return nil, false
-	}
+	_, exist := s.segments[fromSegmentID]
 	if compactTos, ok := s.compactionTo[fromSegmentID]; ok {
 		result := []*SegmentInfo{}
 		for _, compactTo := range compactTos {
 			to, ok := s.segments[compactTo]
 			if !ok {
 				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
-				return nil, true
+				return nil, exist
 			}
 			result = append(result, to)
 		}
-		return result, true
+		return result, exist
 	}
-	return nil, true
+	return nil, exist
 }
 
 // DropSegment deletes provided segmentID
