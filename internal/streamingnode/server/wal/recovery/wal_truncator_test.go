@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -23,7 +24,7 @@ func TestTruncator(t *testing.T) {
 	truncator := newSamplingTruncator(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
-		Magic:     RecoveryMagicStreamingInitialized,
+		Magic:     utility.RecoveryMagicStreamingInitialized,
 	}, w, newRecoveryStorageMetrics(types.PChannelInfo{Name: "test", Term: 1}))
 
 	for i := 0; i < 20; i++ {
@@ -32,7 +33,7 @@ func TestTruncator(t *testing.T) {
 			truncator.SampleCheckpoint(&WALCheckpoint{
 				MessageID: rmq.NewRmqID(int64(i)),
 				TimeTick:  tsoutil.ComposeTSByTime(time.Now(), 0),
-				Magic:     RecoveryMagicStreamingInitialized,
+				Magic:     utility.RecoveryMagicStreamingInitialized,
 			})
 		}
 	}

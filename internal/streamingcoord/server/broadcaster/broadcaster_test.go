@@ -57,7 +57,7 @@ func TestBroadcaster(t *testing.T) {
 					createNewBroadcastMsg([]string{"v1", "v2", "v3"},
 						message.NewCollectionNameResourceKey("c3"),
 						message.NewCollectionNameResourceKey("c4")).WithBroadcastID(7),
-					streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK,
+					streamingpb.BroadcastTaskState_BORADCAST_TASK_STATE_REPLICATED,
 					[]byte{0x00, 0x00, 0x00}),
 			}, nil
 		}).Times(1)
@@ -67,7 +67,7 @@ func TestBroadcaster(t *testing.T) {
 		if rand.Int31n(10) < 3 {
 			return errors.New("save task failed")
 		}
-		if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			done.Insert(broadcastID)
 		}
 		return nil
@@ -84,7 +84,7 @@ func TestBroadcaster(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, bc)
 	assert.Eventually(t, func() bool {
-		return appended.Load() == 9 && len(done.Collect()) == 6 // only one task is done,
+		return appended.Load() == 9 && len(done.Collect()) == 6
 	}, 30*time.Second, 10*time.Millisecond)
 
 	// only task 7 is not done.
@@ -105,7 +105,9 @@ func TestBroadcaster(t *testing.T) {
 		var result *types.BroadcastAppendResult
 		for {
 			var err error
-			result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
+			b, err := bc.WithResourceKeys(context.Background(), message.NewCollectionNameResourceKey("c7"))
+			assert.NoError(t, err)
+			result, err = b.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
 			if err == nil {
 				break
 			}
@@ -120,7 +122,7 @@ func TestBroadcaster(t *testing.T) {
 	}, 30*time.Second, 10*time.Millisecond)
 
 	bc.Close()
-	_, err = bc.Broadcast(context.Background(), nil)
+	_, err = bc.WithResourceKeys(context.Background())
 	assert.Error(t, err)
 	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t))
 	assert.Error(t, err)
@@ -134,6 +136,9 @@ func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel str
 		msg.EXPECT().BroadcastHeader().Return(&message.BroadcastHeader{
 			BroadcastID: broadcastID,
 		})
+		msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(1))
+		msg.EXPECT().LastConfirmedMessageID().Return(walimplstest.NewTestMessageID(1))
+		msg.EXPECT().TimeTick().Return(100)
 		msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
 		if err := broadcaster.Ack(context.Background(), msg); err == nil {
 			break

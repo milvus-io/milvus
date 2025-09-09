@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -18,7 +19,7 @@ func TestDeliverPolicy(t *testing.T) {
 	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_Latest)
 
 	messageID := mock_message.NewMockMessageID(t)
-	messageID.EXPECT().Marshal().Return("messageID")
+	messageID.EXPECT().IntoProto().Return(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameTest), Id: "123"})
 	policy = DeliverPolicyStartFrom(messageID)
 	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
 

@@ -531,6 +531,53 @@ func (_c *MockMutableMessage_Properties_Call) RunAndReturn(run func() message.RP
 	return _c
 }
 
+// ReplicateHeader provides a mock function with no fields
+func (_m *MockMutableMessage) ReplicateHeader() *message.ReplicateHeader {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicateHeader")
+	}
+
+	var r0 *message.ReplicateHeader
+	if rf, ok := ret.Get(0).(func() *message.ReplicateHeader); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*message.ReplicateHeader)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_ReplicateHeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplicateHeader'
+type MockMutableMessage_ReplicateHeader_Call struct {
+	*mock.Call
+}
+
+// ReplicateHeader is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) ReplicateHeader() *MockMutableMessage_ReplicateHeader_Call {
+	return &MockMutableMessage_ReplicateHeader_Call{Call: _e.mock.On("ReplicateHeader")}
+}
+
+func (_c *MockMutableMessage_ReplicateHeader_Call) Run(run func()) *MockMutableMessage_ReplicateHeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_ReplicateHeader_Call) Return(_a0 *message.ReplicateHeader) *MockMutableMessage_ReplicateHeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_ReplicateHeader_Call) RunAndReturn(run func() *message.ReplicateHeader) *MockMutableMessage_ReplicateHeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TimeTick provides a mock function with no fields
 func (_m *MockMutableMessage) TimeTick() uint64 {
 	ret := _m.Called()

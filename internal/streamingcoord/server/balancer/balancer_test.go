@@ -106,6 +106,7 @@ func TestBalancer(t *testing.T) {
 		}, nil
 	})
 	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	// Test for lower datanode and proxy version protection.
 	metaRoot := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
@@ -331,6 +332,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 		}, nil
 	})
 	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	ctx := context.Background()
 	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")

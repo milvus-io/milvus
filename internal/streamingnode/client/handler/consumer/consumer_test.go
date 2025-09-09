@@ -153,9 +153,7 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 
 	recvCh <- &streamingpb.ConsumeResponse{
 		Response: &streamingpb.ConsumeResponse_Create{
-			Create: &streamingpb.CreateConsumerResponse{
-				WalName: walimplstest.WALName,
-			},
+			Create: &streamingpb.CreateConsumerResponse{},
 		},
 	}
 	recvCh <- &streamingpb.ConsumeResponse{

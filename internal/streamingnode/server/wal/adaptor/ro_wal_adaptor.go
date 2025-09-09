@@ -30,7 +30,7 @@ type roWALAdaptorImpl struct {
 	scanMetrics     *metricsutil.ScanMetrics
 }
 
-func (w *roWALAdaptorImpl) WALName() string {
+func (w *roWALAdaptorImpl) WALName() message.WALName {
 	return w.roWALImpls.WALName()
 }
 
@@ -48,6 +48,10 @@ func (w *roWALAdaptorImpl) Metrics() types.WALMetrics {
 
 func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
+}
+
+func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
+	panic("we cannot get replicate checkpoint from a read only wal")
 }
 
 // Append writes a record to the log.

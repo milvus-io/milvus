@@ -23,8 +23,8 @@ type walImpl struct {
 	l wp.LogHandle
 }
 
-func (w *walImpl) WALName() string {
-	return WALName
+func (w *walImpl) WALName() message.WALName {
+	return message.WALNameWoodpecker
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {

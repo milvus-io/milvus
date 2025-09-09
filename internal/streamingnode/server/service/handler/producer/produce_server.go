@@ -39,7 +39,7 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 		StreamingNodeHandlerService_ProduceServer: streamServer,
 	}
 	if err := produceServer.SendCreated(&streamingpb.CreateProducerResponse{
-		WalName: l.WALName(),
+		WalName: l.WALName().String(),
 	}); err != nil {
 		return nil, errors.Wrap(err, "at send created")
 	}

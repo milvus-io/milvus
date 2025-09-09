@@ -18,6 +18,8 @@ packages:
       Balancer:
   github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
+      Broadcaster:
+      BroadcastAPI:
       AppendOperator:
       Watcher:
   github.com/milvus-io/milvus/internal/streamingcoord/client:
@@ -55,6 +57,9 @@ packages:
       InterceptorWithReady:
       InterceptorWithMetrics:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates:
+    interfaces:
+      ReplicatesManager:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards:
     interfaces:
       ShardManager:
@@ -78,6 +83,7 @@ packages:
       Manager:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
+      ReplicationCatalog:
       StreamingCoordCataLog:
       StreamingNodeCataLog:
   github.com/milvus-io/milvus/internal/util/segcore:
