@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"maps"
 	"math"
 
@@ -417,6 +418,32 @@ func (m *BM25Stats) Serialize() ([]byte, error) {
 
 	// TODO ADD Serialize Time Metric
 	return buffer.Bytes(), nil
+}
+
+func (m *BM25Stats) SerializeToWriter(w io.Writer) error {
+	if err := binary.Write(w, common.Endian, BM25VERSION); err != nil {
+		return err
+	}
+
+	if err := binary.Write(w, common.Endian, m.numRow); err != nil {
+		return err
+	}
+
+	if err := binary.Write(w, common.Endian, m.numToken); err != nil {
+		return err
+	}
+
+	for key, value := range m.rowsWithToken {
+		if err := binary.Write(w, common.Endian, key); err != nil {
+			return err
+		}
+
+		if err := binary.Write(w, common.Endian, value); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (m *BM25Stats) Deserialize(bs []byte) error {
