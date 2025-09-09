@@ -4586,6 +4586,7 @@ class TestQueryString(TestMilvusClientV2Base):
         # Wait for string field index to be ready before loading
         self.wait_for_index_ready(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
+        time.sleep(ct.default_graceful_time)
         # 4. query
         result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         assert len(result) == exp_len
@@ -4893,4 +4894,45 @@ class TestQueryCount(TestMilvusClientV2Base):
                    check_task=CheckTasks.err_res,
                    check_items={"err_code": 1,
                                 "err_msg": f"field {invalid_output_field} not exist"})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_duplicate_ids(self):
+        """
+        target: test count duplicate ids
+        method: 1. insert duplicate ids
+                2. count
+                3. delete duplicate ids
+                4. count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. insert duplicate ids data
+        tmp_nb = 100
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info)
+        # Set all primary keys to 0 (duplicate ids)
+        for row in rows:
+            row[default_primary_key_field_name] = 0
+        self.insert(client, collection_name, rows)
+        # 4. query count
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])[0]
+        assert len(res) == 1
+        assert res[0]["count(*)"] == tmp_nb
+        # 5. delete and verify count
+        self.delete(client, collection_name, filter="id == 0")
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])[0]
+        assert len(res) == 1
+        assert res[0]["count(*)"] == 0
+        # 6. clean up
         self.drop_collection(client, collection_name)

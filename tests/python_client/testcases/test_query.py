@@ -397,38 +397,6 @@ class TestQueryCount(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_count_duplicate_ids(self):
-        """
-        target: test count duplicate ids
-        method: 1. insert duplicate ids
-                2. count
-                3. delete duplicate ids
-                4. count
-        expected: verify count
-        """
-        # create
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-
-        # insert duplicate ids
-        tmp_nb = 100
-        df = cf.gen_default_dataframe_data(tmp_nb)
-        df[ct.default_int64_field_name] = 0
-        collection_w.insert(df)
-
-        # query count
-        collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: tmp_nb}],"pk_name": collection_w.primary_field.name})
-
-        # delete and verify count
-        collection_w.delete(default_term_expr)
-        collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 0}], "pk_name": collection_w.primary_field.name})
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_count_multi_partitions(self):
         """
         target: test count multi partitions
