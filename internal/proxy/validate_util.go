@@ -89,6 +89,7 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		},
 		FieldId:   (*fieldData).GetFieldId(),
 		IsDynamic: (*fieldData).GetIsDynamic(),
+		ValidData: (*fieldData).GetValidData(),
 	}
 	return nil
 }
