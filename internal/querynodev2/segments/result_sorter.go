@@ -58,6 +58,9 @@ func swapFieldData(field *schemapb.FieldData, i int, j int) {
 		case *schemapb.ScalarField_DoubleData:
 			data := sd.DoubleData.Data
 			data[i], data[j] = data[j], data[i]
+		case *schemapb.ScalarField_TimestamptzData:
+			data := sd.TimestamptzData.Data
+			data[i], data[j] = data[j], data[i]
 		case *schemapb.ScalarField_StringData:
 			data := sd.StringData.Data
 			data[i], data[j] = data[j], data[i]

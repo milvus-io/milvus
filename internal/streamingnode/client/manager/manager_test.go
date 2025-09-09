@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -20,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -74,6 +74,8 @@ func TestManager(t *testing.T) {
 	states := []map[uint64]bool{
 		{1: false, 2: false, 3: true},
 		{1: true, 2: false},
+		{1: true, 2: false},
+		{1: true, 2: false},
 	}
 	r.EXPECT().GetLatestState(mock.Anything).Unset()
 	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
@@ -87,6 +89,10 @@ func TestManager(t *testing.T) {
 	assert.Len(t, nodes, 3)
 	assert.ErrorIs(t, nodes[3].Err, types.ErrNotAlive)
 	assert.ErrorIs(t, nodes[1].Err, types.ErrStopping)
+
+	nodeInfos, err := m.GetAllStreamingNodes(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, nodeInfos, 2)
 
 	// Test Assign
 	serverID := int64(2)
@@ -123,6 +129,9 @@ func TestManager(t *testing.T) {
 	rb.EXPECT().Close().Return()
 	m.Close()
 
+	nodeInfos, err = m.GetAllStreamingNodes(context.Background())
+	assert.Nil(t, nodeInfos)
+	assert.Error(t, err)
 	nodes, err = m.CollectAllStatus(context.Background())
 	assert.Nil(t, nodes)
 	assert.Error(t, err)
@@ -160,11 +169,7 @@ func newVersionedState(version int64, serverIDs map[uint64]bool) discoverer.Vers
 func TestDial(t *testing.T) {
 	paramtable.Init()
 
-	err := etcd.InitEtcdServer(true, "", t.TempDir(), "stdout", "info")
-	assert.NoError(t, err)
-	defer etcd.StopEtcdServer()
-	c, err := etcd.GetEmbedEtcdClient()
-	assert.NoError(t, err)
+	c, _ := kvfactory.GetEtcdAndPath()
 	assert.NotNil(t, c)
 
 	client := NewManagerClient(c)

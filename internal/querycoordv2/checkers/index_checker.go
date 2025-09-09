@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -126,12 +127,13 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
+	redundant := make(map[int64][]int64)    // segmentID => indexIDs
+	redundantSegments := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
-
 		missing := c.checkSegment(segment, indexInfos)
 		missingStats := c.checkSegmentStats(segment, schema, collection.LoadFields)
 		if len(missing) > 0 {
@@ -140,6 +142,12 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		} else if len(missingStats) > 0 {
 			targetsStats[segment.GetID()] = missingStats
 			idSegmentsStats[segment.GetID()] = segment
+		}
+
+		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
+		if len(redundantIndices) > 0 {
+			redundant[segment.GetID()] = redundantIndices
+			redundantSegments[segment.GetID()] = segment
 		}
 	}
 
@@ -190,6 +198,11 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	})
 	tasks = append(tasks, tasksStats...)
 
+	dropTasks := lo.FilterMap(lo.Values(redundantSegments), func(segment *meta.Segment, _ int) (task.Task, bool) {
+		return c.createSegmentIndexDropTasks(ctx, replica, segment, redundant[segment.GetID()]), true
+	})
+	tasks = append(tasks, dropTasks...)
+
 	return tasks
 }
 
@@ -207,6 +220,24 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 		}
 	}
 	return result
+}
+
+// checkRedundantIndices returns redundant indexIDs for each segment
+func (c *IndexChecker) checkRedundantIndices(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) []int64 {
+	var redundant []int64
+	indexInfoMap := typeutil.NewSet[int64]()
+
+	for _, indexInfo := range indexInfos {
+		indexInfoMap.Insert(indexInfo.IndexID)
+	}
+
+	for indexID := range segment.IndexInfo {
+		if !indexInfoMap.Contain(indexID) {
+			redundant = append(redundant, indexID)
+		}
+	}
+
+	return redundant
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
@@ -247,17 +278,15 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 		for _, v := range loadField {
 			loadFieldMap[v] = struct{}{}
 		}
-		jsonStatsFieldMap := make(map[int64]struct{})
-		for _, v := range segment.JSONIndexField {
-			jsonStatsFieldMap[v] = struct{}{}
-		}
+
 		for _, field := range schema.GetFields() {
 			// Check if the field exists in both loadFieldMap and jsonStatsFieldMap
 			h := typeutil.CreateFieldSchemaHelper(field)
+			fieldID := field.GetFieldID()
 			if h.EnableJSONKeyStatsIndex() {
-				if _, ok := loadFieldMap[field.FieldID]; ok {
-					if _, ok := jsonStatsFieldMap[field.FieldID]; !ok {
-						result = append(result, field.FieldID)
+				if _, ok := loadFieldMap[fieldID]; ok {
+					if info, ok := segment.JSONStatsField[fieldID]; !ok || info.GetDataFormatVersion() < common.JSONStatsDataFormatVersion {
+						result = append(result, fieldID)
 					}
 				}
 			}
@@ -289,4 +318,15 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	t.SetPriority(task.TaskPriorityLow)
 	t.SetReason("missing json stats")
 	return t, true
+}
+
+func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, segment *meta.Segment, indexIDs []int64) task.Task {
+	if len(indexIDs) == 0 {
+		return nil
+	}
+	action := task.NewDropIndexAction(segment.Node, task.ActionTypeDropIndex, segment.GetInsertChannel(), indexIDs)
+	t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, segment.GetID(), action)
+	t.SetPriority(task.TaskPriorityLow)
+	t.SetReason("drop index")
+	return t
 }

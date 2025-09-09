@@ -27,10 +27,11 @@ const prometheus::Histogram::BucketBoundaries cgoCallDurationbuckets = {
 // One histogram per function name (label)
 static inline prometheus::Histogram&
 GetHistogram(std::string&& func) {
-    static auto& hist_family = prometheus::BuildHistogram()
-                                   .Name("milvus_cgocall_duration_seconds")
-                                   .Help("Duration of cgo-exposed functions")
-                                   .Register(prometheusClient->GetRegistry());
+    static auto& hist_family =
+        prometheus::BuildHistogram()
+            .Name("milvus_cgocall_duration_seconds")
+            .Help("Duration of cgo-exposed functions")
+            .Register(getPrometheusClient().GetRegistry());
 
     // default buckets: [0.005, 0.01, ..., 1.0]
     return hist_family.Add({{"func", func}}, cgoCallDurationbuckets);

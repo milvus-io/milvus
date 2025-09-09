@@ -46,6 +46,9 @@ void
 SegcoreSetRefineRatio(const float);
 
 void
+SegcoreSetIndexBuildRatio(const float);
+
+void
 SegcoreInterminDenseIndexType(const char*);
 
 CStatus
@@ -66,6 +69,9 @@ SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads);
 
 void
 SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads);
+
+void
+SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads);
 
 void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
@@ -107,7 +113,7 @@ ConfigureTieredStorage(
     const int64_t eviction_interval_ms,
     const int64_t cache_cell_unaccessed_survival_time,
     const float overloaded_memory_threshold_percentage,
-    const float loading_memory_factor,
+    const float loading_resource_factor,
     const float max_disk_usage_percentage,
     const char* disk_path);
 

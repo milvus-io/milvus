@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -354,12 +355,9 @@ func WrapErrServiceUnavailable(reason string, msg ...string) error {
 }
 
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
-	toMB := func(mem float32) float32 {
-		return mem / 1024 / 1024
-	}
 	err := wrapFields(ErrServiceMemoryLimitExceeded,
-		value("predict(MB)", toMB(predict)),
-		value("limit(MB)", toMB(limit)),
+		value("predict(MB)", logutil.ToMB(float64(predict))),
+		value("limit(MB)", logutil.ToMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -397,12 +395,9 @@ func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, ms
 }
 
 func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
-	toMB := func(mem float32) float32 {
-		return mem / 1024 / 1024
-	}
 	err := wrapFields(ErrServiceDiskLimitExceeded,
-		value("predict(MB)", toMB(predict)),
-		value("limit(MB)", toMB(limit)),
+		value("predict(MB)", logutil.ToMB(float64(predict))),
+		value("limit(MB)", logutil.ToMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))

@@ -30,11 +30,14 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -53,8 +56,9 @@ type CompositeBinlogRecordReader struct {
 	schema      *schemapb.CollectionSchema
 	index       map[FieldID]int16
 
-	brs []*BinlogReader
-	rrs []array.RecordReader
+	brs    []*BinlogReader
+	bropts []BinlogReaderOption
+	rrs    []array.RecordReader
 }
 
 func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
@@ -87,7 +91,7 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 	crr.brs = make([]*BinlogReader, fieldNum)
 
 	for _, b := range blobs {
-		reader, err := NewBinlogReader(b.Value)
+		reader, err := NewBinlogReader(b.Value, crr.bropts...)
 		if err != nil {
 			return err
 		}
@@ -253,7 +257,7 @@ func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 	}
 }
 
-func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*CompositeBinlogRecordReader, error) {
+func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader, opts ...BinlogReaderOption) (*CompositeBinlogRecordReader, error) {
 	idx := 0
 	index := make(map[FieldID]int16)
 	for _, f := range schema.Fields {
@@ -266,10 +270,12 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 			idx++
 		}
 	}
+
 	return &CompositeBinlogRecordReader{
 		schema:      schema,
 		BlobsReader: blobsReader,
 		index:       index,
+		bropts:      opts,
 	}, nil
 }
 
@@ -314,7 +320,18 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					m[j] = nil
 				}
 			} else {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i, shouldCopy)
+				// Get element type and dim for ArrayOfVector, otherwise use defaults
+				elementType := schemapb.DataType_None
+				dim := 0
+				if typeutil.IsVectorType(dt) {
+					dimValue, _ := typeutil.GetDim(f)
+					dim = int(dimValue)
+				}
+				if dt == schemapb.DataType_ArrayOfVector {
+					elementType = f.GetElementType()
+				}
+
+				d, ok := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
 				if ok {
 					m[j] = d // TODO: avoid memory copy here.
 				} else {
@@ -382,14 +399,46 @@ func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog
 	}), nil
 }
 
+type HeaderExtraWriterOption func(header *descriptorEvent)
+
+func WithEncryptionKey(ezID int64, edek []byte) HeaderExtraWriterOption {
+	return func(header *descriptorEvent) {
+		header.AddExtra(edekKey, string(edek))
+		header.AddExtra(ezIDKey, ezID)
+	}
+}
+
+type StreamWriterOption func(*BinlogStreamWriter)
+
+func WithEncryptor(encryptor hook.Encryptor) StreamWriterOption {
+	return func(w *BinlogStreamWriter) {
+		w.encryptor = encryptor
+	}
+}
+
+func WithHeaderExtraOptions(headerOpt HeaderExtraWriterOption) StreamWriterOption {
+	return func(w *BinlogStreamWriter) {
+		w.headerOpt = headerOpt
+	}
+}
+
+func GetEncryptionOptions(ezID int64, edek []byte, encryptor hook.Encryptor) []StreamWriterOption {
+	return []StreamWriterOption{
+		WithEncryptor(encryptor),
+		WithHeaderExtraOptions(WithEncryptionKey(ezID, edek)),
+	}
+}
+
 type BinlogStreamWriter struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentID    UniqueID
 	fieldSchema  *schemapb.FieldSchema
 
-	buf bytes.Buffer
-	rw  *singleFieldRecordWriter
+	buf       bytes.Buffer
+	rw        *singleFieldRecordWriter
+	headerOpt HeaderExtraWriterOption
+	encryptor hook.Encryptor
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -415,9 +464,55 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 	if err := bsw.writeBinlogHeaders(&b); err != nil {
 		return nil, err
 	}
-	if _, err := b.Write(bsw.buf.Bytes()); err != nil {
+
+	// Everything but descryptor event is encrypted
+	tmpBuf := &b
+	if bsw.encryptor != nil {
+		tmpBuf = &bytes.Buffer{}
+	}
+
+	eh := newEventHeader(InsertEventType)
+
+	ev := newInsertEventData()
+	ev.StartTimestamp = 1
+	ev.EndTimestamp = 1
+	eh.EventLength = int32(bsw.buf.Len()) + eh.GetMemoryUsageInBytes() + int32(binary.Size(ev))
+	// eh.NextPosition = eh.EventLength + w.Offset()
+
+	// Write event header
+	if err := eh.Write(tmpBuf); err != nil {
 		return nil, err
 	}
+
+	// Write event data, which ic startTs and endTs for insert event data
+	if err := ev.WriteEventData(tmpBuf); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(tmpBuf, common.Endian, bsw.buf.Bytes()); err != nil {
+		return nil, err
+	}
+
+	// tmpBuf could be "b" or new "tmpBuf"
+	// if encryptor is not nil, tmpBuf is new tmpBuf, which need to be written into
+	// b after encryption
+	if bsw.encryptor != nil {
+		cipherText, err := bsw.encryptor.Encrypt(tmpBuf.Bytes())
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("Binlog stream writer encrypted cipher text",
+			zap.Int64("collectionID", bsw.collectionID),
+			zap.Int64("segmentID", bsw.segmentID),
+			zap.Int64("fieldID", bsw.fieldSchema.FieldID),
+			zap.Int("plain size", tmpBuf.Len()),
+			zap.Int("cipher size", len(cipherText)),
+		)
+		if err := binary.Write(&b, common.Endian, cipherText); err != nil {
+			return nil, err
+		}
+	}
+
 	return &Blob{
 		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
 		Value:      b.Bytes(),
@@ -437,21 +532,11 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
+	// Additional head options
+	if bsw.headerOpt != nil {
+		bsw.headerOpt(de)
+	}
 	if err := de.Write(w); err != nil {
-		return err
-	}
-	// Write event header
-	eh := newEventHeader(InsertEventType)
-	// Write event data
-	ev := newInsertEventData()
-	ev.StartTimestamp = 1
-	ev.EndTimestamp = 1
-	eh.EventLength = int32(bsw.buf.Len()) + eh.GetMemoryUsageInBytes() + int32(binary.Size(ev))
-	// eh.NextPosition = eh.EventLength + w.Offset()
-	if err := eh.Write(w); err != nil {
-		return err
-	}
-	if err := ev.WriteEventData(w); err != nil {
 		return err
 	}
 	return nil
@@ -470,16 +555,25 @@ func newBinlogWriter(collectionID, partitionID, segmentID UniqueID,
 
 func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 	schema *schemapb.CollectionSchema,
+	writerOptions ...StreamWriterOption,
 ) map[FieldID]*BinlogStreamWriter {
 	bws := make(map[FieldID]*BinlogStreamWriter)
 
 	for _, f := range schema.Fields {
-		bws[f.FieldID] = newBinlogWriter(collectionID, partitionID, segmentID, f)
+		writer := newBinlogWriter(collectionID, partitionID, segmentID, f)
+		for _, writerOption := range writerOptions {
+			writerOption(writer)
+		}
+		bws[f.FieldID] = writer
 	}
 
 	for _, structField := range schema.StructArrayFields {
 		for _, subField := range structField.Fields {
-			bws[subField.FieldID] = newBinlogWriter(collectionID, partitionID, segmentID, subField)
+			writer := newBinlogWriter(collectionID, partitionID, segmentID, subField)
+			for _, writerOption := range writerOptions {
+				writerOption(writer)
+			}
+			bws[subField.FieldID] = writer
 		}
 	}
 
@@ -494,9 +588,18 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
 	for _, f := range allFieldsSchema {
 		dim, _ := typeutil.GetDim(f)
-		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
+
+		elementType := schemapb.DataType_None
+		if f.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = f.GetElementType()
+			elementTypes[f.FieldID] = elementType
+		}
+
+		arrowType := serdeMap[f.DataType].arrowType(int(dim), elementType)
+		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
 		types[f.FieldID] = f.DataType
 	}
@@ -509,7 +612,14 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 			if !ok {
 				panic("unknown type")
 			}
-			ok = typeEntry.serialize(builders[fid], e)
+
+			// Get element type for ArrayOfVector, otherwise use None
+			elementType := schemapb.DataType_None
+			if types[fid] == schemapb.DataType_ArrayOfVector {
+				elementType = elementTypes[fid]
+			}
+
+			ok = typeEntry.serialize(builders[fid], e, elementType)
 			if !ok {
 				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
 			}
@@ -570,6 +680,7 @@ type CompositeBinlogRecordWriter struct {
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
 
 	flushedUncompressed uint64
+	options             []StreamWriterOption
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -631,7 +742,7 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 
 func (c *CompositeBinlogRecordWriter) initWriters() error {
 	if c.rw == nil {
-		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema)
+		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema, c.options...)
 		rws := make(map[FieldID]RecordWriter, len(c.fieldWriters))
 		for fid, w := range c.fieldWriters {
 			rw, err := w.GetRecordWriter()
@@ -837,6 +948,7 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
+	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -869,6 +981,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		maxRowNum:    maxRowNum,
 		pkstats:      stats,
 		bm25Stats:    bm25Stats,
+		options:      options,
 	}, nil
 }
 
@@ -1166,7 +1279,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
-			Type:     serdeMap[dsw.pkType].arrowType(0),
+			Type:     serdeMap[dsw.pkType].arrowType(0, schemapb.DataType_None),
 			Nullable: false,
 		},
 		{
@@ -1243,7 +1356,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 		fields := []arrow.Field{
 			{
 				Name:     "pk",
-				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0),
+				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0, schemapb.DataType_None),
 				Nullable: false,
 			},
 			{

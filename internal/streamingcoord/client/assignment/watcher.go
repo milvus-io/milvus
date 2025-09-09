@@ -30,6 +30,18 @@ type watcher struct {
 	lastVersionedAssignment types.VersionedStreamingNodeAssignments
 }
 
+func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error) {
+	w.cond.L.Lock()
+	for w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1 {
+		if err := w.cond.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	last := w.lastVersionedAssignment
+	w.cond.L.Unlock()
+	return &last, nil
+}
+
 // AssignmentDiscover watches the assignment discovery.
 func (w *watcher) AssignmentDiscover(ctx context.Context, cb func(*types.VersionedStreamingNodeAssignments) error) error {
 	w.cond.L.Lock()

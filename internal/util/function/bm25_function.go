@@ -27,8 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -46,7 +46,7 @@ type BM25FunctionRunner struct {
 	mu     sync.RWMutex
 	closed bool
 
-	tokenizer   tokenizerapi.Tokenizer
+	tokenizer   analyzer.Analyzer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	inputField  *schemapb.FieldSchema
@@ -88,7 +88,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	params = getAnalyzerParams(inputField)
-	tokenizer, err := ctokenizer.NewTokenizer(params)
+	tokenizer, err := analyzer.NewAnalyzer(params)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +110,9 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 	defer tokenizer.Destroy()
 
 	for i := 0; i < len(data); i++ {
+		if !typeutil.IsUTF8(data[i]) {
+			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", data[i])
+		}
 		embeddingMap := map[uint32]float32{}
 		tokenStream := tokenizer.NewTokenStream(data[i])
 		defer tokenStream.Destroy()

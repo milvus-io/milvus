@@ -93,6 +93,21 @@ AssembleGroupByValues(
                 }
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                auto field_data =
+                    group_by_values_field->mutable_timestamptz_data();
+                field_data->mutable_data()->Resize(group_by_val_size, 0);
+                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                    if (group_by_vals[idx].has_value()) {
+                        int64_t val =
+                            std::get<int64_t>(group_by_vals[idx].value());
+                        field_data->mutable_data()->Set(idx, val);
+                    } else {
+                        valid_data->Set(idx, false);
+                    }
+                }
+                break;
+            }
             case DataType::BOOL: {
                 auto field_data = group_by_values_field->mutable_bool_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);

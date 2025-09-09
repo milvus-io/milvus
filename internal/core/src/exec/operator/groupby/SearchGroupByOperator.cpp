@@ -97,6 +97,21 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                                           topk_per_nq_prefix_sum);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            auto dataGetter =
+                GetDataGetter<int64_t>(segment, group_by_field_id);
+            GroupIteratorsByType<int64_t>(iterators,
+                                          search_info.topk_,
+                                          search_info.group_size_,
+                                          search_info.strict_group_size_,
+                                          *dataGetter,
+                                          group_by_values,
+                                          seg_offsets,
+                                          distances,
+                                          search_info.metric_type_,
+                                          topk_per_nq_prefix_sum);
+            break;
+        }
         case DataType::BOOL: {
             auto dataGetter = GetDataGetter<bool>(segment, group_by_field_id);
             GroupIteratorsByType<bool>(iterators,

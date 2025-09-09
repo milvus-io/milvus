@@ -208,6 +208,23 @@ func (c *ColumnDouble) Slice(start, end int) Column {
 	}
 }
 
+/* Timestamptz */
+var _ Column = (*ColumnTimestamptz)(nil)
+
+type ColumnTimestamptz struct {
+	*genericColumnBase[int64]
+}
+
+func NewColumnTimestamptz(name string, values []int64) *ColumnTimestamptz {
+	return &ColumnTimestamptz{
+		genericColumnBase: &genericColumnBase[int64]{
+			name:      name,
+			fieldType: entity.FieldTypeTimestamptz,
+			values:    values,
+		},
+	}
+}
+
 /* Varchar */
 
 var _ (Column) = (*ColumnVarChar)(nil)

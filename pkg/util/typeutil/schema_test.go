@@ -3078,7 +3078,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Check results
@@ -3141,7 +3141,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1 (second vector)
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Check results
@@ -3180,7 +3180,7 @@ func TestUpdateFieldData(t *testing.T) {
 		updateData := []*schemapb.FieldData{}
 
 		// Update should succeed but change nothing
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Data should remain unchanged
@@ -3193,7 +3193,7 @@ func TestUpdateFieldData(t *testing.T) {
 				Type:      schemapb.DataType_Int64,
 				FieldName: Int64FieldName,
 				FieldId:   Int64FieldID,
-				ValidData: []bool{true, true, false, true},
+				ValidData: []bool{true, true, true, true},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
@@ -3216,7 +3216,7 @@ func TestUpdateFieldData(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{
-								Data: []int64{10, 20, 30, 40},
+								Data: []int64{30},
 							},
 						},
 					},
@@ -3225,9 +3225,9 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Update index 1
-		err := UpdateFieldData(baseData, updateData, 1)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
-		err = UpdateFieldData(baseData, updateData, 2)
+		err = UpdateFieldData(baseData, updateData, 2, 2)
 		require.NoError(t, err)
 
 		// Check that ValidData was updated
@@ -3283,7 +3283,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating first row
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.NoError(t, err)
 
 		// Verify first row was correctly merged
@@ -3298,7 +3298,7 @@ func TestUpdateFieldData(t *testing.T) {
 		assert.Equal(t, "new_value", result["key5"])  // New value
 
 		// Test updating second row
-		err = UpdateFieldData(baseData, updateData, 1)
+		err = UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 
 		// Verify second row was correctly merged
@@ -3356,7 +3356,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.NoError(t, err)
 
 		// For non-dynamic fields, the update should completely replace the old value
@@ -3407,7 +3407,7 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 
 		// Test updating with invalid base JSON
-		err := UpdateFieldData(baseData, updateData, 0)
+		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to unmarshal base json")
 
@@ -3416,8 +3416,206 @@ func TestUpdateFieldData(t *testing.T) {
 		updateData[0].GetScalars().GetJsonData().Data[0] = []byte(`invalid json`)
 
 		// Test updating with invalid update JSON
-		err = UpdateFieldData(baseData, updateData, 0)
+		err = UpdateFieldData(baseData, updateData, 0, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to unmarshal update json")
+	})
+
+	t.Run("nullable field with valid data index mapping", func(t *testing.T) {
+		// Test the new logic for nullable fields where updateIdx needs to be mapped to actual data index
+		// Scenario: data=[1,2,3], valid_data=[true, false, true]
+		// updateIdx=1 should map to data index 0 (first valid data), updateIdx=2 should map to data index 1 (second valid data)
+
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "nullable_int_field",
+				FieldId:   1,
+				ValidData: []bool{true, true, true}, // All base data is valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{100, 200, 300},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "nullable_int_field",
+				FieldId:   1,
+				ValidData: []bool{true, false, true}, // Only indices 0 and 2 are valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{999, 888, 777}, // Only indices 0 and 2 will be used
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating at index 1 (which maps to data index 0 due to valid_data[1] = false)
+		err := UpdateFieldData(baseData, updateData, 0, 1)
+		require.NoError(t, err)
+
+		// Since valid_data[1] = false, no data should be updated
+		assert.Equal(t, int64(100), baseData[0].GetScalars().GetLongData().Data[0])
+		assert.Equal(t, false, baseData[0].ValidData[0])
+
+		// Test updating at index 2 (which maps to data index 1 due to valid_data[2] = true)
+		err = UpdateFieldData(baseData, updateData, 1, 2)
+		require.NoError(t, err)
+
+		// Index 2 maps to data index 1 because valid_data[0] = true, valid_data[1] = false
+		// So updateFieldIdx = 0 + 1 = 1, which means we use data[1] = 888
+		assert.Equal(t, int64(888), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, true, baseData[0].ValidData[1])
+	})
+
+	t.Run("nullable field with complex valid data pattern", func(t *testing.T) {
+		// Test more complex pattern: data=[1,2,3,4,5], valid_data=[false, true, false, true, false]
+		// This tests the index mapping logic more thoroughly
+
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Float,
+				FieldName: "complex_nullable_field",
+				FieldId:   2,
+				ValidData: []bool{true, true, true, true, true},
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Float,
+				FieldName: "complex_nullable_field",
+				FieldId:   2,
+				ValidData: []bool{false, true, false, true, false}, // Only indices 1 and 3 are valid
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: []float32{999.9, 888.8},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Test updating at index 1 (valid_data[1] = true, so data[1] = 999.9)
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+		assert.Equal(t, float32(999.9), baseData[0].GetScalars().GetFloatData().Data[1])
+		assert.Equal(t, true, baseData[0].ValidData[0])
+
+		// Test updating at index 3 (valid_data[3] = true, so data[3] = 888.8)
+		err = UpdateFieldData(baseData, updateData, 3, 3)
+		require.NoError(t, err)
+		assert.Equal(t, float32(888.8), baseData[0].GetScalars().GetFloatData().Data[3])
+		assert.Equal(t, true, baseData[0].ValidData[1])
+
+		// Test updating at index 0 (valid_data[0] = false, so no data update, only ValidData update)
+		err = UpdateFieldData(baseData, updateData, 2, 2)
+		require.NoError(t, err)
+		assert.Equal(t, float32(3.3), baseData[0].GetScalars().GetFloatData().Data[2]) // Should remain unchanged
+		assert.Equal(t, false, baseData[0].ValidData[2])
+	})
+}
+
+func TestAppendFieldDataWithNullData(t *testing.T) {
+	// Test data with nullable fields
+	createTestFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, validData []bool) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+			ValidData: validData,
+		}
+
+		switch dataType {
+		case schemapb.DataType_Int32:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data.([]int32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: data.([]float32),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Bool:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: data.([]bool),
+						},
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("TestAppendFieldDataWithNullData_SkipNullValues", func(t *testing.T) {
+		// Case 1: Before validateUtil.fillWithValue - skip null values
+		// Data: [1, null, 2] = [1, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 2, 3}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, true) // skipAppendNullData = true, idx = 0
+
+		// Should append value at index 0 (valid)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
+	})
+
+	t.Run("TestAppendFieldDataWithNullData_IncludeNullValues", func(t *testing.T) {
+		// Case 2: After validateUtil.fillWithValue - include null values with zero values
+		// Data: [1, null, 2] = [1, 0, 2] + [true, false, true]
+		src := []*schemapb.FieldData{
+			createTestFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 0, 2}, []bool{true, false, true}),
+		}
+
+		dst := make([]*schemapb.FieldData, 1)
+		appendSize := AppendFieldDataWithNullData(dst, src, 0, false) // skipAppendNullData = false, idx = 0
+
+		// Should append value at index 0 (including null values)
+		assert.Equal(t, int64(4), appendSize) // 1 int32 value * 4 bytes
+		assert.NotNil(t, dst[0])
+		assert.Equal(t, []int32{1}, dst[0].GetScalars().GetIntData().Data)
+		assert.Equal(t, []bool{true}, dst[0].ValidData)
 	})
 }

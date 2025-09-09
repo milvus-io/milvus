@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
+#include "index/ScalarIndex.h"
 #include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -84,18 +85,24 @@ class SealedDataGetter : public DataGetter<T> {
         int64_t,
         PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
         pw_map_;
+
+    PinWrapper<const index::IndexBase*> index_ptr_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
  public:
     SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id)
         : segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
-        if (!from_data_ && !segment_.HasIndex(field_id_)) {
-            ThrowInfo(
-                UnexpectedError,
-                "The segment:{} used to init data getter has no effective "
-                "data source, neither"
-                "index or data",
-                segment_.get_segment_id());
+        if (!from_data_) {
+            auto index = segment_.PinIndex(field_id_);
+            if (index.empty()) {
+                ThrowInfo(
+                    UnexpectedError,
+                    "The segment:{} used to init data getter has no effective "
+                    "data source, neither"
+                    "index or data",
+                    segment_.get_segment_id());
+            }
+            index_ptr_ = std::move(index[0]);
         }
     }
 
@@ -130,8 +137,10 @@ class SealedDataGetter : public DataGetter<T> {
             }
         } else {
             // null is not supported for indexed fields
-            auto pw = segment_.chunk_scalar_index<T>(field_id_, 0);
-            auto* chunk_index = pw.get();
+            AssertInfo(index_ptr_.get() != nullptr,
+                       "indexed field should have only one index");
+            auto chunk_index =
+                dynamic_cast<const index::ScalarIndex<T>*>(index_ptr_.get());
             auto raw = chunk_index->Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();

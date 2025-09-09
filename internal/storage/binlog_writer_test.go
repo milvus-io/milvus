@@ -21,9 +21,77 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
+
+func TestBinlogReaderWriterCipher(t *testing.T) {
+	hookutil.InitTestCipher()
+
+	encryptor, safeKey, err := hookutil.GetCipher().GetEncryptor(1, 1)
+	require.NoError(t, err)
+	require.NotNil(t, encryptor)
+	cypherOpts := WithWriterEncryptionContext(1, safeKey, encryptor)
+
+	binlogWriter := NewInsertBinlogWriter(schemapb.DataType_Int32, 10, 20, 30, 40, false, cypherOpts)
+	binlogWriter.SetEventTimeStamp(1000, 2000)
+
+	eventWriter, err := binlogWriter.NextInsertEventWriter()
+	require.NoError(t, err)
+	err = eventWriter.AddInt32ToPayload([]int32{1, 2, 3}, nil)
+	assert.NoError(t, err)
+	eventWriter.SetEventTimestamp(1000, 2000)
+	nums, err := binlogWriter.GetRowNums()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 3, nums)
+	sizeTotal := 20000000
+	binlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	err = binlogWriter.Finish()
+	assert.NoError(t, err)
+
+	storedEdek, ok := binlogWriter.descriptorEvent.GetEdek()
+	assert.True(t, ok)
+	assert.EqualValues(t, safeKey, storedEdek)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1, binlogWriter.GetEventNums())
+	nums, err = binlogWriter.GetRowNums()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 3, nums)
+
+	buffer, err := binlogWriter.GetBuffer()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, buffer)
+	binlogWriter.Close()
+
+	// Test reader
+	binlogReader, err := NewBinlogReader(buffer, WithReaderDecryptionContext(1, 1))
+	assert.NoError(t, err)
+
+	log.Info("binlogReader", zap.Any("descriptorEvent", binlogReader.descriptorEvent))
+
+	gotsafeKey, ok := binlogReader.descriptorEvent.GetEdek()
+	assert.True(t, ok)
+	assert.EqualValues(t, safeKey, gotsafeKey)
+
+	eventReader, err := binlogReader.NextEventReader()
+	assert.NoError(t, err)
+	_, _, err = eventReader.GetInt8FromPayload()
+	assert.Error(t, err)
+	payload, _, err := eventReader.GetInt32FromPayload()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 3, len(payload))
+	assert.EqualValues(t, 1, payload[0])
+	assert.EqualValues(t, 2, payload[1])
+	assert.EqualValues(t, 3, payload[2])
+
+	reader, err := binlogReader.NextEventReader()
+	assert.NoError(t, err)
+	assert.Nil(t, reader)
+}
 
 func TestBinlogWriterReader(t *testing.T) {
 	binlogWriter := NewInsertBinlogWriter(schemapb.DataType_Int32, 10, 20, 30, 40, false)

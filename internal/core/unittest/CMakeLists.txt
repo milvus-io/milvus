@@ -11,6 +11,7 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -20,10 +21,17 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
-add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
+add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
+
+# Collect test files from source directories using glob pattern
+file(GLOB_RECURSE SOURCE_TEST_FILES
+    "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
+    "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
+)
 
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
+        ${SOURCE_TEST_FILES}
         init_gtest.cpp
         # test_packed_c.cpp
         # test_arrow_fs_c.cpp
@@ -109,51 +117,46 @@ set(MILVUS_TEST_FILES
         # test_json_flat_index.cpp
         # test_vector_array.cpp
         # test_ngram_query.cpp
-        test_stlsort_index.cpp
+        # test_stlsort_index.cpp
         test_string_index.cpp
         test_string_index_perf.cpp
         test_string_index_benchmark.cpp
         )
 
-if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set(MILVUS_TEST_FILES
-        ${MILVUS_TEST_FILES}
-        test_kmeans_clustering.cpp)
+if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "KmeansClusteringTest\\.cpp$")
 endif()
 
-if ( BUILD_DISK_ANN STREQUAL "ON" )
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757
-            #test_minio_chunk_manager.cpp
-            )
-endif()
+# need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757.
+# now we always remove this file from MILVUS_TEST_FILES thus it is never compiled.
+# once done, compile this test file only if `BUILD_DISK_ANN STREQUAL "ON"`.
+# if ( BUILD_DISK_ANN STREQUAL "OFF" )
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "MinioChunkManagerTest\\.cpp$")
+# endif()
 
-if (LINUX OR APPLE)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_scalar_index_creator.cpp
-            test_string_index.cpp
-            test_array.cpp
-            test_array_expr.cpp)
+# bitset has its own test binary
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "BitsetTest\\.cpp$")
+
+if (NOT (LINUX OR APPLE))
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ScalarIndexCreatorTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "StringIndexTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrayTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ExprArrayTest\\.cpp$")
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)
-    set(MILVUS_TEST_FILES
-                ${MILVUS_TEST_FILES}
-                test_azure_chunk_manager.cpp
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
-                #test_remote_chunk_manager.cpp
-                )
     include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+else()
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "AzureChunkManagerTest\\.cpp$")
 endif()
+# need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
+# once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
 
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
-    set(MILVUS_TEST_FILES
-                ${MILVUS_TEST_FILES}
-                test_gcp_native_chunk_manager.cpp
-                )
+else()
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
 endif()
 
 if (LINUX)
@@ -164,26 +167,6 @@ if (LINUX)
         add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
     endif()
-
-    # check if memory leak exists in index builder
-    set(INDEX_BUILDER_TEST_FILES
-            test_index_wrapper.cpp
-            test_scalar_index_creator.cpp
-            test_index_c_api.cpp
-            )
-
-    add_executable(index_builder_test
-            ${INDEX_BUILDER_TEST_FILES}
-            )
-
-    target_link_libraries(index_builder_test
-            gtest
-            milvus_core
-            knowhere
-            milvus-storage
-            milvus-common
-            )
-    install(TARGETS index_builder_test DESTINATION unittest)
 endif()
 
 add_executable(all_tests
@@ -202,19 +185,7 @@ target_link_libraries(all_tests
 install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
-
-# if (USE_DYNAMIC_SIMD)
-# add_executable(dynamic_simd_test
-#                test_simd.cpp)
-#
-# target_link_libraries(dynamic_simd_test
-#                 milvus_simd
-#                 milvus_log
-#                 gtest
-#                 ${CONAN_LIBS})
-#
-# install(TARGETS dynamic_simd_test DESTINATION unittest)
-# endif()
+add_subdirectory(test_json_stats)
 
 # bitset unit test
 include(CheckCXXCompilerFlag)
@@ -224,14 +195,14 @@ check_cxx_compiler_flag("-march=armv8-a+sve" COMPILER_SUPPORTS_SVE)
 check_include_file_cxx("arm_sve.h" COMPILER_HAS_ARM_SVE_HEADER)
 
 add_executable(bitset_test
-        test_bitset.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/bitset/BitsetTest.cpp
 )
 
 if (COMPILER_SUPPORTS_SVE AND COMPILER_HAS_ARM_SVE_HEADER)
         message(STATUS "SVE support for the bitset library UT is enabled")
         target_compile_definitions(bitset_test PRIVATE BITSET_ENABLE_SVE_SUPPORT=1)
 
-        set_source_files_properties(test_bitset.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+        set_source_files_properties(${CMAKE_HOME_DIRECTORY}/src/bitset/BitsetTest.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
 else()
         message(STATUS "SVE support for the bitset library UT is disabled")
 endif()

@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -706,6 +706,23 @@ func TestValidateName(t *testing.T) {
 	assert.NotNil(t, ValidateObjectName(" "))
 	assert.NotNil(t, ValidateObjectName(string(longName)))
 	assert.Nil(t, ValidateObjectName("*"))
+}
+
+func TestValidateRoleName_HyphenToggle(t *testing.T) {
+	pt := paramtable.Get()
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$-")
+	assert.Nil(t, ValidateRoleName("Admin-1"))
+	assert.Nil(t, ValidateRoleName("_a-bc$1"))
+	assert.NotNil(t, ValidateRoleName("-bad"))
+	assert.NotNil(t, ValidateRoleName("1leading"))
+	assert.NotNil(t, ValidateRoleName(""))
+	assert.NotNil(t, ValidateRoleName("*"))
+
+	pt.ProxyCfg.RoleNameValidationAllowedChars.SwapTempValue("$")
+	assert.Nil(t, ValidateRoleName("Admin_1"))
+	assert.Nil(t, ValidateRoleName("Admin$1"))
+	assert.NotNil(t, ValidateRoleName("Admin-1"))
 }
 
 func TestIsDefaultRole(t *testing.T) {
@@ -2700,7 +2717,7 @@ func TestValidateModelFunction(t *testing.T) {
 				"mock.apikey": "mock",
 			}
 		}
-		ts := function.CreateOpenAIEmbeddingServer()
+		ts := embedding.CreateOpenAIEmbeddingServer()
 		defer ts.Close()
 		paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 			return map[string]string{
@@ -2805,7 +2822,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("Invalid BM25 function input - tokenizer not enabled", func(t *testing.T) {
+	t.Run("Invalid BM25 function input - analyzer not enabled", func(t *testing.T) {
 		function := &schemapb.FunctionSchema{
 			Type: schemapb.FunctionType_BM25,
 		}
@@ -3884,6 +3901,17 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
 	})
 
+	t.Run("JSON not supported in struct", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "json_field",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_JSON,
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "JSON is not supported for fields in struct")
+	})
+
 	t.Run("nested array not supported", func(t *testing.T) {
 		testCases := []struct {
 			elementType schemapb.DataType
@@ -4465,4 +4493,104 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		assert.True(t, foundStruct1, "Should find struct1")
 		assert.True(t, foundStruct2, "Should find struct2")
 	})
+}
+
+func TestLackOfFieldsDataBySchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk_field", IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: true},
+			{FieldID: 101, Name: "required_field", DataType: schemapb.DataType_Float},
+			{FieldID: 102, Name: "nullable_field", DataType: schemapb.DataType_VarChar, Nullable: true},
+			{FieldID: 103, Name: "default_value_field", DataType: schemapb.DataType_JSON, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "{}"}}},
+		},
+	}
+
+	tests := []struct {
+		name             string
+		fieldsData       []*schemapb.FieldData
+		skipPkFieldCheck bool
+		expectErr        bool
+	}{
+		{
+			name: "all required fields present",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "pk_field"},
+				{FieldName: "required_field"},
+				{FieldName: "nullable_field"},
+				{FieldName: "default_value_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        false,
+		},
+		{
+			name: "missing required field",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "pk_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        true,
+		},
+		{
+			name: "missing nullable field is ok",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "pk_field"},
+				{FieldName: "required_field"},
+				{FieldName: "default_value_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        false,
+		},
+		{
+			name: "missing default value field is ok",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "pk_field"},
+				{FieldName: "required_field"},
+				{FieldName: "nullable_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        false,
+		},
+		{
+			name: "missing nullable and default value field is ok",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "pk_field"},
+				{FieldName: "required_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        false,
+		},
+		{
+			name:             "empty fields data",
+			fieldsData:       []*schemapb.FieldData{},
+			skipPkFieldCheck: false,
+			expectErr:        true,
+		},
+		{
+			name: "skip pk check",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "required_field"},
+			},
+			skipPkFieldCheck: true,
+			expectErr:        false,
+		},
+		{
+			name: "missing pk without skip",
+			fieldsData: []*schemapb.FieldData{
+				{FieldName: "required_field"},
+			},
+			skipPkFieldCheck: false,
+			expectErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := LackOfFieldsDataBySchema(schema, tt.fieldsData, tt.skipPkFieldCheck, false)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

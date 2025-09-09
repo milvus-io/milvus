@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -299,6 +301,19 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
+	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	if hookutil.IsClusterEncyptionEnabled() && len(defaultRootKey) > 0 {
+		// Set unique ID as ezID because the default dbID for each cluster
+		// is the same
+		ezID, err := mt.tsoAllocator.GenerateTSO(1)
+		if err != nil {
+			return err
+		}
+
+		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
+		defaultProperties = append(defaultProperties, cipherProps...)
+	}
+
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
 }
 
@@ -320,6 +335,11 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	}
 
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+		return err
+	}
+
+	// Call back cipher plugin when creating database succeeded
+	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
@@ -371,6 +391,11 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	}
 
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
+		return err
+	}
+
+	// Call back cipher plugin when dropping database succeeded
+	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
@@ -1673,8 +1698,8 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 }
 
 func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListPrivilegeGroups(ctx)
 }

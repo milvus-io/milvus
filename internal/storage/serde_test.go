@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -101,17 +102,16 @@ func TestSerDe(t *testing.T) {
 		{"test bfloat16 vector null", args{dt: schemapb.DataType_BFloat16Vector, v: nil}, nil, true},
 		{"test bfloat16 vector negative", args{dt: schemapb.DataType_BFloat16Vector, v: -1}, nil, false},
 		{"test int8 vector", args{dt: schemapb.DataType_Int8Vector, v: []int8{10}}, []int8{10}, true},
-		{"test array of vector", args{dt: schemapb.DataType_ArrayOfVector, v: "{}"}, nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.args.dt
 			v := tt.args.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1))
-			serdeMap[dt].serialize(builder, v)
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None))
+			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
 			// assert.True(t, ok)
 			a := builder.NewArray()
-			got, got1 := serdeMap[dt].deserialize(a, 0, false)
+			got, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
@@ -140,20 +140,20 @@ func TestSerDeCopy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.dt
 			v := tt.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1))
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None))
 			defer builder.Release()
-			serdeMap[dt].serialize(builder, v)
+			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
 			a := builder.NewArray()
 
 			// Test deserialize with shouldCopy parameter
-			copy, got1 := serdeMap[dt].deserialize(a, 0, true)
+			copy, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
 			if !got1 {
 				t.Errorf("deserialize() failed for %s", tt.name)
 			}
 			if !reflect.DeepEqual(copy, tt.v) {
 				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
 			}
-			ref, _ := serdeMap[dt].deserialize(a, 0, false)
+			ref, _ := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
 			// check the unsafe pointers of copy and ref are different
 			switch v := copy.(type) {
 			case []byte:
@@ -265,4 +265,193 @@ func TestCalculateArraySize(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestArrayOfVectorArrowType(t *testing.T) {
+	tests := []struct {
+		name          string
+		elementType   schemapb.DataType
+		expectedChild arrow.DataType
+	}{
+		{
+			name:          "FloatVector",
+			elementType:   schemapb.DataType_FloatVector,
+			expectedChild: arrow.PrimitiveTypes.Float32,
+		},
+		{
+			name:          "BinaryVector",
+			elementType:   schemapb.DataType_BinaryVector,
+			expectedChild: arrow.PrimitiveTypes.Uint8,
+		},
+		{
+			name:          "Float16Vector",
+			elementType:   schemapb.DataType_Float16Vector,
+			expectedChild: arrow.PrimitiveTypes.Uint8,
+		},
+		{
+			name:          "BFloat16Vector",
+			elementType:   schemapb.DataType_BFloat16Vector,
+			expectedChild: arrow.PrimitiveTypes.Uint8,
+		},
+		{
+			name:          "Int8Vector",
+			elementType:   schemapb.DataType_Int8Vector,
+			expectedChild: arrow.PrimitiveTypes.Int8,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arrowType := getArrayOfVectorArrowType(tt.elementType)
+			assert.NotNil(t, arrowType)
+
+			listType, ok := arrowType.(*arrow.ListType)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedChild, listType.Elem())
+		})
+	}
+}
+
+func TestArrayOfVectorSerialization(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+		vectors     []*schemapb.VectorField
+	}{
+		{
+			name:        "FloatVector array",
+			elementType: schemapb.DataType_FloatVector,
+			dim:         4,
+			vectors: []*schemapb.VectorField{
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{1.0, 2.0, 3.0, 4.0},
+						},
+					},
+				},
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+
+			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			assert.NotNil(t, arrowType)
+
+			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+			defer builder.Release()
+
+			for _, vector := range tt.vectors {
+				ok := entry.serialize(builder, vector, tt.elementType)
+				assert.True(t, ok)
+			}
+
+			arr := builder.NewArray()
+			defer arr.Release()
+
+			for i, expectedVector := range tt.vectors {
+				result, ok := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
+				assert.True(t, ok)
+
+				if expectedVector == nil {
+					assert.Nil(t, result)
+				} else {
+					resultVector, ok := result.(*schemapb.VectorField)
+					assert.True(t, ok)
+					assert.NotNil(t, resultVector)
+
+					assert.Equal(t, expectedVector.GetDim(), resultVector.GetDim())
+
+					if tt.elementType == schemapb.DataType_FloatVector {
+						expectedData := expectedVector.GetFloatVector().GetData()
+						resultData := resultVector.GetFloatVector().GetData()
+						assert.Equal(t, expectedData, resultData)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestArrayOfVectorIntegration(t *testing.T) {
+	// Test the full integration with BuildRecord
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     100,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	// Create insert data
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Data: []*schemapb.VectorField{
+					{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1.0, 2.0, 3.0, 4.0},
+							},
+						},
+					},
+					{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema)
+	assert.NoError(t, err)
+	assert.NotNil(t, arrowSchema)
+
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	err = BuildRecord(recordBuilder, insertData, schema)
+	assert.NoError(t, err)
+
+	record := recordBuilder.NewRecord()
+	defer record.Release()
+
+	assert.Equal(t, int64(2), record.NumRows())
+	assert.Equal(t, int64(1), record.NumCols())
+
+	field := arrowSchema.Field(0)
+	assert.True(t, field.HasMetadata())
+
+	elementTypeStr, ok := field.Metadata.GetValue("elementType")
+	assert.True(t, ok)
+	assert.Equal(t, "101", elementTypeStr) // FloatVector = 101
+
+	dimStr, ok := field.Metadata.GetValue("dim")
+	assert.True(t, ok)
+	assert.Equal(t, "4", dimStr)
 }

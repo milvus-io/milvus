@@ -57,12 +57,13 @@ DiskFileManagerImpl::DiskFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    plugin_context_ = fileManagerContext.plugin_context;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
     RemoveIndexFiles();
     RemoveTextLogFiles();
-    RemoveJsonKeyIndexFiles();
+    RemoveJsonStatsFiles();
     RemoveNgramIndexFiles();
 }
 
@@ -93,10 +94,21 @@ DiskFileManagerImpl::GetRemoteTextLogPath(const std::string& file_name,
 }
 
 std::string
-DiskFileManagerImpl::GetRemoteJsonKeyIndexPath(const std::string& file_name,
-                                               int64_t slice_num) {
-    auto remote_prefix = GetRemoteJsonKeyLogPrefix();
-    return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
+DiskFileManagerImpl::GetRemoteJsonStatsSharedIndexPath(
+    const std::string& file_name, int64_t slice_num) {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetRemoteJsonStatsLogPrefix();
+    fs::path suffix = JSON_STATS_SHARED_INDEX_PATH;
+    fs::path file = file_name + "_" + std::to_string(slice_num);
+    return (prefix / suffix / file).string();
+}
+
+std::string
+DiskFileManagerImpl::GetRemoteJsonStatsShreddingPrefix() {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetRemoteJsonStatsLogPrefix();
+    fs::path suffix = JSON_STATS_SHREDDING_DATA_PATH;
+    return (prefix / suffix).string();
 }
 
 bool
@@ -204,10 +216,10 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
 }
 
 bool
-DiskFileManagerImpl::AddJsonKeyIndexLog(const std::string& file) noexcept {
+DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
     return AddFileInternal(
         file, [this](const std::string& file_name, int slice_num) {
-            return GetRemoteJsonKeyIndexPath(file_name, slice_num);
+            return GetRemoteJsonStatsSharedIndexPath(file_name, slice_num);
         });
 }
 
@@ -265,7 +277,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                        remote_file_sizes,
                        remote_files,
                        field_meta_,
-                       index_meta_);
+                       index_meta_,
+                       plugin_context_);
     for (auto& re : res) {
         remote_paths_to_size_[re.first] = re.second;
     }
@@ -312,7 +325,9 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
-            auto file_writer = storage::FileWriter(local_index_file_name);
+            auto file_writer = storage::FileWriter(
+                local_index_file_name,
+                storage::io::GetPriorityFromLoadPriority(priority));
             auto appendIndexFiles = [&]() {
                 auto index_chunks_futures =
                     GetObjectData(rcm_.get(),
@@ -361,19 +376,19 @@ DiskFileManagerImpl::CacheTextLogToDisk(
 }
 
 void
-DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
-    const std::vector<std::string>& remote_files,
-    milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        remote_files, GetLocalJsonKeyIndexPrefix(), priority);
-}
-
-void
 DiskFileManagerImpl::CacheNgramIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files, GetLocalNgramIndexPrefix(), priority);
+}
+
+void
+DiskFileManagerImpl::CacheJsonStatsSharedIndexToDisk(
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
+    return CacheIndexToDiskInternal(
+        remote_files, GetLocalJsonStatsSharedIndexPrefix(), priority);
 }
 
 template <typename DataType>
@@ -474,7 +489,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                                   GetFieldDataMeta().segment_id,
                                   GetFieldDataMeta().field_id) +
                               "raw_data";
-            if (dt == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+            if (dt == milvus::DataType::VECTOR_SPARSE_U32_F32) {
                 local_data_path += ".sparse_u32_f32";
             }
             local_chunk_manager->CreateFile(local_data_path);
@@ -482,13 +497,13 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         init_file_info(data_type);
         file_created = true;
     }
-    if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type == milvus::DataType::VECTOR_SPARSE_U32_F32) {
         dim =
             (uint32_t)(std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
                            field_data)
                            ->Dim());
         auto sparse_rows =
-            static_cast<const knowhere::sparse::SparseRow<float>*>(
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
         for (size_t i = 0; i < field_data->Length(); ++i) {
             auto row = sparse_rows[i];
@@ -519,7 +534,11 @@ template <typename T>
 std::string
 DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
+    auto element_type =
+        index::GetValueFromConfig<DataType>(config, ELEMENT_TYPE_KEY);
     AssertInfo(data_type.has_value(), "data type is empty when build index");
+    AssertInfo(element_type.has_value(),
+               "element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
@@ -545,6 +564,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto field_datas = GetFieldDatasFromStorageV2(all_remote_files,
                                                   GetFieldDataMeta().field_id,
                                                   data_type.value(),
+                                                  element_type.value(),
                                                   dim,
                                                   fs_);
     for (auto& field_data : field_datas) {
@@ -583,10 +603,10 @@ DiskFileManagerImpl::RemoveTextLogFiles() {
 }
 
 void
-DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
+DiskFileManagerImpl::RemoveJsonStatsFiles() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+    local_chunk_manager->RemoveDir(GetLocalJsonStatsPrefix());
 }
 
 void
@@ -618,9 +638,11 @@ WriteOptFieldIvfDataImpl(
 
     // Do not write to disk if there is only one value
     if (mp.size() <= 1) {
+        LOG_INFO("There are only one category, skip caching to local disk");
         return false;
     }
 
+    LOG_INFO("Get opt fields with {} categories", mp.size());
     local_chunk_manager->Write(local_data_path,
                                write_offset,
                                const_cast<int64_t*>(&field_id),
@@ -710,7 +732,31 @@ WriteOptFieldsIvfMeta(
 }
 
 std::string
-DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
+DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return "";
+    }
+
+    std::vector<std::vector<std::string>> remote_files_storage_v2;
+    if (storage_version == STORAGE_V2) {
+        auto segment_insert_files =
+            index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+                config, SEGMENT_INSERT_FILES_KEY);
+        AssertInfo(segment_insert_files.has_value(),
+                   "segment insert files is empty when build index while "
+                   "caching opt fields");
+        remote_files_storage_v2 = segment_insert_files.value();
+        for (auto& remote_files : remote_files_storage_v2) {
+            SortByPath(remote_files);
+        }
+    }
+
+    auto fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
@@ -735,15 +781,27 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
-        auto& field_paths = std::get<2>(tup);
-        if (0 == field_paths.size()) {
-            LOG_WARN("optional field {} has no data", field_id);
-            return "";
-        }
+        const auto& element_type = std::get<2>(tup);
 
-        SortByPath(field_paths);
-        std::vector<FieldDataPtr> field_datas =
-            FetchFieldData(rcm_.get(), field_paths);
+        std::vector<FieldDataPtr> field_datas;
+        // fetch scalar data from storage v2
+        if (storage_version == STORAGE_V2) {
+            field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
+                                                     field_id,
+                                                     field_type,
+                                                     element_type,
+                                                     1,
+                                                     fs_);
+        } else {  // original way
+            auto& field_paths = std::get<3>(tup);
+            if (0 == field_paths.size()) {
+                LOG_WARN("optional field {} has no data", field_id);
+                return "";
+            }
+
+            SortByPath(field_paths);
+            field_datas = FetchFieldData(rcm_.get(), field_paths);
+        }
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,
@@ -835,41 +893,58 @@ DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
                               true);
 }
 
-// path to store pre-built index contents downloaded from remote storage
 std::string
-DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
+DiskFileManagerImpl::GetLocalJsonStatsPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenJsonKeyIndexPathPrefix(local_chunk_manager,
-                                     index_meta_.build_id,
-                                     index_meta_.index_version,
-                                     field_meta_.segment_id,
-                                     field_meta_.field_id,
-                                     false);
-}
-
-// temporary path used during index building
-std::string
-DiskFileManagerImpl::GetLocalTempJsonKeyIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenJsonKeyIndexPathPrefix(local_chunk_manager,
-                                     index_meta_.build_id,
-                                     index_meta_.index_version,
-                                     field_meta_.segment_id,
-                                     field_meta_.field_id,
-                                     true);
+    return GenJsonStatsPathPrefix(local_chunk_manager,
+                                  index_meta_.build_id,
+                                  index_meta_.index_version,
+                                  field_meta_.segment_id,
+                                  field_meta_.field_id,
+                                  false);
 }
 
 std::string
-DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
-    return GenRemoteJsonKeyIndexPathPrefix(rcm_,
-                                           index_meta_.build_id,
-                                           index_meta_.index_version,
-                                           field_meta_.collection_id,
-                                           field_meta_.partition_id,
-                                           field_meta_.segment_id,
-                                           field_meta_.field_id);
+DiskFileManagerImpl::GetLocalTempJsonStatsPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenJsonStatsPathPrefix(local_chunk_manager,
+                                  index_meta_.build_id,
+                                  index_meta_.index_version,
+                                  field_meta_.segment_id,
+                                  field_meta_.field_id,
+                                  true);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalJsonStatsShreddingPrefix() {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetLocalJsonStatsPrefix();
+    fs::path suffix = JSON_STATS_SHREDDING_DATA_PATH;
+    return (prefix / suffix).string();
+}
+
+std::string
+DiskFileManagerImpl::GetLocalJsonStatsSharedIndexPrefix() {
+    // make sure the path end with '/'
+    namespace fs = std::filesystem;
+    fs::path prefix = GetLocalJsonStatsPrefix();
+    fs::path suffix = JSON_STATS_SHARED_INDEX_PATH;
+    auto result = (prefix / suffix).string();
+    if (!result.empty() && result.back() != fs::path::preferred_separator) {
+        result += fs::path::preferred_separator;
+    }
+    return result;
+}
+
+std::string
+DiskFileManagerImpl::GetLocalJsonStatsShreddingPath(
+    const std::string& file_name) {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetLocalJsonStatsShreddingPrefix();
+    fs::path file = file_name;
+    return (prefix / file).string();
 }
 
 std::string
@@ -894,6 +969,17 @@ DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
                                field_meta_.segment_id,
                                field_meta_.field_id,
                                true);
+}
+
+std::string
+DiskFileManagerImpl::GetRemoteJsonStatsLogPrefix() {
+    return GenRemoteJsonStatsPathPrefix(rcm_,
+                                        index_meta_.build_id,
+                                        index_meta_.index_version,
+                                        field_meta_.collection_id,
+                                        field_meta_.partition_id,
+                                        field_meta_.segment_id,
+                                        field_meta_.field_id);
 }
 
 std::string
@@ -932,6 +1018,8 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {

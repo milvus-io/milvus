@@ -32,6 +32,7 @@
 #include "simdjson/common_defs.h"
 #include "sys/mman.h"
 #include "common/Types.h"
+#include "cachinglayer/Utils.h"
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
@@ -65,9 +66,12 @@ class Chunk {
         return size_;
     }
 
-    size_t
+    cachinglayer::ResourceUsage
     CellByteSize() const {
-        return size_;
+        if (mmap_file_raii_) {
+            return cachinglayer::ResourceUsage(0, static_cast<int64_t>(size_));
+        }
+        return cachinglayer::ResourceUsage(static_cast<int64_t>(size_), 0);
     }
 
     int64_t
@@ -220,6 +224,40 @@ class StringChunk : public Chunk {
             }
         }
         return result;
+    }
+
+    int
+    lower_bound_string(std::string_view target) {
+        int left = 0;
+        int right = row_nums_;
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = (*this)[mid];
+
+            if (midString < target) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
+    int
+    upper_bound_string(std::string_view target) {
+        int left = 0;
+        int right = row_nums_;
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = (*this)[mid];
+
+            if (midString <= target) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        return left;
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -416,14 +454,42 @@ class VectorArrayChunk : public Chunk {
             data_ptr, dim_, len, next_offset - offset, element_type_);
     }
 
-    std::vector<VectorArrayView>
-    Views() const {
+    std::pair<std::vector<VectorArrayView>, FixedVector<bool>>
+    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
+              std::nullopt) const {
+        auto start_offset = 0;
+        auto len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && start_offset < row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                len > 0 && len <= row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                start_offset + len <= row_nums_,
+                "Retrieve vector array views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+        }
+
         std::vector<VectorArrayView> views;
-        views.reserve(row_nums_);
-        for (int64_t i = 0; i < row_nums_; i++) {
+        views.reserve(len);
+        auto end_offset = start_offset + len;
+        for (int64_t i = start_offset; i < end_offset; i++) {
             views.emplace_back(View(i));
         }
-        return views;
+        // vector array does not support null, so just return {}.
+        return {std::move(views), {}};
     }
 
     const char*
@@ -466,7 +532,8 @@ class SparseFloatVectorChunk : public Chunk {
             reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
         for (int i = 0; i < row_nums; i++) {
             vec_[i] = {(offsets_ptr[i + 1] - offsets_ptr[i]) /
-                           knowhere::sparse::SparseRow<float>::element_size(),
+                           knowhere::sparse::SparseRow<
+                               SparseValueType>::element_size(),
                        reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
                        false};
             dim_ = std::max(dim_, vec_[i].dim());
@@ -485,7 +552,7 @@ class SparseFloatVectorChunk : public Chunk {
     }
 
     // only for test
-    std::vector<knowhere::sparse::SparseRow<float>>&
+    std::vector<knowhere::sparse::SparseRow<SparseValueType>>&
     Vec() {
         return vec_;
     }
@@ -497,6 +564,6 @@ class SparseFloatVectorChunk : public Chunk {
 
  private:
     int64_t dim_ = 0;
-    std::vector<knowhere::sparse::SparseRow<float>> vec_;
+    std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec_;
 };
 }  // namespace milvus

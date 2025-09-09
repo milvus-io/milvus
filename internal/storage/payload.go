@@ -26,7 +26,7 @@ import (
 
 // PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
-	AddDataToPayload(any, []bool) error
+	AddDataToPayloadForUT(any, []bool) error
 	AddBoolToPayload([]bool, []bool) error
 	AddByteToPayload([]byte, []bool) error
 	AddInt8ToPayload([]int8, []bool) error
@@ -35,6 +35,7 @@ type PayloadWriterInterface interface {
 	AddInt64ToPayload([]int64, []bool) error
 	AddFloatToPayload([]float32, []bool) error
 	AddDoubleToPayload([]float64, []bool) error
+	AddTimestamptzToPayload([]int64, []bool) error
 	AddOneStringToPayload(string, bool) error
 	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
 	AddOneJSONToPayload([]byte, bool) error
@@ -44,7 +45,7 @@ type PayloadWriterInterface interface {
 	AddBFloat16VectorToPayload([]byte, int) error
 	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
 	AddInt8VectorToPayload([]int8, int) error
-	AddOneVectorArrayToPayload(*schemapb.VectorField) error
+	AddVectorArrayFieldDataToPayload(*VectorArrayFieldData) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
@@ -64,6 +65,7 @@ type PayloadReaderInterface interface {
 	GetInt64FromPayload() ([]int64, []bool, error)
 	GetFloatFromPayload() ([]float32, []bool, error)
 	GetDoubleFromPayload() ([]float64, []bool, error)
+	GetTimestamptzFromPayload() ([]int64, []bool, error)
 	GetStringFromPayload() ([]string, []bool, error)
 	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
 	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)

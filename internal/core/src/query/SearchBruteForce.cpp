@@ -106,7 +106,7 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         query_dataset->SetRows(query_ds.query_lims[query_ds.num_queries]);
     }
 
-    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
         base_dataset->SetIsSparse(true);
         query_dataset->SetIsSparse(true);
     }
@@ -168,9 +168,9 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         } else if (data_type == DataType::VECTOR_BINARY) {
             res = knowhere::BruteForce::RangeSearch<bin1>(
                 base_dataset, query_dataset, search_cfg, bitset);
-        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             res = knowhere::BruteForce::RangeSearch<
-                knowhere::sparse::SparseRow<float>>(
+                knowhere::sparse::SparseRow<SparseValueType>>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_INT8) {
             res = knowhere::BruteForce::RangeSearch<int8>(
@@ -229,7 +229,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset);
-        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             stat = knowhere::BruteForce::SearchSparseWithBuf(
                 base_dataset,
                 query_dataset,
@@ -279,9 +279,9 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
         case DataType::VECTOR_BFLOAT16:
             return knowhere::BruteForce::AnnIterator<bfloat16>(
                 base_dataset, query_dataset, config, bitset);
-        case DataType::VECTOR_SPARSE_FLOAT:
+        case DataType::VECTOR_SPARSE_U32_F32:
             return knowhere::BruteForce::AnnIterator<
-                knowhere::sparse::SparseRow<float>>(
+                knowhere::sparse::SparseRow<SparseValueType>>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(

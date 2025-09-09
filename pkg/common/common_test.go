@@ -258,3 +258,33 @@ func TestReplicateProperty(t *testing.T) {
 		}
 	})
 }
+
+func TestIsEnableDynamicSchema(t *testing.T) {
+	type testCase struct {
+		tag         string
+		input       []*commonpb.KeyValuePair
+		expectFound bool
+		expectValue bool
+		expectError bool
+	}
+
+	cases := []testCase{
+		{tag: "no_params", expectFound: false},
+		{tag: "dynamicfield_true", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "true"}}, expectFound: true, expectValue: true},
+		{tag: "dynamicfield_false", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "false"}}, expectFound: true, expectValue: false},
+		{tag: "bad_kv_value", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "abc"}}, expectFound: true, expectError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			found, value, err := IsEnableDynamicSchema(tc.input)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tc.expectFound, found)
+			assert.Equal(t, tc.expectValue, value)
+		})
+	}
+}

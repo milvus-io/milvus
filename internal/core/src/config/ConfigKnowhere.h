@@ -35,6 +35,9 @@ KnowhereInitBuildThreadPool(const uint32_t);
 void
 KnowhereInitSearchThreadPool(const uint32_t);
 
+void
+KnowhereInitFetchThreadPool(const uint32_t);
+
 int32_t
 GetMinimalIndexVersion();
 

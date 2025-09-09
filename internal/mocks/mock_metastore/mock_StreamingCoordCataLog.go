@@ -23,6 +23,64 @@ func (_m *MockStreamingCoordCataLog) EXPECT() *MockStreamingCoordCataLog_Expecte
 	return &MockStreamingCoordCataLog_Expecter{mock: &_m.Mock}
 }
 
+// GetCChannel provides a mock function with given fields: ctx
+func (_m *MockStreamingCoordCataLog) GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCChannel")
+	}
+
+	var r0 *streamingpb.CChannelMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*streamingpb.CChannelMeta, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *streamingpb.CChannelMeta); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.CChannelMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingCoordCataLog_GetCChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCChannel'
+type MockStreamingCoordCataLog_GetCChannel_Call struct {
+	*mock.Call
+}
+
+// GetCChannel is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockStreamingCoordCataLog_Expecter) GetCChannel(ctx interface{}) *MockStreamingCoordCataLog_GetCChannel_Call {
+	return &MockStreamingCoordCataLog_GetCChannel_Call{Call: _e.mock.On("GetCChannel", ctx)}
+}
+
+func (_c *MockStreamingCoordCataLog_GetCChannel_Call) Run(run func(ctx context.Context)) *MockStreamingCoordCataLog_GetCChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetCChannel_Call) Return(_a0 *streamingpb.CChannelMeta, _a1 error) *MockStreamingCoordCataLog_GetCChannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetCChannel_Call) RunAndReturn(run func(context.Context) (*streamingpb.CChannelMeta, error)) *MockStreamingCoordCataLog_GetCChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVersion provides a mock function with given fields: ctx
 func (_m *MockStreamingCoordCataLog) GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
 	ret := _m.Called(ctx)
@@ -241,6 +299,53 @@ func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) Return(_a0 error) *M
 }
 
 func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) RunAndReturn(run func(context.Context, uint64, *streamingpb.BroadcastTask) error) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveCChannel provides a mock function with given fields: ctx, info
+func (_m *MockStreamingCoordCataLog) SaveCChannel(ctx context.Context, info *streamingpb.CChannelMeta) error {
+	ret := _m.Called(ctx, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveCChannel")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.CChannelMeta) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingCoordCataLog_SaveCChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCChannel'
+type MockStreamingCoordCataLog_SaveCChannel_Call struct {
+	*mock.Call
+}
+
+// SaveCChannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *streamingpb.CChannelMeta
+func (_e *MockStreamingCoordCataLog_Expecter) SaveCChannel(ctx interface{}, info interface{}) *MockStreamingCoordCataLog_SaveCChannel_Call {
+	return &MockStreamingCoordCataLog_SaveCChannel_Call{Call: _e.mock.On("SaveCChannel", ctx, info)}
+}
+
+func (_c *MockStreamingCoordCataLog_SaveCChannel_Call) Run(run func(ctx context.Context, info *streamingpb.CChannelMeta)) *MockStreamingCoordCataLog_SaveCChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.CChannelMeta))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveCChannel_Call) Return(_a0 error) *MockStreamingCoordCataLog_SaveCChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveCChannel_Call) RunAndReturn(run func(context.Context, *streamingpb.CChannelMeta) error) *MockStreamingCoordCataLog_SaveCChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

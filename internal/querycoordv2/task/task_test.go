@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -142,6 +143,8 @@ func (suite *TaskSuite) TearDownSuite() {
 }
 
 func (suite *TaskSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
+
 	config := GenerateEtcdConfig()
 	suite.ctx = context.Background()
 	cli, err := etcd.GetEtcdClient(
@@ -157,10 +160,10 @@ func (suite *TaskSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
-	suite.dist = meta.NewDistributionManager()
+	suite.nodeMgr = session.NewNodeManager()
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.target = meta.NewTargetManager(suite.broker, suite.meta)
-	suite.nodeMgr = session.NewNodeManager()
 	suite.cluster = session.NewMockCluster(suite.T())
 
 	suite.scheduler = suite.newScheduler()

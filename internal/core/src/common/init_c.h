@@ -43,10 +43,10 @@ void
 SetDefaultExprEvalBatchSize(int64_t val);
 
 void
-SetDefaultOptimizeExprEnable(bool val);
+SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val);
+SetDefaultOptimizeExprEnable(bool val);
 
 void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);
@@ -63,6 +63,13 @@ InitTrace(CTraceConfig* config);
 
 void
 SetTrace(CTraceConfig* config);
+
+// Expr result cache
+void
+SetExprResCacheEnable(bool val);
+
+void
+SetExprResCacheCapacityBytes(int64_t bytes);
 
 #ifdef __cplusplus
 };

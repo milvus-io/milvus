@@ -1381,23 +1381,38 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("AlterCollection")
 
-	log.Ctx(ctx).Info("received request to alter collection",
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()),
+	)
+
+	log.Info("received request to alter collection",
 		zap.Any("props", in.Properties),
 		zap.Any("delete_keys", in.DeleteKeys),
 	)
 
-	t := &alterCollectionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
+	var t task
+	if ok, value, err := common.IsEnableDynamicSchema(in.GetProperties()); ok {
+		if err != nil {
+			log.Warn("failed to check dynamic schema prop kv", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		log.Info("found update dynamic schema prop kv")
+		t = &alterDynamicFieldTask{
+			baseTask:    newBaseTask(ctx, c),
+			Req:         in,
+			targetValue: value,
+		}
+	} else {
+		t = &alterCollectionTask{
+			baseTask: newBaseTask(ctx, c),
+			Req:      in,
+		}
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Warn("failed to enqueue request to alter collection",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()))
+			zap.Error(err))
 
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -1405,9 +1420,7 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to alter collection",
-			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
 			zap.Uint64("ts", t.GetTs()))
 
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
@@ -1416,11 +1429,9 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.GetDurationInQueue().Milliseconds()))
 
 	log.Info("done to alter collection",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetCollectionName()),
 		zap.Uint64("ts", t.GetTs()))
 	return merr.Success(), nil
 }

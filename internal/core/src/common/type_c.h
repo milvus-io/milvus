@@ -93,6 +93,22 @@ typedef struct CStorageConfig {
     bool use_custom_part_upload;
 } CStorageConfig;
 
+typedef struct CDiskWriteRateLimiterConfig {
+    int64_t refill_period_us;
+    int64_t avg_bps;
+    int64_t max_burst_bps;
+    int32_t high_priority_ratio;
+    int32_t middle_priority_ratio;
+    int32_t low_priority_ratio;
+} CDiskWriteRateLimiterConfig;
+
+typedef struct CDiskWriteConfig {
+    const char* mode;
+    uint64_t buffer_size_kb;
+    int nr_threads;
+    CDiskWriteRateLimiterConfig rate_limiter_config;
+} CDiskWriteConfig;
+
 typedef struct CMmapConfig {
     const char* cache_read_ahead_policy;
     const char* mmap_path;
@@ -127,6 +143,18 @@ typedef struct CNewSegmentResult {
     CStatus status;
     CSegmentInterface segmentPtr;
 } CNewSegmentResult;
+
+typedef struct CPluginContext {
+    int64_t ez_id;
+    int64_t collection_id;
+    const char* key;
+} CPluginContext;
+
+typedef struct CResourceUsage {
+    int64_t memory_bytes;
+    int64_t disk_bytes;
+} CResourceUsage;
+
 #ifdef __cplusplus
 }
 

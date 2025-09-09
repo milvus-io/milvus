@@ -41,18 +41,40 @@ InterimSealedIndexTranslator::cell_id_of(
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 InterimSealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    // SCANN reference the raw data and has little meta, thus we ignore its size.
-    if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
-        return milvus::cachinglayer::ResourceUsage{0, 0};
-    }
-    // IVF_FLAT_CC, SPARSE_WAND_CC and SPARSE_INVERTED_INDEX_CC basically has the same size as the
-    // raw data.
-    // TODO(tiered storage 1) cqy123456: provide a better estimation for IVF_SQ_CC once supported.
     auto size = vec_data_->DataByteSize();
-    return milvus::cachinglayer::ResourceUsage{static_cast<int64_t>(size), 0};
+    auto row_count = vec_data_->NumRows();
+    // TODO: hack, move these estimate logic to knowhere
+    // ignore the size of centroids
+    if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
+        auto vec_size = size_t(index::GetValueFromConfig<int>(
+                                   build_config_, knowhere::indexparam::SUB_DIM)
+                                   .value() /
+                               8 * dim_);
+        if (build_config_[knowhere::indexparam::REFINE_TYPE] ==
+            knowhere::RefineType::UINT8_QUANT) {
+            vec_size += dim_ * 1;
+        } else if (build_config_[knowhere::indexparam::REFINE_TYPE] ==
+                       knowhere::RefineType::FLOAT16_QUANT ||
+                   build_config_[knowhere::indexparam::REFINE_TYPE] ==
+                       knowhere::RefineType::BFLOAT16_QUANT) {
+            vec_size += dim_ * 2;
+        }  // else knowhere::RefineType::DATA_VIEW, no extra size
+        return {{vec_size * row_count, 0},
+                {static_cast<int64_t>(vec_size * row_count + size * 0.5), 0}};
+    } else if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+        // fp16/bf16 all use float32 to build index
+        auto fp32_size = row_count * sizeof(float) * dim_;
+        return {{fp32_size, 0},
+                {static_cast<int64_t>(fp32_size + fp32_size * 0.5), 0}};
+    } else {
+        // SPARSE_WAND_CC and SPARSE_INVERTED_INDEX_CC basically has the same size as the
+        // raw data.
+        return {{size, 0}, {static_cast<int64_t>(size * 2.0), 0}};
+    }
 }
 
 const std::string&
@@ -105,7 +127,8 @@ InterimSealedIndexTranslator::get_cells(
                 false);
         }
     } else {
-        vec_index = std::make_unique<index::VectorMemIndex<float>>(
+        // sparse vector case
+        vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
             DataType::NONE,
             index_type_,
             metric_type_,

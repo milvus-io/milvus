@@ -157,6 +157,19 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	return nil
 }
 
+func (s *Server) ServerExist(serverID int64) bool {
+	sessions, _, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
 func (s *Server) registerMetricsRequest() {
 	getSystemInfoAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 		return s.getSystemInfoMetrics(ctx, req)
@@ -406,10 +419,7 @@ func (s *Server) initMeta() error {
 		return err
 	}
 
-	s.dist = &meta.DistributionManager{
-		SegmentDistManager: meta.NewSegmentDistManager(),
-		ChannelDistManager: meta.NewChannelDistManager(),
-	}
+	s.dist = meta.NewDistributionManager(s.nodeMgr)
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
@@ -738,10 +748,6 @@ func (s *Server) handleNodeUp(node int64) {
 	// start dist handler
 	s.distController.StartDistInstance(s.ctx, node)
 
-	if nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
-		// The querynode embedded in the streaming node can not work with streaming node.
-		return
-	}
 	// need assign to new rg and replica
 	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
 
@@ -788,7 +794,8 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second))
+		interval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -800,6 +807,16 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 				success := s.updateBalanceConfig()
 				if success {
 					return
+				}
+				// apply dynamic update only when changed
+				newInterval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+				if newInterval != interval {
+					interval = newInterval
+					select {
+					case <-ticker.C:
+					default:
+					}
+					ticker.Reset(interval)
 				}
 			}
 		}

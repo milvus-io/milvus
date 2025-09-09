@@ -60,6 +60,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		reader, err := storage.NewBinlogRecordReader(ctx,
 			s.GetFieldBinlogs(),
 			plan.GetSchema(),
+			storage.WithCollectionID(collectionID),
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithVersion(s.StorageVersion),
 			storage.WithStorageConfig(compactionParams.StorageConfig),
@@ -105,7 +106,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn("compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate); err != nil {
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate, []int64{pkField.FieldID}); err != nil {
 		writer.Close()
 		return nil, err
 	}

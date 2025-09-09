@@ -93,8 +93,7 @@ VecIndexConfig::GetBuildThreshold() const noexcept {
     if (is_sparse_) {
         return 0;
     }
-    assert(VecIndexConfig::index_build_ratio.count(index_type_));
-    auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
+    auto ratio = config_.get_build_ratio();
     assert(ratio >= 0.0 && ratio < 1.0);
     return std::max(int64_t(max_index_row_count_ * ratio),
                     config_.get_nlist() * 39);

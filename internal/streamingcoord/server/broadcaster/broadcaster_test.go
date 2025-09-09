@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -87,14 +88,14 @@ func TestBroadcaster(t *testing.T) {
 	}, 30*time.Second, 10*time.Millisecond)
 
 	// only task 7 is not done.
-	ack(bc, 7, "v1")
-	ack(bc, 7, "v1") // test already acked, make the idempotent.
+	ack(t, bc, 7, "v1")
+	ack(t, bc, 7, "v1") // test already acked, make the idempotent.
 	assert.Equal(t, len(done.Collect()), 6)
-	ack(bc, 7, "v2")
-	ack(bc, 7, "v2")
+	ack(t, bc, 7, "v2")
+	ack(t, bc, 7, "v2")
 	assert.Equal(t, len(done.Collect()), 6)
-	ack(bc, 7, "v3")
-	ack(bc, 7, "v3")
+	ack(t, bc, 7, "v3")
+	ack(t, bc, 7, "v3")
 	assert.Eventually(t, func() bool {
 		return appended.Load() == 9 && len(done.Collect()) == 7
 	}, 30*time.Second, 10*time.Millisecond)
@@ -121,16 +122,20 @@ func TestBroadcaster(t *testing.T) {
 	bc.Close()
 	_, err = bc.Broadcast(context.Background(), nil)
 	assert.Error(t, err)
-	err = bc.Ack(context.Background(), types.BroadcastAckRequest{})
+	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t))
 	assert.Error(t, err)
 }
 
-func ack(broadcaster Broadcaster, broadcastID uint64, vchannel string) {
+func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel string) {
 	for {
-		if err := broadcaster.Ack(context.Background(), types.BroadcastAckRequest{
+		msg := mock_message.NewMockImmutableMessage(t)
+		msg.EXPECT().VChannel().Return(vchannel)
+		msg.EXPECT().MessageTypeWithVersion().Return(message.MessageTypeTimeTickV1)
+		msg.EXPECT().BroadcastHeader().Return(&message.BroadcastHeader{
 			BroadcastID: broadcastID,
-			VChannel:    vchannel,
-		}); err == nil {
+		})
+		msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
+		if err := broadcaster.Ack(context.Background(), msg); err == nil {
 			break
 		}
 	}
@@ -165,7 +170,7 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 			vchannel := msg.VChannel()
 			go func() {
 				time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
-				ack(broadcaster.Get(), broadcastID, vchannel)
+				ack(t, broadcaster.Get(), broadcastID, vchannel)
 			}()
 		}
 		return resps

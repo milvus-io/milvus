@@ -161,13 +161,48 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 		UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 		t.processMetaSaved()
+	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
+		if t.checkTimeout() {
+			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+			if err != nil {
+				log.Warn("update clustering compaction task meta failed", zap.Error(err))
+				return
+			}
+		}
+	case datapb.CompactionTaskState_timeout:
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		if err != nil {
+			log.Warn("update clustering compaction task meta failed", zap.Error(err))
+			return
+		}
 	case datapb.CompactionTaskState_failed:
 		log.Info("mixCompactionTask fail in datanode")
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 		if err != nil {
 			log.Warn("fail to updateAndSaveTaskMeta")
 		}
+	default:
+		log.Error("not support compaction task state", zap.String("state", result.GetState().String()))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		if err != nil {
+			log.Warn("update clustering compaction task meta failed", zap.Error(err))
+			return
+		}
 	}
+}
+
+func (t *mixCompactionTask) checkTimeout() bool {
+	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
+		diff := time.Since(time.Unix(t.GetTaskProto().GetStartTime(), 0)).Seconds()
+		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
+			log.Ctx(context.TODO()).Warn("compaction timeout",
+				zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()),
+				zap.Int64("startTime", t.GetTaskProto().GetStartTime()),
+			)
+			return true
+		}
+	}
+	return false
 }
 
 func (t *mixCompactionTask) DropTaskOnWorker(cluster session.Cluster) {
@@ -376,7 +411,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
 	}
-
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
@@ -407,6 +441,8 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	plan.PreAllocatedLogIDs = logIDRange
 	// BeginLogID is deprecated, but still assign it for compatibility.
 	plan.BeginLogID = logIDRange.Begin
+
+	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
 		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Any("segID2DeltaLogs", segIDMap))

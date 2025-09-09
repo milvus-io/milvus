@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -326,6 +327,14 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
+		case schemapb.DataType_Timestamptz:
+			appender := &nullDefaultAppender[int64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetTimestamptzData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
 		case schemapb.DataType_VarChar:
 			appender := &nullDefaultAppender[string]{}
 			if defaultVal != nil {
@@ -405,8 +414,8 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 
 func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 	schema := task.GetSchema()
-	if function.HasNonBM25Functions(schema.Functions, []int64{}) {
-		exec, err := function.NewFunctionExecutor(schema)
+	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
+		exec, err := embedding.NewFunctionExecutor(schema)
 		if err != nil {
 			return err
 		}

@@ -17,8 +17,13 @@
 package datacoord
 
 import (
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -43,4 +48,34 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
 	begin, end, err := allocator.AllocN(int64(n))
 	return &datapb.IDRange{Begin: begin, End: end}, err
+}
+
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
+	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
+	if pluginContext == nil {
+		return
+	}
+
+	switch msg.(type) {
+	case *datapb.CompactionPlan:
+		plan := msg.(*datapb.CompactionPlan)
+		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+	case *workerpb.CreateJobRequest:
+		job := msg.(*workerpb.CreateJobRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *workerpb.AnalyzeRequest:
+		job := msg.(*workerpb.AnalyzeRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *workerpb.CreateStatsRequest:
+		job := msg.(*workerpb.CreateStatsRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.ImportRequest:
+		job := msg.(*datapb.ImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.PreImportRequest:
+		job := msg.(*datapb.PreImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	default:
+		return
+	}
 }

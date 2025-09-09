@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -90,7 +91,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 		AutoID:      false,
 	}
 	structF := &schemapb.StructArrayFieldSchema{
-		FieldID: 105,
+		FieldID: 102,
 		Name:    integration.StructArrayField,
 		Fields:  []*schemapb.FieldSchema{sId, sVec},
 	}
@@ -156,16 +157,30 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
+		IndexName:      "float_vector_index",
 		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexFaissIvfFlat, metric.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
+	log.Info("=========================Index created for float vector=========================")
 	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.FloatVecField)
-	log.Info("=========================Index created=========================")
+
+	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      integration.StructSubFloatVecField,
+		IndexName:      "array_of_vector_index",
+		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexEmbListHNSW, metric.MaxSim),
+	})
+	s.NoError(err)
+	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.StructSubFloatVecField)
+
+	log.Info("=========================Index created for array of vector=========================")
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
@@ -299,12 +314,10 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	nq := 10
 	topk := 10
 	roundDecimal := -1
-	radius := 10
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
-	params["radius"] = radius
-	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
+	params := integration.GetSearchParams(integration.IndexEmbListHNSW, metric.MaxSim)
+	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, expr,
+		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 
@@ -323,5 +336,5 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 
 func TestArrayStructDataNodeUtil(t *testing.T) {
 	// skip struct array test
-	// suite.Run(t, new(ArrayStructDataNodeSuite))
+	suite.Run(t, new(ArrayStructDataNodeSuite))
 }

@@ -105,7 +105,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
 INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
                          TaskTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
-                                           DataType::VECTOR_SPARSE_FLOAT));
+                                           DataType::VECTOR_SPARSE_U32_F32));
 
 TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =
@@ -145,6 +145,7 @@ TEST_P(TaskTest, CallExprEmpty) {
         MAX_TIMESTAMP,
         0,
         0,
+        query::PlanOptions{false},
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 
@@ -184,6 +185,7 @@ TEST_P(TaskTest, UnaryExpr) {
         MAX_TIMESTAMP,
         0,
         0,
+        query::PlanOptions{false},
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 
@@ -232,6 +234,7 @@ TEST_P(TaskTest, LogicalExpr) {
         MAX_TIMESTAMP,
         0,
         0,
+        query::PlanOptions{false},
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 

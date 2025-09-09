@@ -36,6 +36,7 @@ enum class ScalarIndexType {
     MARISA,
     INVERTED,
     HYBRID,
+    JSONSTATS,
     BTREE,
 };
 
@@ -92,7 +93,7 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     IsNull() = 0;
 
-    virtual const TargetBitmap
+    virtual TargetBitmap
     IsNotNull() = 0;
 
     virtual const TargetBitmap

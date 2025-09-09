@@ -66,6 +66,7 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
+		indexType == IndexNGRAM ||
 		indexType == IndexBTREE
 }
 

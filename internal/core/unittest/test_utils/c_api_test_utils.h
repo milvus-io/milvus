@@ -39,16 +39,16 @@
 using namespace milvus;
 using namespace milvus::segcore;
 
-// Test utility function for AppendFieldInfo
+// Test utility function for AppendFieldInfoForTest
 inline CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info,
-                int64_t collection_id,
-                int64_t partition_id,
-                int64_t segment_id,
-                int64_t field_id,
-                enum CDataType field_type,
-                bool enable_mmap,
-                const char* mmap_dir_path) {
+AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
+                       int64_t collection_id,
+                       int64_t partition_id,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       enum CDataType field_type,
+                       bool enable_mmap,
+                       const char* mmap_dir_path) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -165,7 +165,7 @@ get_default_schema_config() {
                                   data_type: %1%
                                   type_params: <
                                     key: "dim"
-                                    value: "16"
+                                    value: "4"
                                   >
                                   index_params: <
                                     key: "metric_type"
@@ -191,7 +191,7 @@ get_default_schema_config_nullable() {
                                   data_type: FloatVector
                                   type_params: <
                                     key: "dim"
-                                    value: "16"
+                                    value: "4"
                                   >
                                   index_params: <
                                     key: "metric_type"

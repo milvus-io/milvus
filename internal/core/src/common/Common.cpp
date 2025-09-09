@@ -23,10 +23,9 @@ namespace milvus {
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
+std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
 
-std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL(
-    DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL);
 std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
     DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
 std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
@@ -46,17 +45,17 @@ SetDefaultExecEvalExprBatchSize(int64_t val) {
 }
 
 void
+SetDefaultDeleteDumpBatchSize(int64_t val) {
+    DELETE_DUMP_BATCH_SIZE.store(val);
+    LOG_INFO("set default delete dump batch size: {}",
+             DELETE_DUMP_BATCH_SIZE.load());
+}
+
+void
 SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
-}
-
-void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
-    JSON_KEY_STATS_COMMIT_INTERVAL.store(val);
-    LOG_INFO("set default json key Stats commit interval: {}",
-             JSON_KEY_STATS_COMMIT_INTERVAL.load());
 }
 
 void

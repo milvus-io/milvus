@@ -18,16 +18,17 @@ package column
 
 var (
 	// scalars
-	NewNullableColumnBool      NullableColumnCreateFunc[bool, *ColumnBool]        = NewNullableColumnCreator(NewColumnBool).New
-	NewNullableColumnInt8      NullableColumnCreateFunc[int8, *ColumnInt8]        = NewNullableColumnCreator(NewColumnInt8).New
-	NewNullableColumnInt16     NullableColumnCreateFunc[int16, *ColumnInt16]      = NewNullableColumnCreator(NewColumnInt16).New
-	NewNullableColumnInt32     NullableColumnCreateFunc[int32, *ColumnInt32]      = NewNullableColumnCreator(NewColumnInt32).New
-	NewNullableColumnInt64     NullableColumnCreateFunc[int64, *ColumnInt64]      = NewNullableColumnCreator(NewColumnInt64).New
-	NewNullableColumnVarChar   NullableColumnCreateFunc[string, *ColumnVarChar]   = NewNullableColumnCreator(NewColumnVarChar).New
-	NewNullableColumnString    NullableColumnCreateFunc[string, *ColumnString]    = NewNullableColumnCreator(NewColumnString).New
-	NewNullableColumnFloat     NullableColumnCreateFunc[float32, *ColumnFloat]    = NewNullableColumnCreator(NewColumnFloat).New
-	NewNullableColumnDouble    NullableColumnCreateFunc[float64, *ColumnDouble]   = NewNullableColumnCreator(NewColumnDouble).New
-	NewNullableColumnJSONBytes NullableColumnCreateFunc[[]byte, *ColumnJSONBytes] = NewNullableColumnCreator(NewColumnJSONBytes).New
+	NewNullableColumnBool        NullableColumnCreateFunc[bool, *ColumnBool]         = NewNullableColumnCreator(NewColumnBool).New
+	NewNullableColumnInt8        NullableColumnCreateFunc[int8, *ColumnInt8]         = NewNullableColumnCreator(NewColumnInt8).New
+	NewNullableColumnInt16       NullableColumnCreateFunc[int16, *ColumnInt16]       = NewNullableColumnCreator(NewColumnInt16).New
+	NewNullableColumnInt32       NullableColumnCreateFunc[int32, *ColumnInt32]       = NewNullableColumnCreator(NewColumnInt32).New
+	NewNullableColumnInt64       NullableColumnCreateFunc[int64, *ColumnInt64]       = NewNullableColumnCreator(NewColumnInt64).New
+	NewNullableColumnVarChar     NullableColumnCreateFunc[string, *ColumnVarChar]    = NewNullableColumnCreator(NewColumnVarChar).New
+	NewNullableColumnString      NullableColumnCreateFunc[string, *ColumnString]     = NewNullableColumnCreator(NewColumnString).New
+	NewNullableColumnFloat       NullableColumnCreateFunc[float32, *ColumnFloat]     = NewNullableColumnCreator(NewColumnFloat).New
+	NewNullableColumnDouble      NullableColumnCreateFunc[float64, *ColumnDouble]    = NewNullableColumnCreator(NewColumnDouble).New
+	NewNullableColumnTimestamptz NullableColumnCreateFunc[int64, *ColumnTimestamptz] = NewNullableColumnCreator(NewColumnTimestamptz).New
+	NewNullableColumnJSONBytes   NullableColumnCreateFunc[[]byte, *ColumnJSONBytes]  = NewNullableColumnCreator(NewColumnJSONBytes).New
 	// array
 	NewNullableColumnBoolArray    NullableColumnCreateFunc[[]bool, *ColumnBoolArray]      = NewNullableColumnCreator(NewColumnBoolArray).New
 	NewNullableColumnInt8Array    NullableColumnCreateFunc[[]int8, *ColumnInt8Array]      = NewNullableColumnCreator(NewColumnInt8Array).New

@@ -12,7 +12,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -321,7 +322,7 @@ func TestInsertTask_Function(t *testing.T) {
 		}
 	}
 
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{
@@ -482,5 +483,136 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
+	})
+}
+
+func TestInsertTask_Namespace(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
+	cache := NewMockCache(t)
+	globalMetaCache = cache
+	cache.On("GetDatabaseInfo",
+		mock.Anything,
+		mock.Anything,
+	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	ctx := context.Background()
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Status(nil),
+		ID:     11198,
+		Count:  10,
+	}, nil)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	idAllocator.Start()
+	defer idAllocator.Close()
+	assert.NoError(t, err)
+
+	schemaWithNamespaceEnabled := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "100"},
+			}},
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceEnabledKey, Value: "true"},
+		},
+	}
+
+	schemaWithNamespaceDisabled := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		},
+	}
+
+	t.Run("test insert with namespace enabled", func(t *testing.T) {
+		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
+		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			schema: newSchemaInfo(schemaWithNamespaceEnabled),
+		}, nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
+		namespace := "test"
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "test",
+					Namespace:      &namespace,
+					NumRows:        100,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+			schema:      schemaWithNamespaceEnabled,
+			idAllocator: idAllocator,
+		}
+		err := it.PreExecute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, int64(101), it.insertMsg.FieldsData[0].FieldId)
+
+		// namespace data is not set
+		it = insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "test",
+					NumRows:        100,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+			idAllocator: idAllocator,
+		}
+		err = it.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("test insert with namespace disabled", func(t *testing.T) {
+		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
+		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			schema: newSchemaInfo(schemaWithNamespaceDisabled),
+		}, nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
+		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
+			name:                "p1",
+			partitionID:         10,
+			createdTimestamp:    10001,
+			createdUtcTimestamp: 10002,
+		}, nil).Maybe()
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "test",
+					NumRows:        100,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+			schema:      schemaWithNamespaceDisabled,
+			idAllocator: idAllocator,
+		}
+		err := it.PreExecute(context.Background())
+		assert.NoError(t, err)
+
+		// namespace data is set
+		namespace := "test"
+		it = insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: "test",
+					Namespace:      &namespace,
+					NumRows:        100,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+			idAllocator: idAllocator,
+		}
+		err = it.PreExecute(context.Background())
+		assert.Error(t, err)
 	})
 }

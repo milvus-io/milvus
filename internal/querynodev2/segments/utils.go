@@ -76,7 +76,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 			offset += 2
 		case schemapb.DataType_Int32:
 			offset += 4
-		case schemapb.DataType_Int64:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_Int64:
 			offset += 8
 		case schemapb.DataType_Float:
 			offset += 4

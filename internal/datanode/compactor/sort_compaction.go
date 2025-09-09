@@ -67,6 +67,7 @@ type sortCompactionTask struct {
 	tr   *timerecord.TimeRecorder
 
 	compactionParams compaction.Params
+	sortByFieldIDs   []int64
 }
 
 var _ Compactor = (*sortCompactionTask)(nil)
@@ -76,6 +77,7 @@ func NewSortCompactionTask(
 	binlogIO io.BinlogIO,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
+	sortByFieldIDs []int64,
 ) *sortCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &sortCompactionTask{
@@ -87,6 +89,7 @@ func NewSortCompactionTask(
 		currentTime:      time.Now(),
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
+		sortByFieldIDs:   sortByFieldIDs,
 	}
 }
 
@@ -208,6 +211,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(t.collectionID),
 	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
@@ -215,7 +219,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 	defer rr.Close()
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate)
+	numValidRows, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn("sort failed", zap.Error(err))
 		return nil, err

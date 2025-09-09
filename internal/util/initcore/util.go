@@ -60,12 +60,20 @@ func UpdateDefaultExprEvalBatchSize(size int) {
 	C.SetDefaultExprEvalBatchSize(C.int64_t(size))
 }
 
+func UpdateDefaultDeleteDumpBatchSize(size int) {
+	C.SetDefaultDeleteDumpBatchSize(C.int64_t(size))
+}
+
 func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
-func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
-	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
+func UpdateExprResCacheEnable(enable bool) {
+	C.SetExprResCacheEnable(C.bool(enable))
+}
+
+func UpdateExprResCacheCapacityBytes(capacity int) {
+	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

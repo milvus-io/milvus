@@ -289,7 +289,7 @@ class IndexingRecord {
                 }
                 //Small-Index enabled, create index for vector field only
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
-                    index_meta_->HasFiled(field_id)) {
+                    index_meta_->HasField(field_id)) {
                     auto vec_field_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
                     //Disable growing index for flat and embedding list
@@ -345,7 +345,7 @@ class IndexingRecord {
                 size,
                 field_raw_data,
                 stream_data->vectors().bfloat16_vector().data());
-        } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
             auto data = SparseBytesToRows(
                 stream_data->vectors().sparse_float_vector().contents());
             indexing->AppendSegmentIndexSparse(
@@ -378,7 +378,7 @@ class IndexingRecord {
             auto vec_base = record.get_data_base(fieldId);
             indexing->AppendSegmentIndexDense(
                 reserved_offset, size, vec_base, data->Data());
-        } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
+        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
             auto vec_base = record.get_data_base(fieldId);
             indexing->AppendSegmentIndexSparse(
                 reserved_offset,
@@ -406,7 +406,7 @@ class IndexingRecord {
             if (data_type == DataType::VECTOR_FLOAT ||
                 data_type == DataType::VECTOR_FLOAT16 ||
                 data_type == DataType::VECTOR_BFLOAT16 ||
-                data_type == DataType::VECTOR_SPARSE_FLOAT) {
+                data_type == DataType::VECTOR_SPARSE_U32_F32) {
                 indexing->GetDataFromIndex(
                     seg_offsets, count, element_size, output_raw);
             }

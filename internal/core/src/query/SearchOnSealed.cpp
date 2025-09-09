@@ -40,7 +40,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
-    auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
+    auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
@@ -115,7 +115,8 @@ SearchOnSealedColumn(const Schema& schema,
     auto data_type = field.get_data_type();
     auto element_type = field.get_element_type();
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-    auto dim = data_type == DataType::VECTOR_SPARSE_FLOAT ? 0 : field.get_dim();
+    auto dim =
+        data_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : field.get_dim();
 
     query::dataset::SearchDataset query_dataset{search_info.metric_type_,
                                                 num_queries,

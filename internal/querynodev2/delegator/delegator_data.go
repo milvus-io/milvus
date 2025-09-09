@@ -991,3 +991,13 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
 	return avgdl, nil
 }
+
+func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
+	workers := sd.workerManager.GetAllWorkers()
+	for _, worker := range workers {
+		if err := worker.DropIndex(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}

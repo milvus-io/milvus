@@ -38,8 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -592,6 +592,10 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		return fmt.Errorf("Nested array is not supported %s", field.Name)
 	}
 
+	if field.ElementType == schemapb.DataType_JSON {
+		return fmt.Errorf("JSON is not supported for fields in struct, fieldName = %s", field.Name)
+	}
+
 	if field.DataType == schemapb.DataType_Array {
 		if typeutil.IsVectorType(field.GetElementType()) {
 			return fmt.Errorf("Inconsistent schema: element type of array field %s is a vector type", field.Name)
@@ -692,7 +696,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema)
 
 	hasDefault := false
 	for name, params := range analyzerMap {
-		if err := ctokenizer.ValidateTokenizer(string(params)); err != nil {
+		if err := analyzer.ValidateAnalyzer(string(params)); err != nil {
 			return fmt.Errorf("analyzer %s params invalid: %s", name, err)
 		}
 		if name == "default" {
@@ -729,7 +733,7 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 
 	for _, kv := range fieldSchema.GetTypeParams() {
 		if kv.GetKey() == "analyzer_params" {
-			return ctokenizer.ValidateTokenizer(kv.Value)
+			return analyzer.ValidateAnalyzer(kv.Value)
 		}
 	}
 	// return nil when use default analyzer
@@ -835,6 +839,11 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
+	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
+	for _, field := range coll.Fields {
+		field.IsFunctionOutput = false
+	}
+
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
 			return err
@@ -893,7 +902,7 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		}
 	}
 
-	if err := function.ValidateFunctions(coll); err != nil {
+	if err := embedding.ValidateFunctions(coll); err != nil {
 		return err
 	}
 	return nil
@@ -910,7 +919,7 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if err := function.TextEmbeddingOutputsCheck(fields); err != nil {
+		if err := embedding.TextEmbeddingOutputsCheck(fields); err != nil {
 			return err
 		}
 	default:
@@ -1278,6 +1287,10 @@ func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Tim
 }
 
 func validateName(entity string, nameType string) error {
+	return validateNameWithCustomChars(entity, nameType, Params.ProxyCfg.NameValidationAllowedChars.GetValue())
+}
+
+func validateNameWithCustomChars(entity string, nameType string, allowedChars string) error {
 	entity = strings.TrimSpace(entity)
 
 	if entity == "" {
@@ -1300,15 +1313,15 @@ func validateName(entity string, nameType string) error {
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("%s can only contain numbers, letters, dollars and underscores, found %c at %d", nameType, c, i)
+		if c != '_' && !isAlpha(c) && !isNumber(c) && !strings.ContainsRune(allowedChars, rune(c)) {
+			return merr.WrapErrParameterInvalidMsg("%s can only contain numbers, letters, underscores, and allowed characters (%s), found %c at %d", nameType, allowedChars, c, i)
 		}
 	}
 	return nil
 }
 
 func ValidateRoleName(entity string) error {
-	return validateName(entity, "role name")
+	return validateNameWithCustomChars(entity, "role name", Params.ProxyCfg.RoleNameValidationAllowedChars.GetValue())
 }
 
 func IsDefaultRole(roleName string) bool {
@@ -1947,6 +1960,10 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			continue
 		}
 
+		if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
+			continue
+		}
+
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
 				IsBM25FunctionOutputField(fieldSchema, schema) ||
@@ -2315,6 +2332,59 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	return nil
 }
 
+func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
+	}
+	namespaceIsSet := insertMsg.InsertRequest.Namespace != nil
+
+	if namespaceEnabeld != namespaceIsSet {
+		if namespaceIsSet {
+			return fmt.Errorf("namespace data is set but namespace disabled")
+		}
+		return fmt.Errorf("namespace data is not set but namespace enabled")
+	}
+	if !namespaceEnabeld {
+		return nil
+	}
+
+	// check namespace field exists
+	namespaceField := typeutil.GetFieldByName(schema, common.NamespaceFieldName)
+	if namespaceField == nil {
+		return fmt.Errorf("namespace field not found")
+	}
+
+	// check namespace field data is already set
+	for _, fieldData := range insertMsg.FieldsData {
+		if fieldData.FieldId == namespaceField.FieldID {
+			return fmt.Errorf("namespace field data is already set by users")
+		}
+	}
+
+	// set namespace field data
+	namespaceData := make([]string, insertMsg.NRows())
+	namespace := *insertMsg.InsertRequest.Namespace
+	for i := range namespaceData {
+		namespaceData[i] = namespace
+	}
+	insertMsg.FieldsData = append(insertMsg.FieldsData, &schemapb.FieldData{
+		FieldName: namespaceField.Name,
+		FieldId:   namespaceField.FieldID,
+		Type:      namespaceField.DataType,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: namespaceData,
+					},
+				},
+			},
+		},
+	})
+	return nil
+}
+
 func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
 	if globalMetaCache != nil {
 		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
@@ -2628,4 +2698,13 @@ func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema
 	)
 	results.Results.FieldsData = fieldsData
 	results.Results.OutputFields = outputFields
+}
+
+func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.Fields {
+		if field.GetDataType() == schemapb.DataType_Timestamptz {
+			return true
+		}
+	}
+	return false
 }

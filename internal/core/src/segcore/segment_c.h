@@ -89,6 +89,9 @@ GetRealCount(CSegmentInterface c_segment);
 bool
 HasRawData(CSegmentInterface c_segment, int64_t field_id);
 
+bool
+HasFieldData(CSegmentInterface c_segment, int64_t field_id);
+
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,
@@ -141,6 +144,11 @@ CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
+DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
+                           int64_t field_id,
+                           const char* nested_path);
+
+CStatus
 AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info);
 
@@ -166,6 +174,9 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
 FinishLoad(CSegmentInterface c_segment);
+
+CStatus
+ExprResCacheEraseSegment(int64_t segment_id);
 
 #ifdef __cplusplus
 }

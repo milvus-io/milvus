@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -46,6 +47,14 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Use dbID as ezID because the dbID is unqiue
+	properties, err := hookutil.TidyDBCipherProperties(t.dbID, t.Req.Properties)
+	if err != nil {
+		return err
+	}
+
+	t.Req.Properties = properties
 	return nil
 }
 

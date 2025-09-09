@@ -196,6 +196,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedAnalyzeFiles(ctx)
 			gc.recycleUnusedTextIndexFiles(ctx)
 			gc.recycleUnusedJSONIndexFiles(ctx)
+			gc.recycleUnusedJSONStatsFiles(ctx)
 		})
 	}()
 	go func() {
@@ -989,8 +990,106 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }
 
-// recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
+// recycleUnusedJSONStatsFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
+func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedJSONStatsFiles"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedJSONStatsFiles...")
+	defer func() { log.Info("recycleUnusedJSONStatsFiles done", zap.Duration("timeCost", time.Since(start))) }()
+
+	hasJSONStatsSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return len(info.GetJsonKeyStats()) != 0
+	}))
+	fileNum := 0
+	deletedFilesNum := atomic.NewInt32(0)
+
+	for _, seg := range hasJSONStatsSegments {
+		for _, fieldStats := range seg.GetJsonKeyStats() {
+			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			// clear low version task
+			for i := int64(1); i < fieldStats.GetVersion(); i++ {
+				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONStatsPath, fieldStats.GetJsonKeyStatsDataFormat(),
+					fieldStats.GetBuildID(), i, seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fieldStats.GetFieldID())
+				futures := make([]*conc.Future[struct{}], 0)
+
+				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					file := files.FilePath
+
+					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+						log := log.With(zap.String("file", file))
+						log.Info("garbageCollector recycleUnusedJSONStatsFiles remove file...")
+
+						if err := gc.option.cli.Remove(ctx, file); err != nil {
+							log.Warn("garbageCollector recycleUnusedJSONStatsFiles remove file failed", zap.Error(err))
+							return struct{}{}, err
+						}
+						deletedFilesNum.Inc()
+						log.Info("garbageCollector recycleUnusedJSONStatsFiles remove file success")
+						return struct{}{}, nil
+					})
+					futures = append(futures, future)
+					return true
+				})
+
+				// Wait for all remove tasks done.
+				if err := conc.BlockOnAll(futures...); err != nil {
+					// error is logged, and can be ignored here.
+					log.Warn("some task failure in remove object pool", zap.Error(err))
+				}
+
+				log = log.With(zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+				if err != nil {
+					log.Warn("json stats files recycle failed when walk with prefix", zap.Error(err))
+					return
+				}
+			}
+
+			// clear low data format version stats file
+			// for upgrade from old version to new version, we need to clear the old data format version stats file
+			for i := int64(1); i < fieldStats.GetJsonKeyStatsDataFormat(); i++ {
+				prefix := fmt.Sprintf("%s/%s/%d", gc.option.cli.RootPath(), common.JSONStatsPath, i)
+				futures := make([]*conc.Future[struct{}], 0)
+
+				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					file := files.FilePath
+
+					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+						log := log.With(zap.String("file", file))
+						log.Info("garbageCollector recycleUnusedJSONStatsFiles remove file...")
+
+						if err := gc.option.cli.Remove(ctx, file); err != nil {
+							log.Warn("garbageCollector recycleUnusedJSONStatsFiles remove file failed", zap.Error(err))
+							return struct{}{}, err
+						}
+						deletedFilesNum.Inc()
+						log.Info("garbageCollector recycleUnusedJSONStatsFiles remove file success")
+						return struct{}{}, nil
+					})
+					futures = append(futures, future)
+					return true
+				})
+
+				// Wait for all remove tasks done.
+				if err := conc.BlockOnAll(futures...); err != nil {
+					// error is logged, and can be ignored here.
+					log.Warn("some task failure in remove object pool", zap.Error(err))
+				}
+
+				log = log.With(zap.Int("deleteJSONStatsLowerDataFormatNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+				if err != nil {
+					log.Warn("json stats lower data format files recycle failed when walk with prefix", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
+	log.Info("json stats files recycle done")
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
+
+// recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
 func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedJSONIndexFiles"), zap.Time("startAt", start))

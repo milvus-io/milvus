@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -22,14 +24,19 @@ func TestStreamingNodeManager(t *testing.T) {
 	b := mock_balancer.NewMockBalancer(t)
 
 	ch := make(chan pChannelInfoAssigned, 1)
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Run(
-		func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) {
+		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case p := <-ch:
-					cb(p.version, p.pchannels)
+					cb(balancer.WatchChannelAssignmentsCallbackParam{
+						Version:            p.version,
+						CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+						Relations:          p.pchannels,
+					})
 				}
 			}
 		})
@@ -58,6 +65,11 @@ func TestStreamingNodeManager(t *testing.T) {
 
 	node := m.GetWALLocated("a_test")
 	assert.Equal(t, node, int64(1))
+
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {ServerID: 1, Address: "localhost:1"},
+	}, nil)
 	streamingNodes = m.GetStreamingQueryNodeIDs()
 	assert.Equal(t, len(streamingNodes), 1)
 

@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -39,7 +39,7 @@ type MultiAnalyzerBM25FunctionRunner struct {
 	mu     sync.RWMutex
 	closed bool
 
-	analyzers   map[string]tokenizerapi.Tokenizer
+	analyzers   map[string]analyzer.Analyzer
 	alias       map[string]string // alias -> analyzer name
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
@@ -61,7 +61,7 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		schema:      schema,
 		inputFields: []*schemapb.FieldSchema{inputField},
 		outputField: outputField,
-		analyzers:   make(map[string]tokenizerapi.Tokenizer),
+		analyzers:   make(map[string]analyzer.Analyzer),
 		concurrency: 8,
 	}
 
@@ -114,9 +114,9 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	}
 
 	for name, param := range analyzersParam {
-		analyzer, err := ctokenizer.NewTokenizer(string(param))
+		analyzer, err := analyzer.NewAnalyzer(string(param))
 		if err != nil {
-			return nil, fmt.Errorf("bm25 function create tokenizer %s failed with error: %s", name, err.Error())
+			return nil, fmt.Errorf("bm25 function create analyzer %s failed with error: %s", name, err.Error())
 		}
 		runner.analyzers[name] = analyzer
 	}
@@ -124,7 +124,7 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	return runner, nil
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]tokenizerapi.Tokenizer) (tokenizerapi.Tokenizer, error) {
+func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
 	if alias, ok := v.alias[name]; ok {
 		name = alias
 	}
@@ -146,7 +146,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst []map[uint32]float32) error {
-	cloneAnalyzers := map[string]tokenizerapi.Tokenizer{}
+	cloneAnalyzers := map[string]analyzer.Analyzer{}
 	defer func() {
 		for _, analyzer := range cloneAnalyzers {
 			analyzer.Destroy()
@@ -154,6 +154,9 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 	}()
 
 	for i := 0; i < len(text); i++ {
+		if !typeutil.IsUTF8(text[i]) {
+			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
+		}
 		embeddingMap := map[uint32]float32{}
 
 		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
@@ -236,7 +239,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []string, dst [][]*milvuspb.AnalyzerToken, withDetail bool, withHash bool) error {
-	cloneAnalyzers := map[string]tokenizerapi.Tokenizer{}
+	cloneAnalyzers := map[string]analyzer.Analyzer{}
 	defer func() {
 		for _, analyzer := range cloneAnalyzers {
 			analyzer.Destroy()

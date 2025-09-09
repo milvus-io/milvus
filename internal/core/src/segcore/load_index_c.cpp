@@ -232,7 +232,9 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                 load_index_info->index_engine_version,
                 load_index_info->index_size,
                 index_params,
-                load_index_info->enable_mmap);
+                load_index_info->enable_mmap,
+                load_index_info->num_rows,
+                load_index_info->dim);
         return request;
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
@@ -241,6 +243,23 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                               e.what()));
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
+}
+
+bool
+TryReserveLoadingResourceWithTimeout(CResourceUsage size,
+                                     int64_t millisecond_timeout) {
+    return milvus::cachinglayer::Manager::GetInstance()
+        .ReserveLoadingResourceWithTimeout(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes),
+            std::chrono::milliseconds(millisecond_timeout));
+}
+
+void
+ReleaseLoadingResource(CResourceUsage size) {
+    milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
+        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                            size.disk_bytes));
 }
 
 CStatus
@@ -316,14 +335,15 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
         LOG_INFO(
             "[collection={}][segment={}][field={}][enable_mmap={}][load_"
-            "priority={}] load index "
-            "{}",
+            "priority={}] load index {}, "
+            "mmap_dir_path={}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
             load_priority_str,
-            load_index_info->index_id);
+            load_index_info->index_id,
+            load_index_info->mmap_dir_path);
 
         // get index type
         AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -370,10 +390,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                                               load_index_info->field_id,
                                               load_index_info->index_build_id,
                                               load_index_info->index_version};
-        auto remote_chunk_manager =
-            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                .GetRemoteChunkManager();
-
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         if (load_index_info->field_type == milvus::DataType::JSON) {
@@ -381,6 +397,9 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                 config.at(JSON_CAST_TYPE).get<std::string>());
             index_info.json_path = config.at(JSON_PATH).get<std::string>();
         }
+        auto remote_chunk_manager =
+            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager);
         fileManagerContext.set_for_loading_index(true);
@@ -400,12 +419,13 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
         LOG_INFO(
             "[collection={}][segment={}][field={}][enable_mmap={}] load index "
-            "{} done",
+            "{} done, mmap_dir_path={}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
-            load_index_info->index_id);
+            load_index_info->index_id,
+            load_index_info->mmap_dir_path);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -552,7 +572,6 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->element_type = static_cast<milvus::DataType>(
                 info_proto->field().element_type());
             load_index_info->enable_mmap = info_proto->enable_mmap();
-            load_index_info->mmap_dir_path = info_proto->mmap_dir_path();
             load_index_info->index_id = info_proto->indexid();
             load_index_info->index_build_id = info_proto->index_buildid();
             load_index_info->index_version = info_proto->index_version();
@@ -569,6 +588,23 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                 info_proto->index_engine_version();
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
+            load_index_info->num_rows = info_proto->num_rows();
+            auto field_schema =
+                milvus::FieldMeta::ParseFrom(load_index_info->schema);
+            size_t dim = IsVectorDataType(field_schema.get_data_type()) &&
+                                 !IsSparseFloatVectorDataType(
+                                     field_schema.get_data_type())
+                             ? field_schema.get_dim()
+                             : 1;
+            load_index_info->dim = dim;
+
+            auto remote_chunk_manager =
+                milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                    .GetRemoteChunkManager();
+            load_index_info->mmap_dir_path =
+                milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                    .GetChunkManager()
+                    ->GetRootPath();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;

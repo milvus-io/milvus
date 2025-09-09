@@ -11,7 +11,7 @@ message LoadIndexInfo {
   int64 segmentID = 3;
   schema.FieldSchema field = 5;
   bool enable_mmap = 6;
-  string mmap_dir_path = 7;
+  string mmap_dir_path = 7; //Deprecated
   int64 indexID = 8;
   int64 index_buildID = 9;
   int64 index_version = 10;
@@ -21,6 +21,7 @@ message LoadIndexInfo {
   int64 index_store_version = 14;
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
+  int64 num_rows = 17;
 }
 
 message IndexStats {

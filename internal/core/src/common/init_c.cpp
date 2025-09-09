@@ -20,6 +20,7 @@
 #include "common/Tracer.h"
 #include "storage/ThreadPool.h"
 #include "log/Log.h"
+#include "exec/expression/ExprCache.h"
 
 std::once_flag traceFlag;
 std::once_flag cpuNumFlag;
@@ -55,13 +56,13 @@ SetDefaultExprEvalBatchSize(int64_t val) {
 }
 
 void
-SetDefaultOptimizeExprEnable(bool val) {
-    milvus::SetDefaultOptimizeExprEnable(val);
+SetDefaultDeleteDumpBatchSize(int64_t val) {
+    milvus::SetDefaultDeleteDumpBatchSize(val);
 }
 
 void
-SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
-    milvus::SetDefaultJSONKeyStatsCommitInterval(val);
+SetDefaultOptimizeExprEnable(bool val) {
+    milvus::SetDefaultOptimizeExprEnable(val);
 }
 
 void
@@ -77,6 +78,17 @@ SetDefaultConfigParamTypeCheck(bool val) {
 void
 SetLogLevel(const char* level) {
     milvus::SetLogLevel(level);
+}
+
+void
+SetExprResCacheEnable(bool val) {
+    milvus::exec::ExprResCacheManager::SetEnabled(val);
+}
+
+void
+SetExprResCacheCapacityBytes(int64_t bytes) {
+    milvus::exec::ExprResCacheManager::Instance().SetCapacityBytes(
+        static_cast<size_t>(bytes));
 }
 
 void

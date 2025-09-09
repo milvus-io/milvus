@@ -130,6 +130,30 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_deserialize_duration,
                             internal_storage_load_duration,
                             deserializeDurationLabels)
 
+// json stats metrics
+std::map<std::string, std::string> invertedIndexLatencyLabels{
+    {"type", "inverted_index_latency"}};
+std::map<std::string, std::string> shreddingLatencyLabels{
+    {"type", "shredding_latency"}};
+std::map<std::string, std::string> sharedLatencyLabels{
+    {"type", "shared_latency"}};
+std::map<std::string, std::string> loadLatencyLabels{{"type", "load_latency"}};
+
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency,
+                                   "[cpp]durations of json stats")
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_term_query,
+                            internal_json_stats_latency,
+                            invertedIndexLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding,
+                            internal_json_stats_latency,
+                            shreddingLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared,
+                            internal_json_stats_latency,
+                            sharedLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load,
+                            internal_json_stats_latency,
+                            loadLatencyLabels)
+
 // search latency metrics
 std::map<std::string, std::string> scalarLatencyLabels{
     {"type", "scalar_latency"}};
@@ -139,6 +163,8 @@ std::map<std::string, std::string> groupbyLatencyLabels{
     {"type", "groupby_latency"}};
 std::map<std::string, std::string> iterativeFilterLatencyLabels{
     {"type", "iterative_filter_latency"}};
+std::map<std::string, std::string> rescoreLatencyLabels{
+    {"type", "rescore_latency"}};
 std::map<std::string, std::string> scalarProportionLabels{
     {"type", "scalar_proportion"}};
 std::map<std::string, std::string> getVectorLatencyLabels{
@@ -168,6 +194,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_iterative_filter,
                             internal_core_search_latency,
                             iterativeFilterLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_rescore,
+                            internal_core_search_latency,
+                            rescoreLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_search_latency_scalar_proportion,
     internal_core_search_latency,

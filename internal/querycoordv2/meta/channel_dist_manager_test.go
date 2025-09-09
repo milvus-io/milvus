@@ -17,21 +17,16 @@
 package meta
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelDistManagerSuite struct {
@@ -86,7 +81,7 @@ func (suite *ChannelDistManagerSuite) SetupSuite() {
 }
 
 func (suite *ChannelDistManagerSuite) SetupTest() {
-	suite.dist = NewChannelDistManager()
+	suite.dist = NewChannelDistManager(session.NewNodeManager())
 	// Distribution:
 	// node 0 contains channel dmc0
 	// node 1 contains channel dmc0, dmc1
@@ -247,7 +242,7 @@ func TestDmChannelIsServiceable(t *testing.T) {
 }
 
 func (suite *ChannelDistManagerSuite) TestUpdateReturnsNewServiceableChannels() {
-	dist := NewChannelDistManager()
+	dist := NewChannelDistManager(session.NewNodeManager())
 
 	// Create a non-serviceable channel
 	nonServiceableChannel := suite.channels["dmc0"].Clone()
@@ -279,7 +274,8 @@ func (suite *ChannelDistManagerSuite) TestUpdateReturnsNewServiceableChannels() 
 }
 
 func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
-	dist := NewChannelDistManager()
+	nodeManager := session.NewNodeManager()
+	dist := NewChannelDistManager(nodeManager)
 
 	// Create a replica
 	replicaPB := &querypb.Replica{
@@ -347,32 +343,12 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	suite.Nil(leader)
 
 	// Test streaming node
-	balancer := mock_balancer.NewMockBalancer(suite.T())
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
-		versions := []typeutil.VersionInt64Pair{
-			{Global: 1, Local: 2},
-		}
-		pchans := [][]types.PChannelInfoAssigned{
-			{
-				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
-					Node:    types.StreamingNodeInfo{ServerID: 4, Address: "localhost:1"},
-				},
-			},
-		}
-		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
-		}
-		<-ctx.Done()
-		return context.Cause(ctx)
-	})
-	defer snmanager.ResetStreamingNodeManager()
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
-	suite.Eventually(func() bool {
-		nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-		return nodeIDs.Contain(4)
-	}, 10*time.Second, 100*time.Millisecond)
-
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   4,
+		Address:  "localhost:1",
+		Hostname: "localhost",
+		Labels:   map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"},
+	}))
 	channel1Node4 := suite.channels["dmc0"].Clone()
 	channel1Node4.Node = 4
 	channel1Node4.Version = 3
@@ -387,7 +363,7 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 }
 
 func TestGetChannelDistJSON(t *testing.T) {
-	manager := NewChannelDistManager()
+	manager := NewChannelDistManager(session.NewNodeManager())
 	channel1 := &DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
 			CollectionID: 100,

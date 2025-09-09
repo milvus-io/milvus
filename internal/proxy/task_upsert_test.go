@@ -32,7 +32,7 @@ import (
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -379,7 +379,7 @@ func TestUpsertTask_Function(t *testing.T) {
 			"mock.apikey": "mock",
 		}
 	}
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{
@@ -1081,4 +1081,274 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "query pre-execute failed")
 	})
+}
+
+func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
+	// Schema for the test collection
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_merge_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{FieldID: 102, Name: "extra", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	})
+
+	// Upsert IDs: 1 (update), 2 (update), 3 (insert)
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+		},
+	}
+	numRows := uint64(len(upsertData[0].GetScalars().GetLongData().GetData()))
+
+	// Query result for existing PKs: 1, 2
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+			},
+			{
+				FieldName: "extra", FieldId: 102, Type: schemapb.DataType_VarChar,
+				Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+				ValidData: []bool{true, true},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    uint32(numRows),
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    numRows,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	// Verify delete PKs
+	deletePks := task.deletePKs.GetIntId().GetData()
+	assert.ElementsMatch(t, []int64{1, 2}, deletePks)
+
+	// Verify merged insert data
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	assert.NoError(t, err)
+	idField, err := typeutil.GetPrimaryFieldData(task.insertFieldData, primaryFieldSchema)
+	assert.NoError(t, err)
+	ids, err := parsePrimaryFieldData2IDs(idField)
+	assert.NoError(t, err)
+	insertPKs := ids.GetIntId().GetData()
+	assert.Equal(t, []int64{1, 2, 3}, insertPKs)
+
+	var valueField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		if f.GetFieldName() == "value" {
+			valueField = f
+			break
+		}
+	}
+	assert.NotNil(t, valueField)
+	assert.Equal(t, []int32{100, 200, 300}, valueField.GetScalars().GetIntData().GetData())
+}
+
+func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
+	// Schema for the test collection
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_merge_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{FieldID: 102, Name: "extra", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	})
+
+	// Upsert IDs: 4, 5
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{4, 5}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{400, 500}}}}},
+		},
+	}
+	numRows := uint64(len(upsertData[0].GetScalars().GetLongData().GetData()))
+
+	// Query result is empty, but schema is preserved
+	mockQueryResult := &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}}},
+		},
+		{
+			FieldName: "extra", FieldId: 102, Type: schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{}}}}},
+		},
+	}}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    uint32(numRows),
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    numRows,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	// Verify delete PKs
+	deletePks := task.deletePKs.GetIntId().GetData()
+	assert.Empty(t, deletePks)
+
+	// Verify merged insert data
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	assert.NoError(t, err)
+	idField, err := typeutil.GetPrimaryFieldData(task.insertFieldData, primaryFieldSchema)
+	assert.NoError(t, err)
+	ids, err := parsePrimaryFieldData2IDs(idField)
+	assert.NoError(t, err)
+	insertPKs := ids.GetIntId().GetData()
+	assert.Equal(t, []int64{4, 5}, insertPKs)
+
+	var valueField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		if f.GetFieldName() == "value" {
+			valueField = f
+			break
+		}
+	}
+	assert.NotNil(t, valueField)
+	assert.Equal(t, []int32{400, 500}, valueField.GetScalars().GetIntData().GetData())
+}
+
+func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
+	// Schema for the test collection
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_merge_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{FieldID: 102, Name: "extra", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	})
+
+	// Upsert IDs: 6, 7
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{6, 7}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{600, 700}}}}},
+		},
+	}
+	numRows := uint64(len(upsertData[0].GetScalars().GetLongData().GetData()))
+
+	// Query result for existing PKs: 6, 7
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{6, 7}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{60, 70}}}}},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    uint32(numRows),
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    numRows,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	// Verify delete PKs
+	deletePks := task.deletePKs.GetIntId().GetData()
+	assert.ElementsMatch(t, []int64{6, 7}, deletePks)
+
+	// Verify merged insert data
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	assert.NoError(t, err)
+	idField, err := typeutil.GetPrimaryFieldData(task.insertFieldData, primaryFieldSchema)
+	assert.NoError(t, err)
+	ids, err := parsePrimaryFieldData2IDs(idField)
+	assert.NoError(t, err)
+	insertPKs := ids.GetIntId().GetData()
+	assert.Equal(t, []int64{6, 7}, insertPKs)
+
+	var valueField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		if f.GetFieldName() == "value" {
+			valueField = f
+			break
+		}
+	}
+	assert.NotNil(t, valueField)
+	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
 }

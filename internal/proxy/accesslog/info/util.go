@@ -18,6 +18,7 @@ package info
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -113,9 +114,15 @@ func listToString(strs []string) string {
 }
 
 func kvsToString(kvs []*commonpb.KeyValuePair) string {
-	str := "{"
+	m := make(map[string]string)
 	for _, kv := range kvs {
-		str += fmt.Sprintf("%s:%s,", kv.GetKey(), kv.GetValue())
+		m[kv.GetKey()] = kv.GetValue()
 	}
-	return str + "}"
+
+	v, err := json.Marshal(m)
+	if err != nil {
+		return Unknown
+	}
+
+	return string(v)
 }

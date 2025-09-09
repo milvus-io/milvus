@@ -68,9 +68,11 @@ func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
 	log.Info("start dist handler")
-	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
+	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
+	ticker := time.NewTicker(distInterval)
 	defer ticker.Stop()
-	checkExecutedFlagTicker := time.NewTicker(Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond))
+	flagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
+	checkExecutedFlagTicker := time.NewTicker(flagInterval)
 	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
@@ -90,8 +92,28 @@ func (dh *distHandler) start(ctx context.Context) {
 				default:
 				}
 			}
+			// only reset when interval updated
+			newFlagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
+			if newFlagInterval != flagInterval {
+				flagInterval = newFlagInterval
+				select {
+				case <-checkExecutedFlagTicker.C:
+				default:
+				}
+				checkExecutedFlagTicker.Reset(flagInterval)
+			}
 		case <-ticker.C:
 			dh.pullDist(ctx, &failures, true)
+			// only reset when interval updated
+			newDistInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
+			if newDistInterval != distInterval {
+				distInterval = newDistInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(distInterval)
+			}
 		}
 	}
 }
@@ -183,7 +205,7 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 			Version:            s.GetVersion(),
 			LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
 			IndexInfo:          s.GetIndexInfo(),
-			JSONIndexField:     s.GetFieldJsonIndexStats(),
+			JSONStatsField:     s.GetJsonStatsInfo(),
 		})
 	}
 

@@ -446,7 +446,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
+	// prevent user creating collection with timestamptz field for now (not implemented)
+	if hasTimestamptzField(t.schema) {
+		return merr.WrapErrParameterInvalidMsg("timestamptz field is still in development")
+	}
 	return nil
 }
 
@@ -538,7 +541,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if typeutil.IsVectorType(t.fieldSchema.DataType) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add vector field, field name = %s", t.fieldSchema.Name))
 	}
-	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName}, t.fieldSchema.GetName()) {
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, t.fieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.fieldSchema.Name))
 	}
 	if t.fieldSchema.IsPrimaryKey {

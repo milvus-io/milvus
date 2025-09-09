@@ -140,10 +140,7 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 // ObserveMessage is called when a new message is observed.
 func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	if h := msg.BroadcastHeader(); h != nil {
-		if err := streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-			BroadcastID: h.BroadcastID,
-			VChannel:    msg.VChannel(),
-		}); err != nil {
+		if err := streaming.WAL().Broadcast().Ack(ctx, msg); err != nil {
 			r.Logger().Warn("failed to ack broadcast message", zap.Error(err))
 			return err
 		}
@@ -241,7 +238,7 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
-		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil {
+		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && msg.VChannel() != message.ControlChannel {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
 
@@ -284,8 +281,6 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 		r.handleSchemaChange(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
-	default:
-		panic("unreachable: some message type can not be consumed, there's a critical bug.")
 	}
 }
 

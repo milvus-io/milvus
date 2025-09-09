@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -20,6 +21,40 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestHideSensitive(t *testing.T) {
+	configs := map[string]string{
+		"dummy":                               "ok",
+		"MyPassword":                          "123456",
+		"your_secret_access_Key":              "ABCD",
+		"Foo":                                 "password",
+		"SECRETACCESSKEY2":                    "XXX",
+		"minio.secretAccessKey":               "secretAccessKey",
+		"common.security.defaultRootPassword": "milvus",
+	}
+	copiedConfigs := make(map[string]string)
+	for k, v := range configs {
+		copiedConfigs[k] = v
+	}
+	hideSensitive(configs)
+
+	for k := range copiedConfigs {
+		assert.Contains(t, configs, k)
+	}
+	for k, v := range configs {
+		contains := false
+		for _, sensitive := range sensitiveKeys {
+			if strings.Contains(strings.ToLower(k), sensitive) {
+				assert.Equal(t, v, "*****")
+				contains = true
+				break
+			}
+		}
+		if !contains {
+			assert.Equal(t, v, copiedConfigs[k])
+		}
+	}
+}
 
 func TestGetConfigs(t *testing.T) {
 	w := httptest.NewRecorder()

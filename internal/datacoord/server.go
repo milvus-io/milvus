@@ -240,6 +240,19 @@ func (s *Server) Register() error {
 	return nil
 }
 
+func (s *Server) ServerExist(serverID int64) bool {
+	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	s.registerMetricsRequest()
@@ -340,14 +353,12 @@ func (s *Server) initDataCoord() error {
 // initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
 func (s *Server) initMessageCallback() {
-	registry.RegisterMessageAckCallback(message.MessageTypeDropPartition, func(ctx context.Context, msg message.MutableMessage) error {
-		dropPartitionMsg := message.MustAsMutableDropPartitionMessageV1(msg)
-		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{dropPartitionMsg.Header().PartitionId})
+	registry.RegisterDropPartitionMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
+		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{msg.Header().PartitionId})
 	})
 
-	registry.RegisterMessageAckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.MutableMessage) error {
-		importMsg := message.MustAsMutableImportMessageV1(msg)
-		body := importMsg.MustBody()
+	registry.RegisterImportMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableImportMessageV1) error {
+		body := msg.MustBody()
 		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			CollectionID:   body.GetCollectionID(),
 			CollectionName: body.GetCollectionName(),
@@ -377,14 +388,10 @@ func (s *Server) initMessageCallback() {
 		return nil
 	})
 
-	registry.RegisterMessageCheckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.BroadcastMutableMessage) error {
-		importMsg := message.MustAsMutableImportMessageV1(msg)
-		b, err := importMsg.Body()
-		if err != nil {
-			return err
-		}
+	registry.RegisterImportMessageV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
+		b := msg.MustBody()
 		options := funcutil.Map2KeyValuePair(b.GetOptions())
-		_, err = importutilv2.GetTimeoutTs(options)
+		_, err := importutilv2.GetTimeoutTs(options)
 		if err != nil {
 			return err
 		}

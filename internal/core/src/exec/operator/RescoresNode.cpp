@@ -54,6 +54,10 @@ PhyRescoresNode::GetOutput() {
     if (input_ == nullptr) {
         return nullptr;
     }
+
+    std::chrono::high_resolution_clock::time_point scalar_start =
+        std::chrono::high_resolution_clock::now();
+
     ExecContext* exec_context = operator_context_->get_exec_context();
     auto query_context_ = exec_context->get_query_context();
     auto query_info = exec_context->get_query_config();
@@ -66,14 +70,30 @@ PhyRescoresNode::GetOutput() {
     for (size_t i = 0; i < search_result.seg_offsets_.size(); i++) {
         // remain offset will be -1 if result count not enough (less than topk)
         // skip placeholder offset
-        if (search_result.seg_offsets_[i] >= 0){
-            offsets.push_back(static_cast<int32_t>(search_result.seg_offsets_[i]));
+        if (search_result.seg_offsets_[i] >= 0) {
+            offsets.push_back(
+                static_cast<int32_t>(search_result.seg_offsets_[i]));
             offset_idx.push_back(i);
         }
     }
 
+    // skip rescore if result was empty
+    if (offsets.empty()) {
+        query_context_->set_search_result(std::move(search_result));
+        return input_;
+    }
+
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
+        // rescore for all result if no filter
+        if (!filter) {
+            for (auto i = 0; i < offsets.size(); i++) {
+                search_result.distances_[offset_idx[i]] =
+                    scorer->rescore(search_result.distances_[offset_idx[i]]);
+            }
+            continue;
+        }
+
         std::vector<expr::TypedExprPtr> filters;
         filters.emplace_back(filter);
         auto expr_set = std::make_unique<ExprSet>(filters, exec_context);
@@ -99,8 +119,8 @@ PhyRescoresNode::GetOutput() {
             Assert(bitsetview.size() == offsets.size());
             for (auto i = 0; i < offsets.size(); i++) {
                 if (bitsetview[i] > 0) {
-                    search_result.distances_[offset_idx[i]] =
-                        scorer->rescore(search_result.distances_[offset_idx[i]]);
+                    search_result.distances_[offset_idx[i]] = scorer->rescore(
+                        search_result.distances_[offset_idx[i]]);
                 }
             }
         } else {
@@ -115,8 +135,8 @@ PhyRescoresNode::GetOutput() {
             bitset.append(view);
             for (auto i = 0; i < offsets.size(); i++) {
                 if (bitset[offsets[i]] > 0) {
-                    search_result.distances_[offset_idx[i]] =
-                        scorer->rescore(search_result.distances_[offset_idx[i]]);
+                    search_result.distances_[offset_idx[i]] = scorer->rescore(
+                        search_result.distances_[offset_idx[i]]);
                 }
             }
         }
@@ -126,6 +146,13 @@ PhyRescoresNode::GetOutput() {
     bool large_is_better = PositivelyRelated(metric_type);
     sort_search_result(search_result, large_is_better);
     query_context_->set_search_result(std::move(search_result));
+
+    std::chrono::high_resolution_clock::time_point scalar_end =
+        std::chrono::high_resolution_clock::now();
+    double scalar_cost =
+        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+            .count();
+    monitor::internal_core_search_latency_rescore.Observe(scalar_cost / 1000);
     return input_;
 };
 

@@ -72,6 +72,7 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_iterative_filter);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_rescore);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar_proportion);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_get_vector_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_retrieve_get_target_entry_latency);
@@ -93,6 +94,13 @@ DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_inflight_task_total);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_all);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all);
+
+// json stats metrics
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_term_query);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load);
 
 // --- file writer metrics ---
 

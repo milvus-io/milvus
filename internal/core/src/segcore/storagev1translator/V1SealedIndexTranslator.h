@@ -29,7 +29,8 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
     num_cells() const override;
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
-    milvus::cachinglayer::ResourceUsage
+    std::pair<milvus::cachinglayer::ResourceUsage,
+              milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
     const std::string&
     key() const override;
@@ -57,10 +58,11 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
         int64_t index_build_id;
         int64_t index_version;
     };
-    std::unique_ptr<milvus::index::IndexBase>
+
+    index::IndexBasePtr
     LoadVecIndex();
 
-    std::unique_ptr<milvus::index::IndexBase>
+    index::IndexBasePtr
     LoadScalarIndex();
 
     std::string key_;
