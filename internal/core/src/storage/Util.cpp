@@ -1207,10 +1207,27 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     }
 
     std::vector<std::string> remote_chunk_files;
-    int64_t column_group_id;
+    int64_t column_group_id = -1;
+    size_t col_offset = -1;
     if (column_group_files.find(field_id) == column_group_files.end()) {
-        column_group_id = DEFAULT_SHORT_COLUMN_GROUP_ID;
-        remote_chunk_files = column_group_files[DEFAULT_SHORT_COLUMN_GROUP_ID];
+        for (auto& [group_id, files] : column_group_files) {
+            if (group_id >= START_USER_FIELDID) {
+                continue;
+            }
+            milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+                FieldId(group_id), files[0], nullptr, fs);
+            for (size_t i = 0; i < field_id_list.size(); ++i) {
+                if (field_id_list.Get(i) == field_id) {
+                    remote_chunk_files = files;
+                    column_group_id = group_id;
+                    col_offset = i;
+                    break;
+                }
+            }
+            if (column_group_id != -1) {
+                break;
+            }
+        }
     } else {
         remote_chunk_files = column_group_files[field_id];
         column_group_id = field_id;
@@ -1220,13 +1237,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                "[StorageV2] remote files size is 0");
 
     // find column offset
-    milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
-    size_t col_offset = -1;
-    for (size_t i = 0; i < field_id_list.size(); ++i) {
-        if (field_id_list.Get(i) == field_id) {
-            col_offset = i;
-            break;
+    if (col_offset == -1) {
+        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+            FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
+
+        for (size_t i = 0; i < field_id_list.size(); ++i) {
+            if (field_id_list.Get(i) == field_id) {
+                col_offset = i;
+                break;
+            }
         }
     }
     // field not found, must be newly added field, return empty resultset

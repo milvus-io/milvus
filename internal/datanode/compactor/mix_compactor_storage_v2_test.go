@@ -80,7 +80,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK() {
 
 	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
 	s.Equal(1, len(result.GetSegments()))
-	s.Equal(6, len(result.GetSegments()[0].GetInsertLogs()))
+	s.Equal(7, len(result.GetSegments()[0].GetInsertLogs()))
 	s.Equal(1, len(result.GetSegments()[0].GetField2StatslogPaths()))
 }
 
@@ -226,7 +226,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactTwoToOne() {
 
 	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
 	s.Equal(1, len(result.GetSegments()))
-	s.Equal(6, len(result.GetSegments()[0].GetInsertLogs()))
+	s.Equal(7, len(result.GetSegments()[0].GetInsertLogs()))
 	s.Equal(1, len(result.GetSegments()[0].GetField2StatslogPaths()))
 }
 
@@ -241,7 +241,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactTwoToOneWithBM25() {
 	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.Empty(segment.Deltalogs)
-	s.Equal(2, len(segment.InsertLogs))
+	s.Equal(3, len(segment.InsertLogs))
 	s.Equal(1, len(segment.Bm25Logs))
 	s.Equal(1, len(segment.Field2StatslogPaths))
 }
@@ -262,7 +262,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactSortedSegment() {
 	segment := result.GetSegments()[0]
 	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(291, segment.GetNumOfRows())
-	s.EqualValues(6, len(segment.InsertLogs))
+	s.EqualValues(7, len(segment.InsertLogs))
 	s.EqualValues(1, len(segment.Field2StatslogPaths))
 	s.Empty(segment.Deltalogs)
 }
@@ -289,7 +289,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactSortedSegmentLackBinlog() {
 	segment := result.GetSegments()[0]
 	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(291, segment.GetNumOfRows())
-	s.EqualValues(6, len(segment.InsertLogs))
+	s.EqualValues(7, len(segment.InsertLogs))
 	s.EqualValues(1, len(segment.Field2StatslogPaths))
 	s.Empty(segment.Deltalogs)
 }
