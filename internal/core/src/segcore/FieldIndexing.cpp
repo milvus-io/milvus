@@ -666,61 +666,29 @@ CreateIndex(const FieldMeta& field_meta,
     }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
-            return std::make_unique<ScalarFieldIndexing<bool>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta,
+                                                               segcore_config);
         case DataType::INT8:
             return std::make_unique<ScalarFieldIndexing<int8_t>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::INT16:
             return std::make_unique<ScalarFieldIndexing<int16_t>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::INT32:
             return std::make_unique<ScalarFieldIndexing<int32_t>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::INT64:
             return std::make_unique<ScalarFieldIndexing<int64_t>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::FLOAT:
-            return std::make_unique<ScalarFieldIndexing<float>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+            return std::make_unique<ScalarFieldIndexing<float>>(field_meta,
+                                                                segcore_config);
         case DataType::DOUBLE:
             return std::make_unique<ScalarFieldIndexing<double>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::VARCHAR:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
-                field_meta,
-                field_index_meta,
-                segment_max_row_count,
-                segcore_config,
-                field_raw_data);
+                field_meta, segcore_config);
         case DataType::GEOMETRY:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta,

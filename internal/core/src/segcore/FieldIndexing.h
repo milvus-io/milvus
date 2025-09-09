@@ -182,14 +182,7 @@ class ScalarFieldIndexing : public FieldIndexing {
 
     int64_t
     get_build_threshold() const override {
-        // For geometry fields, build immediately (no threshold)
-        if constexpr (std::is_same_v<T, std::string>) {
-            if (field_meta_.get_data_type() == DataType::GEOMETRY) {
-                return 0;  // Build immediately for geometry fields
-            }
-        }
-        // For other scalar indexes, use a default threshold
-        return 1000;  // Default threshold for other scalar index building
+        return 0;
     }
 
     bool

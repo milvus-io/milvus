@@ -51,9 +51,6 @@ class RTreeIndexWrapper {
      */
     ~RTreeIndexWrapper();
 
-    /**
-     * @brief Add a geometry (WKB) for dynamic insertion build (UT helper)
-     */
     void
     add_geometry(const uint8_t* wkb_data, size_t len, int64_t row_offset);
 
