@@ -65,7 +65,7 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 
 	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetOldName())
 	if collID == 0 {
-		return fmt.Errorf("collection %s not found in database %s", t.Req.GetOldName(), t.Req.GetDbName())
+		return fmt.Errorf("collection not found in database, collection: %s, database: %s", t.Req.GetOldName(), t.Req.GetDbName())
 	}
 
 	// check old collection doesn't have aliases if renaming databases
