@@ -3757,7 +3757,8 @@ class TestQueryOperation(TestMilvusClientV2Base):
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_without_loading(self):
+    @pytest.mark.parametrize("output_fields", [None, ["count(*)"]])
+    def test_milvus_client_query_without_loading(self, output_fields):
         """
         target: test query without loading
         method: query without loading
@@ -3777,7 +3778,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         assert collection_info['row_count'] == default_nb
         # 4. query without loading
         error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
-        self.query(client, collection_name, filter=default_term_expr,
+        self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
                    check_task=CheckTasks.err_res, check_items=error)
         # 6. clean up
         self.drop_collection(client, collection_name)
@@ -4582,6 +4583,8 @@ class TestQueryString(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type, params={"tokenizer": "standard"})
         self.create_index(client, collection_name, index_params)
+        # Wait for string field index to be ready before loading
+        self.wait_for_index_ready(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
         # 4. query
         result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
@@ -4814,4 +4817,80 @@ class TestQueryArray(TestMilvusClientV2Base):
         for record in res:
             first_element = record[ct.default_string_array_field_name][0]
             assert match_func(first_element)
+        self.drop_collection(client, collection_name)
+
+
+class TestQueryCount(TestMilvusClientV2Base):
+    """
+    test query count(*)
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("consistency_level", ["Bounded", "Strong", "Eventually"])
+    def test_milvus_client_count_consistency_level(self, consistency_level):
+        """
+        target: test count(*) with different consistency levels
+        method: 1. create collection with different consistency level
+                2. load collection
+                3. insert and count
+                4. verify count
+        expected: expected count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with specified consistency level
+        self.create_collection(client, collection_name, default_dim, consistency_level=consistency_level)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 4. wait based on consistency level
+        if consistency_level == "Bounded":
+            time.sleep(ct.default_graceful_time)
+        elif consistency_level == "Strong":
+            pass
+        elif consistency_level == "Eventually":
+            time.sleep(ct.default_graceful_time)
+        # 5. query with count(*)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb}],
+                                "pk_name": ct.default_int64_field_name})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_output_field", ["count", "count(int64)", "count(**)"])
+    def test_milvus_client_count_invalid_output_field(self, invalid_output_field):
+        """
+        target: test count with invalid output field
+        method: query with invalid count output field
+        expected: raise exception with field not exist error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False, enable_dynamic_field=False)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. create index and load collection
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 4. query with invalid count output field
+        self.query(client, collection_name, filter=default_search_exp, output_fields=[invalid_output_field],
+                   check_task=CheckTasks.err_res,
+                   check_items={"err_code": 1,
+                                "err_msg": f"field {invalid_output_field} not exist"})
         self.drop_collection(client, collection_name)
