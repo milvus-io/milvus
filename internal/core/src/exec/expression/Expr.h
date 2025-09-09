@@ -182,7 +182,6 @@ class SegmentExpr : public Expr {
                                  allow_any_json_cast_type_,
                                  is_json_contains_);
         if (pinned_index_.size() > 0) {
-            is_index_mode_ = true;
             num_index_chunk_ = pinned_index_.size();
         }
         // if index not include raw data, also need load data
@@ -1225,7 +1224,7 @@ class SegmentExpr : public Expr {
     CanUseIndex() const {
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
-        return is_index_mode_ && !CanUseNgramIndex();
+        return num_index_chunk_ != 0 && !CanUseNgramIndex();
     }
 
     template <typename T>
@@ -1315,7 +1314,6 @@ class SegmentExpr : public Expr {
     DataType value_type_;
     bool allow_any_json_cast_type_{false};
     bool is_json_contains_{false};
-    bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data
     // default true means use index as much as possible
