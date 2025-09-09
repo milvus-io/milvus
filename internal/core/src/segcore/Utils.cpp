@@ -1121,9 +1121,11 @@ getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index) {
     if (is_index) {
-        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_INDEX : milvus::cachinglayer::CellDataType::SCALAR_INDEX;
+        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_INDEX
+                         : milvus::cachinglayer::CellDataType::SCALAR_INDEX;
     } else {
-        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_FIELD : milvus::cachinglayer::CellDataType::SCALAR_FIELD;
+        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_FIELD
+                         : milvus::cachinglayer::CellDataType::SCALAR_FIELD;
     }
 }
 
