@@ -19,6 +19,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const index::VectorIndex& indexing,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
+              milvus::OpContext& op_context,
               SearchResult& search_result,
               bool is_sparse) {
     auto num_queries = search_dataset.num_queries;
@@ -43,7 +44,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         return;
     }
 
-    indexing.Query(dataset, search_conf, bitset, search_result);
+    indexing.Query(dataset, search_conf, bitset, op_context, search_result);
 }
 
 }  // namespace milvus::query

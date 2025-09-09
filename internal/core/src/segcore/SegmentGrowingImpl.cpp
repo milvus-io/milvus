@@ -678,6 +678,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
+                                  milvus::OpContext& op_context,
                                   SearchResult& output) const {
     query::SearchOnGrowing(*this,
                            search_info,
@@ -686,6 +687,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                            query_count,
                            timestamp,
                            bitset,
+                           op_context,
                            output);
 }
 

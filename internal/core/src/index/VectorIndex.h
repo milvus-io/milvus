@@ -29,6 +29,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "common/OpContext.h"
 #include "knowhere/version.h"
 
 namespace milvus::index {
@@ -58,6 +59,7 @@ class VectorIndex : public IndexBase {
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset,
+          milvus::OpContext& op_context,
           SearchResult& search_result) const = 0;
 
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>

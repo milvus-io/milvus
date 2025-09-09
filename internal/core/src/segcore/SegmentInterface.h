@@ -23,6 +23,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -61,10 +62,14 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
     virtual void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+    FillPrimaryKeys(const query::Plan* plan,
+                    milvus::OpContext& op_context,
+                    SearchResult& results) const = 0;
 
     virtual void
-    FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
+    FillTargetEntry(const query::Plan* plan,
+                    milvus::OpContext& op_context,
+                    SearchResult& results) const = 0;
 
     virtual bool
     Contain(const PkType& pk) const = 0;
@@ -283,10 +288,12 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     FillPrimaryKeys(const query::Plan* plan,
+                    milvus::OpContext& op_context,
                     SearchResult& results) const override;
 
     void
     FillTargetEntry(const query::Plan* plan,
+                    milvus::OpContext& op_context,
                     SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
@@ -363,6 +370,7 @@ class SegmentInternalInterface : public SegmentInterface {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
+                  milvus::OpContext& op_context,
                   SearchResult& output) const = 0;
 
     virtual void
@@ -458,7 +466,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* offsets,
         int64_t size,
         bool ignore_non_pk,
-        bool fill_ids) const;
+        bool fill_ids,
+        milvus::OpContext& op_context) const;
 
     // return whether field mmap or not
     virtual bool

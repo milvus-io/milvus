@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -395,7 +396,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -435,7 +436,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -475,7 +476,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		f4.FieldId = fieldNameId[testFloatField]
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3, f4},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -4154,8 +4155,10 @@ func TestSearchTask_Requery(t *testing.T) {
 		}
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
-		queryResult, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
+		queryResult, storageCost, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
 		assert.NoError(t, err)
+		assert.Equal(t, int64(0), storageCost.ScannedRemoteBytes)
+		assert.Equal(t, int64(0), storageCost.ScannedTotalBytes)
 		assert.Len(t, queryResult.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
 			fieldName := field.GetFieldName()
@@ -4219,7 +4222,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
-		_, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
+		_, _, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})

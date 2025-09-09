@@ -124,7 +124,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     auto query_data = col_query_data.data();
     auto index_info = std::map<std::string, std::string>{};
     SearchResult search_result;
-
+    milvus::OpContext op_context;
     query::SearchOnSealedColumn(*schema,
                                 column.get(),
                                 search_info,
@@ -134,6 +134,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                                 1,
                                 total_row_count,
                                 bv,
+                                op_context,
                                 search_result);
 
     std::set<int64_t> offsets;
@@ -160,6 +161,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                                 1,
                                 total_row_count,
                                 bv,
+                                op_context,
                                 search_result);
 
     ASSERT_EQ(1, search_result.vector_iterators_->size());

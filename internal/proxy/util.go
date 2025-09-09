@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -2410,6 +2411,23 @@ func SetReportValue(status *commonpb.Status, value int) {
 		status.ExtraInfo = make(map[string]string)
 	}
 	status.ExtraInfo["report_value"] = strconv.Itoa(value)
+}
+
+func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
+	if storageCost.ScannedRemoteBytes == 0 && storageCost.ScannedTotalBytes == 0 {
+		return
+	}
+	if !merr.Ok(status) {
+		return
+	}
+	if status.ExtraInfo == nil {
+		status.ExtraInfo = make(map[string]string)
+	}
+
+	status.ExtraInfo["scanned_remote_bytes"] = strconv.FormatInt(storageCost.ScannedRemoteBytes, 10)
+	status.ExtraInfo["scanned_total_bytes"] = strconv.FormatInt(storageCost.ScannedTotalBytes, 10)
+	cacheHitRatio := float64(storageCost.ScannedTotalBytes-storageCost.ScannedRemoteBytes) / float64(storageCost.ScannedTotalBytes)
+	status.ExtraInfo["cache_hit_ratio"] = strconv.FormatFloat(cacheHitRatio, 'f', -1, 64)
 }
 
 func GetCostValue(status *commonpb.Status) int {
