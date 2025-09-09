@@ -48,6 +48,22 @@ func SplitBySchema(fields []*schemapb.FieldSchema) []ColumnGroup {
 	return groups
 }
 
+func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, policies ...ColumnGroupSplitPolicy) []ColumnGroup {
+	split := newCurrentSplit(fields, stats)
+	for _, policy := range policies {
+		split = policy.Split(split)
+	}
+	return split.outputGroups
+}
+
+func DefaultPolicies() []ColumnGroupSplitPolicy {
+	return []ColumnGroupSplitPolicy{
+		NewSystemColumnPolicy(true),
+		NewSelectedDataTypePolicy(),
+		NewRemanentShortPolicy(-1),
+	}
+}
+
 func IsVectorDataType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_BinaryVector,
