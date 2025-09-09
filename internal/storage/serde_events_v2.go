@@ -343,6 +343,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
 	}
+	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
 }
 
@@ -395,7 +396,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
-	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
