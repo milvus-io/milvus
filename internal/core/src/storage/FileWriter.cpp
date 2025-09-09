@@ -209,14 +209,14 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
 
     assert(src == static_cast<const char*>(data) + nbyte);
 
-    monitor::disk_write_total_bytes_direct.Increment(nbyte);
+    milvus::monitor::disk_write_total_bytes_direct.Increment(nbyte);
 }
 
 void
 FileWriter::WriteWithBufferedIO(const void* data, size_t nbyte) {
     PositionedWriteWithCheck(data, nbyte, file_size_);
     file_size_ += nbyte;
-    monitor::disk_write_total_bytes_buffered.Increment(nbyte);
+    milvus::monitor::disk_write_total_bytes_buffered.Increment(nbyte);
 }
 
 void
@@ -270,7 +270,7 @@ FileWriter::FlushWithDirectIO() {
            nearest_aligned_offset - offset_);
     PositionedWriteWithCheck(aligned_buf_, nearest_aligned_offset, file_size_);
     file_size_ += offset_;
-    monitor::disk_write_total_bytes_direct.Increment(offset_);
+    milvus::monitor::disk_write_total_bytes_direct.Increment(offset_);
     // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
         Cleanup();

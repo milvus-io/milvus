@@ -85,7 +85,7 @@ PhyGroupByNode::GetOutput() {
     double vector_cost =
         std::chrono::duration<double, std::micro>(vector_end - vector_start)
             .count();
-    monitor::internal_core_search_latency_groupby.Observe(vector_cost / 1000);
+    milvus::monitor::internal_core_search_latency_groupby.Observe(vector_cost / 1000);
     return input_;
 }
 

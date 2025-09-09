@@ -642,7 +642,7 @@ OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
         std::chrono::high_resolution_clock::now();
     double cost =
         std::chrono::duration<double, std::micro>(end - start).count();
-    monitor::internal_core_optimize_expr_latency.Observe(cost / 1000);
+    milvus::monitor::internal_core_optimize_expr_latency.Observe(cost / 1000);
 }
 
 }  // namespace exec

@@ -1117,4 +1117,14 @@ getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
                          : manager.getScalarFieldCacheWarmupPolicy();
     }
 }
+
+milvus::cachinglayer::CellDataType
+getCellDataType(bool is_vector, bool is_index) {
+    if (is_index) {
+        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_INDEX : milvus::cachinglayer::CellDataType::SCALAR_INDEX;
+    } else {
+        return is_vector ? milvus::cachinglayer::CellDataType::VECTOR_FIELD : milvus::cachinglayer::CellDataType::SCALAR_FIELD;
+    }
+}
+
 }  // namespace milvus::segcore

@@ -1919,7 +1919,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
     double get_vector_cost = std::chrono::duration<double, std::micro>(
                                  get_vector_end - get_vector_start)
                                  .count();
-    monitor::internal_core_get_vector_latency.Observe(get_vector_cost / 1000);
+    milvus::monitor::internal_core_get_vector_latency.Observe(get_vector_cost /
+                                                              1000);
 
     return vector;
 }
