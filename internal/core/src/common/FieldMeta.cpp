@@ -97,7 +97,6 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         return schema_proto.default_value();
     }();
 
-    LOG_DEBUG("Get datatype {}", GetDataTypeName(data_type));
     if (data_type == DataType::VECTOR_ARRAY) {
         // todo(SpadeA): revisit the code when index build for vector array is ready
         int64_t dim = 0;

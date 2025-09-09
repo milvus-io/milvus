@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
-#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
