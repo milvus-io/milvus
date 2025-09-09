@@ -1233,6 +1233,13 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         column_group_id = field_id;
     }
 
+    if (column_group_id == -1) {
+        LOG_INFO(
+            "[StorageV2] field {} not found in any column group, return "
+            "empty result set",
+            field_id);
+        return field_data_list;
+    }
     AssertInfo(remote_chunk_files.size() > 0,
                "[StorageV2] remote files size is 0");
 
