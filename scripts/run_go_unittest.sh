@@ -58,6 +58,8 @@ usage:
   esac
 done
 
+export ASAN_OPTIONS="detect_containter_overflow=0"
+
 function test_proxy()
 {
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
