@@ -263,7 +263,7 @@ type idfOracle struct {
 
 	sealed typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 
-	collectionID int64
+	channel string
 
 	// for sync distribution
 	next          idfTarget
@@ -405,7 +405,8 @@ func (o *idfOracle) syncloop() {
 
 func (o *idfOracle) localloop() {
 	pool := conc.NewPool[struct{}](paramtable.Get().QueryNodeCfg.IDFWriteConcurrenct.GetAsInt())
-	o.dirPath = pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID())
+	// write local file to /{bm25_path}/{node_id}/{channel_name}
+	o.dirPath = path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), o.channel)
 
 	defer o.wg.Done()
 	for {
@@ -553,9 +554,9 @@ func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][
 	return idfBytes, stats.GetAvgdl(), nil
 }
 
-func NewIDFOracle(collID int64, functions []*schemapb.FunctionSchema) IDFOracle {
+func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracle {
 	return &idfOracle{
-		collectionID:  collID,
+		channel:       channel,
 		targetVersion: atomic.NewInt64(0),
 		current:       newBm25Stats(functions),
 		growing:       make(map[int64]*growingBm25Stats),
