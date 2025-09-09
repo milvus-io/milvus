@@ -878,10 +878,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     ExecTextMatch();
 
     bool
-    CanExecNgramMatch();
-
-    bool
-    CanExecNgramMatchForJson();
+    CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
     ExecNgramMatch();

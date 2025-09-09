@@ -262,7 +262,7 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
-	enabled, has, err := parseNamespaceProp(t.Req.Properties...)
+	enabled, has, err := common.ParseNamespaceProp(t.Req.Properties...)
 	if err != nil {
 		return err
 	}
@@ -301,19 +301,6 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		zap.String("collectionName", t.Req.CollectionName),
 		zap.String("fieldName", common.NamespaceFieldName))
 	return nil
-}
-
-func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == common.NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
 }
 
 func hasIsolationProperty(props ...*commonpb.KeyValuePair) bool {

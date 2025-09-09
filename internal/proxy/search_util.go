@@ -602,9 +602,10 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 }
 
 func getMetricType(toReduceResults []*internalpb.SearchResults) string {
-	metricType := ""
-	if len(toReduceResults) >= 1 {
-		metricType = toReduceResults[0].GetMetricType()
+	for _, r := range toReduceResults {
+		if m := r.GetMetricType(); m != "" {
+			return m
+		}
 	}
-	return metricType
+	return ""
 }
