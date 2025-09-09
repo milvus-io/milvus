@@ -358,14 +358,12 @@ StringIndexBTree::IsNull() {
 
 const TargetBitmap
 StringIndexBTree::IsNotNull() {
-    TargetBitmap bitset(total_rows_, true);
-
-    // for (size_t i = 0; i < total_rows_; ++i) {
-    //     if (!offset_to_string_[i].empty()) {
-    //         bitset[i] = true;
-    //     }
-    // }
-
+    TargetBitmap bitset(total_rows_);
+    for (size_t i = 0; i < total_rows_; ++i) {
+        if (!offset_to_string_[i].empty()) {
+            bitset.set(i);
+        }
+    }
     return bitset;
 }
 

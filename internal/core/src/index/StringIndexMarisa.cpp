@@ -317,14 +317,12 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
 
 TargetBitmap
 StringIndexMarisa::IsNotNull() {
-    TargetBitmap bitset(str_ids_.size(), true);
-
-    // TargetBitmap bitset(str_ids_.size());
-    // for (size_t i = 0; i < bitset.size(); i++) {
-    //     if (str_ids_[i] != MARISA_NULL_KEY_ID) {
-    //         bitset.set(i);
-    //     }
-    // }
+    TargetBitmap bitset(str_ids_.size());
+    for (size_t i = 0; i < bitset.size(); i++) {
+        if (str_ids_[i] != MARISA_NULL_KEY_ID) {
+            bitset.set(i);
+        }
+    }
     return bitset;
 }
 
