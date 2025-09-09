@@ -27,48 +27,6 @@
 #include "common/Tracer.h"
 namespace milvus::query {
 
-namespace impl {
-
-class ExecPlanNodeVisitor : PlanNodeVisitor {
- public:
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
-                        Timestamp timestamp,
-                        const PlaceholderGroup& placeholder_group,
-                        int32_t consystency_level,
-                        Timestamp collection_ttl)
-        : segment_(segment),
-          timestamp_(timestamp),
-          placeholder_group_(placeholder_group),
-          consystency_level_(consystency_level),
-          collection_ttl_timestamp_(collection_ttl_timestamp_) {
-    }
-
-    SearchResult
-    get_moved_result(PlanNode& node) {
-        assert(!search_result_opt_.has_value());
-        node.accept(*this);
-        assert(search_result_opt_.has_value());
-        auto ret = std::move(search_result_opt_).value();
-        search_result_opt_ = std::nullopt;
-        return ret;
-    }
-
- private:
-    template <typename VectorType>
-    void
-    VectorVisitorImpl(VectorPlanNode& node);
-
- private:
-    const segcore::SegmentInterface& segment_;
-    Timestamp timestamp_;
-    Timestamp collection_ttl_timestamp_;
-    const PlaceholderGroup& placeholder_group_;
-
-    SearchResultOpt search_result_opt_;
-    int32_t consystency_level_ = 0;
-};
-}  // namespace impl
-
 static SearchResult
 empty_search_result(int64_t num_queries) {
     SearchResult final_result;

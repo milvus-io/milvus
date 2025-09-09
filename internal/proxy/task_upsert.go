@@ -223,7 +223,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	defer func() {
 		sp.End()
 	}()
-	queryResult, err := t.node.(*Proxy).query(ctx, qt, sp)
+	// ignore storage cost?
+	queryResult, _, err := t.node.(*Proxy).query(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, err
 	}

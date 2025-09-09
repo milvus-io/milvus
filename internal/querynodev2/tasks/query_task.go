@@ -158,8 +158,10 @@ func (t *QueryTask) Execute() error {
 			ServiceTime:          tr.ElapseSpan().Milliseconds(),
 			TotalRelatedDataSize: relatedDataSize,
 		},
-		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
-		HasMoreResult:    reducedResult.HasMoreResult,
+		AllRetrieveCount:   reducedResult.GetAllRetrieveCount(),
+		HasMoreResult:      reducedResult.HasMoreResult,
+		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
+		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
 	}
 	return nil
 }

@@ -11,6 +11,8 @@ message RetrieveResults {
   repeated schema.FieldData fields_data = 3;
   int64 all_retrieve_count = 4;
   bool has_more_result = 5;
+  int64 scanned_remote_bytes = 6;
+  int64 scanned_total_bytes = 7;
 }
 
 message LoadFieldMeta {

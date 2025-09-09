@@ -473,6 +473,7 @@ void
 VectorMemIndex<T>::Query(const DatasetPtr dataset,
                          const SearchInfo& search_info,
                          const BitsetView& bitset,
+                         milvus::OpContext& op_context,
                          SearchResult& search_result) const {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
@@ -486,7 +487,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
         if (CheckAndUpdateKnowhereRangeSearchParam(
                 search_info, topk, GetMetricType(), search_conf)) {
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
-            auto res = index_.RangeSearch(dataset, search_conf, bitset);
+            auto res =
+                index_.RangeSearch(dataset, search_conf, bitset, &op_context);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 ThrowInfo(ErrorCode::UnexpectedError,
@@ -500,7 +502,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             return result;
         } else {
             milvus::tracer::AddEvent("start_knowhere_index_search");
-            auto res = index_.Search(dataset, search_conf, bitset);
+            auto res = index_.Search(dataset, search_conf, bitset, &op_context);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 ThrowInfo(

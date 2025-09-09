@@ -342,10 +342,14 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
-        vec_index->Query(query_dataset, searchInfo, nullptr, result);
+        milvus::OpContext op_context;
+        vec_index->Query(
+            query_dataset, searchInfo, nullptr, op_context, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
         EXPECT_EQ(result.total_nq_, 2);
         EXPECT_EQ(result.distances_.size(), 2 * searchInfo.topk_);
+        EXPECT_EQ(op_context.storage_usage.scanned_cold_bytes, 0);
+        EXPECT_EQ(op_context.storage_usage.scanned_total_bytes, 0);
     }
 }

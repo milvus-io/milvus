@@ -137,6 +137,8 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
 
 CStatus
 GetSearchResultDataBlob(CProto* searchResultDataBlob,
+                        int64_t* scanned_remote_bytes,
+                        int64_t* scanned_total_bytes,
                         CSearchResultDataBlobs cSearchResultDataBlobs,
                         int32_t blob_index) {
     SCOPE_CGO_CALL_METRIC();
@@ -151,6 +153,10 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
             search_result_data_blobs->blobs[blob_index].data();
         searchResultDataBlob->proto_size =
             search_result_data_blobs->blobs[blob_index].size();
+        *scanned_remote_bytes =
+            search_result_data_blobs->costs[blob_index].scanned_remote_bytes;
+        *scanned_total_bytes =
+            search_result_data_blobs->costs[blob_index].scanned_total_bytes;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         searchResultDataBlob->proto_blob = nullptr;
