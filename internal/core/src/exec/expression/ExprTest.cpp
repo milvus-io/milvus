@@ -4234,12 +4234,15 @@ TEST_P(ExprTest, TestMutiInConvert) {
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     auto final1 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    auto prev_optimize_expr_enabled = OPTIMIZE_EXPR_ENABLED.load();
     OPTIMIZE_EXPR_ENABLED.store(false);
     auto final2 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final1.size(), final2.size());
     for (auto i = 0; i < final1.size(); i++) {
         EXPECT_EQ(final1[i], final2[i]);
     }
+    OPTIMIZE_EXPR_ENABLED.store(prev_optimize_expr_enabled,
+                                std::memory_order_release);
 }
 
 TEST(Expr, TestExprPerformance) {

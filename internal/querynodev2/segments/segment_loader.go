@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -113,10 +112,10 @@ type ResourceEstimate struct {
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
 	return ResourceEstimate{
-		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
-		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
-		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
-		FinalDiskCost:   uint64(float64(estimate.final_disk_cost) * util.GB),
+		MaxMemoryCost:   uint64(estimate.max_memory_cost),
+		MaxDiskCost:     uint64(estimate.max_disk_cost),
+		FinalMemoryCost: uint64(estimate.final_memory_cost),
+		FinalDiskCost:   uint64(estimate.final_disk_cost),
 		HasRawData:      bool(estimate.has_raw_data),
 	}
 }
@@ -236,17 +235,6 @@ type segmentLoader struct {
 
 var _ Loader = (*segmentLoader)(nil)
 
-func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
-	if segmentInfo.GetStorageVersion() == 2 && paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
-		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
-			}
-		}
-	}
-}
-
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,
 	segmentType SegmentType,
@@ -261,9 +249,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	if len(segments) == 0 {
 		log.Info("no segment to load")
 		return nil, nil
-	}
-	for _, segmentInfo := range segments {
-		addBucketNameStorageV2(segmentInfo)
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)

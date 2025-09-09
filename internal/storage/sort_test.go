@@ -112,7 +112,7 @@ func TestMergeSort(t *testing.T) {
 	t.Run("merge sort", func(t *testing.T) {
 		gotNumRows, err := MergeSort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
-		})
+		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 10000, gotNumRows)
 		err = rw.Close()
@@ -125,7 +125,7 @@ func TestMergeSort(t *testing.T) {
 			// cover a single record (1024 rows) that is deleted, or the last data in the record is deleted
 			// index 1023 is deleted. records (1024-2048) and (5000-6023) are all deleted
 			return pk < 2000 || (pk >= 3050 && pk < 5000) || pk >= 7000
-		})
+		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 5950, gotNumRows)
 		err = rw.Close()

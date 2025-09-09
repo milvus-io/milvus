@@ -154,7 +154,7 @@ TEST(CApiTest, StreamReduceGroupBY) {
     int N = 300;
     int topK = 100;
     int num_queries = 2;
-    int dim = 16;
+    int dim = 4;
     namespace schema = milvus::proto::schema;
 
     void* c_collection;
