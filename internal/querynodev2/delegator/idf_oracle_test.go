@@ -31,6 +31,7 @@ import (
 type IDFOracleSuite struct {
 	suite.Suite
 	collectionID     int64
+	channel          string
 	collectionSchema *schemapb.CollectionSchema
 	idfOracle        *idfOracle
 
@@ -40,6 +41,7 @@ type IDFOracleSuite struct {
 
 func (suite *IDFOracleSuite) SetupSuite() {
 	suite.collectionID = 111
+	suite.channel = "test-channel"
 	suite.collectionSchema = &schemapb.CollectionSchema{
 		Functions: []*schemapb.FunctionSchema{{
 			Type:           schemapb.FunctionType_BM25,
@@ -50,7 +52,7 @@ func (suite *IDFOracleSuite) SetupSuite() {
 }
 
 func (suite *IDFOracleSuite) SetupTest() {
-	suite.idfOracle = NewIDFOracle(suite.collectionID, suite.collectionSchema.GetFunctions()).(*idfOracle)
+	suite.idfOracle = NewIDFOracle(suite.channel, suite.collectionSchema.GetFunctions()).(*idfOracle)
 	suite.idfOracle.Start()
 	suite.snapshot = &snapshot{
 		dist: []SnapshotItem{{1, make([]SegmentEntry, 0)}},

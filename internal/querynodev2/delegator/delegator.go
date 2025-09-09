@@ -973,7 +973,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	if len(sd.isBM25Field) > 0 {
-		sd.idfOracle = NewIDFOracle(sd.collectionID, collection.Schema().GetFunctions())
+		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
 		sd.idfOracle.Start()
 	}
