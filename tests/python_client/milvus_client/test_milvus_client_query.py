@@ -9,6 +9,8 @@ import pandas as pd
 import numpy as np
 import random
 from pymilvus import Function, FunctionType
+import threading
+
 
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
@@ -4584,7 +4586,6 @@ class TestQueryString(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type, params={"tokenizer": "standard"})
         self.create_index(client, collection_name, index_params)
         # Wait for string field index to be ready before loading
-        self.wait_for_index_ready(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
         time.sleep(ct.default_graceful_time)
         # 4. query
@@ -4826,6 +4827,41 @@ class TestQueryCount(TestMilvusClientV2Base):
     test query count(*)
     """
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_count_with_expr(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection, insert data, create index and load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. count with default expr 
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb}],
+                                "pk_name": default_primary_key_field_name})
+        # 5. count with term expr (should return 2 entities: id in [0, 1])
+        self.query(client, collection_name, filter="id in [0, 1]", output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 2}],
+                                "pk_name": default_primary_key_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("consistency_level", ["Bounded", "Strong", "Eventually"])
     def test_milvus_client_count_consistency_level(self, consistency_level):
@@ -4926,13 +4962,473 @@ class TestQueryCount(TestMilvusClientV2Base):
             row[default_primary_key_field_name] = 0
         self.insert(client, collection_name, rows)
         # 4. query count
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])[0]
-        assert len(res) == 1
-        assert res[0]["count(*)"] == tmp_nb
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb}],
+                                "pk_name": default_primary_key_field_name})
         # 5. delete and verify count
         self.delete(client, collection_name, filter="id == 0")
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])[0]
-        assert len(res) == 1
-        assert res[0]["count(*)"] == 0
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 0}],
+                                "pk_name": default_primary_key_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_multi_partitions(self):
+        """
+        target: test count multi partitions
+        method: 1. init partitions: p1, _default
+                2. count p1, _default, [p1, _default]
+                3. delete _default entities and count _default, [p1, _default]
+                4. drop p1 and count p1, [p1, _default]
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        half = default_nb // 2
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data into two partitions
+        schema_info = self.describe_collection(client, collection_name)[0]
+        # insert [0, half) into custom partition
+        rows_partition = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition, partition_name=partition_name)
+        # insert [half, nb) into _default partition
+        rows_default = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_default)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name, "_default"])
+        # 4. query count for each partition
+        for p_name in [partition_name, "_default"]:
+            self.query(client, collection_name, filter=default_search_exp, 
+                           output_fields=["count(*)"], partition_names=[p_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{"count(*)": half}],
+                                        "pk_name": default_primary_key_field_name})[0]
+        # 5. delete entities from _default partition
+        delete_expr = f"{default_primary_key_field_name} >= {half}"
+        self.delete(client, collection_name, filter=delete_expr)
+        # count _default partition after deletion
+        self.query(client, collection_name, filter=default_search_exp, 
+                   output_fields=["count(*)"], partition_names=["_default"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 0}],
+                                "pk_name": default_primary_key_field_name})[0]
+        # count both partitions after deletion
+        self.query(client, collection_name, filter=default_search_exp, 
+                   output_fields=["count(*)"], partition_names=[partition_name, "_default"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": half}],
+                                "pk_name": default_primary_key_field_name})[0]
+        # 6. drop partition and test error
+        self.release_partitions(client, collection_name, [partition_name])
+        self.drop_partition(client, collection_name, partition_name)
+        # query dropped partition should fail
+        self.query(client, collection_name, filter=default_search_exp, 
+                 output_fields=["count(*)"], partition_names=[partition_name],
+                 check_task=CheckTasks.err_res,
+                 check_items={"err_code": 65535,
+                              "err_msg": f'partition name {partition_name} not found'})
+        # count remaining _default partition
+        self.query(client, collection_name, filter=default_search_exp, 
+                   output_fields=["count(*)"], partition_names=["_default"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 0}],
+                                "pk_name": default_primary_key_field_name})[0]
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_partition_duplicate(self):
+        """
+        target: test count from partitions which have duplicate ids
+        method: 1. insert same ids into 2 partitions
+                2. count
+                3. delete some ids and count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = "p1"
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert same data into both partitions (duplicate ids)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows, partition_name="_default")
+        self.insert(client, collection_name, rows, partition_name=partition_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. count total entities (should be default_nb * 2 due to duplicates)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb * 2}],
+                                "pk_name": default_primary_key_field_name})[0]
+        # 5. delete some duplicate ids
+        self.delete(client, collection_name, filter="id in [0, 1]")
+        # 6. count remaining entities in partition p1
+        self.query(client, collection_name, filter=default_search_exp, 
+                   output_fields=["count(*)"], partition_names=[partition_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb - 2}],
+                                "pk_name": default_primary_key_field_name})[0]
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_growing_sealed_segment(self):
+        """
+        target: test count growing and sealed segment
+        method: 1. insert -> index -> load
+                2. count
+                3. new insert
+                4. count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        tmp_nb = 100
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert initial data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. create index and load (this creates sealed segment)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. count sealed segment data
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb}], "pk_name": default_primary_key_field_name})[0]
+        # 5. new insert (this creates growing segment)
+        new_rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info, start=tmp_nb)
+        self.insert(client, collection_name, new_rows)
+        # 6. count both sealed and growing segment data
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb * 2}], "pk_name": default_primary_key_field_name})[0]
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_during_handoff(self):
+        """
+        target: test count during handoff
+        method: 1. index -> load
+                2. insert
+                3. flush while count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection -> index -> load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. flush while count (concurrent operations)        
+        def flush_collection():
+            self.flush(client, collection_name)
+            
+        def count_entities():
+            self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                      check_task=CheckTasks.check_query_results,
+                      check_items={exp_res: [{"count(*)": default_nb}],
+                                   "pk_name": default_primary_key_field_name})
+        
+        t_flush = threading.Thread(target=flush_collection)
+        t_count = threading.Thread(target=count_entities)
+        
+        t_flush.start()
+        t_count.start()
+        t_flush.join()
+        t_count.join()
+        
+        # 4. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_delete_insert_duplicate_ids(self):
+        """
+        target: test count after delete and re-insert same entities
+        method: 1. insert and delete
+                2. count
+                3. re-insert deleted ids with different vectors
+                4. count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        tmp_nb = 100
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert initial data (sealed segment) [0, default_nb)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_initial = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows_initial)
+        # 3. create index and load (make data into sealed segment)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. insert additional data (growing segment) [default_nb, default_nb + tmp_nb)
+        rows_additional = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info, start=default_nb)
+        self.insert(client, collection_name, rows_additional)
+        # 5. delete sealed segment data [0, default_nb) -> count
+        delete_expr = f"{default_primary_key_field_name} in {[i for i in range(default_nb)]}"
+        self.delete(client, collection_name, filter=delete_expr)
+        # Count should show only remaining growing segment data (tmp_nb records)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb}],
+                                "pk_name": default_primary_key_field_name})
+        # 6. re-insert deleted ids [0, default_nb) with different vectors
+        rows_reinsert = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows_reinsert)
+        # Count should show all data: tmp_nb (growing) + default_nb (re-inserted)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb + tmp_nb}],
+                                "pk_name": default_primary_key_field_name})
+        # 7. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_during_compact(self):
+        """
+        target: test count during compact merge many small segments
+        method: 1. init many small segments
+                2. compact while count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        tmp_nb = 100
+        # 1. create collection with one shard
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", shards_num=1)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. init 10 small segments
+        for i in range(10):
+            schema_info = self.describe_collection(client, collection_name)[0]
+            rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info, start=i * tmp_nb)
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. compact while count using threading
+        def compact_collection():
+            self.compact(client, collection_name)
+        def count_entities():
+            self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": tmp_nb * 10}],
+                                    "pk_name": default_primary_key_field_name})
+        t_compact = threading.Thread(target=compact_collection)
+        t_count = threading.Thread(target=count_entities)
+        
+        t_compact.start()
+        t_count.start()
+        t_count.join()
+        t_compact.join()
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_count_expr_json(self):
+        """
+        target: test query with part json key value
+        method: 1. insert data and some entities doesn't have number key
+                2. query count with number expr filter
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with dynamic field enabled and json field
+        schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data with partial json fields
+        rows = cf.gen_default_rows_data(with_json=False)
+        for i in range(default_nb):
+            # Only odd numbered entities have the "number" field in json
+            if i % 2 == 0:
+                rows[i][ct.default_json_field_name] = {"string": str(i), "bool": bool(i)}
+            else:
+                rows[i][ct.default_json_field_name] = {"string": str(i), "bool": bool(i), "number": i}
+        self.insert(client, collection_name, rows)
+        time.sleep(0.4)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. query count with json number field filter
+        expression = f'{ct.default_json_field_name}["number"] < 100'
+        self.query(client, collection_name, filter=expression, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 50}],
+                                "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_json_expr_on_search_n_query(self):
+        """
+        target: verify more expressions of json object, json array and json texts are supported in search and query
+        method: 1. insert data with vectors and different json format
+                2. verify insert successfully
+                3. build index and load
+                4. search and query with different expressions
+                5. verify search and query successfully
+        expected: succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        
+        # 1. create collection with multiple json fields
+        json_int = "json_int"
+        json_float = "json_float"
+        json_string = "json_string"
+        json_bool = "json_bool"
+        json_array = "json_array"
+        json_embedded_object = "json_embedded_object"
+        json_objects_array = "json_objects_array"
+        dim = 16
+        
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=True)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(json_int, DataType.JSON)
+        schema.add_field(json_float, DataType.JSON)
+        schema.add_field(json_string, DataType.JSON)
+        schema.add_field(json_bool, DataType.JSON)
+        schema.add_field(json_array, DataType.JSON)
+        schema.add_field(json_embedded_object, DataType.JSON)
+        schema.add_field(json_objects_array, DataType.JSON)
+        
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        
+        # 2. insert data with different json types
+        nb = 1000
+        for i in range(10):
+            # Generate vectors
+            vectors = cf.gen_vectors(nb, dim)
+            
+            # Generate JSON data for each field using the same function as original test
+            json_int_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_int)
+            json_float_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_float)
+            json_string_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_string)
+            json_bool_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_bool)
+            json_array_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_array)
+            json_embedded_object_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_embedded_object)
+            json_objects_array_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_objects_array)
+            
+            # Convert to rows format for MilvusClient V2
+            rows = []
+            for j in range(nb):
+                row = {
+                    ct.default_float_vec_field_name: vectors[j],
+                    json_int: json_int_data[j],
+                    json_float: json_float_data[j],
+                    json_string: json_string_data[j],
+                    json_bool: json_bool_data[j],
+                    json_array: json_array_data[j],
+                    json_embedded_object: json_embedded_object_data[j],
+                    json_objects_array: json_objects_array_data[j]
+                }
+                rows.append(row)
+            self.insert(client, collection_name, rows)
+        
+        time.sleep(0.4)
+        
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2",
+                              params={"nlist": 64})
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        
+        # 4. query with different json expressions - each should return 10 results
+        query_exprs = [
+            f'json_contains_any({json_embedded_object}["{json_embedded_object}"]["level2"]["level2_array"], [1,3,5,7,9])',
+            f'json_contains_any({json_embedded_object}["array"], [1,3,5,7,9])',
+            f'{json_int} < 10',
+            f'{json_float} <= 200.0 and {json_float} > 190.0',
+            f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
+            f'{json_bool} == true and {json_float} <= 10',
+            f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
+            f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
+            f'{json_objects_array}[0]["level2"]["level2_str"] like "199%" and {json_objects_array}[1]["float"] >= 1990'
+        ]
+        
+        search_vectors = cf.gen_vectors(2, dim)
+        
+        for expr in query_exprs:
+            log.debug(f"query_expr: {expr}")
+            # Query test
+            res = self.query(client, collection_name, filter=expr, output_fields=["count(*)"])
+            assert res[0][0]["count(*)"] == 10, f"Query failed for expr: {expr}, got {res[0][0]['count(*)']}"
+            
+            # Search test
+            search_res = self.search(client, collection_name, search_vectors, limit=10, filter=expr, 
+                                   output_fields=None, search_params={})
+            assert len(search_res[0]) == 2, f"Search nq failed for expr: {expr}"
+            for hits in search_res[0]:
+                assert len(hits) == 10, f"Search limit failed for expr: {expr}"
+        
+        # 5. verify edge cases for issue #36718
+        edge_case_exprs = [
+            f'{json_embedded_object}["{json_embedded_object}"]["number"] in []',
+            f'{json_embedded_object}["{json_embedded_object}"] in []'
+        ]
+        
+        for expr in edge_case_exprs:
+            log.debug(f"edge_case_expr: {expr}")
+            # Query test - should return 0 results
+            res = self.query(client, collection_name, filter=expr, output_fields=["count(*)"])
+            assert res[0][0]["count(*)"] == 0, f"Edge case query failed for expr: {expr}"
+            
+            # Search test - should return 0 results
+            search_res = self.search(client, collection_name, search_vectors, limit=10, filter=expr,
+                                   output_fields=None, search_params={})
+            assert len(search_res[0]) == 2, f"Edge case search nq failed for expr: {expr}"
+            for hits in search_res[0]:
+                assert len(hits) == 0, f"Edge case search should return 0 results for expr: {expr}"
+        
         # 6. clean up
         self.drop_collection(client, collection_name)
