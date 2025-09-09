@@ -28,6 +28,12 @@ else ()
     set(WITH_AZURE_FS OFF CACHE BOOL "" FORCE )
 endif ()
 
+if ( USE_ASAN STREQUAL "ON" )
+    set(WITH_ASAN True CACHE BOOL "" FORCE )
+else ()
+    set(WITH_ASAN False CACHE BOOL "" FORCE )
+endif ()
+
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         milvus-storage

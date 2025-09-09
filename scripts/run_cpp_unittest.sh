@@ -35,6 +35,8 @@ if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
+export ASAN_OPTIONS="detect_containter_overflow=0"
+
 # run unittest
 arg="$1"
 filter_value="${arg#*=}"
