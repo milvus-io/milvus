@@ -272,7 +272,10 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				return false
 			}
 		}
-		return false
+		if x.ri != y.ri {
+			return x.ri < y.ri
+		}
+		return x.i < y.i
 	})
 
 	endPositions := make([]int, len(recs))
