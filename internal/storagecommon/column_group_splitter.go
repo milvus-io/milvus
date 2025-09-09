@@ -29,6 +29,7 @@ const (
 type ColumnGroup struct {
 	GroupID typeutil.UniqueID
 	Columns []int // column indices
+	Fields  []int64
 }
 
 // SplitBySchema is a generic function to split columns by schema based on data type

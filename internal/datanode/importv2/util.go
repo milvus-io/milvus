@@ -68,6 +68,8 @@ func NewSyncTask(ctx context.Context,
 			PartitionID:    partitionID,
 			InsertChannel:  vchannel,
 			StorageVersion: storageVersion,
+			// TODO change to paramtable or request param
+			ManifestSource: datapb.ManifestSource_EtcdManifest,
 		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs

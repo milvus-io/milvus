@@ -118,6 +118,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		SegLevel:        pack.level,
 		StorageVersion:  segment.GetStorageVersion(),
 		WithFullBinlogs: true,
+		ManifestSource:  segment.GetManifestSource(),
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)

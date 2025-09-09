@@ -912,6 +912,25 @@ func SetStorageVersion(segmentID int64, version int64) UpdateOperator {
 	}
 }
 
+func SetManifestSource(segmentID int64, manifestSource datapb.ManifestSource) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update ManifestSource failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.GetManifestSource() == manifestSource {
+			log.Ctx(context.TODO()).Debug("meta update: segment stats already is target version",
+				zap.Int64("segmentID", segmentID), zap.Stringer("source", manifestSource))
+			return false
+		}
+
+		segment.ManifestSource = manifestSource
+		return true
+	}
+}
+
 func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

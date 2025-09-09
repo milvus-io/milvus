@@ -511,6 +511,8 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storageVersion,
+			// TODO change to paramtable
+			ManifestSource: datapb.ManifestSource_EtcdManifest,
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
