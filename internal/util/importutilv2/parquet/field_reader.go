@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -80,11 +78,6 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 }
 
 func (c *FieldReader) Next(count int64) (any, any, error) {
-	log.Info("debug=== FieldReader.Next called",
-		zap.String("field", c.field.GetName()),
-		zap.Int64("fieldID", c.field.GetFieldID()),
-		zap.String("dataType", c.field.GetDataType().String()),
-		zap.Int64("count", count))
 	switch c.field.GetDataType() {
 	case schemapb.DataType_Bool:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
@@ -214,17 +207,10 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		data, err := ReadArrayData(c, count)
 		return data, nil, err
 	case schemapb.DataType_ArrayOfVector:
-		log.Info("debug=== Processing ArrayOfVector field", zap.String("field", c.field.GetName()))
 		if c.field.GetNullable() {
 			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
 		}
 		data, err := ReadVectorArrayData(c, count)
-		if err != nil {
-			log.Error("debug=== ReadVectorArrayData failed", zap.String("field", c.field.GetName()), zap.Error(err))
-		} else {
-			log.Info("debug=== ReadVectorArrayData succeeded", zap.String("field", c.field.GetName()),
-				zap.Bool("isNil", data == nil))
-		}
 		return data, nil, err
 	default:
 		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
@@ -1790,11 +1776,6 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 }
 
 func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
-	log.Info("debug=== ReadVectorArrayData called",
-		zap.String("field", pcr.field.GetName()),
-		zap.Int64("count", count),
-		zap.String("elementType", pcr.field.GetElementType().String()))
-
 	data := make([]*schemapb.VectorField, 0, count)
 	maxCapacity, err := parameterutil.GetMaxCapacity(pcr.field)
 	if err != nil {
@@ -1805,47 +1786,32 @@ func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info("debug=== VectorArray params",
-		zap.Int64("maxCapacity", maxCapacity),
-		zap.Int64("dim", dim))
 
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
-		log.Error("debug=== NextBatch failed", zap.Error(err))
 		return nil, err
 	}
 
 	if chunked == nil {
-		log.Info("debug=== NextBatch returned nil")
 		return nil, nil
 	}
-
-	log.Info("debug=== NextBatch succeeded",
-		zap.Int("numChunks", len(chunked.Chunks())),
-		zap.Int64("length", int64(chunked.Len())))
 
 	elementType := pcr.field.GetElementType()
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		for chunkIdx, chunk := range chunked.Chunks() {
-			log.Info("debug=== Processing chunk", zap.Int("chunkIdx", chunkIdx),
-				zap.String("chunkType", chunk.DataType().Name()),
-				zap.Int("chunkLen", chunk.Len()))
+		for _, chunk := range chunked.Chunks() {
 			if chunk.NullN() > 0 {
 				return nil, WrapNullRowErr(pcr.field)
 			}
 			listReader, ok := chunk.(*array.List)
 			if !ok {
-				log.Error("debug=== Not a List type", zap.String("actualType", chunk.DataType().Name()))
 				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			listFloat32Reader, ok := listReader.ListValues().(*array.Float32)
 			if !ok {
-				log.Error("debug=== List values not Float32", zap.String("actualType", listReader.ListValues().DataType().Name()))
 				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
 			offsets := listReader.Offsets()
-			log.Info("debug=== List offsets", zap.Int("numOffsets", len(offsets)))
 			for i := 1; i < len(offsets); i++ {
 				start, end := offsets[i-1], offsets[i]
 				floatCount := end - start
@@ -1860,9 +1826,6 @@ func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
 
 				arrData := make([]float32, floatCount)
 				copy(arrData, listFloat32Reader.Float32Values()[start:end])
-				log.Info("debug=== Created VectorField", zap.Int("rowIdx", i-1),
-					zap.Int32("floatCount", floatCount),
-					zap.Int32("vecCount", arrLength))
 				data = append(data, &schemapb.VectorField{
 					Dim: dim,
 					Data: &schemapb.VectorField_FloatVector{
@@ -1878,8 +1841,5 @@ func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
 			elementType.String(), pcr.field.GetName()))
 	}
 
-	log.Info("debug=== ReadVectorArrayData returning",
-		zap.String("field", pcr.field.GetName()),
-		zap.Int("dataLength", len(data)))
 	return data, nil
 }

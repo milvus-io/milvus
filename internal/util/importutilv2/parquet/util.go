@@ -68,12 +68,6 @@ func WrapNullElementErr(field *schemapb.FieldSchema) error {
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	// Create map for all fields including sub-fields from StructArrayFields
 	allFields := typeutil.GetAllFieldSchemas(schema)
-	log.Info("debug=== CreateFieldReaders: all fields", zap.Int("numFields", len(allFields)))
-	for _, field := range allFields {
-		log.Info("debug=== Field in schema", zap.String("name", field.GetName()),
-			zap.Int64("id", field.GetFieldID()),
-			zap.String("type", field.GetDataType().String()))
-	}
 	nameToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
@@ -81,13 +75,6 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	pqSchema, err := fileReader.Schema()
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
-	}
-
-	log.Info("debug=== Parquet schema fields", zap.Int("numFields", pqSchema.NumFields()))
-	for i := 0; i < pqSchema.NumFields(); i++ {
-		field := pqSchema.Field(i)
-		log.Info("debug=== Parquet field", zap.String("name", field.Name),
-			zap.String("type", field.Type.String()))
 	}
 
 	err = isSchemaEqual(schema, pqSchema)
@@ -99,10 +86,8 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	readFields := make(map[string]int64)
 	crs := make(map[int64]*FieldReader)
 	for i, pqField := range pqSchema.Fields() {
-		log.Info("debug=== Processing parquet field", zap.Int("index", i), zap.String("name", pqField.Name))
 		field, ok := nameToField[pqField.Name]
 		if !ok {
-			log.Info("debug=== Field not in schema, ignoring", zap.String("name", pqField.Name))
 			// redundant fields, ignore. only accepts a special field "$meta" to store dynamic data
 			continue
 		}
@@ -118,12 +103,8 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
 		}
 
-		log.Info("debug=== Creating field reader", zap.String("name", field.GetName()),
-			zap.Int64("fieldID", field.GetFieldID()),
-			zap.String("dataType", field.GetDataType().String()))
 		cr, err := NewFieldReader(ctx, fileReader, i, field)
 		if err != nil {
-			log.Error("debug=== Failed to create field reader", zap.String("name", field.GetName()), zap.Error(err))
 			return nil, err
 		}
 		if _, ok = crs[field.GetFieldID()]; ok {
@@ -132,8 +113,6 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 		crs[field.GetFieldID()] = cr
 		readFields[field.GetName()] = field.GetFieldID()
-		log.Info("debug=== Field reader created", zap.String("name", field.GetName()),
-			zap.Int64("fieldID", field.GetFieldID()))
 	}
 
 	// this loop is for "are there any fields not provided in the parquet file?"
@@ -394,7 +373,6 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 				field.Name, toArrDataType.String(), arrField.Type.String()))
 		}
 	}
-
 	return nil
 }
 
