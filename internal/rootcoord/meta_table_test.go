@@ -1779,7 +1779,6 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "new", coll.Name)
 	})
-
 }
 
 func TestMetaTable_ChangePartitionState(t *testing.T) {
