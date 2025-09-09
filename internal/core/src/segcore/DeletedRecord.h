@@ -21,6 +21,7 @@
 #include <folly/ConcurrentSkipList.h>
 
 #include "AckResponder.h"
+#include "common/Common.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "segcore/Record.h"
@@ -48,7 +49,6 @@ struct Comparator {
 using SortedDeleteList =
     folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
 
-static int32_t DUMP_BATCH_SIZE = 10000;
 static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
 
 template <bool is_sealed = false>
@@ -215,7 +215,7 @@ class DeletedRecord {
         int total_size = accessor.size();
         int dumped_size = dumped_entry_count_.load();
 
-        while (total_size - dumped_size > DUMP_BATCH_SIZE) {
+        while (total_size - dumped_entry_count_.load() > DELETE_DUMP_BATCH_SIZE) {
             int32_t bitsize = 0;
             if constexpr (is_sealed) {
                 bitsize = sealed_row_count_;
@@ -233,15 +233,13 @@ class DeletedRecord {
                                              snapshots_.back().second.size());
             }
 
-            while (total_size - dumped_size > DUMP_BATCH_SIZE &&
+            while (total_size - dumped_entry_count_.load() > DELETE_DUMP_BATCH_SIZE &&
                    it != accessor.end()) {
                 Timestamp dump_ts = 0;
 
-                for (auto size = 0; size < DUMP_BATCH_SIZE; ++it, ++size) {
+                for (auto size = 0; size < DELETE_DUMP_BATCH_SIZE && it != accessor.end(); ++it, ++size) {
                     bitmap.set(it->second);
-                    if (size == DUMP_BATCH_SIZE - 1) {
-                        dump_ts = it->first;
-                    }
+                    dump_ts = it->first;
                 }
 
                 {
@@ -257,21 +255,19 @@ class DeletedRecord {
                         Assert(it != accessor.end() && it.good());
                         snap_next_iter_.push_back(it);
                     }
-
-                    dumped_entry_count_.store(dumped_size + DUMP_BATCH_SIZE);
-                    LOG_INFO(
-                        "dump delete record snapshot at ts: {}, cursor: {}, "
-                        "total size:{} "
-                        "current snapshot size: {} for segment: {}",
-                        dump_ts,
-                        dumped_size + DUMP_BATCH_SIZE,
-                        total_size,
-                        snapshots_.size(),
-                        segment_ ? segment_->get_segment_id() : 0);
-                    last_dump_ts = dump_ts;
                 }
 
-                dumped_size += DUMP_BATCH_SIZE;
+                dumped_entry_count_.fetch_add(DELETE_DUMP_BATCH_SIZE);
+                LOG_INFO(
+                    "dump delete record snapshot at ts: {}, cursor: {}, "
+                    "total size:{} "
+                    "current snapshot size: {} for segment: {}",
+                    dump_ts,
+                    dumped_entry_count_.load(),
+                    total_size,
+                    snapshots_.size(),
+                    segment_ ? segment_->get_segment_id() : 0);
+                last_dump_ts = dump_ts;
             }
         }
     }

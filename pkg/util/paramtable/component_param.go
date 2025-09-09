@@ -2716,6 +2716,9 @@ type queryNodeConfig struct {
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"`
 
+	// delete snapshot dump
+	DeleteDumpBatchSize ParamItem `refreshable:"false"`
+
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
 	// memory limit
@@ -3659,6 +3662,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.WorkerPoolingSize.Init(base.mgr)
+
+	p.DeleteDumpBatchSize = ParamItem{
+		Key:          "queryNode.segcore.deleteDumpBatchSize",
+		Version:      "2.5.18",
+		DefaultValue: "10000",
+		Doc:          "Batch size for delete snapshot dump in segcore.",
+		Export:       true,
+	}
+	p.DeleteDumpBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

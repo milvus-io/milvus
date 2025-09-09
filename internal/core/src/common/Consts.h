@@ -66,6 +66,7 @@ const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 16 << 20;  // bytes
 const int DEFAULT_CPU_NUM = 1;
 
 const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
+const int32_t DEFAULT_DELETE_DUMP_BATCH_SIZE = 10000;
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
