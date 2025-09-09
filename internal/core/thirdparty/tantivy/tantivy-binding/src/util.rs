@@ -15,7 +15,9 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
 }
 
 pub fn index_exist(path: &str) -> bool {
-    let dir = MmapDirectory::open(path).unwrap();
+    let Ok(dir) = MmapDirectory::open(path) else {
+        return false;
+    };
     Index::exists(&dir).unwrap()
 }
 
