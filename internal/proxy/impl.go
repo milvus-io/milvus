@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -2880,6 +2881,27 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+
+	metrics.ProxyScannedTotalBytes.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(qt.storageCost.ScannedTotalBytes))
+
+	metrics.ProxyStorageCacheHitRatio.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
+
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.result)
@@ -2892,6 +2914,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -3087,6 +3110,27 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+
+	metrics.ProxyScannedTotalBytes.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(qt.storageCost.ScannedTotalBytes))
+
+	metrics.ProxyStorageCacheHitRatio.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
+
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
 		username := GetCurUserFromContextOrDefault(ctx)
@@ -3099,6 +3143,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
@@ -3226,14 +3271,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 }
 
 // Query get the records by primary keys.
-func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, error) {
+func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.request
 	method := "Query"
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	log := log.Ctx(ctx).With(
@@ -3291,7 +3336,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
 
@@ -3304,7 +3349,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	if !qt.reQuery {
@@ -3327,9 +3372,30 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+
+		metrics.ProxyScannedTotalBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Observe(float64(qt.storageCost.ScannedTotalBytes))
+
+		metrics.ProxyStorageCacheHitRatio.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
 	}
 
-	return qt.result, nil
+	return qt.result, qt.storageCost, nil
 }
 
 // Query get the records by primary keys.
@@ -3376,7 +3442,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	defer sp.End()
 	method := "Query"
 
-	res, err := node.query(ctx, qt, sp)
+	res, storageCost, err := node.query(ctx, qt, sp)
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
@@ -3394,6 +3460,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.RelatedCntKey:      qt.allQueryCnt,
 	})
 	SetReportValue(res.Status, v)
+	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if log.Ctx(ctx).Core().Enabled(zap.DebugLevel) && matchCountRule(request.GetOutputFields()) {

@@ -147,6 +147,8 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 					},
 					SealedSegmentIDsRetrieved: []int64{segment.ID()},
 					AllRetrieveCount:          result.GetAllRetrieveCount(),
+					ScannedRemoteBytes:        result.GetScannedRemoteBytes(),
+					ScannedTotalBytes:         result.GetScannedTotalBytes(),
 				}); err != nil {
 					errs[i] = err
 				}

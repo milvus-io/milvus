@@ -685,7 +685,8 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     auto slot = iter->second.get();
     lck.unlock();
 
-    auto ca = SemiInlineGet(slot->PinCells({0}));
+    milvus::OpContext ctx;
+    auto ca = SemiInlineGet(slot->PinCells(ctx, {0}));
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
@@ -706,7 +707,8 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
 
         auto slot = iter->second.at(nested_path).get();
 
-        auto ca = SemiInlineGet(slot->PinCells({0}));
+        milvus::OpContext ctx;
+        auto ca = SemiInlineGet(slot->PinCells(ctx, {0}));
         auto index =
             dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
         AssertInfo(index != nullptr,
@@ -749,6 +751,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
+                                        milvus::OpContext& op_context,
                                         SearchResult& output) const {
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
@@ -774,6 +777,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_lims,
                                    query_count,
                                    bitset,
+                                   op_context,
                                    output);
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
@@ -788,6 +792,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_lims,
                                    query_count,
                                    bitset,
+                                   op_context,
                                    output);
         milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
@@ -816,6 +821,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     query_count,
                                     row_count,
                                     bitset,
+                                    op_context,
                                     output);
         milvus::tracer::AddEvent("finish_searching_vector_data");
     }
@@ -837,7 +843,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
-    auto ca = SemiInlineGet(cache_index->PinCells({0}));
+    milvus::OpContext ctx;
+    auto ca = SemiInlineGet(cache_index->PinCells(ctx, {0}));
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
@@ -1612,8 +1619,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                                "index are found");
                     return iter;
                 });
+            milvus::OpContext ctx;
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells({0}));
+                SemiInlineGet(field_index_iter->second->PinCells(ctx, {0}));
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "

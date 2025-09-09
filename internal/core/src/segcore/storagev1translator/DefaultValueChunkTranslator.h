@@ -52,6 +52,13 @@ class DefaultValueChunkTranslator
         return &meta_;
     }
 
+    // TODO: implement this
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        return 0;
+    }
+
  private:
     int64_t segment_id_;
     std::string key_;

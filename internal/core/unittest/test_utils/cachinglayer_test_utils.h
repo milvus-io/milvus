@@ -77,6 +77,11 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
         return {{0, 0}, {0, 0}};
     }
 
+    int64_t
+    cells_storage_bytes(const std::vector<cid_t>& cids) const override {
+        return 0;
+    }
+
     const std::string&
     key() const override {
         return key_;
@@ -148,6 +153,11 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
         return {{0, 0}, {0, 0}};
     }
 
+    int64_t
+    cells_storage_bytes(const std::vector<cid_t>& cids) const override {
+        return 0;
+    }
+
     const std::string&
     key() const override {
         return key_;
@@ -206,6 +216,11 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
     std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const override {
         return {{0, 0}, {0, 0}};
+    }
+
+    int64_t
+    cells_storage_bytes(const std::vector<cid_t>& cids) const override {
+        return 0;
     }
 
     const std::string&

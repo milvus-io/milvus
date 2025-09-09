@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -94,6 +95,8 @@ type searchTask struct {
 	// we always remove pk field from output fields, as search result already contains pk field.
 	// if the user explicitly set pk field in output fields, we add it back to the result.
 	userRequestedPkFieldExplicitly bool
+
+	storageCost segcore.StorageCost
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -739,6 +742,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.relatedDataSize = 0
 	isTopkReduce := false
 	isRecallEvaluation := false
+	storageCost := segcore.StorageCost{}
 	for _, r := range toReduceResults {
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
@@ -750,6 +754,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		for ch, ts := range r.GetChannelsMvcc() {
 			t.queryChannelsTs[ch] = ts
 		}
+		storageCost.ScannedRemoteBytes += r.GetScannedRemoteBytes()
+		storageCost.ScannedTotalBytes += r.GetScannedTotalBytes()
 	}
 
 	t.isTopkReduce = isTopkReduce
@@ -761,7 +767,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		log.Warn("Faild to create post process pipeline")
 		return err
 	}
-	if t.result, err = pipeline.Run(ctx, sp, toReduceResults); err != nil {
+	if t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost); err != nil {
 		return err
 	}
 	t.fillResult()

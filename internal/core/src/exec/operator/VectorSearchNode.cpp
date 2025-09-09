@@ -84,15 +84,18 @@ PhyVectorSearchNode::GetOutput() {
     // TODO: uniform knowhere BitsetView and milvus BitsetView
     milvus::BitsetView final_view((uint8_t*)col_input->GetRawData(),
                                   col_input->size());
+    milvus::OpContext op_context;
     segment_->vector_search(search_info_,
                             src_data,
                             src_lims,
                             num_queries,
                             query_timestamp_,
                             final_view,
+                            op_context,
                             search_result);
 
     search_result.total_data_cnt_ = final_view.size();
+    search_result.search_storage_cost_ = op_context;
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
         std::chrono::high_resolution_clock::now();

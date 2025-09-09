@@ -84,10 +84,12 @@ VecIndexCreator::Load(const milvus::BinarySet& binary_set) {
 std::unique_ptr<SearchResult>
 VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
                        const SearchInfo& search_info,
-                       const BitsetView& bitset) {
+                       const BitsetView& bitset,
+                       milvus::OpContext& op_context) {
     auto vector_index = dynamic_cast<index::VectorIndex*>(index_.get());
     auto search_result = std::make_unique<SearchResult>();
-    vector_index->Query(dataset, search_info, bitset, *search_result);
+    vector_index->Query(
+        dataset, search_info, bitset, op_context, *search_result);
     return search_result;
 }
 
