@@ -17,15 +17,17 @@
 package delegator
 
 import (
+	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -106,40 +108,42 @@ type sealedBm25Stats struct {
 	removed   bool
 	segmentID int64
 	ts        time.Time // Time of segemnt register, all segment resgister after target generate will don't remove
-	localPath string
+	localDir  string
+	fieldList []int64 // bm25 field list
 }
 
-func (s *sealedBm25Stats) writeFile(localPath string) (error, bool) {
+func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 	s.RLock()
 
-	if s.removed {
+	if s.removed || !s.inmemory {
 		return nil, true
 	}
 
-	m := make(map[int64][]byte, len(s.bm25Stats))
 	stats := s.bm25Stats
 	s.RUnlock()
+
+	err := os.MkdirAll(localDir, fs.ModePerm)
+	if err != nil {
+		return err, false
+	}
 
 	// RUnlock when stats serialize and write to file
 	// to avoid block remove stats too long when sync distribution
 	for fieldID, stats := range stats {
-		bytes, err := stats.Serialize()
+		file, err := os.Create(path.Join(localDir, fmt.Sprintf("%d.data", fieldID)))
 		if err != nil {
 			return err, false
 		}
 
-		m[fieldID] = bytes
+		writer := bufio.NewWriter(file)
+
+		err = stats.SerializeToWriter(writer)
+		if err != nil {
+			return err, false
+		}
+		file.Close()
 	}
 
-	b, err := json.Marshal(m)
-	if err != nil {
-		return err, false
-	}
-
-	err = os.WriteFile(localPath, b, 0o600)
-	if err != nil {
-		return err, false
-	}
 	return nil, false
 }
 
@@ -153,22 +157,25 @@ func (s *sealedBm25Stats) ShouldOffLoadToDisk() bool {
 // so that later when the segment is removed from target, we can Minus its stats. To reduce memory usage,
 // idfOracle store such per segment stats to disk, and load them when removing the segment.
 func (s *sealedBm25Stats) ToLocal(dirPath string) error {
-	localpath := path.Join(dirPath, fmt.Sprintf("%d.data", s.segmentID))
-
-	if err, skip := s.writeFile(localpath); err != nil || skip {
+	dir := path.Join(dirPath, fmt.Sprint(s.segmentID))
+	if err, skip := s.writeFile(dir); err != nil {
+		os.Remove(dir)
 		return err
+	} else if skip {
+		return nil
 	}
 
 	s.Lock()
 	defer s.Unlock()
+	s.fieldList = lo.Keys(s.bm25Stats)
 	s.inmemory = false
 	s.bm25Stats = nil
-	s.localPath = localpath
+	s.localDir = dir
 
 	if s.removed {
-		err := os.Remove(s.localPath)
+		err := os.Remove(s.localDir)
 		if err != nil {
-			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localPath))
+			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
 		}
 	}
 	return nil
@@ -180,9 +187,9 @@ func (s *sealedBm25Stats) Remove() {
 	s.removed = true
 
 	if !s.inmemory {
-		err := os.Remove(s.localPath)
+		err := os.Remove(s.localDir)
 		if err != nil {
-			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localPath))
+			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
 		}
 	}
 }
@@ -197,25 +204,20 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 		return s.bm25Stats, nil
 	}
 
-	b, err := os.ReadFile(s.localPath)
-	if err != nil {
-		return nil, err
-	}
-
-	m := make(map[int64][]byte)
-	err = json.Unmarshal(b, &m)
-	if err != nil {
-		return nil, err
-	}
-
 	stats := make(map[int64]*storage.BM25Stats)
-	for fieldID, bytes := range m {
+	for _, fieldID := range s.fieldList {
+		b, err := os.ReadFile(path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID)))
+		if err != nil {
+			return nil, err
+		}
+
 		stats[fieldID] = storage.NewBM25Stats()
-		err = stats[fieldID].Deserialize(bytes)
+		err = stats[fieldID].Deserialize(b)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	return stats, nil
 }
 
@@ -278,8 +280,27 @@ type idfOracle struct {
 	wg      sync.WaitGroup
 }
 
+// now only used for test
 func (o *idfOracle) TargetVersion() int64 {
 	return o.targetVersion.Load()
+}
+
+func (o *idfOracle) preloadSealed(segmentID int64, stats bm25Stats) {
+	o.Lock()
+	defer o.Unlock()
+
+	// skip preload if first target was loaded.
+	if o.targetVersion.Load() != 0 {
+		return
+	}
+	o.sealed.Insert(segmentID, &sealedBm25Stats{
+		bm25Stats: stats,
+		ts:        time.Now(),
+		activate:  atomic.NewBool(true),
+		inmemory:  true,
+		segmentID: segmentID,
+	})
+	o.current.Merge(stats)
 }
 
 func (o *idfOracle) Register(segmentID int64, stats bm25Stats, state commonpb.SegmentState) {
@@ -300,13 +321,19 @@ func (o *idfOracle) Register(segmentID int64, stats bm25Stats, state commonpb.Se
 		if ok := o.sealed.Contain(segmentID); ok {
 			return
 		}
-		o.sealed.Insert(segmentID, &sealedBm25Stats{
-			bm25Stats: stats,
-			ts:        time.Now(),
-			activate:  atomic.NewBool(false),
-			inmemory:  true,
-			segmentID: segmentID,
-		})
+
+		// preload sealed segment to channel before first target
+		if o.targetVersion.Load() == 0 {
+			o.preloadSealed(segmentID, stats)
+		} else {
+			o.sealed.Insert(segmentID, &sealedBm25Stats{
+				bm25Stats: stats,
+				ts:        time.Now(),
+				activate:  atomic.NewBool(false),
+				inmemory:  true,
+				segmentID: segmentID,
+			})
+		}
 	default:
 		log.Warn("register segment with unknown state", zap.String("stats", state.String()))
 		return
@@ -463,12 +490,13 @@ func (o *idfOracle) SyncDistribution() error {
 				continue
 			}
 
-			if segment.TargetVersion == snapshot.targetVersion {
+			switch segment.TargetVersion {
+			case snapshot.targetVersion:
 				sealedMap[segment.SegmentID] = true
 				if !o.sealed.Contain(segment.SegmentID) {
 					log.Warn("idf oracle lack some sealed segment", zap.Int64("segment", segment.SegmentID))
 				}
-			} else if segment.TargetVersion == unreadableTargetVersion {
+			case unreadableTargetVersion:
 				sealedMap[segment.SegmentID] = false
 			}
 		}
@@ -533,7 +561,7 @@ func (o *idfOracle) SyncDistribution() error {
 
 	o.targetVersion.Store(snapshot.targetVersion)
 	o.NotifyLocal()
-	log.Ctx(context.TODO()).Info("sync distribution finished", zap.Int64("version", snapshot.targetVersion), zap.Int64("numrow", o.current.NumRow()), zap.Int("growing", len(o.growing)), zap.Int("sealed", o.sealed.Len()))
+	log.Ctx(context.TODO()).Info("sync idf distribution finished", zap.Int64("version", snapshot.targetVersion), zap.Int64("numrow", o.current.NumRow()), zap.Int("growing", len(o.growing)), zap.Int("sealed", o.sealed.Len()))
 	return nil
 }
 
