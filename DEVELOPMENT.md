@@ -98,7 +98,7 @@ Linux systems (Recommend Ubuntu 20.04 or later):
 ```text
 go: >= 1.21
 cmake: >= 3.18
-gcc: 7.5
+gcc: 12
 conan: 1.61
 ```
 
