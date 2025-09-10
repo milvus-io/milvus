@@ -237,6 +237,15 @@ class ScalarFieldIndexing : public FieldIndexing {
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
 
+    // Helper function to process geometry data and add to R-Tree index
+    template <typename GeometryDataAccessor>
+    void
+    process_geometry_data(int64_t reserved_offset,
+                          int64_t size,
+                          const VectorBase* vec_base,
+                          GeometryDataAccessor&& accessor,
+                          const std::string& log_source);
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.

@@ -440,7 +440,6 @@ ScalarFieldIndexing<T>::recreate_index(DataType data_type,
                 data_type);
             return;
         }
-    } else if constexpr (std::is_same_v<T, std::string>) {
         index_ = index::CreateStringIndexSort();
     } else {
         index_ = index::CreateScalarIndexSort<T>();
@@ -462,14 +461,6 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
     // Special handling for geometry fields (stored as std::string)
     if constexpr (std::is_same_v<T, std::string>) {
         if (field_meta_.get_data_type() == DataType::GEOMETRY) {
-            // Cast to R-Tree index for geometry data
-            auto* rtree_index =
-                dynamic_cast<index::RTreeIndex<std::string>*>(index_.get());
-            if (!rtree_index) {
-                LOG_ERROR("Failed to cast to R-Tree index for geometry field");
-                return;
-            }
-
             // Extract geometry data from stream_data
             if (stream_data->has_scalars() &&
                 stream_data->scalars().has_geometry_data()) {
@@ -477,59 +468,28 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                     stream_data->scalars().geometry_data();
                 const auto& valid_data = stream_data->valid_data();
 
-                // Initialize R-Tree index on first data arrival (no threshold waiting)
-                if (!built_) {
-                    try {
-                        // Initialize R-Tree for building immediately when first data arrives
-                        rtree_index->InitForBuildIndex();
-                        built_ = true;
-                        sync_with_index_ = true;
-                        LOG_INFO(
-                            "Initialized R-Tree index for immediate "
-                            "incremental "
-                            "building");
-                    } catch (std::exception& error) {
-                        LOG_ERROR("R-Tree index initialization error: {}",
-                                  error.what());
-                        recreate_index(field_meta_.get_data_type(), vec_base);
-                        return;
-                    }
-                }
-
-                // Always add geometries incrementally (no bulk build phase)
-                int64_t added_count = 0;
-                for (int64_t i = 0; i < size; ++i) {
-                    int64_t global_offset = reserved_offset + i;
+                // Create accessor for DataArray
+                auto accessor = [&geometry_array, &valid_data](
+                                    int64_t i) -> std::pair<std::string, bool> {
                     bool is_valid = valid_data.empty() || valid_data[i];
-
                     if (is_valid && i < geometry_array.data_size()) {
-                        const auto& wkb_data = geometry_array.data(i);
-                        try {
-                            rtree_index->AddGeometry(wkb_data, global_offset);
-                            added_count++;
-                        } catch (std::exception& error) {
-                            LOG_WARN("Failed to add geometry at offset {}: {}",
-                                     global_offset,
-                                     error.what());
-                        }
+                        return {geometry_array.data(i), true};
                     }
-                }
+                    return {"", false};
+                };
 
-                index_cur_.fetch_add(added_count);
-                sync_with_index_.store(true);
-
-                LOG_DEBUG("Added {} geometries to R-Tree index immediately",
-                          added_count);
+                process_geometry_data(
+                    reserved_offset, size, vec_base, accessor, "DataArray");
             }
             return;
         }
     }
 
     // For other scalar fields, not implemented yet
-    LOG_WARN(
-        "ScalarFieldIndexing::AppendSegmentIndex from DataArray not "
-        "implemented for non-geometry scalar fields. Type: {}",
-        field_meta_.get_data_type());
+    PanicInfo(Unsupported,
+              "ScalarFieldIndexing::AppendSegmentIndex from DataArray not "
+              "implemented for non-geometry scalar fields. Type: {}",
+              field_meta_.get_data_type());
 }
 
 template <typename T>
@@ -541,66 +501,24 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
     // Special handling for geometry fields (stored as std::string)
     if constexpr (std::is_same_v<T, std::string>) {
         if (field_meta_.get_data_type() == DataType::GEOMETRY) {
-            // Cast to R-Tree index for geometry data
-            auto* rtree_index =
-                dynamic_cast<index::RTreeIndex<std::string>*>(index_.get());
-            if (!rtree_index) {
-                LOG_ERROR("Failed to cast to R-Tree index for geometry field");
-                return;
-            }
-
             // Extract geometry data from field_data
             const void* raw_data = field_data->Data();
             if (raw_data) {
                 const auto* string_array =
                     static_cast<const std::string*>(raw_data);
 
-                // Initialize R-Tree index on first data arrival (no threshold waiting)
-                if (!built_) {
-                    try {
-                        // Initialize R-Tree for building immediately when first
-                        // data arrives
-                        rtree_index->InitForBuildIndex();
-                        built_ = true;
-                        sync_with_index_ = true;
-                        LOG_INFO(
-                            "Initialized R-Tree index for immediate "
-                            "incremental "
-                            "building from FieldData");
-                    } catch (std::exception& error) {
-                        LOG_ERROR("R-Tree index initialization error: {}",
-                                  error.what());
-                        recreate_index(field_meta_.get_data_type(), vec_base);
-                        return;
-                    }
-                }
-
-                // Always add geometries incrementally (no bulk build phase)
-                int64_t added_count = 0;
-                for (int64_t i = 0; i < size; ++i) {
-                    int64_t global_offset = reserved_offset + i;
+                // Create accessor for FieldDataPtr
+                auto accessor = [field_data, string_array](
+                                    int64_t i) -> std::pair<std::string, bool> {
                     bool is_valid = field_data->is_valid(i);
-
                     if (is_valid) {
-                        try {
-                            rtree_index->AddGeometry(string_array[i],
-                                                     global_offset);
-                            added_count++;
-                        } catch (std::exception& error) {
-                            LOG_WARN("Failed to add geometry at offset {}: {}",
-                                     global_offset,
-                                     error.what());
-                        }
+                        return {string_array[i], true};
                     }
-                }
+                    return {"", false};
+                };
 
-                index_cur_.fetch_add(added_count);
-                sync_with_index_.store(true);
-
-                LOG_INFO(
-                    "Added {} geometries to R-Tree index immediately from "
-                    "FieldData",
-                    added_count);
+                process_geometry_data(
+                    reserved_offset, size, vec_base, accessor, "FieldData");
             }
             return;
         }
@@ -611,6 +529,75 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
               "ScalarFieldIndexing::AppendSegmentIndex from FieldDataPtr not "
               "implemented for non-geometry scalar fields. Type: {}",
               field_meta_.get_data_type());
+}
+
+template <typename T>
+template <typename GeometryDataAccessor>
+void
+ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
+                                              int64_t size,
+                                              const VectorBase* vec_base,
+                                              GeometryDataAccessor&& accessor,
+                                              const std::string& log_source) {
+    // Special handling for geometry fields (stored as std::string)
+    if constexpr (std::is_same_v<T, std::string>) {
+        if (field_meta_.get_data_type() == DataType::GEOMETRY) {
+            // Cast to R-Tree index for geometry data
+            auto* rtree_index =
+                dynamic_cast<index::RTreeIndex<std::string>*>(index_.get());
+            if (!rtree_index) {
+                PanicInfo(UnexpectedError,
+                          "Failed to cast to R-Tree index for geometry field");
+            }
+
+            // Initialize R-Tree index on first data arrival (no threshold waiting)
+            if (!built_) {
+                try {
+                    // Initialize R-Tree for building immediately when first data arrives
+                    rtree_index->InitForBuildIndex();
+                    built_ = true;
+                    sync_with_index_ = true;
+                    LOG_INFO(
+                        "Initialized R-Tree index for immediate incremental "
+                        "building from {}",
+                        log_source);
+                } catch (std::exception& error) {
+                    PanicInfo(UnexpectedError,
+                              "R-Tree index initialization error: {}",
+                              error.what());
+                }
+            }
+
+            // Always add geometries incrementally (no bulk build phase)
+            int64_t added_count = 0;
+            for (int64_t i = 0; i < size; ++i) {
+                int64_t global_offset = reserved_offset + i;
+
+                // Use the accessor to get geometry data and validity
+                auto [wkb_data, is_valid] = accessor(i);
+
+                if (is_valid) {
+                    try {
+                        rtree_index->AddGeometry(wkb_data, global_offset);
+                        added_count++;
+                    } catch (std::exception& error) {
+                        PanicInfo(UnexpectedError,
+                                  "Failed to add geometry at offset {}: {}",
+                                  global_offset,
+                                  error.what());
+                    }
+                }
+            }
+
+            // Update statistics
+            index_cur_.fetch_add(added_count);
+            sync_with_index_.store(true);
+
+            LOG_INFO("Added {} geometries to R-Tree index immediately from {}",
+                     added_count,
+                     log_source);
+        }
+    }
 }
 
 template <typename T>

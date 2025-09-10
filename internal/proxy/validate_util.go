@@ -63,13 +63,13 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		}
 		geomT, err := wkb.Unmarshal(data)
 		if err != nil {
-			log.Warn("translate the wkb format search result into geometry failed")
+			log.Error("translate the wkb format search result into geometry failed")
 			return err
 		}
 		// now remove MaxDecimalDigits limit
 		wktStr, err := wkt.Marshal(geomT)
 		if err != nil {
-			log.Warn("translate the geomery  into its wkt failed")
+			log.Error("translate the geomery  into its wkt failed")
 			return err
 		}
 		wktArray[i] = wktStr
