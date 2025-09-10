@@ -1012,7 +1012,7 @@ common:
     enablev2: true
     stv2:
       splitSystemColumn:
-        enabled: false # enable split system column policy in storage v2
+        enabled: true # enable split system column policy in storage v2
         includePK: true # whether split system column policy include pk field
       splitByAvgSize:
         enabled: false # enable split by average size policy in storage v2

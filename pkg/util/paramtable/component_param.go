@@ -935,7 +935,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
 		Version:      "2.6.2",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "enable split system column policy in storage v2",
 		Export:       true,
 	}
