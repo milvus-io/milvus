@@ -15,7 +15,8 @@
 // limitations under the License.
 
 #include "MvccNode.h"
-
+#include "common/Tracer.h"
+#include "fmt/format.h"
 namespace milvus {
 namespace exec {
 
@@ -47,6 +48,8 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span("PhyMvccNode::Execute", tracer::GetRootSpan(), true);
+
     if (!is_source_node_ && input_ == nullptr) {
         return nullptr;
     }
@@ -55,6 +58,8 @@ PhyMvccNode::GetOutput() {
         is_finished_ = true;
         return nullptr;
     }
+
+    tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
@@ -68,6 +73,10 @@ PhyMvccNode::GetOutput() {
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
+
+    auto output_rows = active_count_ - data.count();
+    tracer::AddEvent(fmt::format(
+        "output_rows: {}, filtered: {}", output_rows, data.count()));
 
     // input_ have already been updated
     return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});

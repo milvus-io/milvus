@@ -22,6 +22,9 @@ namespace exec {
 
 void
 PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span("PhyValueExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("data_type {}", expr_->type()));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     int64_t real_batch_size = has_offset_input_

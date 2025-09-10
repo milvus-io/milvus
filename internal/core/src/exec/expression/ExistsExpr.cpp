@@ -27,6 +27,10 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyExistsFilterExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("data_type {}", expr_->column_.data_type_));
+
     context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));

@@ -155,6 +155,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
 
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("data_type {}, op_type {}",
+                                 expr_->column_.data_type_,
+                                 expr_->op_type_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {

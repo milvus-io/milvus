@@ -24,6 +24,10 @@ namespace exec {
 
 void
 PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyBinaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("data_type {}", expr_->column_.data_type_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
