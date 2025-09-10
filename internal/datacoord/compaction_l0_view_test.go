@@ -45,7 +45,10 @@ func (s *LevelZeroSegmentsViewSuite) SetupTest() {
 	}
 
 	targetView := &LevelZeroSegmentsView{
-		label, segments, &msgpb.MsgPosition{Timestamp: 10000},
+		label:                     label,
+		segments:                  segments,
+		earliestGrowingSegmentPos: &msgpb.MsgPosition{Timestamp: 10000},
+		triggerID:                 10000,
 	}
 
 	s.True(label.Equal(targetView.GetGroupLabel()))

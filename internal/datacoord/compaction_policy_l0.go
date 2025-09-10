@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -8,8 +9,10 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -18,16 +21,18 @@ type l0CompactionPolicy struct {
 	meta *meta
 
 	activeCollections *activeCollections
+	allocator         allocator.Allocator
 
 	// key: collectionID, value: reference count
 	skipCompactionCollections map[int64]int
 	skipLocker                sync.RWMutex
 }
 
-func newL0CompactionPolicy(meta *meta) *l0CompactionPolicy {
+func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
 		meta:                      meta,
 		activeCollections:         newActiveCollections(),
+		allocator:                 allocator,
 		skipCompactionCollections: make(map[int64]int),
 	}
 }
@@ -69,8 +74,7 @@ func (policy *l0CompactionPolicy) OnCollectionUpdate(collectionID int64) {
 	policy.activeCollections.Record(collectionID)
 }
 
-func (policy *l0CompactionPolicy) Trigger() (events map[CompactionTriggerType][]CompactionView, err error) {
-	events = make(map[CompactionTriggerType][]CompactionView)
+func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[CompactionTriggerType][]CompactionView, err error) {
 	latestCollSegs := policy.meta.GetCompactableSegmentGroupByCollection()
 
 	// 1. Get active collections
@@ -82,6 +86,12 @@ func (policy *l0CompactionPolicy) Trigger() (events map[CompactionTriggerType][]
 
 	idleCollsSet := typeutil.NewUniqueSet(idleColls...)
 	activeL0Views, idleL0Views := []CompactionView{}, []CompactionView{}
+	newTriggerID, err := policy.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("fail to allocate triggerID to trigger l0 compaction", zap.Error(err))
+		return nil, err
+	}
+	events = make(map[CompactionTriggerType][]CompactionView)
 	for collID, segments := range latestCollSegs {
 		if policy.isSkipCollection(collID) {
 			continue
@@ -94,8 +104,7 @@ func (policy *l0CompactionPolicy) Trigger() (events map[CompactionTriggerType][]
 		if len(levelZeroSegments) == 0 {
 			continue
 		}
-
-		labelViews := policy.groupL0ViewsByPartChan(collID, GetViewsByInfo(levelZeroSegments...))
+		labelViews := policy.groupL0ViewsByPartChan(collID, GetViewsByInfo(levelZeroSegments...), newTriggerID)
 		if idleCollsSet.Contain(collID) {
 			idleL0Views = append(idleL0Views, labelViews...)
 		} else {
@@ -113,7 +122,7 @@ func (policy *l0CompactionPolicy) Trigger() (events map[CompactionTriggerType][]
 	return
 }
 
-func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView) []CompactionView {
+func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView, triggerID UniqueID) []CompactionView {
 	partChanView := make(map[string]*LevelZeroSegmentsView) // "part-chan" as key
 	for _, view := range levelZeroSegments {
 		key := view.label.Key()
@@ -122,6 +131,7 @@ func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, 
 				label:                     view.label,
 				segments:                  []*SegmentView{view},
 				earliestGrowingSegmentPos: policy.meta.GetEarliestStartPositionOfGrowingSegments(view.label),
+				triggerID:                 triggerID,
 			}
 		} else {
 			partChanView[key].Append(view)
@@ -131,6 +141,33 @@ func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, 
 	return lo.Map(lo.Values(partChanView), func(view *LevelZeroSegmentsView, _ int) CompactionView {
 		return view
 	})
+}
+
+func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64) ([]CompactionView, int64, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log.Info("start trigger collection l0 compaction")
+	if policy.isSkipCollection(collectionID) {
+		return nil, 0, merr.WrapErrCollectionNotLoaded(collectionID, "the collection being paused by importing cannot do force l0 compaction")
+	}
+	allL0Segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
+			isFlushed(segment) &&
+			!segment.isCompacting && // not compacting now
+			!segment.GetIsImporting() && // not importing now
+			segment.GetLevel() == datapb.SegmentLevel_L0
+	}))
+
+	if len(allL0Segments) == 0 {
+		return nil, 0, nil
+	}
+
+	newTriggerID, err := policy.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("fail to allocate triggerID for l0 compaction", zap.Error(err))
+		return nil, 0, err
+	}
+	views := policy.groupL0ViewsByPartChan(collectionID, GetViewsByInfo(allL0Segments...), newTriggerID)
+	return views, newTriggerID, nil
 }
 
 type activeCollection struct {

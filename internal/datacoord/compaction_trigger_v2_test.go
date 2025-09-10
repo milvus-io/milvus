@@ -87,7 +87,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	expectedSegID := seg1.ID
 
 	s.Require().Equal(1, len(latestL0Segments))
-	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments, 10000)
 	s.Require().Equal(1, len(levelZeroViews))
 	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
@@ -130,7 +130,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 	s.Require().NotEmpty(latestL0Segments)
-	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments, 10000)
 	s.Require().Equal(1, len(levelZeroViews))
 	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
@@ -397,4 +397,49 @@ func TestCompactionAndImport(t *testing.T) {
 	triggerManager.Start()
 	defer triggerManager.Stop()
 	time.Sleep(3 * time.Second)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+
+	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
+	segments, found := collSegs[1]
+	s.Require().True(found)
+
+	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
+		return info.GetLevel() == datapb.SegmentLevel_L0
+	})
+	s.Require().NotEmpty(levelZeroSegments)
+
+	// Mock allocator for trigger ID
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(19530), nil).Maybe()
+
+	// Mock inspector to expect compaction enqueue
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			s.EqualValues(19530, task.GetTriggerID())
+			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
+			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
+			s.Equal(s.testLabel.Channel, task.GetChannel())
+			s.Equal(datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+
+			expectedSegs := []int64{100, 101, 102}
+			s.ElementsMatch(expectedSegs, task.GetInputSegments())
+			return nil
+		}).Return(nil).Once()
+
+	// Test L0 manual trigger
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true)
+	s.NoError(err)
+	s.Equal(int64(12345), triggerID)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
+	// Test with both clustering and L0 compaction false
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false)
+	s.NoError(err)
+	s.Equal(int64(0), triggerID)
 }
