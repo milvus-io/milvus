@@ -3972,7 +3972,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     CSearchResult search_result;
     auto res = CSearch(
         segment, plan, placeholderGroup, ROW_COUNT + ts_offset, &search_result);
-    std::cout << res.error_msg << std::endl;
+    std::cout << (res.error_msg ? res.error_msg : "(none)") << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
