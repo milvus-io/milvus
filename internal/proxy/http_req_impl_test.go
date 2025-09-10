@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -23,36 +22,46 @@ import (
 )
 
 func TestHideSensitive(t *testing.T) {
-	configs := map[string]string{
-		"dummy":                               "ok",
+	visibleConfigs := map[string]string{
+		"dummy":      "secretAccessKey",
+		"Foo":        "password",
+		"api":        "apikey",
+		"access":     "XXX",
+		"key":        "XXX",
+		"credential": "XXX",
+	}
+	invisibleConfigs := map[string]string{
 		"MyPassword":                          "123456",
 		"your_secret_access_Key":              "ABCD",
-		"Foo":                                 "password",
 		"SECRETACCESSKEY2":                    "XXX",
 		"minio.secretAccessKey":               "secretAccessKey",
 		"common.security.defaultRootPassword": "milvus",
+		"credentialaksk1secretaccesskey":      "XXX",
+		"credential.aksk1.secret_access_key":  "XXX",
+		"credentialapikey1apikey":             "apikey",
+		"credential.apikey1.apikey":           "apikey",
+		"credentialgcp1credentialjson":        "credential",
+		"credential.gcp1.credentialjson":      "credential",
 	}
+
 	copiedConfigs := make(map[string]string)
-	for k, v := range configs {
+	for k, v := range visibleConfigs {
 		copiedConfigs[k] = v
 	}
-	hideSensitive(configs)
-
-	for k := range copiedConfigs {
-		assert.Contains(t, configs, k)
+	hideSensitive(copiedConfigs)
+	for k, v := range visibleConfigs {
+		assert.Contains(t, copiedConfigs, k)
+		assert.Equal(t, copiedConfigs[k], v)
 	}
-	for k, v := range configs {
-		contains := false
-		for _, sensitive := range sensitiveKeys {
-			if strings.Contains(strings.ToLower(k), sensitive) {
-				assert.Equal(t, v, "*****")
-				contains = true
-				break
-			}
-		}
-		if !contains {
-			assert.Equal(t, v, copiedConfigs[k])
-		}
+
+	copiedConfigs = make(map[string]string)
+	for k, v := range invisibleConfigs {
+		copiedConfigs[k] = v
+	}
+	hideSensitive(copiedConfigs)
+	for k := range invisibleConfigs {
+		assert.Contains(t, copiedConfigs, k)
+		assert.Equal(t, copiedConfigs[k], sensitiveMark)
 	}
 }
 
