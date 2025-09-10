@@ -60,7 +60,7 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 
 	// check old collection isn't alias and exists in old db
 	if t.core.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetOldName()) {
-		return fmt.Errorf("unsupported use an alias to rename collection, alias: %s", t.Req.GetOldName())
+		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", t.Req.GetOldName())
 	}
 
 	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetOldName())
