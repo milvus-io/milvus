@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -128,11 +130,13 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		return nil
 	}
 
+	columnGroups := t.getColumnGroups(segmentInfo)
+
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, t.writeRetryOpts...)
+			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
@@ -175,6 +179,9 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.pack.ReleaseData()
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows)}
+	if columnGroups != nil {
+		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
+	}
 	if t.pack.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
@@ -194,6 +201,45 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
 
 	return nil
+}
+
+func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
+	// column group only needed for storage v2 segment
+	if segmentInfo.GetStorageVersion() != storage.StorageV2 {
+		return nil
+	}
+
+	// empty pack
+	if len(t.pack.insertData) == 0 && t.schema == nil {
+		return nil
+	}
+
+	allFields := typeutil.GetAllFieldSchemas(t.schema)
+
+	// use previous split if already exists
+	if currentSplit := segmentInfo.GetCurrentSplit(); currentSplit != nil {
+		for _, cg := range currentSplit {
+			// legacy split found, use legacy policy
+			if cg.Fields == nil {
+				return storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+			}
+		}
+		field2idx := make(map[int64]int)
+		for idx, field := range allFields {
+			field2idx[field.GetFieldID()] = idx
+		}
+		for idx, cg := range currentSplit {
+			cg.Columns = lo.Map(cg.Fields, func(fieldID int64, _ int) int {
+				return field2idx[fieldID]
+			})
+			currentSplit[idx] = cg
+		}
+		return currentSplit
+	}
+
+	// TODO calculate field stats
+	policies := storagecommon.DefaultPolicies()
+	return storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, policies...)
 }
 
 // writeMeta updates segments via meta writer in option.

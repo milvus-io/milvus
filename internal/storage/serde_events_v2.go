@@ -351,7 +351,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
-			pw.columnGroups = storagecommon.SplitBySchema(allFields)
+			pw.columnGroups = storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.DefaultPolicies()...)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {

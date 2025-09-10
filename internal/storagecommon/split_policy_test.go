@@ -38,6 +38,7 @@ func AssertSplitEqual(t *testing.T, expect, actual *currentSplit) {
 	for i := range expect.outputGroups {
 		assert.Equal(t, expect.outputGroups[i].GroupID, actual.outputGroups[i].GroupID)
 		assert.Equal(t, expect.outputGroups[i].Columns, actual.outputGroups[i].Columns)
+		assert.Equal(t, expect.outputGroups[i].Fields, actual.outputGroups[i].Fields)
 	}
 }
 
@@ -71,6 +72,7 @@ func TestWideDataTypePolicy(t *testing.T) {
 					{
 						GroupID: 100,
 						Columns: []int{2},
+						Fields:  []int64{100},
 					},
 				},
 			},
@@ -103,6 +105,7 @@ func TestWideDataTypePolicy(t *testing.T) {
 					{
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
+						Fields:  []int64{0, 1, 100},
 					},
 				},
 			},
@@ -112,10 +115,12 @@ func TestWideDataTypePolicy(t *testing.T) {
 					{
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
+						Fields:  []int64{0, 1, 100},
 					},
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 				},
 			},
@@ -169,6 +174,7 @@ func TestSystemColumnPolicy(t *testing.T) {
 					{
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
+						Fields:  []int64{0, 1, 100},
 					},
 				},
 			},
@@ -200,6 +206,7 @@ func TestSystemColumnPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 				},
 			},
@@ -209,10 +216,12 @@ func TestSystemColumnPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 					{
 						GroupID: 0,
 						Columns: []int{0, 1},
+						Fields:  []int64{0, 1},
 					},
 				},
 			},
@@ -277,10 +286,12 @@ func TestRemanentShortPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 					{
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
+						Fields:  []int64{0, 1, 100},
 					},
 				},
 				nextGroupID: 1,
@@ -292,14 +303,17 @@ func TestRemanentShortPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 					{
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
+						Fields:  []int64{0, 1, 100},
 					},
 					{
 						GroupID: 1,
 						Columns: []int{4, 5, 6},
+						Fields:  []int64{102, 103, 104},
 					},
 				},
 			},
@@ -343,10 +357,12 @@ func TestRemanentShortPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 					{
 						GroupID: 0,
 						Columns: []int{0, 1},
+						Fields:  []int64{0, 1},
 					},
 				},
 				nextGroupID: 1,
@@ -358,18 +374,22 @@ func TestRemanentShortPolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 					{
 						GroupID: 0,
 						Columns: []int{0, 1},
+						Fields:  []int64{0, 1},
 					},
 					{
 						GroupID: 1,
 						Columns: []int{2, 4},
+						Fields:  []int64{100, 102},
 					},
 					{
 						GroupID: 2,
 						Columns: []int{5, 6},
+						Fields:  []int64{103, 104},
 					},
 				},
 			},
@@ -428,6 +448,7 @@ func TestAvgSizePolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
 					},
 				},
 			},

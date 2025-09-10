@@ -49,7 +49,7 @@ func newCurrentSplit(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats
 
 func (c *currentSplit) SplitFields(groupID int64, fields []int64, indices []int) {
 	c.processFields.Insert(fields...)
-	c.outputGroups = append(c.outputGroups, ColumnGroup{Columns: indices, GroupID: groupID})
+	c.outputGroups = append(c.outputGroups, ColumnGroup{Columns: indices, GroupID: groupID, Fields: fields})
 }
 
 func (c *currentSplit) NextGroupID() int64 {
