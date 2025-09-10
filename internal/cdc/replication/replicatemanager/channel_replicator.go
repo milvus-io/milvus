@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -149,6 +150,13 @@ func (r *channelReplicator) replicateLoop() error {
 				panic(fmt.Sprintf("replicate message failed due to unrecoverable error: %v", err))
 			}
 			logger.Debug("replicate message success", log.FieldMessage(msg))
+			if msg.MessageType() == message.MessageTypePutReplicateConfig {
+				roleChanged := r.handlePutReplicateConfigMessage(msg)
+				if roleChanged {
+					// Role changed, return and stop replicate.
+					return nil
+				}
+			}
 		}
 	}
 }
@@ -191,6 +199,31 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		zap.Any("startFromMessageID", startFrom),
 	)
 	return startFrom, nil
+}
+
+func (r *channelReplicator) handlePutReplicateConfigMessage(msg message.ImmutableMessage) (roleChanged bool) {
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
+	logger.Info("handle PutReplicateConfigMessage", log.FieldMessage(msg))
+	prcMsg := message.MustAsImmutablePutReplicateConfigMessageV2(msg)
+	replicateConfig := prcMsg.Header().ReplicateConfiguration
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
+	if currentCluster.Role() == replicateutil.RolePrimary {
+		logger.Info("primary cluster, skip handle PutReplicateConfigMessage")
+		return false
+	}
+	// Current cluster role changed, not primary cluster,
+	// we need to remove the replicate pchannel.
+	err := resource.Resource().ReplicationCatalog().RemoveReplicatePChannel(r.ctx,
+		r.replicateInfo.GetSourceChannelName(), r.replicateInfo.GetTargetChannelName())
+	if err != nil {
+		panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
+	}
+	logger.Info("handle PutReplicateConfigMessage done, replicate pchannel removed")
+	return true
 }
 
 func (r *channelReplicator) StopReplicate() {
