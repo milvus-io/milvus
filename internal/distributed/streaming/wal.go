@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -72,6 +73,15 @@ func (w *walAccesserImpl) Local() Local {
 	return localServiceImpl{w}
 }
 
+// ControlChannel returns the control channel name of the wal.
+func (w *walAccesserImpl) ControlChannel() string {
+	last, err := w.streamingCoordClient.Assignment().GetLatestAssignments(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return funcutil.GetControlChannel(last.PChannelOfCChannel())
+}
+
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)
@@ -96,10 +106,7 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 	}
 
 	if opts.VChannel != "" {
-		pchannel, err := w.routePChannel(ctx, opts.VChannel)
-		if err != nil {
-			panic(err)
-		}
+		pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
 		if opts.PChannel != "" && opts.PChannel != pchannel {
 			panic("pchannel is not match with vchannel")
 		}

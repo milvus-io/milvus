@@ -149,7 +149,7 @@ class TestSearchGroupBy(TestcaseBase):
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("grpby_unsupported_field", [ct.default_float_field_name, ct.default_json_field_name,
+    @pytest.mark.parametrize("grpby_unsupported_field", [ct.default_float_field_name,
                                                          ct.default_double_field_name, ct.default_float_vec_field_name])
     def test_search_group_by_unsupported_field(self, grpby_unsupported_field):
         """

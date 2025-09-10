@@ -34,8 +34,11 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
                 ? milvus::cachinglayer::StorageType::DISK
                 : milvus::cachinglayer::StorageType::MEMORY,
             milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+            milvus::segcore::getCellDataType(
+                /* is_vector */ IsVectorDataType(load_index_info->field_type),
+                /* is_index */ true),
             milvus::segcore::getCacheWarmupPolicy(
-                IsVectorDataType(load_index_info->field_type),
+                /* is_vector */ IsVectorDataType(load_index_info->field_type),
                 /* is_index */ true),
             /* support_eviction */ false) {
 }

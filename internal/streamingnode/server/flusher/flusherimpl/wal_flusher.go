@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -207,6 +208,11 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 		}
 	}()
+
+	// wal flusher will not handle the control channel message.
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
 
 	// Do the data sync service management here.
 	switch msg.MessageType() {

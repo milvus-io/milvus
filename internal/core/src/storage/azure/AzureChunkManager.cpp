@@ -175,13 +175,13 @@ AzureChunkManager::ObjectExists(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->ObjectExists(bucket_name, object_name);
-        monitor::internal_storage_request_latency_stat.Observe(
+        milvus::monitor::internal_storage_request_latency_stat.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_stat_suc.Increment();
+        milvus::monitor::internal_storage_op_count_stat_suc.Increment();
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_stat_fail.Increment();
+        milvus::monitor::internal_storage_op_count_stat_fail.Increment();
         ThrowAzureError("ObjectExists",
                         err,
                         "params, bucket={}, object={}",
@@ -198,13 +198,13 @@ AzureChunkManager::GetObjectSize(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->GetObjectSize(bucket_name, object_name);
-        monitor::internal_storage_request_latency_stat.Observe(
+        milvus::monitor::internal_storage_request_latency_stat.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_stat_suc.Increment();
+        milvus::monitor::internal_storage_op_count_stat_suc.Increment();
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_stat_fail.Increment();
+        milvus::monitor::internal_storage_op_count_stat_fail.Increment();
         ThrowAzureError("GetObjectSize",
                         err,
                         "params, bucket={}, object={}",
@@ -221,13 +221,13 @@ AzureChunkManager::DeleteObject(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->DeleteObject(bucket_name, object_name);
-        monitor::internal_storage_request_latency_remove.Observe(
+        milvus::monitor::internal_storage_request_latency_remove.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_remove_suc.Increment();
+        milvus::monitor::internal_storage_op_count_remove_suc.Increment();
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_remove_fail.Increment();
+        milvus::monitor::internal_storage_op_count_remove_fail.Increment();
         ThrowAzureError("DeleteObject",
                         err,
                         "params, bucket={}, object={}",
@@ -246,14 +246,14 @@ AzureChunkManager::PutObjectBuffer(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->PutObjectBuffer(bucket_name, object_name, buf, size);
-        monitor::internal_storage_request_latency_put.Observe(
+        milvus::monitor::internal_storage_request_latency_put.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_put_suc.Increment();
-        monitor::internal_storage_kv_size_put.Observe(size);
+        milvus::monitor::internal_storage_op_count_put_suc.Increment();
+        milvus::monitor::internal_storage_kv_size_put.Observe(size);
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_put_fail.Increment();
+        milvus::monitor::internal_storage_op_count_put_fail.Increment();
         ThrowAzureError("PutObjectBuffer",
                         err,
                         "params, bucket={}, object={}",
@@ -272,14 +272,14 @@ AzureChunkManager::GetObjectBuffer(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->GetObjectBuffer(bucket_name, object_name, buf, size);
-        monitor::internal_storage_request_latency_get.Observe(
+        milvus::monitor::internal_storage_request_latency_get.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_get_suc.Increment();
-        monitor::internal_storage_kv_size_get.Observe(size);
+        milvus::monitor::internal_storage_op_count_get_suc.Increment();
+        milvus::monitor::internal_storage_kv_size_get.Observe(size);
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_get_fail.Increment();
+        milvus::monitor::internal_storage_op_count_get_fail.Increment();
         ThrowAzureError("GetObjectBuffer",
                         err,
                         "params, bucket={}, object={}",
@@ -296,13 +296,13 @@ AzureChunkManager::ListObjects(const std::string& bucket_name,
     try {
         auto start = std::chrono::system_clock::now();
         res = client_->ListObjects(bucket_name, prefix);
-        monitor::internal_storage_request_latency_list.Observe(
+        milvus::monitor::internal_storage_request_latency_list.Observe(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - start)
                 .count());
-        monitor::internal_storage_op_count_list_suc.Increment();
+        milvus::monitor::internal_storage_op_count_list_suc.Increment();
     } catch (std::exception& err) {
-        monitor::internal_storage_op_count_list_fail.Increment();
+        milvus::monitor::internal_storage_op_count_list_fail.Increment();
         ThrowAzureError("ListObjects",
                         err,
                         "params, bucket={}, prefix={}",

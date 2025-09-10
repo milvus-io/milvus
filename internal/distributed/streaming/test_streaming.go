@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
@@ -161,6 +162,10 @@ type noopWALAccesser struct{}
 
 func (n *noopWALAccesser) Replicate() ReplicateService {
 	return &noopReplicateService{}
+}
+
+func (n *noopWALAccesser) ControlChannel() string {
+	return funcutil.GetControlChannel("noop")
 }
 
 func (n *noopWALAccesser) Balancer() Balancer {
