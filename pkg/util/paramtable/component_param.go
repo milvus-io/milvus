@@ -279,7 +279,13 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
+	// storage v2
 	EnableStorageV2           ParamItem `refreshable:"false"`
+	Stv2SplitSystemColumn     ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePK ParamItem `refreshable:"true"`
+	Stv2SplitByAvgSize        ParamItem `refreshable:"true"`
+	Stv2SplitAvgSizeThreshold ParamItem `refreshable:"true"`
+
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
@@ -925,6 +931,42 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
+
+	p.Stv2SplitSystemColumn = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          "enable split system column policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitSystemColumn.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludePK = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includePK",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include pk field",
+		Export:       true,
+	}
+	p.Stv2SystemColumnIncludePK.Init(base.mgr)
+
+	p.Stv2SplitByAvgSize = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          "enable split by average size policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitByAvgSize.Init(base.mgr)
+
+	p.Stv2SplitAvgSizeThreshold = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.threshold",
+		Version:      "2.6.2",
+		DefaultValue: "1024",
+		Doc:          "split by average size policy threshold(in bytes) in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitAvgSizeThreshold.Init(base.mgr)
 
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",

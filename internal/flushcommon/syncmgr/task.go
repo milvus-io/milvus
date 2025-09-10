@@ -239,7 +239,28 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 
 	// TODO calculate field stats
 	policies := storagecommon.DefaultPolicies()
-	return storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, policies...)
+	return storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+}
+
+func (t *SyncTask) calcColumnStats() map[int64]storagecommon.ColumnStats {
+	result := make(map[int64]storagecommon.ColumnStats)
+
+	memorySizes := make(map[int64]int64)
+	rowNums := make(map[int64]int64)
+	for _, data := range t.pack.insertData {
+		for fieldID, fieldData := range data.Data {
+			memorySizes[fieldID] += int64(fieldData.GetMemorySize())
+			rowNums[fieldID] += int64(fieldData.RowNum())
+		}
+	}
+	for fieldID, rowNum := range rowNums {
+		if rowNum > 0 {
+			result[fieldID] = storagecommon.ColumnStats{
+				AvgSize: memorySizes[fieldID] / rowNum,
+			}
+		}
+	}
+	return result
 }
 
 // writeMeta updates segments via meta writer in option.
