@@ -116,6 +116,54 @@ func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datap
 	return _c
 }
 
+// CreateGlobalStats provides a mock function with given fields: nodeID, in, taskSlot
+func (_m *MockCluster) CreateGlobalStats(nodeID int64, in *datapb.GlobalStatsTask, taskSlot int64) error {
+	ret := _m.Called(nodeID, in, taskSlot)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateGlobalStats")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.GlobalStatsTask, int64) error); ok {
+		r0 = rf(nodeID, in, taskSlot)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreateGlobalStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateGlobalStats'
+type MockCluster_CreateGlobalStats_Call struct {
+	*mock.Call
+}
+
+// CreateGlobalStats is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.GlobalStatsTask
+//   - taskSlot int64
+func (_e *MockCluster_Expecter) CreateGlobalStats(nodeID interface{}, in interface{}, taskSlot interface{}) *MockCluster_CreateGlobalStats_Call {
+	return &MockCluster_CreateGlobalStats_Call{Call: _e.mock.On("CreateGlobalStats", nodeID, in, taskSlot)}
+}
+
+func (_c *MockCluster_CreateGlobalStats_Call) Run(run func(nodeID int64, in *datapb.GlobalStatsTask, taskSlot int64)) *MockCluster_CreateGlobalStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.GlobalStatsTask), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreateGlobalStats_Call) Return(_a0 error) *MockCluster_CreateGlobalStats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreateGlobalStats_Call) RunAndReturn(run func(int64, *datapb.GlobalStatsTask, int64) error) *MockCluster_CreateGlobalStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateImport provides a mock function with given fields: nodeID, in, taskSlot
 func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
 	ret := _m.Called(nodeID, in, taskSlot)
@@ -400,6 +448,53 @@ func (_c *MockCluster_DropCompaction_Call) RunAndReturn(run func(int64, int64) e
 	return _c
 }
 
+// DropGlobalStats provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) DropGlobalStats(nodeID int64, taskID int64) error {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropGlobalStats")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropGlobalStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropGlobalStats'
+type MockCluster_DropGlobalStats_Call struct {
+	*mock.Call
+}
+
+// DropGlobalStats is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) DropGlobalStats(nodeID interface{}, taskID interface{}) *MockCluster_DropGlobalStats_Call {
+	return &MockCluster_DropGlobalStats_Call{Call: _e.mock.On("DropGlobalStats", nodeID, taskID)}
+}
+
+func (_c *MockCluster_DropGlobalStats_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropGlobalStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropGlobalStats_Call) Return(_a0 error) *MockCluster_DropGlobalStats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropGlobalStats_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropGlobalStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImport provides a mock function with given fields: nodeID, taskID
 func (_m *MockCluster) DropImport(nodeID int64, taskID int64) error {
 	ret := _m.Called(nodeID, taskID)
@@ -655,6 +750,65 @@ func (_c *MockCluster_QueryCompaction_Call) Return(_a0 *datapb.CompactionPlanRes
 }
 
 func (_c *MockCluster_QueryCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionStateRequest) (*datapb.CompactionPlanResult, error)) *MockCluster_QueryCompaction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryGlobalStats provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) QueryGlobalStats(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.GlobalStatsResults, error) {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryGlobalStats")
+	}
+
+	var r0 *workerpb.GlobalStatsResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *workerpb.QueryJobsRequest) (*workerpb.GlobalStatsResults, error)); ok {
+		return rf(nodeID, in)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *workerpb.QueryJobsRequest) *workerpb.GlobalStatsResults); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*workerpb.GlobalStatsResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *workerpb.QueryJobsRequest) error); ok {
+		r1 = rf(nodeID, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryGlobalStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryGlobalStats'
+type MockCluster_QueryGlobalStats_Call struct {
+	*mock.Call
+}
+
+// QueryGlobalStats is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *workerpb.QueryJobsRequest
+func (_e *MockCluster_Expecter) QueryGlobalStats(nodeID interface{}, in interface{}) *MockCluster_QueryGlobalStats_Call {
+	return &MockCluster_QueryGlobalStats_Call{Call: _e.mock.On("QueryGlobalStats", nodeID, in)}
+}
+
+func (_c *MockCluster_QueryGlobalStats_Call) Run(run func(nodeID int64, in *workerpb.QueryJobsRequest)) *MockCluster_QueryGlobalStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*workerpb.QueryJobsRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryGlobalStats_Call) Return(_a0 *workerpb.GlobalStatsResults, _a1 error) *MockCluster_QueryGlobalStats_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryGlobalStats_Call) RunAndReturn(run func(int64, *workerpb.QueryJobsRequest) (*workerpb.GlobalStatsResults, error)) *MockCluster_QueryGlobalStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

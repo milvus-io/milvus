@@ -241,6 +241,18 @@ message AnalyzeResults {
   repeated AnalyzeResult results = 1;
 }
 
+
+message GlobalStatsResult {
+  int64 taskID = 1;
+  index.JobState state = 2;
+  string fail_reason = 3;
+  repeated string files = 4;
+}
+
+message GlobalStatsResults {
+  repeated GlobalStatsResult results = 1;
+}
+
 message StatsResult {
   int64 taskID = 1;
   index.JobState state = 2;
@@ -268,6 +280,7 @@ message QueryJobsV2Response {
     IndexJobResults index_job_results = 3;
     AnalyzeResults analyze_job_results = 4;
     StatsResults stats_job_results = 5;
+    GlobalStatsResults global_stats_results=6;
   }
 }
 

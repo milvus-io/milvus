@@ -74,6 +74,10 @@ type Server struct {
 	tikvCli *txnkv.Client
 
 	mixCoordClient types.MixCoordClient
+
+	// Event related fields
+	eventMu       sync.RWMutex
+	eventWatchers map[string][]chan *datapb.WatchResponse
 }
 
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
@@ -933,4 +937,9 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 // ListFileResources list file resources
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
+}
+
+// Watch implements streaming event watching
+func (s *Server) Watch(req *datapb.WatchRequest, stream datapb.DataCoord_WatchServer) error {
+	return s.mixCoord.Watch(req, stream)
 }

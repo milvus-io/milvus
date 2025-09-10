@@ -107,6 +107,30 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+  rpc Watch(WatchRequest) returns (stream WatchResponse) {}  
+}
+
+// Event types for watch
+enum EventType {
+  EventType_PrimaryKeyIndexBuilt = 0; 
+}
+
+// Event data for primary key index built
+message PrimaryKeyIndexBuiltData {
+  int64 collection_id = 1;
+  string vchannel_name = 2;
+  int64 version = 3;
+  repeated string files = 4;
+}
+
+message WatchRequest {
+  common.MsgBase base = 1;
+  EventType event_type = 2;
+}
+
+message WatchResponse {
+  EventType event_type = 1;
+  bytes event_data = 2;
 }
 
 service DataNode {
@@ -1086,6 +1110,23 @@ message PartitionStatsInfo {
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
   int64 commitTime = 7;
+}
+
+message GlobalStatsTask {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  string vChannel = 6;
+  int64 version = 7;
+  repeated SegmentInfo segmentInfos = 8;
+  int64 nodeID = 9;
+  index.StorageConfig storage_config = 10;
+  schema.CollectionSchema schema = 11;
+  index.JobState state = 12;
+  string fail_reason = 13;
+  int64 task_slot = 14;
 }
 
 message DropCompactionPlanRequest {

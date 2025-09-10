@@ -4344,6 +4344,8 @@ type dataCoordConfig struct {
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
+	GlobalStatsTriggerInterval ParamItem `refreshable:"true"`
+
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
@@ -5419,6 +5421,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONStatsTriggerInterval.Init(base.mgr)
+
+	p.GlobalStatsTriggerInterval = ParamItem{
+		Key:          "dataCoord.globalStatsTriggerInterval",
+		Version:      "2.6.0",
+		Doc:          "global stats task interval per trigger",
+		DefaultValue: "120",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.GlobalStatsTriggerInterval.Init(base.mgr)
 
 	p.RequestTimeoutSeconds = ParamItem{
 		Key:          "dataCoord.requestTimeoutSeconds",

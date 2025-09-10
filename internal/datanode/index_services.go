@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -368,6 +369,40 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	return ret, nil
 }
 
+func (node *DataNode) createGlobalStatsTask(ctx context.Context, req *datapb.GlobalStatsTask) (*commonpb.Status, error) {
+	log.Info("receive global stats job", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("vChannel", req.GetVChannel()),
+		zap.Int("segmentCount", len(req.GetSegmentInfos())),
+	)
+	taskCtx, taskCancel := context.WithCancel(node.ctx)
+	if oldInfo := node.taskManager.LoadOrStoreGlobalStatsTask(req.GetClusterID(), req.GetTaskID(), &index.GlobalStatsTaskInfo{
+		Cancel: taskCancel,
+		State:  indexpb.JobState_JobStateInProgress,
+	}); oldInfo != nil {
+		return merr.Status(errors.New("global stats task not found")), nil
+	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		// node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
+		// metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	t := index.NewGlobalStatsTask(taskCtx, taskCancel, req, node.taskManager, io.NewBinlogIO(cm))
+	ret := merr.Success()
+	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
+		log.Warn("DataNode failed to schedule", zap.Error(err))
+		ret = merr.Status(err)
+		return ret, nil
+	}
+	log.Info("DataNode global stats job enqueued successfully")
+	return merr.Success(), nil
+}
+
 func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateStatsRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Info("receive stats job", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
@@ -549,6 +584,55 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 			},
 		},
 	}, nil
+}
+
+func (node *DataNode) queryGlobalStatsTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
+	).WithRateGroup("QueryResult", 1, 60)
+
+	results := make([]*workerpb.GlobalStatsResult, 0, len(req.GetTaskIDs()))
+	for _, taskID := range req.GetTaskIDs() {
+		info := node.taskManager.GetGlobalStatsTaskInfo(req.GetClusterID(), taskID)
+		if info != nil {
+			results = append(results, &workerpb.GlobalStatsResult{
+				TaskID:     taskID,
+				State:      info.State,
+				FailReason: info.FailReason,
+				Files:      info.Files,
+			})
+		}
+	}
+	log.Debug("query global stats jobs result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
+	return &workerpb.QueryJobsV2Response{
+		Status:    merr.Success(),
+		ClusterID: req.GetClusterID(),
+		Result: &workerpb.QueryJobsV2Response_GlobalStatsResults{
+			GlobalStatsResults: &workerpb.GlobalStatsResults{
+				Results: results,
+			},
+		},
+	}, nil
+}
+
+func (node *DataNode) dropGlobalStatsTask(ctx context.Context, clusterID string, taskID int64) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", taskID))
+	log.Info("drop global stats job", zap.String("clusterID", clusterID), zap.Int64("taskID", taskID))
+	keys := make([]index.Key, 0, 1)
+	keys = append(keys, index.Key{ClusterID: clusterID, TaskID: taskID})
+	infos := node.taskManager.DeleteGlobalStatsTaskInfos(ctx, keys)
+	for _, info := range infos {
+		if info.Cancel != nil {
+			info.Cancel()
+		}
+	}
+	log.Info("drop global stats job success")
+	return merr.Success(), nil
 }
 
 // Deprecated: use DropTask instead, keep for compatibility

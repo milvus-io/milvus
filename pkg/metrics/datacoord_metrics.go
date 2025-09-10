@@ -364,6 +364,15 @@ var (
 			Help:      "number of index tasks of each type",
 		}, []string{TaskTypeLabel, TaskStateLabel})
 
+	// GlobalStatsTaskNum records the number of tasks of each type.
+	GlobalStatsTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "global_stats_task_count",
+			Help:      "number of global stats tasks",
+		}, []string{TaskTypeLabel, TaskStateLabel})
+
 	// TaskVersion records the version of task(retry times of task).
 	TaskVersion = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -415,6 +424,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
 	registry.MustRegister(IndexStatsTaskNum)
+	registry.MustRegister(GlobalStatsTaskNum)
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
 	registerStreamingCoord(registry)

@@ -1556,6 +1556,93 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 	})
 }
 
+func TestCatalog_GlobalStatsTask(t *testing.T) {
+	kc := &Catalog{}
+	mockErr := errors.New("mock error")
+
+	t.Run("ListGlobalStatsTask", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		tasks, err := kc.ListGlobalStatsTask(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, tasks)
+
+		task := &datapb.GlobalStatsTask{
+			TaskID:       1,
+			Version:      1,
+			NodeID:       1,
+			CollectionID: 1,
+			PartitionID:  2,
+			VChannel:     "ch1",
+		}
+		value, err := proto.Marshal(task)
+		assert.NoError(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("key1"), value)
+		})
+		kc.MetaKv = txn
+
+		tasks, err = kc.ListGlobalStatsTask(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(tasks))
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("key1"), []byte("1234"))
+		})
+		kc.MetaKv = txn
+
+		tasks, err = kc.ListGlobalStatsTask(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, tasks)
+	})
+
+	t.Run("SaveGlobalStatsTask", func(t *testing.T) {
+		task := &datapb.GlobalStatsTask{
+			TaskID:       1,
+			Version:      1,
+			NodeID:       1,
+			CollectionID: 1,
+			PartitionID:  2,
+			VChannel:     "ch1",
+		}
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		kc.MetaKv = txn
+
+		err := kc.SaveGlobalStatsTask(context.Background(), task)
+		assert.NoError(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		err = kc.SaveGlobalStatsTask(context.Background(), task)
+		assert.Error(t, err)
+	})
+
+	t.Run("DropGlobalStatsTask", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		kc.MetaKv = txn
+
+		err := kc.DropGlobalStatsTask(context.Background(), 1)
+		assert.NoError(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		err = kc.DropGlobalStatsTask(context.Background(), 1)
+		assert.Error(t, err)
+	})
+}
+
 func Test_PartitionStatsInfo(t *testing.T) {
 	kc := &Catalog{}
 	mockErr := errors.New("mock error")
@@ -1803,6 +1890,105 @@ func Test_StatsTasks(t *testing.T) {
 		kc.MetaKv = txn
 
 		err = kc.DropStatsTask(context.Background(), 1)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_GlobalStatsTask(t *testing.T) {
+	kc := &Catalog{}
+	mockErr := errors.New("mock error")
+
+	t.Run("ListPartitionStatsInfo", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		infos, err := kc.ListPartitionStatsInfos(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, infos)
+
+		info := &datapb.PartitionStatsInfo{
+			CollectionID:  1,
+			PartitionID:   2,
+			VChannel:      "ch1",
+			Version:       1,
+			SegmentIDs:    nil,
+			AnalyzeTaskID: 3,
+			CommitTime:    10,
+		}
+		value, err := proto.Marshal(info)
+		assert.NoError(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("key1"), value)
+		})
+		kc.MetaKv = txn
+
+		infos, err = kc.ListPartitionStatsInfos(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(infos))
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("key1"), []byte("1234"))
+		})
+		kc.MetaKv = txn
+
+		infos, err = kc.ListPartitionStatsInfos(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, infos)
+	})
+
+	t.Run("SavePartitionStatsInfo", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		info := &datapb.PartitionStatsInfo{
+			CollectionID:  1,
+			PartitionID:   2,
+			VChannel:      "ch1",
+			Version:       1,
+			SegmentIDs:    nil,
+			AnalyzeTaskID: 3,
+			CommitTime:    10,
+		}
+
+		err := kc.SavePartitionStatsInfo(context.Background(), info)
+		assert.Error(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+		kc.MetaKv = txn
+
+		err = kc.SavePartitionStatsInfo(context.Background(), info)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropPartitionStatsInfo", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
+		kc.MetaKv = txn
+
+		info := &datapb.PartitionStatsInfo{
+			CollectionID:  1,
+			PartitionID:   2,
+			VChannel:      "ch1",
+			Version:       1,
+			SegmentIDs:    nil,
+			AnalyzeTaskID: 3,
+			CommitTime:    10,
+		}
+
+		err := kc.DropPartitionStatsInfo(context.Background(), info)
+		assert.Error(t, err)
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		kc.MetaKv = txn
+
+		err = kc.DropPartitionStatsInfo(context.Background(), info)
 		assert.NoError(t, err)
 	})
 }
