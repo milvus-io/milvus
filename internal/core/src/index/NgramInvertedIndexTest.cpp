@@ -99,6 +99,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     storage::FileManagerContext ctx(field_meta, index_meta, cm);
     std::vector<std::string> index_files;
 
+    auto index_size = 0;
     {
         Config config;
         config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
@@ -115,9 +116,9 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
 
         auto create_index_result = index->Upload();
         auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
+        index_size = create_index_result->GetSerializedSize();
         ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
+        ASSERT_GT(index_size, 0);
         index_files = create_index_result->GetIndexFiles();
     }
 
@@ -183,7 +184,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             .index_params = index_params,
             .index_files = index_files,
             .schema = field_meta.field_schema,
-            .index_size = 1024 * 1024 * 1024,
+            .index_size = index_size,
         };
 
         uint8_t trace_id[16] = {0};
