@@ -5,6 +5,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -337,6 +338,11 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
 		if err != nil {
 			return err
+		}
+
+		// adapt all valid data for nullable column
+		if fieldSchema.GetNullable() && len(field.GetValidData()) == 0 {
+			field.ValidData = lo.RepeatBy(numRows, func(i int) bool { return true })
 		}
 
 		if fieldSchema.GetDefaultValue() == nil {
