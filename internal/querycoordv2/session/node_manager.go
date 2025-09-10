@@ -102,9 +102,9 @@ func NewNodeManager() *NodeManager {
 type State int
 
 const (
-	NormalStateName   = "Normal"
-	StoppingStateName = "Stopping"
-	SuspendStateName  = "Suspend"
+	NormalStateName   = "active"
+	StoppingStateName = "stopping"
+	SuspendStateName  = "suspended"
 )
 
 type ImmutableNodeInfo struct {

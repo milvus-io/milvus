@@ -969,6 +969,10 @@ func (s *mixCoordImpl) CheckBalanceStatus(ctx context.Context, req *querypb.Chec
 	return s.queryCoordServer.CheckBalanceStatus(ctx, req)
 }
 
+func (s *mixCoordImpl) IsNodeSuspended(ctx context.Context, req *querypb.IsNodeSuspendedRequest) (*querypb.IsNodeSuspendedResponse, error) {
+	return s.queryCoordServer.IsNodeSuspended(ctx, req)
+}
+
 func (s *mixCoordImpl) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.SuspendNode(ctx, req)
 }
@@ -1144,6 +1148,10 @@ func (s *mixCoordImpl) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.Rep
 
 func (s *mixCoordImpl) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
 	return s.datacoordServer.GcControl(ctx, req)
+}
+
+func (s *mixCoordImpl) GetGcStatus(ctx context.Context, request *datapb.GetGcStatusRequest) (*datapb.GetGcStatusResponse, error) {
+	return s.datacoordServer.GetGcStatus(ctx, request)
 }
 
 func (s *mixCoordImpl) ImportV2(ctx context.Context, req *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {

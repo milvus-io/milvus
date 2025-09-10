@@ -62,6 +62,10 @@ func (n *noopBalancer) GetWALDistribution(ctx context.Context, nodeID int64) (*t
 	return nil, nil
 }
 
+func (n *noopBalancer) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
+	return nil, nil
+}
+
 func (n *noopBalancer) IsRebalanceSuspended(ctx context.Context) (bool, error) {
 	return false, nil
 }
