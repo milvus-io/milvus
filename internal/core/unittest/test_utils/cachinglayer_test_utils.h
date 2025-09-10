@@ -40,6 +40,7 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
           meta_(segcore::storagev1translator::CTMeta(
               StorageType::MEMORY,
               CellIdMappingMode::IDENTICAL,
+              CellDataType::SCALAR_FIELD,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
@@ -118,6 +119,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
               num_fields,
               StorageType::MEMORY,
               CellIdMappingMode::IDENTICAL,
+              CellDataType::OTHER,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
@@ -185,6 +187,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
           meta_(milvus::cachinglayer::Meta(
               StorageType::MEMORY,
               CellIdMappingMode::IDENTICAL,
+              CellDataType::OTHER,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               false)) {
     }

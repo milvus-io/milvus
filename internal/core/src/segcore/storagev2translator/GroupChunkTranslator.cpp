@@ -62,6 +62,17 @@ GroupChunkTranslator::GroupChunkTranslator(
             use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
+            milvus::segcore::getCellDataType(
+                /* is_vector */
+                [&]() {
+                    for (const auto& [fid, field_meta] : field_metas_) {
+                        if (IsVectorDataType(field_meta.get_data_type())) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }(),
+                /* is_index */ false),
             milvus::segcore::getCacheWarmupPolicy(
                 /* is_vector */
                 [&]() {

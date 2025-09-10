@@ -164,8 +164,8 @@ PhyRandomSampleNode::GetOutput() {
         std::chrono::high_resolution_clock::now();
     double duration =
         std::chrono::duration<double, std::micro>(end - start).count();
-    monitor::internal_core_search_latency_random_sample.Observe(duration /
-                                                                1000);
+    milvus::monitor::internal_core_search_latency_random_sample.Observe(
+        duration / 1000);
     is_finished_ = true;
     return result;
 }

@@ -101,7 +101,7 @@ PhyFilterBitsNode::GetOutput() {
     Assert(valid_bitset.size() == need_process_rows_);
     auto filter_ratio =
         bitset.size() != 0 ? 1 - float(bitset.count()) / bitset.size() : 0;
-    monitor::internal_core_expr_filter_ratio.Observe(filter_ratio);
+    milvus::monitor::internal_core_expr_filter_ratio.Observe(filter_ratio);
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
@@ -111,7 +111,8 @@ PhyFilterBitsNode::GetOutput() {
     double scalar_cost =
         std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
             .count();
-    monitor::internal_core_search_latency_scalar.Observe(scalar_cost / 1000);
+    milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
+                                                                 1000);
 
     return std::make_shared<RowVector>(col_res);
 }

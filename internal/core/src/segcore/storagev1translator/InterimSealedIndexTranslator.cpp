@@ -24,6 +24,9 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
       index_key_(fmt::format("seg_{}_ii_{}", segment_id, field_id)),
       meta_(milvus::cachinglayer::StorageType::MEMORY,
             milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+            milvus::segcore::getCellDataType(
+                /* is_vector */ true,
+                /* is_index */ true),
             milvus::segcore::getCacheWarmupPolicy(
                 /* is_vector */ true,
                 /* is_index */ true),
