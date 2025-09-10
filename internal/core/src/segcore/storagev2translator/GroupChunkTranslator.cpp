@@ -318,10 +318,20 @@ GroupChunkTranslator::load_group_chunk(
             chunk = create_chunk(field_meta, array_vec);
         } else {
             // Mmap mode
-            auto filepath =
-                std::filesystem::path(column_group_info_.mmap_dir_path) /
-                std::to_string(segment_id_) / std::to_string(field_id) /
-                std::to_string(cid);
+            std::filesystem::path filepath;
+            if (field_meta.get_main_field_id() != INVALID_FIELD_ID) {
+                // json shredding mode
+                filepath =
+                    std::filesystem::path(column_group_info_.mmap_dir_path) /
+                    std::to_string(segment_id_) /
+                    std::to_string(field_meta.get_main_field_id()) /
+                    std::to_string(field_id) / std::to_string(cid);
+            } else {
+                filepath =
+                    std::filesystem::path(column_group_info_.mmap_dir_path) /
+                    std::to_string(segment_id_) / std::to_string(field_id) /
+                    std::to_string(cid);
+            }
 
             LOG_INFO(
                 "[StorageV2] translator {} mmaping field {} chunk {} to path "
