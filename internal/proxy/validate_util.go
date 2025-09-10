@@ -362,13 +362,13 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 }
 
 func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
-	if !fieldSchema.GetNullable() {
-		return nil
-	}
-
 	err := nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
 		return err
+	}
+
+	if !fieldSchema.GetNullable() {
+		return nil
 	}
 
 	switch field.Field.(type) {
