@@ -136,15 +136,15 @@ if command -v cargo >/dev/null 2>&1; then
     unameOut="$(uname -s)"
     case "${unameOut}" in
         Darwin*)
-          echo "running on mac os, reinstall rust 1.83"
+          echo "running on mac os, reinstall rust 1.89"
           # github will install rust 1.74 by default.
           # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
-          rustup install 1.83
-          rustup default 1.83;;
+          rustup install 1.89
+          rustup default 1.89;;
         *)
           echo "not running on mac os, no need to reinstall rust";;
     esac
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.83 -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.89 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi

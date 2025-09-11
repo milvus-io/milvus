@@ -18,7 +18,7 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.4.linux-$TARGE
 RUN pip3 install conan==1.64.1
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.83 -y
+    sh -s -- --default-toolchain=1.89 -y
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
 RUN mkdir /opt/vcpkg &&  \
