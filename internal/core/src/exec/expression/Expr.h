@@ -183,6 +183,11 @@ class SegmentExpr : public Expr {
                                                     is_json_contains_)) {
                 num_index_chunk_ = 1;
             }
+        } else if (field_meta.get_data_type() == DataType::GEOMETRY) {
+            is_index_mode_ = segment_->HasIndex(field_id_);
+            if (is_index_mode_) {
+                num_index_chunk_ = 1;
+            }
         } else {
             is_index_mode_ = segment_->HasIndex(field_id_);
             if (is_index_mode_) {
@@ -307,19 +312,18 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
-                                                          : current_data_chunk_;
-        auto current_chunk_pos = is_index_mode_ && use_index_
-                                     ? current_index_chunk_pos_
-                                     : current_data_chunk_pos_;
+        auto use_sealed_index = is_index_mode_ && use_index_ &&
+                                segment_->type() == SegmentType::Sealed;
+        auto current_chunk =
+            use_sealed_index ? current_index_chunk_ : current_data_chunk_;
+        auto current_chunk_pos = use_sealed_index ? current_index_chunk_pos_
+                                                  : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
-            current_rows =
-                is_index_mode_ && use_index_ &&
-                        segment_->type() == SegmentType::Sealed
-                    ? current_chunk_pos
-                    : segment_->num_rows_until_chunk(field_id_, current_chunk) +
-                          current_chunk_pos;
+            current_rows = use_sealed_index ? current_chunk_pos
+                                            : segment_->num_rows_until_chunk(
+                                                  field_id_, current_chunk) +
+                                                  current_chunk_pos;
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
@@ -911,6 +915,9 @@ class SegmentExpr : public Expr {
                     case DataType::VARCHAR: {
                         return ProcessIndexChunksForValid<std::string>();
                     }
+                    case DataType::GEOMETRY: {
+                        return ProcessIndexChunksForValid<std::string>();
+                    }
                     default:
                         PanicInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
@@ -971,6 +978,10 @@ class SegmentExpr : public Expr {
                     }
                     case DataType::STRING:
                     case DataType::VARCHAR: {
+                        return ProcessChunksForValidByOffsets<std::string>(
+                            use_index, input);
+                    }
+                    case DataType::GEOMETRY: {
                         return ProcessChunksForValidByOffsets<std::string>(
                             use_index, input);
                     }

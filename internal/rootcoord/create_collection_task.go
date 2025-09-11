@@ -23,6 +23,8 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -153,6 +155,21 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	return check(maxColNumPerDB)
 }
 
+func checkGeometryDefaultValue(value string) error {
+	geomT, err := wkt.Unmarshal(value)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+	_, err = wkb.Marshal(geomT, wkb.NDR)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+
+	return nil
+}
+
 func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 	for _, fieldSchema := range schema.Fields {
 		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
@@ -210,6 +227,9 @@ func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
 				}
 			case *schemapb.ValueField_StringData:
+				if dtype == schemapb.DataType_Geometry {
+					return checkGeometryDefaultValue(fieldSchema.GetDefaultValue().GetStringData())
+				}
 				if dtype != schemapb.DataType_VarChar {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
 				}

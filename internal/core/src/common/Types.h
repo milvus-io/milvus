@@ -313,8 +313,8 @@ IsJsonType(proto::schema::DataType type) {
 }
 
 inline bool
-IsGeometryType(proto::schema::DataType type) {
-    return type == proto::schema::DataType::Geometry;
+IsGeometryType(DataType data_type) {
+    return data_type == DataType::GEOMETRY;
 }
 
 inline bool

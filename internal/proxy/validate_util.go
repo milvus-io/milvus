@@ -53,49 +53,44 @@ func withMaxCapCheck() validateOption {
 	}
 }
 
-func validateGeometryFieldSearchResult(array *[]*schemapb.FieldData) error {
-	if array == nil {
-		log.Warn("geometry field search result is nil")
-		return nil
+func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
+	wkbArray := (*fieldData).GetScalars().GetGeometryData().GetData()
+	wktArray := make([]string, len(wkbArray))
+	validData := (*fieldData).GetValidData()
+	for i, data := range wkbArray {
+		if validData != nil && !validData[i] {
+			continue
+		}
+		geomT, err := wkb.Unmarshal(data)
+		if err != nil {
+			log.Error("translate the wkb format search result into geometry failed")
+			return err
+		}
+		// now remove MaxDecimalDigits limit
+		wktStr, err := wkt.Marshal(geomT)
+		if err != nil {
+			log.Error("translate the geomery  into its wkt failed")
+			return err
+		}
+		wktArray[i] = wktStr
 	}
-
-	for idx, fieldData := range *array {
-		if fieldData.Type == schemapb.DataType_Geometry {
-			wkbArray := fieldData.GetScalars().GetGeometryData().GetData()
-			wktArray := make([]string, len(wkbArray))
-			for i, data := range wkbArray {
-				geomT, err := wkb.Unmarshal(data)
-				if err != nil {
-					log.Warn("translate the wkb format search result into geometry failed")
-					return err
-				}
-				// now remove MaxDecimalDigits limit
-				wktStr, err := wkt.Marshal(geomT)
-				if err != nil {
-					log.Warn("translate the geomery  into its wkt failed")
-					return err
-				}
-				wktArray[i] = wktStr
-			}
-			// modify the field data
-			(*array)[idx] = &schemapb.FieldData{
-				Type:      fieldData.GetType(),
-				FieldName: fieldData.GetFieldName(),
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_GeometryWktData{
-							GeometryWktData: &schemapb.GeometryWktArray{
-								Data: wktArray,
-							},
-						},
+	// modify the field data in place
+	*fieldData = &schemapb.FieldData{
+		Type:      (*fieldData).GetType(),
+		FieldName: (*fieldData).GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryWktData{
+					GeometryWktData: &schemapb.GeometryWktArray{
+						Data: wktArray,
 					},
 				},
-				FieldId:   fieldData.GetFieldId(),
-				IsDynamic: fieldData.GetIsDynamic(),
-			}
-		}
+			},
+		},
+		FieldId:   (*fieldData).GetFieldId(),
+		IsDynamic: (*fieldData).GetIsDynamic(),
+		ValidData: (*fieldData).GetValidData(),
 	}
-
 	return nil
 }
 
@@ -531,8 +526,18 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
-			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
-			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValue, field.GetValidData())
+			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
+			geomT, err := wkt.Unmarshal(defaultValue)
+			if err != nil {
+				log.Warn("invalid default value for geometry field", zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+			}
+			defaultValueWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
+			if err != nil {
+				log.Warn("invalid default value for geometry field", zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+			}
+			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, field.GetValidData())
 			if err != nil {
 				return err
 			}
