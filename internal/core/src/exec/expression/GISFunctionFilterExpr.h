@@ -12,15 +12,147 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <unordered_map>
+#include <shared_mutex>
+#include <memory>
 
 #include "common/FieldDataInterface.h"
 #include "common/Vector.h"
+#include "common/Geometry.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
+
+// Simple WKB-based Geometry cache for avoiding repeated WKB->Geometry conversions
+class SimpleGeometryCache {
+ public:
+    // Get or create Geometry from WKB data
+    std::shared_ptr<const Geometry>
+    GetOrCreate(const std::string_view& wkb_data) {
+        // Use WKB data content as key (could be optimized with hash later)
+        std::string key(wkb_data);
+
+        // Try read-only access first (most common case)
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto it = cache_.find(key);
+            if (it != cache_.end()) {
+                return it->second;
+            }
+        }
+
+        // Cache miss: create new Geometry with write lock
+        std::lock_guard<std::shared_mutex> lock(mutex_);
+
+        // Double-check after acquiring write lock
+        auto it = cache_.find(key);
+        if (it != cache_.end()) {
+            return it->second;
+        }
+
+        // Construct new Geometry
+        try {
+            auto geometry = std::make_shared<const Geometry>(wkb_data.data(),
+                                                             wkb_data.size());
+            cache_.emplace(key, geometry);
+            return geometry;
+        } catch (...) {
+            // Return nullptr on construction failure
+            return nullptr;
+        }
+    }
+
+    // Clear all cached geometries
+    void
+    Clear() {
+        std::lock_guard<std::shared_mutex> lock(mutex_);
+        cache_.clear();
+    }
+
+    // Get cache statistics
+    size_t
+    Size() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return cache_.size();
+    }
+
+ private:
+    mutable std::shared_mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<const Geometry>> cache_;
+};
+
+// Global cache instance per segment+field
+class SimpleGeometryCacheManager {
+ public:
+    static SimpleGeometryCacheManager&
+    Instance() {
+        static SimpleGeometryCacheManager instance;
+        return instance;
+    }
+
+    SimpleGeometryCache&
+    GetCache(const void* segment_addr, FieldId field_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto key = std::make_pair(segment_addr, field_id.get());
+        auto it = caches_.find(key);
+        if (it != caches_.end()) {
+            return *(it->second);
+        }
+
+        auto cache = std::make_unique<SimpleGeometryCache>();
+        auto* cache_ptr = cache.get();
+        caches_.emplace(key, std::move(cache));
+        return *cache_ptr;
+    }
+
+    void
+    RemoveCache(const void* segment_addr, FieldId field_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto key = std::make_pair(segment_addr, field_id.get());
+        caches_.erase(key);
+    }
+
+    // Remove all caches for a segment (useful when segment is destroyed)
+    void
+    RemoveSegmentCaches(const void* segment_addr) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = caches_.begin();
+        while (it != caches_.end()) {
+            if (it->first.first == segment_addr) {
+                it = caches_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // Get cache statistics for monitoring
+    struct CacheStats {
+        size_t total_caches = 0;
+        size_t total_geometries = 0;
+    };
+
+    CacheStats
+    GetStats() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        CacheStats stats;
+        stats.total_caches = caches_.size();
+        for (const auto& [key, cache] : caches_) {
+            stats.total_geometries += cache->Size();
+        }
+        return stats;
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    std::unordered_map<std::pair<const void*, int64_t>,
+                       std::unique_ptr<SimpleGeometryCache>,
+                       std::hash<std::pair<const void*, int64_t>>>
+        caches_;
+};
 
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
@@ -46,6 +178,11 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
 
  private:
     VectorPtr
