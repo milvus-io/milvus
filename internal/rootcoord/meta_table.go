@@ -39,8 +39,10 @@ import (
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -91,10 +93,10 @@ type IMetaTable interface {
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
 
-	AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
-	DeleteCredential(ctx context.Context, username string) error
-	AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	InitCredential(ctx context.Context) error
+	DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error
+	AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error
 	ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
 
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
@@ -1353,47 +1355,58 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 	return mt.generalCnt
 }
 
-// AddCredential add credential
-func (mt *MetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	usernames, err := mt.catalog.ListCredentials(ctx)
-	if err != nil {
+	credInfo, err := mt.catalog.GetCredential(ctx, util.UserRoot)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return err
 	}
-	if len(usernames) >= Params.ProxyCfg.MaxUserNum.GetAsInt() {
-		errMsg := "unable to add user because the number of users has reached the limit"
-		log.Ctx(ctx).Error(errMsg, zap.Int("max_user_num", Params.ProxyCfg.MaxUserNum.GetAsInt()))
-		return errors.New(errMsg)
+	if credInfo != nil {
+		return nil
 	}
-
-	if origin, _ := mt.catalog.GetCredential(ctx, credInfo.Username); origin != nil {
-		return fmt.Errorf("user already exists: %s", credInfo.Username)
+	encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
 	}
-
-	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+	log.Ctx(ctx).Info("RootCoord init user root")
+	err = mt.catalog.AlterCredential(ctx, &model.Credential{
+		Username:          util.UserRoot,
+		EncryptedPassword: encryptedRootPassword,
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
 	}
-	return mt.catalog.CreateCredential(ctx, credential)
+	return nil
 }
 
 // AlterCredential update credential
-func (mt *MetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error {
+	body := result.Message.MustBody()
 
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
+	existsCredential, err := mt.catalog.GetCredential(ctx, body.CredentialInfo.Username)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", body.CredentialInfo.Username),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
 	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+		Username:          body.CredentialInfo.Username,
+		EncryptedPassword: body.CredentialInfo.EncryptedPassword,
+		TimeTick:          result.GetControlChannelResult().TimeTick,
 	}
 	return mt.catalog.AlterCredential(ctx, credential)
 }
@@ -1408,11 +1421,24 @@ func (mt *MetaTable) GetCredential(ctx context.Context, username string) (*inter
 }
 
 // DeleteCredential delete credential
-func (mt *MetaTable) DeleteCredential(ctx context.Context, username string) error {
+func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.DropCredential(ctx, username)
+	existsCredential, err := mt.catalog.GetCredential(ctx, result.Message.Header().UserName)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", result.Message.Header().UserName),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
+	return mt.catalog.DropCredential(ctx, result.Message.Header().UserName)
 }
 
 // ListCredentialUsernames list credential usernames
@@ -1429,28 +1455,8 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 
 // CreateRole create role
 func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	if funcutil.IsEmptyString(entity.Name) {
-		return errors.New("the role name in the role info is empty")
-	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
-
-	results, err := mt.catalog.ListRole(ctx, tenant, nil, false)
-	if err != nil {
-		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
-		return err
-	}
-	for _, result := range results {
-		if result.GetRole().GetName() == entity.Name {
-			log.Ctx(ctx).Info("role already exists", zap.String("role", entity.Name))
-			return common.NewIgnorableError(errors.Newf("role [%s] already exists", entity))
-		}
-	}
-	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
-		errMsg := "unable to create role because the number of roles has reached the limit"
-		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
-		return errors.New(errMsg)
-	}
 
 	return mt.catalog.CreateRole(ctx, tenant, entity)
 }

@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -47,12 +49,30 @@ func generateMetaTable(t *testing.T) *MetaTable {
 	return &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV(), nil)}
 }
 
+func buildAlterUserMessage(credInfo *internalpb.CredentialInfo) message.ImmutablePutUserMessageV2 {
+	msg := message.NewAlterUserMessageBuilderV2().
+		WithVChannel(message.ControlChannel).
+		WithHeader(&message.AlterUserMessageHeader{
+			UserEntity: &milvuspb.UserEntity{
+				Name: credInfo.Username,
+			},
+		}).
+		WithBody(&message.AlterUserMessageBody{
+			CredentialInfo: credInfo,
+		}).
+		MustBuildMutable().
+		WithTimeTick(1).
+		IntoImmutableMessage(rmq.NewRmqID(1))
+	return message.MustAsImmutableAlterUserMessageV2(msg)
+}
+
 func TestRbacAddCredential(t *testing.T) {
 	mt := generateMetaTable(t)
-	err := mt.AddCredential(context.TODO(), &internalpb.CredentialInfo{
+
+	err := mt.AlterCredential(context.TODO(), buildPutUserMessage(&internalpb.CredentialInfo{
 		Username: "user1",
 		Tenant:   util.DefaultTenant,
-	})
+	}))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -74,7 +94,7 @@ func TestRbacAddCredential(t *testing.T) {
 				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "3")
 			}
 			defer paramtable.Get().Reset(Params.ProxyCfg.MaxUserNum.Key)
-			err := mt.AddCredential(context.TODO(), test.info)
+			err := mt.AlterCredential(context.TODO(), buildPutUserMessage(test.info))
 			assert.Error(t, err)
 		})
 	}
@@ -191,7 +211,7 @@ func TestRbacSelect(t *testing.T) {
 	}
 
 	for user, rs := range userRoles {
-		err := mt.catalog.CreateCredential(context.TODO(), &model.Credential{
+		err := mt.catalog.AlterCredential(context.TODO(), &model.Credential{
 			Username: user,
 			Tenant:   util.DefaultTenant,
 		})

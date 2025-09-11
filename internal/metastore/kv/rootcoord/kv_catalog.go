@@ -346,7 +346,7 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	return kc.Snapshot.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
 }
 
-func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
+func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
 	v, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credential.EncryptedPassword})
 	if err != nil {
@@ -359,12 +359,7 @@ func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 		log.Ctx(ctx).Error("create credential persist meta fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
-
 	return nil
-}
-
-func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
-	return kc.CreateCredential(ctx, credential)
 }
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
@@ -1710,7 +1705,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 			return err
 		}
 		// restore user
-		err = kc.CreateCredential(ctx, &model.Credential{
+		err = kc.AlterCredential(ctx, &model.Credential{
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
 		})

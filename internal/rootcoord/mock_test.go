@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -205,12 +206,12 @@ func (m mockMetaTable) GetCredential(ctx context.Context, username string) (*int
 	return m.GetCredentialFunc(ctx, username)
 }
 
-func (m mockMetaTable) DeleteCredential(ctx context.Context, username string) error {
-	return m.DeleteCredentialFunc(ctx, username)
+func (m mockMetaTable) DeleteCredential(ctx context.Context, msg message.ImmutableDropUserMessageV2) error {
+	return m.DeleteCredentialFunc(ctx, msg.Header().UserName)
 }
 
-func (m mockMetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	return m.AlterCredentialFunc(ctx, credInfo)
+func (m mockMetaTable) AlterCredential(ctx context.Context, msg message.ImmutableAlterUserMessageV2) error {
+	return m.AlterCredentialFunc(ctx, msg.MustBody().CredentialInfo)
 }
 
 func (m mockMetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {

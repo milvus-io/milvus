@@ -8,6 +8,10 @@ import (
 	etcdpb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
@@ -73,53 +77,6 @@ func (_c *IMetaTable_AddCollection_Call) Return(_a0 error) *IMetaTable_AddCollec
 }
 
 func (_c *IMetaTable_AddCollection_Call) RunAndReturn(run func(context.Context, *model.Collection) error) *IMetaTable_AddCollection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// AddCredential provides a mock function with given fields: ctx, credInfo
-func (_m *IMetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	ret := _m.Called(ctx, credInfo)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AddCredential")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
-		r0 = rf(ctx, credInfo)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// IMetaTable_AddCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCredential'
-type IMetaTable_AddCredential_Call struct {
-	*mock.Call
-}
-
-// AddCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - credInfo *internalpb.CredentialInfo
-func (_e *IMetaTable_Expecter) AddCredential(ctx interface{}, credInfo interface{}) *IMetaTable_AddCredential_Call {
-	return &IMetaTable_AddCredential_Call{Call: _e.mock.On("AddCredential", ctx, credInfo)}
-}
-
-func (_c *IMetaTable_AddCredential_Call) Run(run func(ctx context.Context, credInfo *internalpb.CredentialInfo)) *IMetaTable_AddCredential_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_AddCredential_Call) Return(_a0 error) *IMetaTable_AddCredential_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_AddCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_AddCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -271,17 +228,17 @@ func (_c *IMetaTable_AlterCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// AlterCredential provides a mock function with given fields: ctx, credInfo
-func (_m *IMetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	ret := _m.Called(ctx, credInfo)
+// AlterCredential provides a mock function with given fields: ctx, result
+func (_m *IMetaTable) AlterCredential(ctx context.Context, result message.BroadcastResult[*messagespb.AlterUserMessageHeader, *messagespb.AlterUserMessageBody]) error {
+	ret := _m.Called(ctx, result)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AlterCredential")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
-		r0 = rf(ctx, credInfo)
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.AlterUserMessageHeader, *messagespb.AlterUserMessageBody]) error); ok {
+		r0 = rf(ctx, result)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -296,14 +253,14 @@ type IMetaTable_AlterCredential_Call struct {
 
 // AlterCredential is a helper method to define mock.On call
 //   - ctx context.Context
-//   - credInfo *internalpb.CredentialInfo
-func (_e *IMetaTable_Expecter) AlterCredential(ctx interface{}, credInfo interface{}) *IMetaTable_AlterCredential_Call {
-	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", ctx, credInfo)}
+//   - result message.BroadcastResult[*messagespb.AlterUserMessageHeader,*messagespb.AlterUserMessageBody]
+func (_e *IMetaTable_Expecter) AlterCredential(ctx interface{}, result interface{}) *IMetaTable_AlterCredential_Call {
+	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", ctx, result)}
 }
 
-func (_c *IMetaTable_AlterCredential_Call) Run(run func(ctx context.Context, credInfo *internalpb.CredentialInfo)) *IMetaTable_AlterCredential_Call {
+func (_c *IMetaTable_AlterCredential_Call) Run(run func(ctx context.Context, result message.BroadcastResult[*messagespb.AlterUserMessageHeader, *messagespb.AlterUserMessageBody])) *IMetaTable_AlterCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
+		run(args[0].(context.Context), args[1].(message.BroadcastResult[*messagespb.AlterUserMessageHeader, *messagespb.AlterUserMessageBody]))
 	})
 	return _c
 }
@@ -313,7 +270,7 @@ func (_c *IMetaTable_AlterCredential_Call) Return(_a0 error) *IMetaTable_AlterCr
 	return _c
 }
 
-func (_c *IMetaTable_AlterCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_AlterCredential_Call {
+func (_c *IMetaTable_AlterCredential_Call) RunAndReturn(run func(context.Context, message.BroadcastResult[*messagespb.AlterUserMessageHeader, *messagespb.AlterUserMessageBody]) error) *IMetaTable_AlterCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -718,17 +675,17 @@ func (_c *IMetaTable_CreateRole_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// DeleteCredential provides a mock function with given fields: ctx, username
-func (_m *IMetaTable) DeleteCredential(ctx context.Context, username string) error {
-	ret := _m.Called(ctx, username)
+// DeleteCredential provides a mock function with given fields: ctx, result
+func (_m *IMetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody]) error {
+	ret := _m.Called(ctx, result)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteCredential")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = rf(ctx, username)
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody]) error); ok {
+		r0 = rf(ctx, result)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -743,14 +700,14 @@ type IMetaTable_DeleteCredential_Call struct {
 
 // DeleteCredential is a helper method to define mock.On call
 //   - ctx context.Context
-//   - username string
-func (_e *IMetaTable_Expecter) DeleteCredential(ctx interface{}, username interface{}) *IMetaTable_DeleteCredential_Call {
-	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, username)}
+//   - result message.BroadcastResult[*messagespb.DropUserMessageHeader,*messagespb.DropUserMessageBody]
+func (_e *IMetaTable_Expecter) DeleteCredential(ctx interface{}, result interface{}) *IMetaTable_DeleteCredential_Call {
+	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, result)}
 }
 
-func (_c *IMetaTable_DeleteCredential_Call) Run(run func(ctx context.Context, username string)) *IMetaTable_DeleteCredential_Call {
+func (_c *IMetaTable_DeleteCredential_Call) Run(run func(ctx context.Context, result message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody])) *IMetaTable_DeleteCredential_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody]))
 	})
 	return _c
 }
@@ -760,7 +717,7 @@ func (_c *IMetaTable_DeleteCredential_Call) Return(_a0 error) *IMetaTable_Delete
 	return _c
 }
 
-func (_c *IMetaTable_DeleteCredential_Call) RunAndReturn(run func(context.Context, string) error) *IMetaTable_DeleteCredential_Call {
+func (_c *IMetaTable_DeleteCredential_Call) RunAndReturn(run func(context.Context, message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody]) error) *IMetaTable_DeleteCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1672,6 +1629,52 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Return(_a0 []*milvuspb.RoleEnt
 }
 
 func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// InitCredential provides a mock function with given fields: ctx
+func (_m *IMetaTable) InitCredential(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InitCredential")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_InitCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InitCredential'
+type IMetaTable_InitCredential_Call struct {
+	*mock.Call
+}
+
+// InitCredential is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) InitCredential(ctx interface{}) *IMetaTable_InitCredential_Call {
+	return &IMetaTable_InitCredential_Call{Call: _e.mock.On("InitCredential", ctx)}
+}
+
+func (_c *IMetaTable_InitCredential_Call) Run(run func(ctx context.Context)) *IMetaTable_InitCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_InitCredential_Call) Return(_a0 error) *IMetaTable_InitCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_InitCredential_Call) RunAndReturn(run func(context.Context) error) *IMetaTable_InitCredential_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2921,7 +2924,8 @@ func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(context.Context, str
 func NewIMetaTable(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *IMetaTable {
+},
+) *IMetaTable {
 	mock := &IMetaTable{}
 	mock.Mock.Test(t)
 
