@@ -238,12 +238,14 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Won't load bloom filter with sealed segments
+	// Will load bloom filter with sealed segments
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.MayPkExist(lc)
-			suite.Require().False(exist)
+			exist := segment.BloomFilterExist()
+			suite.Require().True(exist)
+			exist = segment.MayPkExist(lc)
+			suite.Require().True(exist)
 		}
 	}
 
@@ -277,7 +279,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.MayPkExist(lc)
+			exist := segment.BloomFilterExist()
+			suite.True(exist)
+			exist = segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}
@@ -363,7 +367,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 		})
 	}
 
-	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, 0, loadInfos...)
+	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfos...)
 	suite.NoError(err)
 
 	for _, bf := range bfs {
