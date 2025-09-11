@@ -236,9 +236,10 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
         case 2: {
             load_column_group_data_internal(load_info);
-            auto timestamp_proxy_column = get_column(TimestampFieldID);
-            // TODO check timestamp_index ready instead of check system_ready_count_
-            if (timestamp_proxy_column && system_ready_count_ == 0) {
+            if (load_info.field_infos.find(TimestampFieldID.get()) !=
+                load_info.field_infos.end()) {
+                auto timestamp_proxy_column = get_column(TimestampFieldID);
+                // TODO check timestamp_index ready instead of check system_ready_count_
                 int64_t num_rows;
                 for (auto& [_, info] : load_info.field_infos) {
                     num_rows = info.row_count;
