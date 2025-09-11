@@ -4595,6 +4595,7 @@ class TestQueryString(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
+        time.sleep(ct.default_graceful_time)
         result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         assert len(result_without_index) == len(result) == exp_len
         # 6. clean up
