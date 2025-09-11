@@ -580,19 +580,23 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 
 	fieldIDSet := typeutil.NewUniqueSet(fieldIDs...)
 
+	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
+		return fieldIDSet.Contain(index.FieldID)
+	})
+
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
-		for indexID, index := range fieldIndexes {
+		for _, index := range targetIndices {
 			if !fieldIDSet.Contain(index.FieldID) || index.IsDeleted {
 				continue
 			}
 
-			if segIdx, ok := indexes.Get(indexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
+			if segIdx, ok := indexes.Get(index.IndexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
 		}
 
-		return indexedFields == fieldIDSet.Len()
+		return indexedFields == len(targetIndices)
 	}
 
 	ret := make([]int64, 0)

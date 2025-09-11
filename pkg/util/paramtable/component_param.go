@@ -4270,6 +4270,7 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
+	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
@@ -4566,6 +4567,15 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
 	}
 	p.BlockingL0SizeInMB.Init(base.mgr)
+
+	p.DVForceAllIndexReady = ParamItem{
+		Key:          "dataCoord.dataview.forceAllIndexReady",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
+		Export:       false,
+	}
+	p.DVForceAllIndexReady.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",

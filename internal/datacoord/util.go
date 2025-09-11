@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -103,18 +104,26 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		}
 
 		// get vector field id
-		vecFieldIDs := make([]int64, 0)
-		for _, field := range coll.Schema.GetFields() {
-			if typeutil.IsVectorType(field.GetDataType()) {
-				vecFieldIDs = append(vecFieldIDs, field.GetFieldID())
+		var targetFieldIds []int64
+		if !paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
+			// wait all vector datatype fields only
+			for _, field := range coll.Schema.GetFields() {
+				if typeutil.IsVectorType(field.GetDataType()) {
+					targetFieldIds = append(targetFieldIds, field.GetFieldID())
+				}
 			}
+		} else {
+			// wait all fields
+			targetFieldIds = lo.Map(coll.Schema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+				return field.GetFieldID()
+			})
 		}
 		segmentIDs := lo.Map(segmentList, func(seg *SegmentInfo, _ int) UniqueID {
 			return seg.GetID()
 		})
 
 		// get indexed segments which finish build index on all vector field
-		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, vecFieldIDs)
+		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, targetFieldIds)
 		if len(indexed) > 0 {
 			indexedSet := typeutil.NewUniqueSet(indexed...)
 			for _, segment := range segmentList {
