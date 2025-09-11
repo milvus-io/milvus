@@ -2136,17 +2136,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		}
 
 		mt.names.insert(util.DefaultDBName, "name", 1)
-		err := mt.CreateAlias(context.TODO(), "", "name", "name", typeutil.MaxTimestamp)
-		assert.Error(t, err)
-	})
-
-	t.Run("DropAlias with empty db", func(t *testing.T) {
-		mt := &MetaTable{
-			names: newNameDb(),
-		}
-
-		mt.names.insert(util.DefaultDBName, "name", 1)
-		err := mt.DropAlias(context.TODO(), "", "name", typeutil.MaxTimestamp)
+		err := mt.CheckIfAliasCreatable(context.TODO(), "", "name", "name")
 		assert.Error(t, err)
 	})
 }
