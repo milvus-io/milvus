@@ -4597,7 +4597,6 @@ func TestLackOfFieldsDataBySchema(t *testing.T) {
 }
 
 func TestAllocAutoID(t *testing.T) {
-	Params.CommonCfg.AutoIDClusterIDBits.SwapTempValue("3")
 	Params.CommonCfg.ClusterID.SwapTempValue("1")
 	rc := mocks.NewMockRootCoordClient(t)
 	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
