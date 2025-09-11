@@ -1120,7 +1120,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 			// Set the ElementType because it may not be set in the insert request.
 			if fieldData.Type == schemapb.DataType_Array {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok {
+				if !ok || fd.Scalars.GetArrayData() == nil {
 					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
