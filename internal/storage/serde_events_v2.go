@@ -415,7 +415,8 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		columnGroupID := columnGroup.GroupID
 		if _, exists := pw.fieldBinlogs[columnGroupID]; !exists {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
-				FieldID: columnGroupID,
+				FieldID:     columnGroupID,
+				ChildFields: columnGroup.Fields,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
