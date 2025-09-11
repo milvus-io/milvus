@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -105,18 +104,19 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 
 		// get vector field id
 		var targetFieldIds []int64
-		if !paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			// wait all vector datatype fields only
-			for _, field := range coll.Schema.GetFields() {
-				if typeutil.IsVectorType(field.GetDataType()) {
-					targetFieldIds = append(targetFieldIds, field.GetFieldID())
-				}
+		// wait all vector datatype fields only
+		for _, field := range coll.Schema.GetFields() {
+			if typeutil.IsVectorType(field.GetDataType()) {
+				targetFieldIds = append(targetFieldIds, field.GetFieldID())
 			}
-		} else {
-			// wait all fields
-			targetFieldIds = lo.Map(coll.Schema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
-				return field.GetFieldID()
-			})
+		}
+
+		// include all scalar fields with index
+		if paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
+			indices := mt.indexMeta.GetIndexesForCollection(collection, "")
+			for _, index := range indices {
+				targetFieldIds = append(targetFieldIds, index.FieldID)
+			}
 		}
 		segmentIDs := lo.Map(segmentList, func(seg *SegmentInfo, _ int) UniqueID {
 			return seg.GetID()

@@ -579,10 +579,19 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	m.fieldIndexLock.RUnlock()
 
 	fieldIDSet := typeutil.NewUniqueSet(fieldIDs...)
+	matchedFields := typeutil.NewUniqueSet()
 
 	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
 		return fieldIDSet.Contain(index.FieldID)
 	})
+	for _, index := range targetIndices {
+		matchedFields.Insert(index.FieldID)
+	}
+
+	// some field has no index on it
+	if len(matchedFields) != len(fieldIDSet) {
+		return nil
+	}
 
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
