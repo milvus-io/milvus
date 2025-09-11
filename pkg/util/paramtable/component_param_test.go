@@ -146,6 +146,20 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
+
+		assert.Equal(t, 0, params.CommonCfg.AutoIDClusterIDBits.GetAsInt())
+		params.Save("common.tsoClusterIDBits", "5")
+		assert.Panics(t, func() {
+			params.CommonCfg.AutoIDClusterIDBits.GetAsInt()
+		})
+		params.Save("common.tsoClusterIDBits", "0")
+
+		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
+		params.Save("common.clusterID", "32")
+		assert.Panics(t, func() {
+			params.CommonCfg.ClusterID.GetAsInt()
+		})
+		params.Save("common.clusterID", "0")
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -4593,4 +4594,22 @@ func TestLackOfFieldsDataBySchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAllocAutoID(t *testing.T) {
+	Params.CommonCfg.AutoIDClusterIDBits.SwapTempValue("3")
+	Params.CommonCfg.ClusterID.SwapTempValue("1")
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		ID:    100,
+		Count: 100,
+	}, nil)
+	alloc, err := allocator.NewIDAllocator(context.Background(), rc, 0)
+	assert.NoError(t, err)
+	err = alloc.Start()
+	assert.NoError(t, err)
+	start, end, err := AllocAutoID(alloc, 100)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0b0100, start>>60)
+	assert.EqualValues(t, 0b0100, end>>60)
 }
