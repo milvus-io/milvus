@@ -363,7 +363,9 @@ JsonKeyStats::TraverseJsonForBuildStats(
     std::vector<std::string>& path,
     std::map<JsonKey, std::string>& values) {
     jsmntok current = tokens[0];
-    Assert(current.type != JSMN_UNDEFINED);
+    AssertInfo(current.type != JSMN_UNDEFINED,
+               "current token type is undefined for json: {}",
+               json);
     if (current.type == JSMN_OBJECT) {
         if (!path.empty() && current.size == 0) {
             AddKeyStats(
@@ -371,11 +373,20 @@ JsonKeyStats::TraverseJsonForBuildStats(
                 JSONType::OBJECT,
                 std::string(json + current.start, current.end - current.start),
                 values);
+            index++;
             return;
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            Assert(tokens[j].type == JSMN_STRING && tokens[j].size != 0);
+            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
+                       "current token type is not string for json: {} at "
+                       "index: {}, type: {}, size: {} value: {}",
+                       json,
+                       int(tokens[j].type),
+                       tokens[j].size,
+                       std::string(json + tokens[j].start,
+                                   tokens[j].end - tokens[j].start));
+
             std::string key(json + tokens[j].start,
                             tokens[j].end - tokens[j].start);
             path.push_back(key);
