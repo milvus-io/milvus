@@ -57,6 +57,7 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+	MaxClusterIDBits                = 3
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -328,7 +329,6 @@ type commonConfig struct {
 	EnablePosixMode ParamItem `refreshable:"false"`
 
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
-	AutoIDClusterIDBits    ParamItem `refreshable:"false"`
 	ClusterID              ParamItem `refreshable:"false"`
 }
 
@@ -1251,26 +1251,6 @@ This helps Milvus-CDC synchronize incremental data`,
 	}
 	p.EnablePosixMode.Init(base.mgr)
 
-	p.AutoIDClusterIDBits = ParamItem{
-		Key:          "common.tsoClusterIDBits",
-		Version:      "2.6.0",
-		DefaultValue: "0",
-		Doc:          "tso cluster id bits",
-		Export:       true,
-		PanicIfEmpty: true,
-		Formatter: func(v string) string {
-			// bits must be in [0, 3]
-			if getAsInt(v) < 0 {
-				return ""
-			}
-			if getAsInt(v) > 3 {
-				return ""
-			}
-			return v
-		},
-	}
-	p.AutoIDClusterIDBits.Init(base.mgr)
-
 	p.ClusterID = ParamItem{
 		Key:          "common.clusterID",
 		Version:      "2.6.0",
@@ -1282,7 +1262,7 @@ This helps Milvus-CDC synchronize incremental data`,
 			if getAsInt(v) < 0 {
 				return ""
 			}
-			maxClusterID := (int64(1) << p.AutoIDClusterIDBits.GetAsInt()) - 1
+			maxClusterID := (int64(1) << MaxClusterIDBits) - 1
 			if getAsInt64(v) > maxClusterID {
 				return ""
 			}
