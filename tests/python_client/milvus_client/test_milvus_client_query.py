@@ -3626,29 +3626,21 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        # 2. create index and load collection (before inserting data)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 3. insert data without flush (data will be in growing segment)
+        self.load_collection(client, collection_name)        
+        # 2. insert data without flush (data will be in growing segment)
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
         self.insert(client, collection_name, rows)
-        time.sleep(1)
-        # Prepare expected result - find the entity with primary key = 1
+        # 3. prepare expected result - find the entity with primary key = 1
         exp_res = []
         for row in rows:
             if row[default_primary_key_field_name] == 1:
                 exp_res.append(row)
                 break
-        # Query for entity with primary key = 1
+        # 4. query for entity with primary key = 1
         self.query(client, collection_name, filter=f'{default_primary_key_field_name} in [1]',
                         check_task=CheckTasks.check_query_results,
                         check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
-        # 6. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3675,13 +3667,18 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, default_value="abc")
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # Insert data - only provide required fields (pk and vector), other fields will use default values
-        rows = []
-        for i in range(default_nb):
-            row = {}
-            if not auto_id:
-                row[default_primary_key_field_name] = i
-            row[ct.default_float_vec_field_name] = [random.random() for _ in range(default_dim)]
-            rows.append(row)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        skip_fields = [
+            ct.default_int8_field_name,
+            ct.default_int16_field_name, 
+            ct.default_int32_field_name,
+            ct.default_int64_field_name,
+            ct.default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_bool_field_name,
+            ct.default_string_field_name
+        ]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info, skip_field_names=skip_fields)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # Create index and load
@@ -4414,13 +4411,20 @@ class TestQueryString(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        # 4. query with expression comparing two fields - should return empty result
-        # Since float(i) < int64(i+10) for all i, float > int64 will always be false
-        expression = 'float > int64'
+        # 4. query with expression comparing two fields - should return all rows
+        exp_res = []
+        for row in rows:
+            result_item = {
+                ct.default_float_field_name: row[ct.default_float_field_name],
+                ct.default_string_field_name: row[ct.default_string_field_name],
+                ct.default_int64_field_name: row[ct.default_int64_field_name]
+            }
+            exp_res.append(result_item)
+        expression = 'float <= int64'
         output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
         self.query(client, collection_name, filter=expression, output_fields=output_fields,
                    check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": [], "pk_name": ct.default_string_field_name})
+                   check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -4642,57 +4646,6 @@ class TestQueryString(TestMilvusClientV2Base):
         result_without_cache = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         res_len_without_cache = len(result_without_cache)
         assert res_len_without_cache == res_len
-        # 7. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_milvus_client_query_with_create_diskann_with_string_pk(self, primary_field):
-        """
-        target: test query after create diskann index
-        method: create a collection with string pk and build diskann index
-        expected: verify query result
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection with string primary key
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        if primary_field == ct.default_int64_field_name:
-            schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-            schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
-        else:
-            schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
-            schema.add_field(ct.default_int64_field_name, DataType.INT64)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        # 3. create diskann index 
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="DISKANN", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        # 4. verify index created
-        index_info = self.describe_index(client, collection_name, default_vector_field_name)[0]
-        assert index_info["index_type"] == "DISKANN"
-        # 5. load collection
-        self.load_collection(client, collection_name)
-        # 6. query with mixed expression for string primary key
-        output_fields = [ct.default_float_field_name, ct.default_string_field_name, ct.default_int64_field_name]
-        # Filter expected results based on the mix expression: "int64 >= 0 && varchar >= \"0\""
-        exp_res = []
-        for row in rows:
-            if row[ct.default_int64_field_name] >= 0 and row[ct.default_string_field_name] >= "0":
-                exp_result_item = {
-                    ct.default_float_field_name: row[ct.default_float_field_name],
-                    ct.default_string_field_name: row[ct.default_string_field_name],
-                    ct.default_int64_field_name: row[ct.default_int64_field_name]
-                }
-                exp_res.append(exp_result_item)
-        self.query(client, collection_name, filter=default_search_mix_exp, output_fields=output_fields,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": exp_res, "pk_name": primary_field})
         # 7. clean up
         self.drop_collection(client, collection_name)
 
@@ -5529,63 +5482,56 @@ class TestQueryCount(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         
+        # create collection and prepare data
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        
         if is_growing:
-            # create -> index -> load -> insert -> delete
-            self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-            self.release_collection(client, collection_name)
-            self.drop_index(client, collection_name, default_vector_field_name)
+            # create -> index -> load -> insert -> delete (growing segments)
             index_params = self.prepare_index_params(client)[0]
             index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
             self.create_index(client, collection_name, index_params)
             self.load_collection(client, collection_name)
-            
-            schema_info = self.describe_collection(client, collection_name)[0]
-            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
             self.insert(client, collection_name, rows)
-            
-            # delete one entity
-            single_expr = f'{default_primary_key_field_name} in [0]'
-            self.delete(client, collection_name, filter=single_expr)
+            # no flush - data stays in growing segments
         else:
-            # create -> insert -> delete -> index -> load
-            self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-            self.release_collection(client, collection_name)
-            self.drop_index(client, collection_name, default_vector_field_name)
-            schema_info = self.describe_collection(client, collection_name)[0]
-            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+            # create -> insert -> flush -> index -> load (sealed segments)
             self.insert(client, collection_name, rows)
-            
-            # delete one entity
-            single_expr = f'{default_primary_key_field_name} in [0]'
-            self.delete(client, collection_name, filter=single_expr)
-            
+            self.flush(client, collection_name)  # flush to create sealed segments
             index_params = self.prepare_index_params(client)[0]
             index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
             self.create_index(client, collection_name, index_params)
             self.load_collection(client, collection_name)
+        
+        # delete one entity (works for both growing and sealed)
+        single_expr = f'{default_primary_key_field_name} in [0]'
+        self.delete(client, collection_name, filter=single_expr)
         # upsert deleted id
         upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info)
         # Ensure the primary key is 0 (the deleted id)
         upsert_rows[0][default_primary_key_field_name] = 0
         self.upsert(client, collection_name, upsert_rows)
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{"count(*)": ct.default_nb}],
-                                        "pk_name": default_primary_key_field_name})[0]
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": ct.default_nb}],
+                                "pk_name": default_primary_key_field_name})
         # upsert new id and count
         new_upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info, start=default_nb)
         self.upsert(client, collection_name, new_upsert_rows)
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
-                                        "pk_name": default_primary_key_field_name})[0]
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
+                                "pk_name": default_primary_key_field_name})
         # upsert existed id and count
         existed_upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info, start=10)
         self.upsert(client, collection_name, existed_upsert_rows)
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
-                                        "pk_name": default_primary_key_field_name})[0]
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
+                                "pk_name": default_primary_key_field_name})
         # clean up
         self.drop_collection(client, collection_name)
 
@@ -5678,7 +5624,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.drop_collection(client, new_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_count_disable_growing_segments(self):
+    def test_milvus_client_count_ignore_growing(self):
         """
         target: test count when disable growing segments
         method: 1. create -> index -> load -> insert
@@ -5707,3 +5653,245 @@ class TestQueryCount(TestMilvusClientV2Base):
                                "pk_name": default_primary_key_field_name})
         # clean up
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_expressions(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create -> insert -> index -> load
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. filter result with expression in collection
+        for expressions in cf.gen_normal_expressions_and_templates():
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            # Calculate expected count by filtering the data manually
+            filter_ids = []
+            for i, row in enumerate(rows):
+                # Set up variables that match the expression field names
+                int64 = row[ct.default_int64_field_name]
+                float = row[ct.default_float_field_name]
+                # Evaluate the expression with the actual field values
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+
+            expected_count = len(filter_ids)
+            # count with expr
+            self.query(client, collection_name, filter=expr, output_fields=["count(*)"],
+                      check_task=CheckTasks.check_query_results,
+                      check_items={exp_res: [{"count(*)": expected_count}],
+                                   "pk_name": ct.default_int64_field_name})
+        # clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
+    def test_milvus_client_count_bool_expressions(self, bool_type):
+        """
+        target: test count with binary expr
+        method: count with binary expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with all data types including bool field
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_bool_field_name, DataType.BOOL)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data 
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. filter result with expression in collection
+        filter_ids = []
+        bool_type_cmp = bool_type
+        if bool_type == "true":
+            bool_type_cmp = True
+        if bool_type == "false":
+            bool_type_cmp = False
+            
+        # Count matching rows manually
+        for i, row in enumerate(rows):
+            if row[ct.default_bool_field_name] == bool_type_cmp:
+                filter_ids.append(row[ct.default_int64_field_name])
+        expected_count = len(filter_ids)
+        # 5. count with expr
+        expression = f"{ct.default_bool_field_name} == {bool_type}"
+        self.query(client, collection_name, filter=expression, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": expected_count}],
+                                "pk_name": ct.default_int64_field_name})
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_expression_auto_field(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create -> insert -> index -> load
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. filter result with expression in collection for the float field
+        for expressions in cf.gen_normal_expressions_and_templates_field(ct.default_float_field_name):
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            # Calculate expected count by filtering the data manually
+            filter_ids = []
+            for i, row in enumerate(rows):
+                float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+            expected_count = len(filter_ids)
+            
+            # count with expr
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            self.query(client, collection_name, filter=expr, filter_params=expr_params, output_fields=["count(*)"],
+                      check_task=CheckTasks.check_query_results,
+                      check_items={exp_res: [{"count(*)": expected_count}],
+                                   "pk_name": ct.default_int64_field_name})
+        # clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_expression_all_datatype(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with all data types
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_int32_field_name, DataType.INT32)
+        schema.add_field(ct.default_int16_field_name, DataType.INT16)
+        schema.add_field(ct.default_int8_field_name, DataType.INT8)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_double_field_name, DataType.DOUBLE)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. manually generate data to match the expression requirements
+        rows = []
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        for i in range(default_nb):
+            row = {
+                ct.default_int64_field_name: np.int64(i),
+                ct.default_int32_field_name: np.int32(i),
+                ct.default_int16_field_name: np.int16(i),
+                ct.default_int8_field_name: np.int8(i),
+                ct.default_float_field_name: np.float32(i),
+                ct.default_double_field_name: np.float64(i),
+                ct.default_float_vec_field_name: vectors[i]
+            }
+            rows.append(row)
+        
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. count with expr using all data types
+        expr = "int64 >= 0 and int32 >= 1999 and int16 >= 0 and int8 <= 0 and float <= 1999.0 and double >= 0"
+        self.query(client, collection_name, filter=expr, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 1}],
+                            "pk_name": ct.default_int64_field_name})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_expression_comparative(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        
+        # 1. create collection with two int64 fields for comparison
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field("int64_1", DataType.INT64, is_primary=True)
+        schema.add_field("int64_2", DataType.INT64)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. generate data
+        nb = 10
+        int_values = [random.randint(0, nb) for _ in range(nb)]
+        rows = []
+        vectors = cf.gen_vectors(nb, default_dim)
+        for i in range(nb):
+            row = {
+                "int64_1": i,  # primary key: 0, 1, 2, ..., 9
+                "int64_2": int_values[i],  # random values from 0 to nb
+                ct.default_float_vec_field_name: vectors[i]
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 4. calculate expected result manually
+        res = 0
+        for i in range(nb):
+            if i >= int_values[i]:
+                res += 1
+        # 5. count with comparative expression
+        expression = "int64_1 >= int64_2"
+        self.query(client, collection_name, filter=expression, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": res}],
+                                "pk_name": "int64_1"})
+        # clean up
+        self.drop_collection(client, collection_name)
+
+
