@@ -1888,31 +1888,52 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 2: calculate size of binlogs
 	for fieldID, fieldBinlog := range id2Binlogs {
+		fieldIDs := fieldBinlog.GetChildFields()
+		// legacy default split
+		if len(fieldIDs) == 0 {
+			fieldIDs = []int64{fieldID}
+		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 
-		// get field schema from fieldID
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
-		}
+		var supportInterimIndexDataType bool
+		var constainSystemField bool
+		var doubleMemorySysField bool
+		var doubleMomoryDataField bool
+		mmapEnabled := true
+		isVectorType := true
 
-		// missing mapping, shall be "0" group for storage v2
-		if fieldSchema == nil {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += binlogSize
+		for _, fieldID := range fieldIDs {
+			// get field schema from fieldID
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
 			}
-			continue
+
+			// missing mapping, shall be "0" group for storage v2
+			if fieldSchema == nil {
+				if !multiplyFactor.TieredEvictionEnabled {
+					segMemoryLoadingSize += binlogSize
+				}
+				continue
+			}
+
+			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
+			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			constainSystemField = constainSystemField || common.IsSystemField(fieldSchema.GetFieldID())
+			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			doubleMemorySysField = doubleMemorySysField || DoubleMemorySystemField(fieldSchema.GetFieldID())
+			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
 
 		if !multiplyFactor.TieredEvictionEnabled {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 			if interimIndexEnable {
 				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 
-		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				if !multiplyFactor.TieredEvictionEnabled {
@@ -1927,21 +1948,21 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		// system field does not support mmap, skip mmap check
-		if common.IsSystemField(fieldSchema.GetFieldID()) {
+		if constainSystemField {
 			// system field isn't managed by the caching layer, so its size should always be included,
 			// regardless of the tiered eviction value
 			segMemoryLoadingSize += binlogSize
-			if DoubleMemorySystemField(fieldSchema.GetFieldID()) {
+			if doubleMemorySysField {
 				segMemoryLoadingSize += binlogSize
 			}
 			continue
 		}
 
-		mmapEnabled := isDataMmapEnable(fieldSchema)
+		// mmapEnabled := isDataMmapEnable(fieldSchema)
 		if !mmapEnabled {
 			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
-				if DoubleMemoryDataType(fieldSchema.GetDataType()) {
+				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
