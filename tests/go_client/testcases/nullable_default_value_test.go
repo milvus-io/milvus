@@ -207,13 +207,13 @@ func TestNullableInvalid(t *testing.T) {
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 	common.CheckErr(t, err, false, "partition key field not support nullable")
 
-	// function input field not support null
+	// function input field could support null
 	function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
 	fullTextSearchField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(1000).
 		WithNullable(true).WithEnableAnalyzer(true)
 	schema = entity.NewSchema().WithName(common.GenRandomString("nullable_invalid_field", 5)).WithField(pkField).WithField(vecField).WithField(fullTextSearchField).WithFunction(function)
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
-	common.CheckErr(t, err, false, "function input field cannot be nullable")
+	common.CheckErr(t, err, true)
 }
 
 func TestDefaultValueInvalid(t *testing.T) {
