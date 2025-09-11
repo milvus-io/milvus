@@ -328,6 +328,8 @@ type commonConfig struct {
 	EnablePosixMode ParamItem `refreshable:"false"`
 
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
+	AutoIDClusterIDBits    ParamItem `refreshable:"false"`
+	ClusterID              ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1248,6 +1250,46 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnablePosixMode.Init(base.mgr)
+
+	p.AutoIDClusterIDBits = ParamItem{
+		Key:          "common.tsoClusterIDBits",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc:          "tso cluster id bits",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			// bits must be in [0, 3]
+			if getAsInt(v) < 0 {
+				return ""
+			}
+			if getAsInt(v) > 3 {
+				return ""
+			}
+			return v
+		},
+	}
+	p.AutoIDClusterIDBits.Init(base.mgr)
+
+	p.ClusterID = ParamItem{
+		Key:          "common.clusterID",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc:          "cluster id",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 0 {
+				return ""
+			}
+			maxClusterID := (int64(1) << p.AutoIDClusterIDBits.GetAsInt()) - 1
+			if getAsInt64(v) > maxClusterID {
+				return ""
+			}
+			return v
+		},
+	}
+	p.ClusterID.Init(base.mgr)
 }
 
 type gpuConfig struct {

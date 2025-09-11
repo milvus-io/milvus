@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"reflect"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
@@ -2707,4 +2709,17 @@ func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
 		}
 	}
 	return false
+}
+
+func AllocAutoID(allocator *allocator.IDAllocator, rowNum uint32) (int64, int64, error) {
+	idStart, idEnd, err := allocator.Alloc(rowNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	reversed := bits.Reverse64(clusterID)
+	// right shift by 1 to preserve sign bit
+	reversed = reversed >> 1
+
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
