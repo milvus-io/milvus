@@ -20,6 +20,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -46,11 +47,18 @@ func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, p
 }
 
 func DefaultPolicies() []ColumnGroupSplitPolicy {
-	return []ColumnGroupSplitPolicy{
-		NewSystemColumnPolicy(true),
-		NewSelectedDataTypePolicy(),
-		NewRemanentShortPolicy(-1),
+	paramtable.Init()
+	result := make([]ColumnGroupSplitPolicy, 0, 4)
+	if paramtable.Get().CommonCfg.Stv2SplitSystemColumn.GetAsBool() {
+		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool()))
 	}
+	if paramtable.Get().CommonCfg.Stv2SplitByAvgSize.GetAsBool() {
+		result = append(result, NewAvgSizePolicy(paramtable.Get().CommonCfg.Stv2SplitAvgSizeThreshold.GetAsInt64()))
+	}
+	result = append(result,
+		NewSelectedDataTypePolicy(),
+		NewRemanentShortPolicy(-1))
+	return result
 }
 
 func IsVectorDataType(dataType schemapb.DataType) bool {
