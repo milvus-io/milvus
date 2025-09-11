@@ -10,6 +10,15 @@ import numpy as np
 
 prefix = "alter"
 default_vector_field_name = "vector"
+default_primary_key_field_name = "id"
+default_string_field_name = "varchar"
+default_float_field_name = "float"
+default_new_field_name = "field_new"
+default_dynamic_field_name = "dynamic_field"
+exp_res = "exp_res"
+default_nb = 10
+default_dim = 128
+default_limit = 10
 
 
 class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
@@ -146,11 +155,20 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name, properties={"lazyload.enabled": True},
                                          check_task=CheckTasks.err_res, check_items=error)
         error = {ct.err_code: 999,
+                 ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
+        self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": False},
+                                         check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999,
                  ct.err_msg: "can not delete mmap properties if collection loaded"}
         self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection_properties(client, collection_name, property_keys=["lazyload.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
+        # TODO                                
+        # error = {ct.err_code: 999,
+        #          ct.err_msg: "can not delete dynamicfield properties"}
+        # self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
+        #                                 check_task=CheckTasks.err_res, check_items=error)
         res3 = self.describe_collection(client, collection_name)[0]
         assert res3.get('properties', None) == {}
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
@@ -170,6 +188,89 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                                                        "collection.ttl.seconds"])
         res3 = self.describe_collection(client, collection_name)[0]
         assert res3.get('properties', None) == {}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_alter_enable_dynamic_collection_field(self):
+        """
+        target: test enable dynamic field and mixed field operations
+        method: create collection, add field, enable dynamic field, insert mixed data, query/search
+        expected: dynamic field works with new field and static field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. Prepare and insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+        # 3. add new field
+        default_value = 100
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                  nullable=True, default_value=default_value)
+        # 4. alter collection dynamic field enable
+        self.alter_collection_properties(client, collection_name, {"dynamicfield.enabled": True})
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('enable_dynamic_field', None) is True
+        # 5. insert data with dynamic field and new field
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows_new = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                     default_string_field_name: str(i), default_new_field_name: i,
+                     default_dynamic_field_name: i} for i in range(default_nb)]
+        # schema_info = self.describe_collection(client, collection_name)[0]
+        # rows_new = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows_new)
+        # 6. query using filter with dynamic field and new field
+        res = self.query(client, collection_name, filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                         output_fields=[f'$meta["{default_dynamic_field_name}"]'],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: [{"id": item["id"]} for item in rows_new],
+                                      "with_vec": True,
+                                      "pk_name": default_primary_key_field_name})[0]
+        assert set(res[0].keys()) == {default_primary_key_field_name}
+        # 7. search using filter with dynamic field and new field
+        vectors_to_search = [vectors[0]]
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("old_dynamic_flag, new_dynamic_flag", [(True, True), (False, False)])
+    def test_milvus_client_alter_dynamic_collection_field_no_op(self, old_dynamic_flag, new_dynamic_flag):
+        """
+        target: test dynamic field no-op alter operations
+        method: create collection with dynamic flag, alter to same flag, verify unchanged
+        expected: no-op alter succeeds without state change
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=old_dynamic_flag)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. alter collection dynamic field
+        self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": new_dynamic_flag})
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('enable_dynamic_field', None) is new_dynamic_flag
 
 
 class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
