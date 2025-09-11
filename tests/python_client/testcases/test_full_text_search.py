@@ -4344,52 +4344,6 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_text_field_is_nullable(self):
-        """
-        target: test text not exist in multi_analyzer_params
-        method: create collection with by_field not exist
-        expected: collection creation should fail because text field is nullable
-        """
-        multi_analyzer_params = {
-            "by_field": "language",
-            "analyzers": {
-                "en": {"type": "english"},
-                "default": {"tokenizer": "standard"},
-            },
-        }
-        fields = [
-            FieldSchema(name="doc_id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="language", dtype=DataType.VARCHAR, max_length=16),
-            FieldSchema(
-                name="article_content",
-                dtype=DataType.VARCHAR,
-                max_length=1024,
-                enable_analyzer=True,
-                multi_analyzer_params=multi_analyzer_params,
-                nullable=True,
-            ),
-            FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
-        ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
-        bm25_func = Function(
-            name="bm25",
-            function_type=FunctionType.BM25,
-            input_field_names=["article_content"],
-            output_field_names=["bm25_sparse_vector"],
-        )
-        schema.add_function(bm25_func)
-        c_name = cf.gen_unique_str(prefix)
-        error = {
-            ct.err_code: 65535,
-            ct.err_msg: "function input field cannot be nullable",
-        }
-        self.init_collection_wrap(
-            name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error
-        )
-
-    @pytest.mark.tags(CaseLabel.L0)
     def test_missing_default_analyzer(self):
         """
         target: test missing default analyzer in multi_analyzer_params

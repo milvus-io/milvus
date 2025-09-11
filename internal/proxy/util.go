@@ -860,9 +860,6 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			if !ok {
 				return fmt.Errorf("function input field not found: %s", name)
 			}
-			if inputField.GetNullable() {
-				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
-			}
 			inputFields = append(inputFields, inputField)
 		}
 
