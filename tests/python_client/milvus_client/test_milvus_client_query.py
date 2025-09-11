@@ -5433,3 +5433,277 @@ class TestQueryCount(TestMilvusClientV2Base):
         
         # 6. clean up
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_with_pagination_param(self):
+        """
+        target: test count with pagination params
+        method: count with pagination params: offset, limit
+        expected: exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create -> insert -> index -> load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. only params offset is not considered pagination
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], offset=10)[0]
+        assert res[0]["count(*)"] == default_nb
+        # 3. count with limit should raise exception
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], limit=10,
+                  check_task=CheckTasks.err_res,
+                  check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+        # 4. count with pagination params should raise exception
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], offset=10, limit=10,
+                  check_task=CheckTasks.err_res,
+                  check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_alias_insert_delete_drop(self):
+        """
+        target: test count after alias insert and load
+        method: 1. init collection
+                2. alias insert more entities  
+                3. count and alias count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias = cf.gen_unique_str("alias")
+        # 1. create -> insert -> index -> load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. create alias
+        self.create_alias(client, collection_name, alias)
+        # 3. new insert via alias - insert more entities
+        additional_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info, start=default_nb)
+        self.insert(client, alias, additional_rows)
+        # 4. count via alias - should see both original and new entities
+        res = self.query(client, alias, filter=default_search_exp, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == default_nb * 2
+        # 5. delete via alias and count
+        delete_expr = f"{default_primary_key_field_name} in {[i for i in range(default_nb)]}"
+        self.delete(client, alias, filter=delete_expr)
+        res = self.query(client, alias, filter=default_search_exp, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == default_nb
+        # 6. try to drop collection via alias (should fail)
+        self.drop_collection(client, alias, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: "cannot drop the collection via alias"})
+        # 7. clean up - drop alias and collection
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("is_growing", [True, False])
+    def test_milvus_client_count_upsert_growing_sealed(self, is_growing):
+        """
+        target: test count after upsert growing
+        method: 1. create -> index -> load -> insert -> delete
+                2. upsert deleted id and count (+1)
+                3. upsert new id and count (+1)
+                4. upsert existed id and count (+0)
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        
+        if is_growing:
+            # create -> index -> load -> insert -> delete
+            self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, default_vector_field_name)
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+            self.create_index(client, collection_name, index_params)
+            self.load_collection(client, collection_name)
+            
+            schema_info = self.describe_collection(client, collection_name)[0]
+            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+            self.insert(client, collection_name, rows)
+            
+            # delete one entity
+            single_expr = f'{default_primary_key_field_name} in [0]'
+            self.delete(client, collection_name, filter=single_expr)
+        else:
+            # create -> insert -> delete -> index -> load
+            self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, default_vector_field_name)
+            schema_info = self.describe_collection(client, collection_name)[0]
+            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+            self.insert(client, collection_name, rows)
+            
+            # delete one entity
+            single_expr = f'{default_primary_key_field_name} in [0]'
+            self.delete(client, collection_name, filter=single_expr)
+            
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+            self.create_index(client, collection_name, index_params)
+            self.load_collection(client, collection_name)
+        # upsert deleted id
+        upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info)
+        # Ensure the primary key is 0 (the deleted id)
+        upsert_rows[0][default_primary_key_field_name] = 0
+        self.upsert(client, collection_name, upsert_rows)
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{"count(*)": ct.default_nb}],
+                                        "pk_name": default_primary_key_field_name})[0]
+        # upsert new id and count
+        new_upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info, start=default_nb)
+        self.upsert(client, collection_name, new_upsert_rows)
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
+                                        "pk_name": default_primary_key_field_name})[0]
+        # upsert existed id and count
+        existed_upsert_rows = cf.gen_row_data_by_schema(nb=1, schema=schema_info, start=10)
+        self.upsert(client, collection_name, existed_upsert_rows)
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{"count(*)": ct.default_nb + 1}],
+                                        "pk_name": default_primary_key_field_name})[0]
+        # clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_upsert_duplicate(self):
+        """
+        target: test count after upsert duplicate
+        method: 1. insert many duplicate ids
+                2. upsert id and count
+                3. delete id and count
+                4. upsert deleted id and count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. init collection and insert same ids
+        tmp_nb = 100
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        # Generate data with all primary keys set to 0 (duplicate IDs)
+        rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info)
+        for row in rows:
+            row[default_primary_key_field_name] = 0
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. upsert id and count
+        upsert_rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info, start=0)
+        self.upsert(client, collection_name, upsert_rows)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+              check_task=CheckTasks.check_query_results,
+              check_items={exp_res: [{"count(*)": tmp_nb}],
+                           "pk_name": default_primary_key_field_name})
+        # 3. delete id and count
+        self.delete(client, collection_name, filter="id in [0, 1]")
+        delete_count = len([0, 1])  # delete_res.delete_count equivalent
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+              check_task=CheckTasks.check_query_results,
+              check_items={exp_res: [{"count(*)": tmp_nb - delete_count}],
+                           "pk_name": default_primary_key_field_name})
+        # 4. upsert deleted id and count
+        deleted_upsert_rows = cf.gen_row_data_by_schema(nb=delete_count, schema=schema_info, start=0)
+        self.upsert(client, collection_name, deleted_upsert_rows)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb}],
+                            "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_rename_collection(self):
+        """
+        target: test count after rename collection
+        method: 1. create -> insert -> index -> load
+                2. rename collection
+                3. count
+        expected: verify count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create -> insert -> index -> load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. rename collection
+        new_name = cf.gen_unique_str("new_name")
+        self.rename_collection(client, collection_name, new_name)
+        # 3. count with new collection name
+        self.query(client, new_name, filter=default_search_exp, output_fields=["count(*)"],
+                  check_task=CheckTasks.check_query_results,
+                  check_items={exp_res: [{"count(*)": default_nb}],
+                               "pk_name": default_primary_key_field_name})
+        # clean up
+        self.drop_collection(client, new_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_disable_growing_segments(self):
+        """
+        target: test count when disable growing segments
+        method: 1. create -> index -> load -> insert
+                2. query count with ignore_growing
+        expected: verify count 0
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create -> index -> load
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 2. insert data after loading (will be in growing segment)
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
+        self.insert(client, collection_name, rows)
+        # 3. query count with ignore_growing=True (should return 0)
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], 
+                  ignore_growing=True,
+                  check_task=CheckTasks.check_query_results,
+                  check_items={exp_res: [{"count(*)": 0}],
+                               "pk_name": default_primary_key_field_name})
+        # clean up
+        self.drop_collection(client, collection_name)
