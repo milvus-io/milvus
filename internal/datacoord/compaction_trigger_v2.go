@@ -366,19 +366,18 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	})
 
 	task := &datapb.CompactionTask{
-		TriggerID:        taskID, // inner trigger, use task id as trigger id
-		PlanID:           taskID,
-		Type:             datapb.CompactionType_Level0DeleteCompaction,
-		StartTime:        time.Now().Unix(),
-		TotalRows:        totalRows,
-		InputSegments:    levelZeroSegs,
-		State:            datapb.CompactionTaskState_pipelining,
-		Channel:          view.GetGroupLabel().Channel,
-		CollectionID:     view.GetGroupLabel().CollectionID,
-		PartitionID:      view.GetGroupLabel().PartitionID,
-		Pos:              view.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
-		TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-		Schema:           collection.Schema,
+		TriggerID:     taskID, // inner trigger, use task id as trigger id
+		PlanID:        taskID,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		StartTime:     time.Now().Unix(),
+		TotalRows:     totalRows,
+		InputSegments: levelZeroSegs,
+		State:         datapb.CompactionTaskState_pipelining,
+		Channel:       view.GetGroupLabel().Channel,
+		CollectionID:  view.GetGroupLabel().CollectionID,
+		PartitionID:   view.GetGroupLabel().PartitionID,
+		Pos:           view.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
+		Schema:        collection.Schema,
 	}
 
 	err = m.inspector.enqueueCompaction(task)

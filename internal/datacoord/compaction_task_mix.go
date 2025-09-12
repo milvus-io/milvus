@@ -162,13 +162,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 		t.processMetaSaved()
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
-		if t.checkTimeout() {
-			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err != nil {
-				log.Warn("update clustering compaction task meta failed", zap.Error(err))
-				return
-			}
-		}
+		return
 	case datapb.CompactionTaskState_timeout:
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		if err != nil {
@@ -189,20 +183,6 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	}
-}
-
-func (t *mixCompactionTask) checkTimeout() bool {
-	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetTaskProto().GetStartTime(), 0)).Seconds()
-		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
-			log.Ctx(context.TODO()).Warn("compaction timeout",
-				zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetTaskProto().GetStartTime()),
-			)
-			return true
-		}
-	}
-	return false
 }
 
 func (t *mixCompactionTask) DropTaskOnWorker(cluster session.Cluster) {
