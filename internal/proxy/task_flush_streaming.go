@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (t *flushTask) Execute(ctx context.Context) error {
@@ -79,14 +80,14 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs
-		for _, segID := range resp.GetFlushSegmentIDs() {
-			for i, id := range onFlushSegmentIDs {
-				if id == segID {
-					onFlushSegmentIDs = append(onFlushSegmentIDs[:i], onFlushSegmentIDs[i+1:]...)
-					break
-				}
+		flushedSegmentSet := typeutil.NewUniqueSet(resp.GetFlushSegmentIDs()...)
+		filteredSegments := make([]int64, 0, len(onFlushSegmentIDs))
+		for _, id := range onFlushSegmentIDs {
+			if !flushedSegmentSet.Contain(id) {
+				filteredSegments = append(filteredSegments, id)
 			}
 		}
+		onFlushSegmentIDs = filteredSegments
 
 		coll2Segments[collName] = &schemapb.LongArray{Data: onFlushSegmentIDs}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
