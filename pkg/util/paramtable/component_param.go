@@ -279,7 +279,13 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
+	// storage v2
 	EnableStorageV2           ParamItem `refreshable:"false"`
+	Stv2SplitSystemColumn     ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePK ParamItem `refreshable:"true"`
+	Stv2SplitByAvgSize        ParamItem `refreshable:"true"`
+	Stv2SplitAvgSizeThreshold ParamItem `refreshable:"true"`
+
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
@@ -925,6 +931,42 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
+
+	p.Stv2SplitSystemColumn = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "enable split system column policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitSystemColumn.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludePK = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includePK",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include pk field",
+		Export:       true,
+	}
+	p.Stv2SystemColumnIncludePK.Init(base.mgr)
+
+	p.Stv2SplitByAvgSize = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          "enable split by average size policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitByAvgSize.Init(base.mgr)
+
+	p.Stv2SplitAvgSizeThreshold = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.threshold",
+		Version:      "2.6.2",
+		DefaultValue: "1024",
+		Doc:          "split by average size policy threshold(in bytes) in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitAvgSizeThreshold.Init(base.mgr)
 
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",
@@ -2958,9 +3000,10 @@ type queryNodeConfig struct {
 	TieredEvictableMemoryCacheRatio ParamItem `refreshable:"false"`
 	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
+	TieredBackgroundEvictionEnabled ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
-	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
+	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3300,6 +3343,17 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.TieredCacheTouchWindowMs.Init(base.mgr)
 
+	p.TieredBackgroundEvictionEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.backgroundEvictionEnabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc: `Enable background eviction for Tiered Storage. Defaults to false.
+Background eviction is used to do periodic eviction in a separate thread.
+And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.`,
+		Export: true,
+	}
+	p.TieredBackgroundEvictionEnabled.Init(base.mgr)
+
 	p.TieredEvictionIntervalMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
@@ -3311,10 +3365,28 @@ eviction is necessary and the amount of data to evict from memory/disk.
 			}
 			return fmt.Sprintf("%d", window)
 		},
-		Doc:    "Interval in milliseconds to run periodic eviction.",
+		Doc:    "Interval in milliseconds to run periodic eviction. 'backgroundEvictionEnabled' is required.",
 		Export: false,
 	}
 	p.TieredEvictionIntervalMs.Init(base.mgr)
+
+	p.CacheCellUnaccessedSurvivalTime = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			timeout := getAsInt64(v)
+			if timeout <= 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", timeout)
+		},
+		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 'backgroundEvictionEnabled' is required.
+If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+If set to 0, time based eviction is disabled.`,
+		Export: true,
+	}
+	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
@@ -3331,24 +3403,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: false,
 	}
 	p.TieredLoadingResourceFactor.Init(base.mgr)
-
-	p.CacheCellUnaccessedSurvivalTime = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
-		Version:      "2.6.0",
-		DefaultValue: "0",
-		Formatter: func(v string) string {
-			timeout := getAsInt64(v)
-			if timeout <= 0 {
-				return "0"
-			}
-			return fmt.Sprintf("%d", timeout)
-		},
-		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 
-If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
-If set to 0, time based eviction is disabled.`,
-		Export: true,
-	}
-	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
@@ -5424,6 +5478,13 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "1024",
 		Doc:          "the max number of columns to shred",
 		Export:       true,
+		Formatter: func(value string) string {
+			v := getAsInt(value)
+			if v > 10000 {
+				return "10000"
+			}
+			return strconv.Itoa(v)
+		},
 	}
 	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
 

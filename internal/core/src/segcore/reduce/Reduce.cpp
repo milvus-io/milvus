@@ -199,7 +199,7 @@ ReduceHelper::FillEntryData() {
             std::chrono::duration<double, std::micro>(get_target_entry_end -
                                                       get_target_entry_start)
                 .count();
-        monitor::internal_core_search_get_target_entry_latency.Observe(
+        milvus::monitor::internal_core_search_get_target_entry_latency.Observe(
             get_entry_cost / 1000);
     }
 }

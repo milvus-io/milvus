@@ -502,3 +502,16 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 	}
 	return nil
 }
+
+func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
+	for _, p := range props {
+		if p.GetKey() == NamespaceEnabledKey {
+			value, err := strconv.ParseBool(p.GetValue())
+			if err != nil {
+				return false, false, fmt.Errorf("invalid namespace prop value: %s", p.GetValue())
+			}
+			return value, true, nil
+		}
+	}
+	return false, false, nil
+}

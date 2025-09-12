@@ -107,9 +107,10 @@ ConfigureTieredStorage(
     const int64_t disk_high_watermark_bytes,
     const int64_t disk_max_bytes,
     // eviction enabled
-    const bool evictionEnabled,
+    const bool eviction_enabled,
     // eviction configs
     const int64_t cache_touch_window_ms,
+    const bool background_eviction_enabled,
     const int64_t eviction_interval_ms,
     const int64_t cache_cell_unaccessed_survival_time,
     const float overloaded_memory_threshold_percentage,

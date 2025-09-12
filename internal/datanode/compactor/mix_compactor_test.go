@@ -94,7 +94,9 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
@@ -128,7 +130,9 @@ func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupSubTest() {
