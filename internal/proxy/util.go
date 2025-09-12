@@ -1186,14 +1186,14 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 			// Set the ElementType because it may not be set in the insert request.
 			if fieldData.Type == schemapb.DataType_Array {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok {
+				if !ok || fd.Scalars.GetArrayData() == nil {
 					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
 				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
 			} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
-				if !ok {
+				if !ok || fd.Vectors.GetVectorArray() == nil {
 					return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
