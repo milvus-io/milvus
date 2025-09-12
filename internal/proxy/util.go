@@ -2345,6 +2345,9 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 		return err
 	}
 	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
+	}
 	if !namespaceEnabeld {
 		return nil
 	}
