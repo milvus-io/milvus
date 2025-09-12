@@ -16,7 +16,7 @@ default_float_field_name = "float"
 default_new_field_name = "field_new"
 default_dynamic_field_name = "dynamic_field"
 exp_res = "exp_res"
-default_nb = 10
+default_nb = 20
 default_dim = 128
 default_limit = 10
 
@@ -225,22 +225,45 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         rows_new = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                      default_string_field_name: str(i), default_new_field_name: i,
                      default_dynamic_field_name: i} for i in range(default_nb)]
-        # schema_info = self.describe_collection(client, collection_name)[0]
-        # rows_new = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows_new)
         # 6. query using filter with dynamic field and new field
-        res = self.query(client, collection_name, filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
-                         output_fields=[f'$meta["{default_dynamic_field_name}"]'],
+        res = self.query(client, collection_name,
+                         filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                         output_fields=[default_dynamic_field_name],
                          check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: [{"id": item["id"]} for item in rows_new],
-                                      "with_vec": True,
-                                      "pk_name": default_primary_key_field_name})[0]
-        assert set(res[0].keys()) == {default_primary_key_field_name}
+                         check_items={exp_res: [{"id": item["id"],
+                                                 default_dynamic_field_name: item[default_dynamic_field_name]}
+                                                 for item in rows_new]})[0]
+        assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
         # 7. search using filter with dynamic field and new field
         vectors_to_search = [vectors[0]]
         insert_ids = [i for i in range(default_nb)]
         self.search(client, collection_name, vectors_to_search,
                     filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 8. add new field same as dynamic field name
+        self.add_collection_field(client, collection_name, field_name=default_dynamic_field_name,
+                                  data_type=DataType.INT64, nullable=True, default_value=default_value)
+        # 9. query using filter with dynamic field and new field
+        res = self.query(client, collection_name,
+                         filter='$meta["{}"] >= 0 and {} == {}'.format(default_dynamic_field_name,
+                                                                       default_dynamic_field_name, default_value),
+                         output_fields=[default_dynamic_field_name, f'$meta["{default_dynamic_field_name}"]'],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: [{"id": item["id"], default_dynamic_field_name: default_value}
+                                                for item in rows_new]})[0]
+        # dynamic field same as new field name, output_fields contain dynamic field, result do not contain dynamic field
+        # https://github.com/milvus-io/milvus/issues/41702
+        assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
+        # 10. search using filter with dynamic field and new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter='$meta["{}"] >= 0 and {} == {}'.format(default_dynamic_field_name,
+                                                                  default_dynamic_field_name, default_value),
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),

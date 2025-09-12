@@ -1693,7 +1693,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_json_path_index_after_enable_dynamic_field(self, supported_json_cast_type,
-                                                                supported_varchar_scalar_index):
+                                                                      supported_varchar_scalar_index):
         """
         target: test json path index after enabling dynamic field
         method: create collection, enable dynamic field, create json path index, insert

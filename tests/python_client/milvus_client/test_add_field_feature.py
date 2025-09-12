@@ -388,7 +388,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
 
         # 6. test text search using the analyzer field
         vectors_to_search = [vectors[0]]
-        # Simple search without filter to verify basic functionality
+        # simple search without filter to verify basic functionality
         search_results = self.search(
             client, collection_name, vectors_to_search,
             check_task=CheckTasks.check_search_results,
@@ -399,7 +399,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                 "pk_name": default_primary_key_field_name
             }
         )
-        # Verify search returned some results
+        # verify search returned some results
         assert len(search_results[0]) > 0
 
         # 7. test query with analyzer field - use simpler condition
@@ -412,22 +412,22 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                 "exp_limit": 4  # We expect 4 documents with text_content
             }
         )
-        # Verify that we get results for documents with text_content
+        # verify that we get results for documents with text_content
         assert len(query_results[0]) > 0
 
         # 8. test run_analyzer to verify the analyzer configuration
         sample_text = "The Milvus vector database is built for scale"
         analyzer_result = client.run_analyzer(sample_text, analyzer_params)
-        # Verify analyzer produces tokens
+        # verify analyzer produces tokens
         # (should remove stop words like "the", "is", "a")
         tokens = analyzer_result.tokens
         assert len(tokens) > 0
-        # Handle different token formats - tokens might be strings or dictionaries
+        # handle different token formats - tokens might be strings or dictionaries
         if isinstance(tokens[0], str):
             token_texts = tokens
         else:
             token_texts = [token["token"] for token in tokens]
-        # Check that stop words are filtered out
+        # check that stop words are filtered out
         assert "the" not in token_texts
         assert "is" not in token_texts
         assert "a" not in token_texts
