@@ -80,7 +80,7 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	if existingCollID := t.core.meta.GetCollectionID(ctx, targetDB, t.Req.GetNewName()); existingCollID != 0 {
-		return fmt.Errorf("duplicated new collection name %s in database %s with other collectio name or alias", t.Req.GetNewName(), targetDB)
+		return fmt.Errorf("duplicated new collection name %s in database %s with other collection name or alias", t.Req.GetNewName(), targetDB)
 	}
 
 	ts := t.GetTs()
