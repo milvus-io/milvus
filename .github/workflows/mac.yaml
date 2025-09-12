@@ -56,8 +56,8 @@ jobs:
           mkdir -p /tmp/cmake-install
           tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/cmake-install
           echo $PATH
-          ls /tmp/cmake-install/cmake-3.31.8-macos-universal/
-          sudo cp -R /tmp/cmake-install/cmake-3.31.8-macos-universal/* /usr/local/bin/
+          ls /tmp/cmake-install/cmake-3.31.8-macos-universal/CMake.app/Contents/bin/
+          sudo cp -R /tmp/cmake-install/cmake-3.31.8-macos-universal/CMake.app/Contents/bin/* /usr/local/bin/
           ls /usr/local/bin/
           cmake --version
       - name: Setup Go environment
