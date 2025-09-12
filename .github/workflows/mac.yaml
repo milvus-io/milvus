@@ -42,12 +42,12 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '<3.12'
-      - name: Install CMake 3.31.8
+      - name: Install CMake 3.31
         run: |
           cmake --version
           brew uninstall cmake --force || true
-          brew install cmake@3.31.8
-          brew link --force cmake@3.31.8
+          brew install cmake@3.31
+          brew link --force cmake@3.31
           cmake --version
       - name: Setup Go environment
         uses: actions/setup-go@v4
