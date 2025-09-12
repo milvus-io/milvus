@@ -47,7 +47,7 @@ jobs:
           cmake --version
           which cmake
           brew uninstall cmake -f
-          curl -L https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz -o cmake.tar.gz
+          curl -L https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz
           tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/
           sudo mv /tmp/cmake-3.31.8-macos-universal/CMake.app /Applications/
           echo -e "\n=== Creating symlinks for CMake ==="
