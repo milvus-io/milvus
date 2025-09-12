@@ -115,6 +115,65 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 	return _c
 }
 
+// GenSanpshot provides a mock function with given fields: ctx, collectionID
+func (_m *NMockHandler) GenSanpshot(ctx context.Context, collectionID int64) (*SnapshotData, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GenSanpshot")
+	}
+
+	var r0 *SnapshotData
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*SnapshotData, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *SnapshotData); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SnapshotData)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// NMockHandler_GenSanpshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GenSanpshot'
+type NMockHandler_GenSanpshot_Call struct {
+	*mock.Call
+}
+
+// GenSanpshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *NMockHandler_Expecter) GenSanpshot(ctx interface{}, collectionID interface{}) *NMockHandler_GenSanpshot_Call {
+	return &NMockHandler_GenSanpshot_Call{Call: _e.mock.On("GenSanpshot", ctx, collectionID)}
+}
+
+func (_c *NMockHandler_GenSanpshot_Call) Run(run func(ctx context.Context, collectionID int64)) *NMockHandler_GenSanpshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *NMockHandler_GenSanpshot_Call) Return(_a0 *SnapshotData, _a1 error) *NMockHandler_GenSanpshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *NMockHandler_GenSanpshot_Call) RunAndReturn(run func(context.Context, int64) (*SnapshotData, error)) *NMockHandler_GenSanpshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollection provides a mock function with given fields: ctx, collectionID
 func (_m *NMockHandler) GetCollection(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 	ret := _m.Called(ctx, collectionID)

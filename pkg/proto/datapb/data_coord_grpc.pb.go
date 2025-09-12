@@ -75,6 +75,11 @@ const (
 	DataCoord_AddFileResource_FullMethodName             = "/milvus.proto.data.DataCoord/AddFileResource"
 	DataCoord_RemoveFileResource_FullMethodName          = "/milvus.proto.data.DataCoord/RemoveFileResource"
 	DataCoord_ListFileResources_FullMethodName           = "/milvus.proto.data.DataCoord/ListFileResources"
+	DataCoord_CreateSnapshot_FullMethodName              = "/milvus.proto.data.DataCoord/CreateSnapshot"
+	DataCoord_DropSnapshot_FullMethodName                = "/milvus.proto.data.DataCoord/DropSnapshot"
+	DataCoord_ListSnapshots_FullMethodName               = "/milvus.proto.data.DataCoord/ListSnapshots"
+	DataCoord_DescribeSnapshot_FullMethodName            = "/milvus.proto.data.DataCoord/DescribeSnapshot"
+	DataCoord_RestoreSnapshot_FullMethodName             = "/milvus.proto.data.DataCoord/RestoreSnapshot"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -142,6 +147,12 @@ type DataCoordClient interface {
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
+	// snapshot
+	CreateSnapshot(ctx context.Context, in *CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropSnapshot(ctx context.Context, in *DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
+	DescribeSnapshot(ctx context.Context, in *DescribeSnapshotRequest, opts ...grpc.CallOption) (*DescribeSnapshotResponse, error)
+	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataCoordClient struct {
@@ -613,6 +624,51 @@ func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 	return out, nil
 }
 
+func (c *dataCoordClient) CreateSnapshot(ctx context.Context, in *CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_CreateSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) DropSnapshot(ctx context.Context, in *DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_DropSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error) {
+	out := new(ListSnapshotsResponse)
+	err := c.cc.Invoke(ctx, DataCoord_ListSnapshots_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) DescribeSnapshot(ctx context.Context, in *DescribeSnapshotRequest, opts ...grpc.CallOption) (*DescribeSnapshotResponse, error) {
+	out := new(DescribeSnapshotResponse)
+	err := c.cc.Invoke(ctx, DataCoord_DescribeSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_RestoreSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -678,6 +734,12 @@ type DataCoordServer interface {
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
 	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
 	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
+	// snapshot
+	CreateSnapshot(context.Context, *CreateSnapshotRequest) (*commonpb.Status, error)
+	DropSnapshot(context.Context, *DropSnapshotRequest) (*commonpb.Status, error)
+	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
+	DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error)
+	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -836,6 +898,21 @@ func (UnimplementedDataCoordServer) RemoveFileResource(context.Context, *milvusp
 }
 func (UnimplementedDataCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
+}
+func (UnimplementedDataCoordServer) CreateSnapshot(context.Context, *CreateSnapshotRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateSnapshot not implemented")
+}
+func (UnimplementedDataCoordServer) DropSnapshot(context.Context, *DropSnapshotRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropSnapshot not implemented")
+}
+func (UnimplementedDataCoordServer) ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSnapshots not implemented")
+}
+func (UnimplementedDataCoordServer) DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeSnapshot not implemented")
+}
+func (UnimplementedDataCoordServer) RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestoreSnapshot not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1767,6 +1844,96 @@ func _DataCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_CreateSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CreateSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CreateSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CreateSnapshot(ctx, req.(*CreateSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_DropSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).DropSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_DropSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).DropSnapshot(ctx, req.(*DropSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_ListSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSnapshotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).ListSnapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_ListSnapshots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).ListSnapshots(ctx, req.(*ListSnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_DescribeSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).DescribeSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_DescribeSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).DescribeSnapshot(ctx, req.(*DescribeSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_RestoreSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).RestoreSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_RestoreSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).RestoreSnapshot(ctx, req.(*RestoreSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1977,6 +2144,26 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFileResources",
 			Handler:    _DataCoord_ListFileResources_Handler,
+		},
+		{
+			MethodName: "CreateSnapshot",
+			Handler:    _DataCoord_CreateSnapshot_Handler,
+		},
+		{
+			MethodName: "DropSnapshot",
+			Handler:    _DataCoord_DropSnapshot_Handler,
+		},
+		{
+			MethodName: "ListSnapshots",
+			Handler:    _DataCoord_ListSnapshots_Handler,
+		},
+		{
+			MethodName: "DescribeSnapshot",
+			Handler:    _DataCoord_DescribeSnapshot_Handler,
+		},
+		{
+			MethodName: "RestoreSnapshot",
+			Handler:    _DataCoord_RestoreSnapshot_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
