@@ -90,8 +90,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds: 10,
-		Type:             datapb.CompactionType_ClusteringCompaction,
+		Type: datapb.CompactionType_ClusteringCompaction,
 		PreAllocatedLogIDs: &datapb.IDRange{
 			Begin: 200,
 			End:   2000,

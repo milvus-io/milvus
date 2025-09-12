@@ -571,41 +571,6 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_statistic, task.GetTaskProto().GetState())
 	})
-
-	s.Run("process executing, compaction result timeout", func() {
-		task := s.generateBasicTask(false)
-		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setStartTime(time.Now().Unix()), setTimeoutInSeconds(1))
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:    101,
-				State: commonpb.SegmentState_Flushed,
-				Level: datapb.SegmentLevel_L1,
-			},
-		})
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    102,
-				State:                 commonpb.SegmentState_Flushed,
-				Level:                 datapb.SegmentLevel_L2,
-				PartitionStatsVersion: 10000,
-			},
-		})
-		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
-			State: datapb.CompactionTaskState_executing,
-			Segments: []*datapb.CompactionSegment{
-				{
-					SegmentID: 1000,
-				},
-				{
-					SegmentID: 1001,
-				},
-			},
-		}, nil).Once()
-
-		time.Sleep(time.Second * 1)
-		s.True(task.Process())
-		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
-	})
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {

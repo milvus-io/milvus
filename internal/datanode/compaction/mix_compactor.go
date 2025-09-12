@@ -297,10 +297,9 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log := log.Ctx(ctx).With(zap.Int64("planID", t.GetPlanID()),
 		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+		zap.Int64("partitionID", t.partitionID))
 
-	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
+	ctxTimeout, cancelAll := context.WithCancel(ctx)
 	defer cancelAll()
 
 	log.Info("compact start")

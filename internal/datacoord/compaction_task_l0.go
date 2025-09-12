@@ -323,15 +323,14 @@ func (t *l0CompactionTask) PreparePlan() bool {
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
-		PlanID:           taskProto.GetPlanID(),
-		StartTime:        taskProto.GetStartTime(),
-		TimeoutInSeconds: taskProto.GetTimeoutInSeconds(),
-		Type:             taskProto.GetType(),
-		Channel:          taskProto.GetChannel(),
-		CollectionTtl:    taskProto.GetCollectionTtl(),
-		TotalRows:        taskProto.GetTotalRows(),
-		Schema:           taskProto.GetSchema(),
-		SlotUsage:        t.GetSlotUsage(),
+		PlanID:        taskProto.GetPlanID(),
+		StartTime:     taskProto.GetStartTime(),
+		Type:          taskProto.GetType(),
+		Channel:       taskProto.GetChannel(),
+		CollectionTtl: taskProto.GetCollectionTtl(),
+		TotalRows:     taskProto.GetTotalRows(),
+		Schema:        taskProto.GetSchema(),
+		SlotUsage:     t.GetSlotUsage(),
 	}
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))

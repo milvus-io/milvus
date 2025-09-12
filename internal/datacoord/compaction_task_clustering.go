@@ -198,7 +198,6 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
-		TimeoutInSeconds:       taskProto.GetTimeoutInSeconds(),
 		Type:                   taskProto.GetType(),
 		Channel:                taskProto.GetChannel(),
 		CollectionTtl:          taskProto.GetCollectionTtl(),
@@ -302,9 +301,6 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		}
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_executing:
-		if t.checkTimeout() {
-			return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-		}
 		return nil
 	case datapb.CompactionTaskState_failed:
 		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
@@ -767,20 +763,6 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 	t.SetTask(task)
 	log.Ctx(context.TODO()).Info("updateAndSaveTaskMeta success", zap.String("task state", t.GetTaskProto().GetState().String()))
 	return nil
-}
-
-func (t *clusteringCompactionTask) checkTimeout() bool {
-	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetTaskProto().GetStartTime(), 0)).Seconds()
-		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
-			log.Ctx(context.TODO()).Warn("compaction timeout",
-				zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetTaskProto().GetStartTime()),
-			)
-			return true
-		}
-	}
-	return false
 }
 
 func (t *clusteringCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
