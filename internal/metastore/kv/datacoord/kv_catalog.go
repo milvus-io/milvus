@@ -1082,3 +1082,37 @@ func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileReso
 func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
+
+func (kc *Catalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+	key := buildSnapshotKey(snapshot.GetCollectionId(), snapshot.GetId())
+	value, err := proto.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error {
+	key := buildSnapshotKey(collectionID, snapshotID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+	snapshots := make([]*datapb.SnapshotInfo, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		snapshot := &datapb.SnapshotInfo{}
+		err := proto.Unmarshal(value, snapshot)
+		if err != nil {
+			return err
+		}
+		snapshots = append(snapshots, snapshot)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, SnapshotPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return snapshots, nil
+}

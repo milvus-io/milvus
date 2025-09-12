@@ -974,3 +974,23 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.mixCoord.TruncateCollection(ctx, in)
 }
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateSnapshot(ctx, req)
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropSnapshot(ctx, req)
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return s.mixCoord.DescribeSnapshot(ctx, req)
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return s.mixCoord.ListSnapshots(ctx, req)
+}
+
+func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return s.mixCoord.RestoreSnapshot(ctx, req)
+}

@@ -360,3 +360,7 @@ func buildStatsTaskKey(taskID int64) string {
 func buildUpdateExternalCollectionTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
 }
+
+func buildSnapshotKey(collectionID int64, snapshotID int64) string {
+	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
+}

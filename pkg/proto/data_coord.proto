@@ -112,6 +112,13 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+  
+  // snapshot 
+  rpc CreateSnapshot(CreateSnapshotRequest) returns(common.Status){}
+  rpc DropSnapshot(DropSnapshotRequest) returns(common.Status){}
+  rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
+  rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns(common.Status){}
 }
 
 service DataNode {
@@ -1184,3 +1191,80 @@ message DropExternalCollectionRequest {
 
 // Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
 // for internal use by the unified task system, but are not exposed as separate RPCs
+
+message CreateSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2;  // user-defined snapshot name
+  string description = 3; // user-defined snapshot description
+  int64 collection_id= 4; // collection name
+}
+
+message DropSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+}
+
+message ListSnapshotsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2; // collection id, if collection_id is 0, it will list all snapshots.
+  int64 partition_id = 3; // partition id, if partition_id is 0, it will list all snapshots.
+}
+
+// return all snapshots for the given collection or partition
+// Note: list snapshots is not a privilege check operation
+message ListSnapshotsResponse {
+  common.Status status = 1;
+  repeated string snapshots = 2;
+}
+
+
+message SegmentDescription {
+  int64 segment_id = 1; // segment id
+  int64 partition_id = 2; // partition id
+  int64 segment_level = 3; // segment level
+  repeated data.FieldBinlog binlog_files = 4; // binlog files
+  repeated data.FieldBinlog deltalog_files = 5; // deltalog files
+  repeated index.IndexFilePathInfo index_files = 6; // index files
+}
+
+message CollectionDescription {
+  schema.CollectionSchema schema = 1; // collection schema
+  int64 num_partitions = 2; // num of default physical partitions, only used in partition key mode and changes are not supported
+  int64 num_shards = 3; // num of shards
+  common.ConsistencyLevel consistency_level = 4; // consistency level
+  repeated common.KeyValuePair properties = 5; // properties
+}
+
+message SnapshotInfo {
+  string name = 1;  // user-defined snapshot name
+  int64 id = 2; // snapshot id
+  string description = 3; // user-defined snapshot description
+  int64 collection_id = 4; // collection id
+  repeated int64 partition_ids = 5; // partition ids
+  int64 create_ts = 6; // create timestamp, all stream data before this timestamp will be flushed to segment list.
+  string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
+}
+
+message DescribeSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+
+  bool include_collection_info = 3; // if include_collection_info is true, it will return collection info.
+}
+
+// return snapshot basic info and snapshot data info
+message DescribeSnapshotResponse {
+  common.Status status = 1;
+  SnapshotInfo snapshot_info = 2; // snapshot info, if snapshot_info is not nil, it will be used to describe the snapshot.
+
+  CollectionDescription collection_info = 3; // collection info, if include_collection_info is true, it will return collection info.
+  repeated index.IndexInfo index_infos = 4; // index infos, if include_collection_info is true, it will return index infos.
+}
+
+// restore a snapshot to a given collection
+message RestoreSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+  int64 collection_id = 3; // target collection id
+  bool rewrite_data = 4; // if rewrite_data is true, it will rewrite the data through import API.
+}

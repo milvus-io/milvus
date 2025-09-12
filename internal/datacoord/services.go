@@ -2171,3 +2171,122 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 
 	return nil
 }
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
+		zap.String("description", req.GetDescription()))
+
+	snapshotID, err := s.idAllocator.AllocOne()
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	snapshotData, err := s.handler.GenSanpshot(ctx, req.GetCollectionId())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	snapshotData.SnapshotInfo.Id = snapshotID
+	snapshotData.SnapshotInfo.Name = req.GetName()
+	snapshotData.SnapshotInfo.Description = req.GetDescription()
+
+	err = s.meta.GetSnapshotMeta().SaveSnapshot(ctx, snapshotData)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	return merr.Success(), nil
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshot", req.GetName()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Info("receive DropSnapshot request")
+
+	err := s.meta.GetSnapshotMeta().DropSnapshot(ctx, req.GetName())
+	if err != nil {
+		log.Error("failed to drop snapshot", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	return merr.Success(), nil
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", req.GetName()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.DescribeSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive DescribeSnapshot request")
+	snapshotInfo, err := s.meta.GetSnapshotMeta().GetSnapshot(ctx, req.GetName())
+	if err != nil {
+		log.Error("failed to get snapshot info", zap.Error(err))
+		return &datapb.DescribeSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.DescribeSnapshotResponse{
+		Status:         merr.Success(),
+		SnapshotInfo:   snapshotInfo.SnapshotInfo,
+		CollectionInfo: snapshotInfo.Collection,
+		IndexInfos:     snapshotInfo.Indexes,
+	}, nil
+}
+
+func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("snapshot", req.GetName()),
+		zap.Int64("collectionID", req.GetCollectionId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Info("receive RestoreSnapshot request", zap.String("snapshotName", req.GetName()),
+		zap.Int64("collectionID", req.GetCollectionId()))
+
+	err := s.restoreSnapshot(ctx, req.GetName(), req.GetCollectionId(), req.GetBase().GetTimestamp(), req.GetRewriteData())
+	if err != nil {
+		log.Error("failed to restore snapshot", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	return merr.Success(), nil
+}
+
+func (s *Server) restoreSnapshot(ctx context.Context, snapshotName string, collectionID int64, dataTs uint64, rewriteData bool) error {
+	return merr.ErrServiceUnimplemented
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListSnapshotsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("receive ListSnapshots request")
+
+	snapshots, err := s.meta.GetSnapshotMeta().ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
+	if err != nil {
+		log.Error("failed to list snapshots", zap.Error(err))
+		return &datapb.ListSnapshotsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: snapshots,
+	}, nil
+}

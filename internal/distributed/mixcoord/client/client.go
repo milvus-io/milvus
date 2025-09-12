@@ -1994,3 +1994,58 @@ func (c *Client) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest
 		return client.BackupEzk(ctx, req)
 	})
 }
+
+func (c *Client) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CreateSnapshot(ctx, req)
+	})
+}
+
+func (c *Client) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.DropSnapshot(ctx, req)
+	})
+}
+
+func (c *Client) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest, opts ...grpc.CallOption) (*datapb.DescribeSnapshotResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.DescribeSnapshotResponse, error) {
+		return client.DescribeSnapshot(ctx, req)
+	})
+}
+
+func (c *Client) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest, opts ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.ListSnapshotsResponse, error) {
+		return client.ListSnapshots(ctx, req)
+	})
+}
+
+func (c *Client) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RestoreSnapshot(ctx, req)
+	})
+}

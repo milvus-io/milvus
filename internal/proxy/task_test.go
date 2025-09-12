@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -3127,7 +3128,17 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
 		Base:           &commonpb.MsgBase{},
 		CollectionName: "valid", // invalid
+
 	}}
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		return 1, nil
+	}).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	mockRC := mocks.NewMockMixCoordClient(t)
+	mockRC.EXPECT().ListSnapshots(mock.Anything, mock.Anything).Return(nil, nil)
+	dct.mixCoord = mockRC
 	ctx := context.Background()
 	err := dct.PreExecute(ctx)
 	assert.NoError(t, err)

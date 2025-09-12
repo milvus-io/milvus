@@ -1190,3 +1190,23 @@ func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateRepli
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
 	return s.proxy.ComputePhraseMatchSlop(ctx, req)
 }
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateSnapshot(ctx, req)
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.DropSnapshot(ctx, req)
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	return s.proxy.DescribeSnapshot(ctx, req)
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	return s.proxy.ListSnapshots(ctx, req)
+}
+
+func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.RestoreSnapshot(ctx, req)
+}
