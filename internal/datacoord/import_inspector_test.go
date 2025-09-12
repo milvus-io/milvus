@@ -65,6 +65,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())

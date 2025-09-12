@@ -922,6 +922,36 @@ func (s *mockMixCoord) ListFileResources(ctx context.Context, req *milvuspb.List
 	panic("implement me")
 }
 
+// Snapshot related methods
+func (s *mockMixCoord) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (s *mockMixCoord) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (s *mockMixCoord) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return &datapb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: []string{"test_snapshot1", "test_snapshot2"},
+	}, nil
+}
+
+func (s *mockMixCoord) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return &datapb.DescribeSnapshotResponse{
+		Status: merr.Success(),
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:         req.GetName(),
+			CollectionId: 100,
+		},
+	}, nil
+}
+
+func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 type mockHandler struct {
 	meta *meta
 }
@@ -966,6 +996,15 @@ func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChan
 
 func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return nil, nil
+}
+
+func (h *mockHandler) GenSanpshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+	return &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:         "test_snapshot",
+			CollectionId: collectionID,
+		},
+	}, nil
 }
 
 func newMockHandlerWithMeta(meta *meta) *mockHandler {
