@@ -937,8 +937,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		if err := embedding.TextEmbeddingInputsCheck(function.GetName(), fields); err != nil {
+			return err
 		}
 	default:
 		return errors.New("check input field with unknown function type")
