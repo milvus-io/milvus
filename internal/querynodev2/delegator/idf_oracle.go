@@ -141,6 +141,7 @@ func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 		if err != nil {
 			return err, false
 		}
+		writer.Flush()
 		file.Close()
 	}
 
@@ -173,7 +174,7 @@ func (s *sealedBm25Stats) ToLocal(dirPath string) error {
 	s.localDir = dir
 
 	if s.removed {
-		err := os.Remove(s.localDir)
+		err := os.RemoveAll(s.localDir)
 		if err != nil {
 			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
 		}
@@ -187,7 +188,7 @@ func (s *sealedBm25Stats) Remove() {
 	s.removed = true
 
 	if !s.inmemory {
-		err := os.Remove(s.localDir)
+		err := os.RemoveAll(s.localDir)
 		if err != nil {
 			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
 		}
@@ -206,15 +207,16 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 
 	stats := make(map[int64]*storage.BM25Stats)
 	for _, fieldID := range s.fieldList {
-		b, err := os.ReadFile(path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID)))
+		path := path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID))
+		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return nil, errors.Newf("read local file %s: failed: %v", path, err)
 		}
 
 		stats[fieldID] = storage.NewBM25Stats()
 		err = stats[fieldID].Deserialize(b)
 		if err != nil {
-			return nil, err
+			return nil, errors.Newf("deserialize local file :%s failed: %v", path, err)
 		}
 	}
 
@@ -511,14 +513,14 @@ func (o *idfOracle) SyncDistribution() error {
 		if ok && activate && !statsActivate {
 			stats, err := stats.FetchStats()
 			if err != nil {
-				rangeErr = err
+				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
 				return false
 			}
 			diff.Merge(stats)
 		} else if !ok && statsActivate {
 			stats, err := stats.FetchStats()
 			if err != nil {
-				rangeErr = err
+				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
 				return false
 			}
 			diff.Minus(stats)
