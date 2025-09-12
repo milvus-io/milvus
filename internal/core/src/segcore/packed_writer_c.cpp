@@ -270,14 +270,11 @@ EnableSkipIndex(int64_t group_id,
         auto schema = col->get_schema();
         auto field_meta = schema->get_field_metas(milvus_field_ids);
 
-        auto builder =
-            std::make_unique<milvus::ChunkSkipIndexBuilder>(field_meta);
-        auto builder_wrapper =
-            std::make_unique<milvus_storage::MetadataBuilderWrapper>(
-                std::move(builder));
+        auto appender =
+            std::make_unique<milvus::ChunkSkipIndexAppender>(field_meta);
 
-        packed_writer->AddMetadataBuilder(
-            group_id, "skip_index", std::move(builder_wrapper));
+        packed_writer->AddMetadataAppender(
+            group_id, "skip_index", std::move(appender));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
