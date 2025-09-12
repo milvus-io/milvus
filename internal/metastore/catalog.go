@@ -184,6 +184,10 @@ type DataCoordCatalog interface {
 	SaveFileResource(ctx context.Context, resource *model.FileResource) error
 	RemoveFileResource(ctx context.Context, resourceID int64) error
 	ListFileResource(ctx context.Context) ([]*model.FileResource, error)
+	// snapshot related
+	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
+	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
+	ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error)
 }
 
 type QueryCoordCatalog interface {

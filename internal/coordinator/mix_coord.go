@@ -1231,3 +1231,23 @@ func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.Rem
 func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.datacoordServer.ListFileResources(ctx, req)
 }
+
+func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.CreateSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.DropSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return s.datacoordServer.DescribeSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.RestoreSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return s.datacoordServer.ListSnapshots(ctx, req)
+}
