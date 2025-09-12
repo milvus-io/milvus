@@ -68,7 +68,8 @@ InitChunkCacheThreadCoreCoefficient(const float value) {
 
 void
 InitCpuNum(const int value) {
-    std::call_once(flag3, [](int value) { milvus::SetCpuNum(value); }, value);
+    std::call_once(
+        flag3, [](int value) { milvus::SetCpuNum(value); }, value);
 }
 
 void
