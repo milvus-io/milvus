@@ -172,7 +172,7 @@ class ChunkedColumnGroup {
         return memory_size;
     }
 
-    std::vector<std::shared_ptr<ChunkSkipIndex>>
+    std::vector<std::unique_ptr<ChunkSkipIndex>>
     GetSkipIndex(const std::vector<std::string>& insert_files,
                  const std::shared_ptr<arrow::Schema>& arrow_schema,
                  milvus_storage::ArrowFileSystemPtr fs) {
@@ -180,7 +180,7 @@ class ChunkedColumnGroup {
             static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
                 slot_->meta());
 
-        std::vector<std::shared_ptr<ChunkSkipIndex>> field_chunk_skipindex;
+        std::vector<std::unique_ptr<ChunkSkipIndex>> field_chunk_skipindex;
         field_chunk_skipindex.reserve(meta->num_rows_until_chunk_.size());
 
         for (const auto& insert_file : insert_files) {
@@ -192,12 +192,11 @@ class ChunkedColumnGroup {
                 file_reader->file_metadata()->GetMetadataArray<ChunkSkipIndex>(
                     "skip_index");
             if (skip_index_metadata) {
-                auto extracted = skip_index_metadata->ExtractAll();
                 // 使用移动迭代器避免不必要的拷贝
                 field_chunk_skipindex.insert(
                     field_chunk_skipindex.end(),
-                    std::make_move_iterator(extracted.begin()),
-                    std::make_move_iterator(extracted.end()));
+                    std::make_move_iterator(skip_index_metadata->begin()),
+                    std::make_move_iterator(skip_index_metadata->end()));
             }
 
             auto status = file_reader->Close();
