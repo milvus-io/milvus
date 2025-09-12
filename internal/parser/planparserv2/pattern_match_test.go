@@ -80,6 +80,8 @@ func TestOptimizeLikePattern(t *testing.T) {
 		{"%a\t%", planpb.OpType_InnerMatch, "a\t", true},
 		{"%", planpb.OpType_PrefixMatch, "", true},
 		{"%%", planpb.OpType_PrefixMatch, "", true},
+		{"a\\%%", planpb.OpType_PrefixMatch, "a%", true},
+		{"a\\\\%%", planpb.OpType_PrefixMatch, "a\\\\", true},
 		{"%a%b%", planpb.OpType_Invalid, "", false},
 		{"%a_b%", planpb.OpType_Invalid, "", false},
 		{"%abc\\", planpb.OpType_PostfixMatch, "abc\\", true},
