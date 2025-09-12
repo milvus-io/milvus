@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -33,7 +32,7 @@ type flushAllTask struct {
 	*milvuspb.FlushAllRequest
 	ctx      context.Context
 	mixCoord types.MixCoordClient
-	result   *datapb.FlushAllResponse
+	result   *milvuspb.FlushAllResponse
 	chMgr    channelsMgr
 }
 
