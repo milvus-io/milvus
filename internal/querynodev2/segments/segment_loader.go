@@ -1899,6 +1899,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var constainSystemField bool
 		var doubleMemorySysField bool
 		var doubleMomoryDataField bool
+		var legacyNilSchema bool
 		mmapEnabled := true
 		isVectorType := true
 
@@ -1915,7 +1916,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 				if !multiplyFactor.TieredEvictionEnabled {
 					segMemoryLoadingSize += binlogSize
 				}
-				continue
+				legacyNilSchema = true
+				break
 			}
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
@@ -1924,6 +1926,10 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			doubleMemorySysField = doubleMemorySysField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
+		}
+		// legacy v2 segment without children
+		if legacyNilSchema {
+			continue
 		}
 
 		if !multiplyFactor.TieredEvictionEnabled {
