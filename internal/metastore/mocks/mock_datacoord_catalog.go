@@ -2714,6 +2714,159 @@ func (_c *DataCoordCatalog_ShouldDropChannel_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// SaveSnapshot provides a mock function with given fields: ctx, snapshot
+func (_m *DataCoordCatalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+	ret := _m.Called(ctx, snapshot)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveSnapshot")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SnapshotInfo) error); ok {
+		r0 = rf(ctx, snapshot)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveSnapshot'
+type DataCoordCatalog_SaveSnapshot_Call struct {
+	*mock.Call
+}
+
+// SaveSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - snapshot *datapb.SnapshotInfo
+func (_e *DataCoordCatalog_Expecter) SaveSnapshot(ctx interface{}, snapshot interface{}) *DataCoordCatalog_SaveSnapshot_Call {
+	return &DataCoordCatalog_SaveSnapshot_Call{Call: _e.mock.On("SaveSnapshot", ctx, snapshot)}
+}
+
+func (_c *DataCoordCatalog_SaveSnapshot_Call) Run(run func(ctx context.Context, snapshot *datapb.SnapshotInfo)) *DataCoordCatalog_SaveSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.SnapshotInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveSnapshot_Call) Return(_a0 error) *DataCoordCatalog_SaveSnapshot_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.SnapshotInfo) error) *DataCoordCatalog_SaveSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSnapshot provides a mock function with given fields: ctx, collectionID, snapshotID
+func (_m *DataCoordCatalog) DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error {
+	ret := _m.Called(ctx, collectionID, snapshotID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSnapshot")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) error); ok {
+		r0 = rf(ctx, collectionID, snapshotID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSnapshot'
+type DataCoordCatalog_DropSnapshot_Call struct {
+	*mock.Call
+}
+
+// DropSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - snapshotID int64
+func (_e *DataCoordCatalog_Expecter) DropSnapshot(ctx interface{}, collectionID interface{}, snapshotID interface{}) *DataCoordCatalog_DropSnapshot_Call {
+	return &DataCoordCatalog_DropSnapshot_Call{Call: _e.mock.On("DropSnapshot", ctx, collectionID, snapshotID)}
+}
+
+func (_c *DataCoordCatalog_DropSnapshot_Call) Run(run func(ctx context.Context, collectionID int64, snapshotID int64)) *DataCoordCatalog_DropSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSnapshot_Call) Return(_a0 error) *DataCoordCatalog_DropSnapshot_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSnapshot_Call) RunAndReturn(run func(context.Context, int64, int64) error) *DataCoordCatalog_DropSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListSnapshots provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshots")
+	}
+
+	var r0 []*datapb.SnapshotInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.SnapshotInfo, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.SnapshotInfo); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.SnapshotInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListSnapshots_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshots'
+type DataCoordCatalog_ListSnapshots_Call struct {
+	*mock.Call
+}
+
+// ListSnapshots is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListSnapshots(ctx interface{}) *DataCoordCatalog_ListSnapshots_Call {
+	return &DataCoordCatalog_ListSnapshots_Call{Call: _e.mock.On("ListSnapshots", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListSnapshots_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListSnapshots_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListSnapshots_Call) Return(_a0 []*datapb.SnapshotInfo, _a1 error) *DataCoordCatalog_ListSnapshots_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListSnapshots_Call) RunAndReturn(run func(context.Context) ([]*datapb.SnapshotInfo, error)) *DataCoordCatalog_ListSnapshots_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewDataCoordCatalog creates a new instance of DataCoordCatalog. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewDataCoordCatalog(t interface {

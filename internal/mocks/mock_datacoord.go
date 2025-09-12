@@ -510,6 +510,65 @@ func (_c *MockDataCoord_CreateIndex_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CreateSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) CreateSnapshot(_a0 context.Context, _a1 *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CreateSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CreateSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CreateSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_CreateSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateSnapshot'
+type MockDataCoord_CreateSnapshot_Call struct {
+	*mock.Call
+}
+
+// CreateSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CreateSnapshotRequest
+func (_e *MockDataCoord_Expecter) CreateSnapshot(_a0 interface{}, _a1 interface{}) *MockDataCoord_CreateSnapshot_Call {
+	return &MockDataCoord_CreateSnapshot_Call{Call: _e.mock.On("CreateSnapshot", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_CreateSnapshot_Call) Run(run func(_a0 context.Context, _a1 *datapb.CreateSnapshotRequest)) *MockDataCoord_CreateSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CreateSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_CreateSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_CreateSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_CreateSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.CreateSnapshotRequest) (*commonpb.Status, error)) *MockDataCoord_CreateSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeIndex provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) DescribeIndex(_a0 context.Context, _a1 *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -569,6 +628,65 @@ func (_c *MockDataCoord_DescribeIndex_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// DescribeSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) DescribeSnapshot(_a0 context.Context, _a1 *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeSnapshot")
+	}
+
+	var r0 *datapb.DescribeSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DescribeSnapshotRequest) *datapb.DescribeSnapshotResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.DescribeSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DescribeSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_DescribeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeSnapshot'
+type MockDataCoord_DescribeSnapshot_Call struct {
+	*mock.Call
+}
+
+// DescribeSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.DescribeSnapshotRequest
+func (_e *MockDataCoord_Expecter) DescribeSnapshot(_a0 interface{}, _a1 interface{}) *MockDataCoord_DescribeSnapshot_Call {
+	return &MockDataCoord_DescribeSnapshot_Call{Call: _e.mock.On("DescribeSnapshot", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_DescribeSnapshot_Call) Run(run func(_a0 context.Context, _a1 *datapb.DescribeSnapshotRequest)) *MockDataCoord_DescribeSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.DescribeSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_DescribeSnapshot_Call) Return(_a0 *datapb.DescribeSnapshotResponse, _a1 error) *MockDataCoord_DescribeSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_DescribeSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error)) *MockDataCoord_DescribeSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropIndex provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) DropIndex(_a0 context.Context, _a1 *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -624,6 +742,65 @@ func (_c *MockDataCoord_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 error) 
 }
 
 func (_c *MockDataCoord_DropIndex_Call) RunAndReturn(run func(context.Context, *indexpb.DropIndexRequest) (*commonpb.Status, error)) *MockDataCoord_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) DropSnapshot(_a0 context.Context, _a1 *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_DropSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSnapshot'
+type MockDataCoord_DropSnapshot_Call struct {
+	*mock.Call
+}
+
+// DropSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.DropSnapshotRequest
+func (_e *MockDataCoord_Expecter) DropSnapshot(_a0 interface{}, _a1 interface{}) *MockDataCoord_DropSnapshot_Call {
+	return &MockDataCoord_DropSnapshot_Call{Call: _e.mock.On("DropSnapshot", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_DropSnapshot_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropSnapshotRequest)) *MockDataCoord_DropSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.DropSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_DropSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_DropSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_DropSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.DropSnapshotRequest) (*commonpb.Status, error)) *MockDataCoord_DropSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2502,6 +2679,65 @@ func (_c *MockDataCoord_ListIndexes_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// ListSnapshots provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) ListSnapshots(_a0 context.Context, _a1 *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshots")
+	}
+
+	var r0 *datapb.ListSnapshotsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSnapshotsRequest) *datapb.ListSnapshotsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListSnapshotsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListSnapshotsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_ListSnapshots_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshots'
+type MockDataCoord_ListSnapshots_Call struct {
+	*mock.Call
+}
+
+// ListSnapshots is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.ListSnapshotsRequest
+func (_e *MockDataCoord_Expecter) ListSnapshots(_a0 interface{}, _a1 interface{}) *MockDataCoord_ListSnapshots_Call {
+	return &MockDataCoord_ListSnapshots_Call{Call: _e.mock.On("ListSnapshots", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_ListSnapshots_Call) Run(run func(_a0 context.Context, _a1 *datapb.ListSnapshotsRequest)) *MockDataCoord_ListSnapshots_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ListSnapshotsRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_ListSnapshots_Call) Return(_a0 *datapb.ListSnapshotsResponse, _a1 error) *MockDataCoord_ListSnapshots_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_ListSnapshots_Call) RunAndReturn(run func(context.Context, *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error)) *MockDataCoord_ListSnapshots_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualCompaction provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) ManualCompaction(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2779,6 +3015,65 @@ func (_c *MockDataCoord_ReportDataNodeTtMsgs_Call) Return(_a0 *commonpb.Status, 
 }
 
 func (_c *MockDataCoord_ReportDataNodeTtMsgs_Call) RunAndReturn(run func(context.Context, *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error)) *MockDataCoord_ReportDataNodeTtMsgs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) RestoreSnapshot(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.RestoreSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
+type MockDataCoord_RestoreSnapshot_Call struct {
+	*mock.Call
+}
+
+// RestoreSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.RestoreSnapshotRequest
+func (_e *MockDataCoord_Expecter) RestoreSnapshot(_a0 interface{}, _a1 interface{}) *MockDataCoord_RestoreSnapshot_Call {
+	return &MockDataCoord_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_RestoreSnapshot_Call) Run(run func(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest)) *MockDataCoord_RestoreSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.RestoreSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_RestoreSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_RestoreSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest) (*commonpb.Status, error)) *MockDataCoord_RestoreSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -25,10 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -45,6 +49,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
+	GenSanpshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error)
 }
 
 type SegmentsView struct {
@@ -593,4 +598,121 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 
 func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return h.s.listLoadedSegments(ctx)
+}
+
+// GetSnapshotTs use the smallest channel checkpoint ts as snapshot ts
+// Note: if channel has tt lag, the snapshot ts also has tt lag
+func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) (uint64, error) {
+	channels := h.s.channelManager.GetChannelsByCollectionID(collectionID)
+	minTs := uint64(math.MaxUint64)
+	for _, channel := range channels {
+		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
+		if seekPosition != nil && seekPosition.Timestamp < minTs {
+			minTs = seekPosition.Timestamp
+		}
+	}
+	return minTs, nil
+}
+
+// todo: how to avoid schema change and index change during generate snapshot?
+func (h *ServerHandler) GenSanpshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+	// get coll info
+	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	partitionIDs, err := h.s.broker.ShowPartitionsInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// generate snapshot ts with current partition ids
+	snapshotTs, err := h.GetSnapshotTs(ctx, collectionID, partitionIDs...)
+	if err != nil {
+		return nil, err
+	}
+
+	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexInfos := lo.FilterMap(indexes, func(index *model.Index, _ int) (*indexpb.IndexInfo, bool) {
+		if index.CreateTime > snapshotTs {
+			return nil, false
+		}
+		return &indexpb.IndexInfo{
+			IndexID:         index.IndexID,
+			CollectionID:    index.CollectionID,
+			FieldID:         index.FieldID,
+			IndexName:       index.IndexName,
+			TypeParams:      index.TypeParams,
+			IndexParams:     index.IndexParams,
+			IsAutoIndex:     index.IsAutoIndex,
+			UserIndexParams: index.UserIndexParams,
+		}, true
+	})
+
+	// get segment info
+	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetStartPosition().GetTimestamp() < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped
+	}))
+
+	segmentInfos := lo.Map(segments, func(segment *SegmentInfo, _ int) *datapb.SegmentDescription {
+		segID := segment.GetID()
+		info := h.s.meta.GetSegment(ctx, segID)
+		if info == nil {
+			return nil
+		}
+		segIdxes := h.s.meta.indexMeta.getSegmentIndexes(collectionID, segID)
+		indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
+		for _, segIdx := range segIdxes {
+			if segIdx.IndexState == commonpb.IndexState_Finished {
+				fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
+				indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+
+				indexFilePaths := metautil.BuildSegmentIndexFilePaths(h.s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
+					segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+				indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+				indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+
+				indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
+					SegmentID:           segID,
+					FieldID:             fieldID,
+					IndexID:             segIdx.IndexID,
+					BuildID:             segIdx.BuildID,
+					IndexName:           indexName,
+					IndexParams:         indexParams,
+					IndexFilePaths:      indexFilePaths,
+					SerializedSize:      segIdx.IndexSerializedSize,
+					MemSize:             segIdx.IndexMemSize,
+					IndexVersion:        segIdx.IndexVersion,
+					NumRows:             segIdx.NumRows,
+					CurrentIndexVersion: segIdx.CurrentIndexVersion,
+				})
+			}
+		}
+		return &datapb.SegmentDescription{
+			SegmentId:     segment.GetID(),
+			SegmentLevel:  int64(segment.GetLevel()),
+			PartitionId:   segment.GetPartitionID(),
+			BinlogFiles:   info.GetBinlogs(),
+			DeltalogFiles: info.GetDeltalogs(),
+			IndexFiles:    indexesFiles,
+		}
+	})
+
+	return &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			CollectionId: collectionID,
+			PartitionIds: partitionIDs,
+			CreateTs:     int64(snapshotTs),
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema:           resp.GetSchema(),
+			NumShards:        int64(resp.GetShardsNum()),
+			NumPartitions:    int64(resp.GetNumPartitions()),
+			ConsistencyLevel: resp.GetConsistencyLevel(),
+			Properties:       resp.GetProperties(),
+		},
+		Indexes:  indexInfos,
+		Segments: segmentInfos,
+	}, nil
 }

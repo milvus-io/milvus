@@ -5,13 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -1513,4 +1517,149 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
 	})
+}
+
+func TestGetSnapshotTs(t *testing.T) {
+	// Create a minimal server handler without full server initialization
+	handler := &ServerHandler{
+		s: &Server{
+			channelManager: &ChannelManagerImpl{},
+		},
+	}
+
+	// Mock channel manager
+	mockChannels := []RWChannel{
+		&channelMeta{Name: "ch1", CollectionID: 100},
+		&channelMeta{Name: "ch2", CollectionID: 100},
+	}
+
+	// Setup mocks
+	mock1 := mockey.Mock((*ChannelManagerImpl).GetChannelsByCollectionID).To(func(cm *ChannelManagerImpl, collectionID int64) []RWChannel {
+		if collectionID == 100 {
+			return mockChannels
+		}
+		return nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	var callCount int
+	mock2 := mockey.Mock((*ServerHandler).GetChannelSeekPosition).To(func(h *ServerHandler, channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
+		callCount++
+		if callCount == 1 {
+			return &msgpb.MsgPosition{Timestamp: 1000}
+		} else {
+			return &msgpb.MsgPosition{Timestamp: 500} // smaller timestamp
+		}
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Test GetSnapshotTs
+	ts, err := handler.GetSnapshotTs(context.Background(), 100)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(500), ts) // Should return the smallest timestamp
+}
+
+func TestGenSnapshot(t *testing.T) {
+	schema := newTestSchema()
+
+	// Create minimal components for testing
+	mockIndexMeta := &indexMeta{}
+	mockMeta := &meta{
+		indexMeta: mockIndexMeta,
+	}
+
+	// Create handler with minimal server
+	mockBroker := broker.NewCoordinatorBroker(nil) // Create real broker instance for mocking
+	handler := &ServerHandler{
+		s: &Server{
+			broker: mockBroker,
+			meta:   mockMeta,
+		},
+	}
+
+	// Setup mocks
+	mock1 := mockey.Mock((*ServerHandler).GetSnapshotTs).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) (uint64, error) {
+		return uint64(12345), nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	mock2 := mockey.Mock(mockey.GetMethod(mockBroker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		if collectionID == 200 {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:           merr.Success(),
+				Schema:           schema,
+				ShardsNum:        2,
+				NumPartitions:    1,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+				Properties:       []*commonpb.KeyValuePair{},
+			}, nil
+		}
+		return nil, errors.New("unexpected parameters")
+	}).Build()
+	defer mock2.UnPatch()
+
+	mock3 := mockey.Mock(mockey.GetMethod(mockBroker, "ShowPartitionsInternal")).To(func(ctx context.Context, collectionID int64) ([]int64, error) {
+		if collectionID == 200 {
+			return []int64{0, 1}, nil
+		}
+		return nil, errors.New("unexpected collection ID")
+	}).Build()
+	defer mock3.UnPatch()
+
+	mock4 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+		return []*model.Index{
+			{
+				IndexID:      1,
+				CollectionID: 200,
+				FieldID:      2,
+				IndexName:    "test_index",
+				CreateTime:   10000, // Earlier than snapshot timestamp
+			},
+		}
+	}).Build()
+	defer mock4.UnPatch()
+
+	mock5 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+		seg := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  200,
+			PartitionID:   0,
+			State:         commonpb.SegmentState_Flushed,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+		})
+		return []*SegmentInfo{seg}
+	}).Build()
+	defer mock5.UnPatch()
+
+	mock6 := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
+		if segmentID == 1001 {
+			return NewSegmentInfo(&datapb.SegmentInfo{
+				ID:           1001,
+				CollectionID: 200,
+				PartitionID:  0,
+				State:        commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{},
+				Deltalogs:    []*datapb.FieldBinlog{},
+			})
+		}
+		return nil
+	}).Build()
+	defer mock6.UnPatch()
+
+	mock7 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		return map[int64]*model.SegmentIndex{}
+	}).Build()
+	defer mock7.UnPatch()
+
+	// Test GenSanpshot
+	snapshotData, err := handler.GenSanpshot(context.Background(), 200)
+	assert.NoError(t, err)
+	assert.NotNil(t, snapshotData)
+	assert.Equal(t, int64(200), snapshotData.SnapshotInfo.CollectionId)
+	assert.Equal(t, int64(12345), snapshotData.SnapshotInfo.CreateTs)
+	assert.NotNil(t, snapshotData.Collection)
+	assert.Equal(t, int64(2), snapshotData.Collection.NumShards)
+	assert.Equal(t, 1, len(snapshotData.Indexes))
+	assert.Equal(t, 1, len(snapshotData.Segments))
+	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 }

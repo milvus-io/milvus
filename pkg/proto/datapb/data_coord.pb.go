@@ -7,6 +7,9 @@
 package datapb
 
 import (
+	reflect "reflect"
+	sync "sync"
+
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -15,8 +18,6 @@ import (
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (
@@ -9226,6 +9227,720 @@ func (x *CreateExternalCollectionResponse) GetStatus() *commonpb.Status {
 	return nil
 }
 
+type CreateSnapshotRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base         *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Name         string            `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                      // user-defined snapshot name
+	Description  string            `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`                        // user-defined snapshot description
+	CollectionId int64             `protobuf:"varint,4,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // collection name
+}
+
+func (x *CreateSnapshotRequest) Reset() {
+	*x = CreateSnapshotRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[109]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CreateSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateSnapshotRequest) ProtoMessage() {}
+
+func (x *CreateSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[109]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*CreateSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *CreateSnapshotRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *CreateSnapshotRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateSnapshotRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *CreateSnapshotRequest) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+type DropSnapshotRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Name string            `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // snapshot name
+}
+
+func (x *DropSnapshotRequest) Reset() {
+	*x = DropSnapshotRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[110]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DropSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DropSnapshotRequest) ProtoMessage() {}
+
+func (x *DropSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[110]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DropSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*DropSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{110}
+}
+
+func (x *DropSnapshotRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *DropSnapshotRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type ListSnapshotsRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base         *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	CollectionId int64             `protobuf:"varint,2,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // collection id, if collection_id is 0, it will list all snapshots.
+	PartitionId  int64             `protobuf:"varint,3,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`    // partition id, if partition_id is 0, it will list all snapshots.
+}
+
+func (x *ListSnapshotsRequest) Reset() {
+	*x = ListSnapshotsRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[111]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListSnapshotsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSnapshotsRequest) ProtoMessage() {}
+
+func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[111]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSnapshotsRequest.ProtoReflect.Descriptor instead.
+func (*ListSnapshotsRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{111}
+}
+
+func (x *ListSnapshotsRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *ListSnapshotsRequest) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *ListSnapshotsRequest) GetPartitionId() int64 {
+	if x != nil {
+		return x.PartitionId
+	}
+	return 0
+}
+
+// return all snapshots for the given collection or partition
+// Note: list snapshots is not a privilege check operation
+type ListSnapshotsResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status    *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Snapshots []string         `protobuf:"bytes,2,rep,name=snapshots,proto3" json:"snapshots,omitempty"`
+}
+
+func (x *ListSnapshotsResponse) Reset() {
+	*x = ListSnapshotsResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[112]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListSnapshotsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSnapshotsResponse) ProtoMessage() {}
+
+func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[112]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSnapshotsResponse.ProtoReflect.Descriptor instead.
+func (*ListSnapshotsResponse) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *ListSnapshotsResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *ListSnapshotsResponse) GetSnapshots() []string {
+	if x != nil {
+		return x.Snapshots
+	}
+	return nil
+}
+
+type SegmentDescription struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	SegmentId     int64                        `protobuf:"varint,1,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`            // segment id
+	PartitionId   int64                        `protobuf:"varint,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`      // partition id
+	SegmentLevel  int64                        `protobuf:"varint,3,opt,name=segment_level,json=segmentLevel,proto3" json:"segment_level,omitempty"`   // segment level
+	BinlogFiles   []*FieldBinlog               `protobuf:"bytes,4,rep,name=binlog_files,json=binlogFiles,proto3" json:"binlog_files,omitempty"`       // binlog files
+	DeltalogFiles []*FieldBinlog               `protobuf:"bytes,5,rep,name=deltalog_files,json=deltalogFiles,proto3" json:"deltalog_files,omitempty"` // deltalog files
+	IndexFiles    []*indexpb.IndexFilePathInfo `protobuf:"bytes,6,rep,name=index_files,json=indexFiles,proto3" json:"index_files,omitempty"`          // index files
+}
+
+func (x *SegmentDescription) Reset() {
+	*x = SegmentDescription{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[113]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SegmentDescription) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SegmentDescription) ProtoMessage() {}
+
+func (x *SegmentDescription) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[113]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SegmentDescription.ProtoReflect.Descriptor instead.
+func (*SegmentDescription) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *SegmentDescription) GetSegmentId() int64 {
+	if x != nil {
+		return x.SegmentId
+	}
+	return 0
+}
+
+func (x *SegmentDescription) GetPartitionId() int64 {
+	if x != nil {
+		return x.PartitionId
+	}
+	return 0
+}
+
+func (x *SegmentDescription) GetSegmentLevel() int64 {
+	if x != nil {
+		return x.SegmentLevel
+	}
+	return 0
+}
+
+func (x *SegmentDescription) GetBinlogFiles() []*FieldBinlog {
+	if x != nil {
+		return x.BinlogFiles
+	}
+	return nil
+}
+
+func (x *SegmentDescription) GetDeltalogFiles() []*FieldBinlog {
+	if x != nil {
+		return x.DeltalogFiles
+	}
+	return nil
+}
+
+func (x *SegmentDescription) GetIndexFiles() []*indexpb.IndexFilePathInfo {
+	if x != nil {
+		return x.IndexFiles
+	}
+	return nil
+}
+
+type CollectionDescription struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Schema           *schemapb.CollectionSchema `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`                                                                                        // collection schema
+	NumPartitions    int64                      `protobuf:"varint,2,opt,name=num_partitions,json=numPartitions,proto3" json:"num_partitions,omitempty"`                                                    // num of default physical partitions, only used in partition key mode and changes are not supported
+	NumShards        int64                      `protobuf:"varint,3,opt,name=num_shards,json=numShards,proto3" json:"num_shards,omitempty"`                                                                // num of shards
+	ConsistencyLevel commonpb.ConsistencyLevel  `protobuf:"varint,4,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"` // consistency level
+	Properties       []*commonpb.KeyValuePair   `protobuf:"bytes,5,rep,name=properties,proto3" json:"properties,omitempty"`                                                                                // properties
+}
+
+func (x *CollectionDescription) Reset() {
+	*x = CollectionDescription{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[114]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CollectionDescription) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CollectionDescription) ProtoMessage() {}
+
+func (x *CollectionDescription) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[114]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CollectionDescription.ProtoReflect.Descriptor instead.
+func (*CollectionDescription) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *CollectionDescription) GetSchema() *schemapb.CollectionSchema {
+	if x != nil {
+		return x.Schema
+	}
+	return nil
+}
+
+func (x *CollectionDescription) GetNumPartitions() int64 {
+	if x != nil {
+		return x.NumPartitions
+	}
+	return 0
+}
+
+func (x *CollectionDescription) GetNumShards() int64 {
+	if x != nil {
+		return x.NumShards
+	}
+	return 0
+}
+
+func (x *CollectionDescription) GetConsistencyLevel() commonpb.ConsistencyLevel {
+	if x != nil {
+		return x.ConsistencyLevel
+	}
+	return commonpb.ConsistencyLevel(0)
+}
+
+func (x *CollectionDescription) GetProperties() []*commonpb.KeyValuePair {
+	if x != nil {
+		return x.Properties
+	}
+	return nil
+}
+
+type SnapshotInfo struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Name         string  `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                             // user-defined snapshot name
+	Id           int64   `protobuf:"varint,2,opt,name=id,proto3" json:"id,omitempty"`                                                // snapshot id
+	Description  string  `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`                               // user-defined snapshot description
+	CollectionId int64   `protobuf:"varint,4,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`        // collection id
+	PartitionIds []int64 `protobuf:"varint,5,rep,packed,name=partition_ids,json=partitionIds,proto3" json:"partition_ids,omitempty"` // partition ids
+	CreateTs     int64   `protobuf:"varint,6,opt,name=create_ts,json=createTs,proto3" json:"create_ts,omitempty"`                    // create timestamp, all stream data before this timestamp will be flushed to segment list.
+	S3Location   string  `protobuf:"bytes,7,opt,name=s3_location,json=s3Location,proto3" json:"s3_location,omitempty"`               // s3 location of the snapshot meta file if snapshot is exported to s3.
+}
+
+func (x *SnapshotInfo) Reset() {
+	*x = SnapshotInfo{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[115]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SnapshotInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotInfo) ProtoMessage() {}
+
+func (x *SnapshotInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[115]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotInfo.ProtoReflect.Descriptor instead.
+func (*SnapshotInfo) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{115}
+}
+
+func (x *SnapshotInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SnapshotInfo) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *SnapshotInfo) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *SnapshotInfo) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *SnapshotInfo) GetPartitionIds() []int64 {
+	if x != nil {
+		return x.PartitionIds
+	}
+	return nil
+}
+
+func (x *SnapshotInfo) GetCreateTs() int64 {
+	if x != nil {
+		return x.CreateTs
+	}
+	return 0
+}
+
+func (x *SnapshotInfo) GetS3Location() string {
+	if x != nil {
+		return x.S3Location
+	}
+	return ""
+}
+
+type DescribeSnapshotRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base                  *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Name                  string            `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                                                   // snapshot name
+	IncludeCollectionInfo bool              `protobuf:"varint,3,opt,name=include_collection_info,json=includeCollectionInfo,proto3" json:"include_collection_info,omitempty"` // if include_collection_info is true, it will return collection info.
+}
+
+func (x *DescribeSnapshotRequest) Reset() {
+	*x = DescribeSnapshotRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[116]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DescribeSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescribeSnapshotRequest) ProtoMessage() {}
+
+func (x *DescribeSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[116]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DescribeSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*DescribeSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{116}
+}
+
+func (x *DescribeSnapshotRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *DescribeSnapshotRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DescribeSnapshotRequest) GetIncludeCollectionInfo() bool {
+	if x != nil {
+		return x.IncludeCollectionInfo
+	}
+	return false
+}
+
+// return snapshot basic info and snapshot data info
+type DescribeSnapshotResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status         *commonpb.Status       `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	SnapshotInfo   *SnapshotInfo          `protobuf:"bytes,2,opt,name=snapshot_info,json=snapshotInfo,proto3" json:"snapshot_info,omitempty"`       // snapshot info, if snapshot_info is not nil, it will be used to describe the snapshot.
+	CollectionInfo *CollectionDescription `protobuf:"bytes,3,opt,name=collection_info,json=collectionInfo,proto3" json:"collection_info,omitempty"` // collection info, if include_collection_info is true, it will return collection info.
+	IndexInfos     []*indexpb.IndexInfo   `protobuf:"bytes,4,rep,name=index_infos,json=indexInfos,proto3" json:"index_infos,omitempty"`             // index infos, if include_collection_info is true, it will return index infos.
+}
+
+func (x *DescribeSnapshotResponse) Reset() {
+	*x = DescribeSnapshotResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[117]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DescribeSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescribeSnapshotResponse) ProtoMessage() {}
+
+func (x *DescribeSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[117]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DescribeSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*DescribeSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{117}
+}
+
+func (x *DescribeSnapshotResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *DescribeSnapshotResponse) GetSnapshotInfo() *SnapshotInfo {
+	if x != nil {
+		return x.SnapshotInfo
+	}
+	return nil
+}
+
+func (x *DescribeSnapshotResponse) GetCollectionInfo() *CollectionDescription {
+	if x != nil {
+		return x.CollectionInfo
+	}
+	return nil
+}
+
+func (x *DescribeSnapshotResponse) GetIndexInfos() []*indexpb.IndexInfo {
+	if x != nil {
+		return x.IndexInfos
+	}
+	return nil
+}
+
+// restore a snapshot to a given collection
+type RestoreSnapshotRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base         *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Name         string            `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                      // snapshot name
+	CollectionId int64             `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // target collection id
+	RewriteData  bool              `protobuf:"varint,4,opt,name=rewrite_data,json=rewriteData,proto3" json:"rewrite_data,omitempty"`    // if rewrite_data is true, it will rewrite the data through import API.
+}
+
+func (x *RestoreSnapshotRequest) Reset() {
+	*x = RestoreSnapshotRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[118]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RestoreSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestoreSnapshotRequest) ProtoMessage() {}
+
+func (x *RestoreSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[118]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestoreSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*RestoreSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{118}
+}
+
+func (x *RestoreSnapshotRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *RestoreSnapshotRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RestoreSnapshotRequest) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *RestoreSnapshotRequest) GetRewriteData() bool {
+	if x != nil {
+		return x.RewriteData
+	}
+	return false
+}
+
 var File_data_coord_proto protoreflect.FileDescriptor
 
 var file_data_coord_proto_rawDesc = []byte{
@@ -13442,6 +14157,126 @@ func file_data_coord_proto_init() {
 		}
 		file_data_coord_proto_msgTypes[108].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*CreateExternalCollectionResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[109].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*CreateSnapshotRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[110].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DropSnapshotRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[111].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListSnapshotsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[112].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListSnapshotsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[113].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SegmentDescription); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[114].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*CollectionDescription); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[115].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SnapshotInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[116].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DescribeSnapshotRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[117].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DescribeSnapshotResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[118].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RestoreSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
