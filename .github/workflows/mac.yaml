@@ -44,21 +44,10 @@ jobs:
           python-version: '<3.12'
       - name: Install CMake 3.31.8
         run: |
-          echo $PATH
           cmake --version
-          if brew list --cask cmake &>/dev/null; then
-            brew uninstall --cask cmake
-          fi
-          if brew list cmake &>/dev/null; then
-            brew uninstall cmake
-          fi
-          curl -LO "https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz"
-          mkdir -p /tmp/cmake-install
-          tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/cmake-install
-          echo $PATH
-          ls /tmp/cmake-install/cmake-3.31.8-macos-universal/CMake.app/Contents/bin/
-          sudo cp -R /tmp/cmake-install/cmake-3.31.8-macos-universal/CMake.app/Contents/bin/* /usr/local/bin/
-          ls /usr/local/bin/
+          brew uninstall cmake --force || true
+          brew install cmake@3.31.8
+          brew link --force cmake@3.31.8
           cmake --version
       - name: Setup Go environment
         uses: actions/setup-go@v4
