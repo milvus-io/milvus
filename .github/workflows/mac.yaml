@@ -33,7 +33,7 @@ concurrency:
 jobs:
   mac:
     name: Code Checker MacOS 13
-    runs-on: macos-13
+    runs-on: macos-13-20250901.1455
     timeout-minutes: 300
     steps:
       - name: Checkout
