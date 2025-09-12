@@ -105,6 +105,8 @@ type meta struct {
 	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
+	// Snapshot Meta
+	snapshotMeta *snapshotMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -121,6 +123,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetSnapshotMeta() *snapshotMeta {
+	return m.snapshotMeta
 }
 
 type channelCPs struct {
@@ -191,6 +197,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// if err != nil {
 	// 	return nil, err
 	// }
+	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
+	if err != nil {
+		return nil, err
+	}
 
 	mt := &meta{
 		ctx:                ctx,
@@ -206,6 +216,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
 		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
+		snapshotMeta: spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
