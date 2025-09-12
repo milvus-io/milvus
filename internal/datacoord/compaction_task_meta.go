@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -86,12 +87,16 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		return err
 	}
 	for _, task := range compactionTasks {
-		// To maintain compatibility with versions ≤v2.4.12, which use `ResultSegments` as preallocate segment IDs.
-		if task.PreAllocatedSegmentIDs == nil && len(task.GetResultSegments()) == 2 {
-			task.PreAllocatedSegmentIDs = &datapb.IDRange{
-				Begin: task.GetResultSegments()[0],
-				End:   task.GetResultSegments()[1],
-			}
+		// Compatibility handling: for milvus ≤v2.4, since compaction task has no PreAllocatedSegmentIDs field,
+		// here we just mark the task as failed and wait for the compaction trigger to generate a new one.
+		if task.PreAllocatedSegmentIDs == nil {
+			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
+				zap.Int64("taskID", task.GetPlanID()),
+				zap.String("type", task.GetType().String()),
+				zap.String("originalState", task.State.String()),
+			)
+			task.State = datapb.CompactionTaskState_failed
+			task.FailReason = fmt.Sprintf("PreAllocatedSegmentIDs is nil, taskID: %v", task.GetPlanID())
 		}
 		csm.saveCompactionTaskMemory(task)
 	}
