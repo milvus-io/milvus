@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -28,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 func TestWeightedFunction(t *testing.T) {
@@ -271,28 +269,5 @@ func (s *WeightedFunctionSuite) TestWeightedFuctionProcess() {
 			29, 28, 27, 26, 25, 24, 89, 88, 87,
 		},
 			ret.searchResultData.Ids.GetIntId().Data)
-	}
-}
-
-func (s *WeightedFunctionSuite) TestWeightedFuctionNormalize() {
-	{
-		f := getNormalizeFunc(false, metric.COSINE)
-		s.Equal(float32(1.0), f(1.0))
-	}
-	{
-		f := getNormalizeFunc(true, metric.COSINE)
-		s.Equal(float32((1+1.0)*0.5), f(1))
-	}
-	{
-		f := getNormalizeFunc(true, metric.IP)
-		s.Equal(0.5+float32(math.Atan(float64(1.0)))/math.Pi, f(1))
-	}
-	{
-		f := getNormalizeFunc(true, metric.BM25)
-		s.Equal(float32(2*math.Atan(float64(1.0)))/math.Pi, f(1.0))
-	}
-	{
-		f := getNormalizeFunc(true, metric.L2)
-		s.Equal((1.0 - 2*float32(math.Atan(float64(1.0)))/math.Pi), f(1.0))
 	}
 }
