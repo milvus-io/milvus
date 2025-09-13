@@ -1766,7 +1766,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[]):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[], desired_field_names=[]):
     """
     Generates row data based on the given schema.
     
@@ -1786,6 +1786,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         - For primary key fields, generates sequential values starting from 'start'.
         - For non-primary fields, generates random data based on field type.
     """
+    # if both skip_field_names and desired_field_names are specified, raise an exception
+    if skip_field_names and desired_field_names:
+        raise Exception(f"Cannot specify both skip_field_names and desired_field_names")
+
     if schema is None:
         schema = gen_default_collection_schema()
 
@@ -1793,7 +1797,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
     func_output_fields = []
     if isinstance(schema, dict):
         # a dict of collection schema info is usually from client.describe_collection()
-        fields = schema.get('fields', [])
+        all_fields = schema.get('fields', [])
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.get('name', None) in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         functions = schema.get('functions', [])
         for func in functions:
             output_field_names = func.get('output_field_names', [])
@@ -1822,7 +1835,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
             data.append(tmp)
     else:
         # a schema object is usually form orm schema object
-        fields = schema.fields
+        all_fields = schema.fields
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.name in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         if hasattr(schema, "functions"):
             functions = schema.functions
             for func in functions:
