@@ -1149,3 +1149,23 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.proxy.ListFileResources(ctx, req)
 }
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateSnapshot(ctx, req)
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.DropSnapshot(ctx, req)
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	return s.proxy.DescribeSnapshot(ctx, req)
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	return s.proxy.ListSnapshots(ctx, req)
+}
+
+func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	return s.proxy.RestoreSnapshot(ctx, req)
+}

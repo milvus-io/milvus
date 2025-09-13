@@ -1266,6 +1266,52 @@ func (_c *MilvusServiceServer_CreatePrivilegeGroup_Call) RunAndReturn(run func(c
 	return _c
 }
 
+// CreateReplicateStream provides a mock function with given fields: _a0
+func (_m *MilvusServiceServer) CreateReplicateStream(_a0 milvuspb.MilvusService_CreateReplicateStreamServer) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateReplicateStream")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(milvuspb.MilvusService_CreateReplicateStreamServer) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MilvusServiceServer_CreateReplicateStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateReplicateStream'
+type MilvusServiceServer_CreateReplicateStream_Call struct {
+	*mock.Call
+}
+
+// CreateReplicateStream is a helper method to define mock.On call
+//   - _a0 milvuspb.MilvusService_CreateReplicateStreamServer
+func (_e *MilvusServiceServer_Expecter) CreateReplicateStream(_a0 interface{}) *MilvusServiceServer_CreateReplicateStream_Call {
+	return &MilvusServiceServer_CreateReplicateStream_Call{Call: _e.mock.On("CreateReplicateStream", _a0)}
+}
+
+func (_c *MilvusServiceServer_CreateReplicateStream_Call) Run(run func(_a0 milvuspb.MilvusService_CreateReplicateStreamServer)) *MilvusServiceServer_CreateReplicateStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(milvuspb.MilvusService_CreateReplicateStreamServer))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateReplicateStream_Call) Return(_a0 error) *MilvusServiceServer_CreateReplicateStream_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateReplicateStream_Call) RunAndReturn(run func(milvuspb.MilvusService_CreateReplicateStreamServer) error) *MilvusServiceServer_CreateReplicateStream_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateResourceGroup provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1439,6 +1485,65 @@ func (_c *MilvusServiceServer_CreateRowPolicy_Call) Return(_a0 *commonpb.Status,
 }
 
 func (_c *MilvusServiceServer_CreateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)) *MilvusServiceServer_CreateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) CreateSnapshot(_a0 context.Context, _a1 *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_CreateSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateSnapshot'
+type MilvusServiceServer_CreateSnapshot_Call struct {
+	*mock.Call
+}
+
+// CreateSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateSnapshotRequest
+func (_e *MilvusServiceServer_Expecter) CreateSnapshot(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_CreateSnapshot_Call {
+	return &MilvusServiceServer_CreateSnapshot_Call{Call: _e.mock.On("CreateSnapshot", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_CreateSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateSnapshotRequest)) *MilvusServiceServer_CreateSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MilvusServiceServer_CreateSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error)) *MilvusServiceServer_CreateSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1974,6 +2079,65 @@ func (_c *MilvusServiceServer_DescribeSegmentIndexData_Call) RunAndReturn(run fu
 	return _c
 }
 
+// DescribeSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DescribeSnapshot(_a0 context.Context, _a1 *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeSnapshot")
+	}
+
+	var r0 *milvuspb.DescribeSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeSnapshotRequest) *milvuspb.DescribeSnapshotResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DescribeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeSnapshot'
+type MilvusServiceServer_DescribeSnapshot_Call struct {
+	*mock.Call
+}
+
+// DescribeSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeSnapshotRequest
+func (_e *MilvusServiceServer_Expecter) DescribeSnapshot(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DescribeSnapshot_Call {
+	return &MilvusServiceServer_DescribeSnapshot_Call{Call: _e.mock.On("DescribeSnapshot", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DescribeSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeSnapshotRequest)) *MilvusServiceServer_DescribeSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeSnapshot_Call) Return(_a0 *milvuspb.DescribeSnapshotResponse, _a1 error) *MilvusServiceServer_DescribeSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error)) *MilvusServiceServer_DescribeSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) DropAlias(_a0 context.Context, _a1 *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2501,6 +2665,65 @@ func (_c *MilvusServiceServer_DropRowPolicy_Call) Return(_a0 *commonpb.Status, _
 }
 
 func (_c *MilvusServiceServer_DropRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)) *MilvusServiceServer_DropRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DropSnapshot(_a0 context.Context, _a1 *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DropSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSnapshot'
+type MilvusServiceServer_DropSnapshot_Call struct {
+	*mock.Call
+}
+
+// DropSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropSnapshotRequest
+func (_e *MilvusServiceServer_Expecter) DropSnapshot(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DropSnapshot_Call {
+	return &MilvusServiceServer_DropSnapshot_Call{Call: _e.mock.On("DropSnapshot", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DropSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropSnapshotRequest)) *MilvusServiceServer_DropSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MilvusServiceServer_DropSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.DropSnapshotRequest) (*commonpb.Status, error)) *MilvusServiceServer_DropSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3685,6 +3908,65 @@ func (_c *MilvusServiceServer_GetReplicas_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetReplicateInfo provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) GetReplicateInfo(_a0 context.Context, _a1 *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateInfo")
+	}
+
+	var r0 *milvuspb.GetReplicateInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateInfoRequest) *milvuspb.GetReplicateInfoResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetReplicateInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetReplicateInfoRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_GetReplicateInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateInfo'
+type MilvusServiceServer_GetReplicateInfo_Call struct {
+	*mock.Call
+}
+
+// GetReplicateInfo is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetReplicateInfoRequest
+func (_e *MilvusServiceServer_Expecter) GetReplicateInfo(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_GetReplicateInfo_Call {
+	return &MilvusServiceServer_GetReplicateInfo_Call{Call: _e.mock.On("GetReplicateInfo", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_GetReplicateInfo_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetReplicateInfoRequest)) *MilvusServiceServer_GetReplicateInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetReplicateInfoRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_GetReplicateInfo_Call) Return(_a0 *milvuspb.GetReplicateInfoResponse, _a1 error) *MilvusServiceServer_GetReplicateInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_GetReplicateInfo_Call) RunAndReturn(run func(context.Context, *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error)) *MilvusServiceServer_GetReplicateInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetUserTags provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) GetUserTags(_a0 context.Context, _a1 *milvuspb.GetUserTagsRequest) (*milvuspb.GetUserTagsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4625,6 +4907,65 @@ func (_c *MilvusServiceServer_ListRowPolicies_Call) Return(_a0 *milvuspb.ListRow
 }
 
 func (_c *MilvusServiceServer_ListRowPolicies_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)) *MilvusServiceServer_ListRowPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListSnapshots provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) ListSnapshots(_a0 context.Context, _a1 *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshots")
+	}
+
+	var r0 *milvuspb.ListSnapshotsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListSnapshotsRequest) *milvuspb.ListSnapshotsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListSnapshotsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListSnapshotsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_ListSnapshots_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshots'
+type MilvusServiceServer_ListSnapshots_Call struct {
+	*mock.Call
+}
+
+// ListSnapshots is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListSnapshotsRequest
+func (_e *MilvusServiceServer_Expecter) ListSnapshots(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_ListSnapshots_Call {
+	return &MilvusServiceServer_ListSnapshots_Call{Call: _e.mock.On("ListSnapshots", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_ListSnapshots_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListSnapshotsRequest)) *MilvusServiceServer_ListSnapshots_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListSnapshotsRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListSnapshots_Call) Return(_a0 *milvuspb.ListSnapshotsResponse, _a1 error) *MilvusServiceServer_ListSnapshots_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListSnapshots_Call) RunAndReturn(run func(context.Context, *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error)) *MilvusServiceServer_ListSnapshots_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5632,6 +5973,65 @@ func (_c *MilvusServiceServer_RestoreRBAC_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// RestoreSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) RestoreSnapshot(_a0 context.Context, _a1 *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreSnapshotRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RestoreSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
+type MilvusServiceServer_RestoreSnapshot_Call struct {
+	*mock.Call
+}
+
+// RestoreSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RestoreSnapshotRequest
+func (_e *MilvusServiceServer_Expecter) RestoreSnapshot(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_RestoreSnapshot_Call {
+	return &MilvusServiceServer_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_RestoreSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RestoreSnapshotRequest)) *MilvusServiceServer_RestoreSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RestoreSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_RestoreSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MilvusServiceServer_RestoreSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error)) *MilvusServiceServer_RestoreSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RunAnalyzer provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) RunAnalyzer(_a0 context.Context, _a1 *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6218,6 +6618,65 @@ func (_c *MilvusServiceServer_UpdateCredential_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MilvusServiceServer_UpdateCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error)) *MilvusServiceServer_UpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) UpdateReplicateConfiguration(_a0 context.Context, _a1 *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReplicateConfiguration")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
+type MilvusServiceServer_UpdateReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// UpdateReplicateConfiguration is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateReplicateConfigurationRequest
+func (_e *MilvusServiceServer_Expecter) UpdateReplicateConfiguration(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_UpdateReplicateConfiguration_Call {
+	return &MilvusServiceServer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_UpdateReplicateConfiguration_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateReplicateConfigurationRequest)) *MilvusServiceServer_UpdateReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateReplicateConfigurationRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_UpdateReplicateConfiguration_Call) Return(_a0 *commonpb.Status, _a1 error) *MilvusServiceServer_UpdateReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error)) *MilvusServiceServer_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
