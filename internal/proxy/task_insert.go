@@ -183,7 +183,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	tr := timerecord.NewTimeRecorder("applyPK")
-	rowIDBegin, rowIDEnd, _ = it.idAllocator.Alloc(rowNums)
+	rowIDBegin, rowIDEnd, _ = AllocAutoID(it.idAllocator, rowNums)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.insertMsg.RowIDs = make([]UniqueID, rowNums)

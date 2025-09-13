@@ -1039,6 +1039,7 @@ common:
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
   UsingJSONStatsForQuery: true # Indicates whether to use json stats when query
+  clusterID: 0 # cluster id
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
