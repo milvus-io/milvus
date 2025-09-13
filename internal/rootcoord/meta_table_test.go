@@ -720,6 +720,29 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("new name is already an alias", func(t *testing.T) {
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					Name:         "old",
+					DBID:         util.DefaultDBID,
+					State:        pb.CollectionState_CollectionCreated,
+				},
+			},
+		}
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.aliases.insert(util.DefaultDBName, "new", 1)
+
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
 	t.Run("alter collection ok", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
@@ -1538,41 +1561,41 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 	})
 
 	t.Run("new collection name already exist-2", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByID",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, errors.New("error mock GetCollectionByID"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
-			catalog: catalog,
 			names:   newNameDb(),
 			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					Name:         "old",
+					State:        pb.CollectionState_CollectionCreated,
+				},
+				2: {
+					CollectionID: 2,
+					Name:         "new",
+					State:        pb.CollectionState_CollectionCreated,
+				},
+			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
 		meta.names.insert(util.DefaultDBName, "new", 2)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
 		assert.Error(t, err)
 	})
 
 	t.Run("alter collection fail", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollectionDB",
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		catalog.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1585,71 +1608,36 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				1: {
 					CollectionID: 1,
 					Name:         "old",
+					DBID:         util.DefaultDBID,
+					State:        pb.CollectionState_CollectionCreated,
 				},
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
-	t.Run("rename db name fails if aliases exists", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, merr.WrapErrCollectionNotFound("error"))
+	t.Run("new name is already an alias", func(t *testing.T) {
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
 				util.DefaultDBName: model.NewDefaultDatabase(nil),
-				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
-			catalog: catalog,
 			names:   newNameDb(),
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {
 					CollectionID: 1,
 					Name:         "old",
-				},
-			},
-		}
-		meta.names.insert(util.DefaultDBName, "old", 1)
-		meta.aliases.insert(util.DefaultDBName, "alias", 1)
-
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
-		assert.Error(t, err)
-	})
-
-	t.Run("rename db name fails if aliases exists", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, merr.WrapErrCollectionNotFound("error"))
-		meta := &MetaTable{
-			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(nil),
-				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
-			},
-			catalog: catalog,
-			names:   newNameDb(),
-			aliases: newNameDb(),
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				1: {
-					CollectionID: 1,
-					Name:         "old",
+					DBID:         util.DefaultDBID,
+					State:        pb.CollectionState_CollectionCreated,
 				},
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
 		meta.aliases.insert(util.DefaultDBName, "new", 1)
 
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "db1", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
@@ -1682,7 +1670,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "old", 1)
-		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "", "new", 1000)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
 		assert.NoError(t, err)
 
 		id, ok := meta.names.get(util.DefaultDBName, "new")
@@ -1729,6 +1717,60 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
 		assert.NoError(t, err)
 
+		id, ok := meta.names.get(util.DefaultDBName, "new")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), id)
+
+		coll, ok := meta.collID2Meta[1]
+		assert.True(t, ok)
+		assert.Equal(t, "new", coll.Name)
+	})
+
+	t.Run("rename collection rename collName with db encryption on", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
+
+		// Create database with encryption enabled
+		encryptedDBProperties := []*commonpb.KeyValuePair{
+			{Key: "cipher.enabled", Value: "true"},
+		}
+		encryptedDB := model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, encryptedDBProperties)
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: encryptedDB,
+			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					DBID:         1,
+					Name:         "old",
+				},
+			},
+		}
+		meta.names.insert(util.DefaultDBName, "old", 1)
+
+		// Should succeed when renaming within the same encrypted database
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
+		assert.NoError(t, err)
+
+		// Verify the collection name was updated
 		id, ok := meta.names.get(util.DefaultDBName, "new")
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), id)

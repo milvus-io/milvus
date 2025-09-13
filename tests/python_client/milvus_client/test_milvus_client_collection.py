@@ -3317,7 +3317,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=1][collection={name}]"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.rename_collection(client, name, "new_collection",
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -3330,7 +3330,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = "nonexisted"
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=1][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.rename_collection(client, collection_name, "new_collection",
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -3345,7 +3345,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name default:{collection_name} "
+        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database default"
                                                  f"with other collection name or alias"}
         self.rename_collection(client, collection_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
@@ -3362,7 +3362,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         self.drop_collection(client, collection_name)
-        error = {ct.err_code: 100, ct.err_msg: f"{collection_name}: collection not found[collection=default]"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.rename_collection(client, collection_name, "new_collection",
                                check_task=CheckTasks.err_res, check_items=error)
 
