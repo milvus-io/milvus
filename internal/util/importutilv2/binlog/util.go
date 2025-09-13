@@ -140,8 +140,9 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 		}
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(schema)
 	if storageVersion == storage.StorageV2 {
-		for _, field := range schema.GetFields() {
+		for _, field := range allFields {
 			if typeutil.IsVectorType(field.GetDataType()) {
 				if _, ok := insertLogs[field.GetFieldID()]; !ok {
 					// vector field must be provided
@@ -174,8 +175,9 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	// Here we copy the schema for reading part of collection's data. The storage.NewBinlogRecordReader() requires
 	// a schema and the schema must be consistent with the binglog files([]*datapb.FieldBinlog)
 	cloneSchema := typeutil.Clone(schema)
-	cloneSchema.Fields = []*schemapb.FieldSchema{} // the Fields will be reset according to the validInsertLogs
-	cloneSchema.EnableDynamicField = false         // this flag will be reset
+	cloneSchema.Fields = []*schemapb.FieldSchema{}                       // the Fields will be reset according to the validInsertLogs
+	cloneSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{} // the StructArrayFields will be reset according to the validInsertLogs
+	cloneSchema.EnableDynamicField = false                               // this flag will be reset
 
 	// this loop will reset the cloneSchema.Fields and return validInsertLogs
 	validInsertLogs := make(map[int64][]string)
@@ -203,6 +205,19 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 				cloneSchema.EnableDynamicField = true
 			}
 		}
+	}
+
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
+			id := field.GetFieldID()
+			logs, ok := insertLogs[id]
+			if !ok {
+				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", field.GetName()))
+			}
+
+			validInsertLogs[id] = logs
+		}
+		cloneSchema.StructArrayFields = append(cloneSchema.StructArrayFields, structArrayField)
 	}
 
 	return validInsertLogs, cloneSchema, nil

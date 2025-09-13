@@ -66,6 +66,45 @@ func (suite *RowParserSuite) setSchema(autoID bool, hasNullable bool, hasDynamic
 }
 
 func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
+	structArray := &schemapb.StructArrayFieldSchema{
+		FieldID: 110,
+		Name:    "struct_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     111,
+				Name:        "sub_float_vector",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "2",
+					},
+					{
+						Key:   "max_capacity",
+						Value: "4",
+					},
+				},
+			},
+			{
+				FieldID:     112,
+				Name:        "sub_str",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_capacity",
+						Value: "4",
+					},
+					{
+						Key:   "max_length",
+						Value: "8",
+					},
+				},
+			},
+		},
+	}
+
 	schema := &schemapb.CollectionSchema{
 		EnableDynamicField: suite.hasDynamic,
 		Fields: []*schemapb.FieldSchema{
@@ -294,6 +333,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				Nullable: suite.hasNullable,
 			},
 		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
 
 	if suite.hasDynamic {
@@ -338,6 +378,8 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal string
 	rawContent["json"] = "{\"a\": 1}"
 	rawContent["x"] = "2"
 	rawContent["$meta"] = "{\"dynamic\": \"dummy\"}"
+	rawContent["struct_array"] = "[{\"sub_float_vector\": \"[0.1, 0.2]\", \"sub_str\": \"hello1\"}, " +
+		"{\"sub_float_vector\": \"[0.3, 0.4]\", \"sub_str\": \"hello2\"}]"
 
 	rawContent[resetKey] = resetVal // reset a value
 	for _, deleteKey := range deleteKeys {
@@ -555,8 +597,86 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 			default:
 				continue
 			}
+		case schemapb.DataType_ArrayOfVector:
+			// Handle ArrayOfVector validation
+			vf, _ := val.(*schemapb.VectorField)
+			if vf.GetFloatVector() != nil {
+				// Parse expected vectors from raw string
+				var expectedVectors [][]float32
+				err := json.Unmarshal([]byte(rawVal), &expectedVectors)
+				suite.NoError(err)
+
+				// Flatten expected vectors
+				var expectedFlat []float32
+				for _, vec := range expectedVectors {
+					expectedFlat = append(expectedFlat, vec...)
+				}
+
+				suite.Equal(expectedFlat, vf.GetFloatVector().GetData())
+			}
 		default:
 			continue
+		}
+	}
+
+	// Validate struct array sub-fields
+	for _, structArray := range schema.GetStructArrayFields() {
+		// Check if struct_array was provided in the test data
+		if structArrayRaw, ok := c.content[structArray.GetName()]; ok {
+			// Parse the struct array JSON
+			var structArrayData []map[string]any
+			dec := json.NewDecoder(strings.NewReader(structArrayRaw))
+			dec.UseNumber()
+			err := dec.Decode(&structArrayData)
+			suite.NoError(err)
+
+			// For each sub-field in the struct array
+			for _, subField := range structArray.GetFields() {
+				val, ok := row[subField.GetFieldID()]
+				suite.True(ok, "Sub-field %s should exist in row", subField.GetName())
+
+				// Validate based on sub-field type
+				switch subField.GetDataType() {
+				case schemapb.DataType_ArrayOfVector:
+					vf, ok := val.(*schemapb.VectorField)
+					suite.True(ok, "Sub-field %s should be a VectorField", subField.GetName())
+
+					// Extract expected vectors from struct array data
+					var expectedVectors [][]float32
+					for _, elem := range structArrayData {
+						if vecStr, ok := elem[subField.GetName()].(string); ok {
+							var vec []float32
+							err := json.Unmarshal([]byte(vecStr), &vec)
+							suite.NoError(err)
+							expectedVectors = append(expectedVectors, vec)
+						}
+					}
+
+					// Flatten and compare
+					var expectedFlat []float32
+					for _, vec := range expectedVectors {
+						expectedFlat = append(expectedFlat, vec...)
+					}
+					suite.Equal(expectedFlat, vf.GetFloatVector().GetData())
+
+				case schemapb.DataType_Array:
+					sf, ok := val.(*schemapb.ScalarField)
+					suite.True(ok, "Sub-field %s should be a ScalarField", subField.GetName())
+
+					// Extract expected values from struct array data
+					var expectedValues []string
+					for _, elem := range structArrayData {
+						if v, ok := elem[subField.GetName()].(string); ok {
+							expectedValues = append(expectedValues, v)
+						}
+					}
+
+					// Compare based on element type
+					if subField.GetElementType() == schemapb.DataType_VarChar {
+						suite.Equal(expectedValues, sf.GetStringData().GetData())
+					}
+				}
+			}
 		}
 	}
 
@@ -596,6 +716,9 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "A/N/D nullable field varchar is nil", content: suite.genAllTypesRowData("varchar", suite.nullKey)})
 	suite.runValid(&testCase{name: "A/N/D nullable field json is nil", content: suite.genAllTypesRowData("json", suite.nullKey)})
 	suite.runValid(&testCase{name: "A/N/D nullable field array_int8 is nil", content: suite.genAllTypesRowData("array_int8", suite.nullKey)})
+
+	// Test struct array parsing
+	suite.runValid(&testCase{name: "A/N/D struct array valid", content: suite.genAllTypesRowData("x", "2")})
 
 	suite.nullKey = "ABCDEF"
 	suite.runValid(&testCase{name: "A/N/D null key 1", content: suite.genAllTypesRowData("int64", suite.nullKey)})

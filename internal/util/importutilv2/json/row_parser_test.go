@@ -57,6 +57,45 @@ func (suite *RowParserSuite) SetupTest() {
 }
 
 func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
+	structArray := &schemapb.StructArrayFieldSchema{
+		FieldID: 110,
+		Name:    "struct_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     111,
+				Name:        "sub_float_vector",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "2",
+					},
+					{
+						Key:   "max_capacity",
+						Value: "4",
+					},
+				},
+			},
+			{
+				FieldID:     112,
+				Name:        "sub_str",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_capacity",
+						Value: "4",
+					},
+					{
+						Key:   "max_length",
+						Value: "8",
+					},
+				},
+			},
+		},
+	}
+
 	schema := &schemapb.CollectionSchema{
 		EnableDynamicField: suite.hasDynamic,
 		Fields: []*schemapb.FieldSchema{
@@ -285,6 +324,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				Nullable: suite.hasNullable,
 			},
 		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
 
 	if suite.hasDynamic {
@@ -329,6 +369,18 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal any, d
 	rawContent["json"] = map[string]any{"a": 1}
 	rawContent["x"] = 6
 	rawContent["$meta"] = map[string]any{"dynamic": "dummy"}
+	rawContent["struct_array"] = []any{
+		// struct array element 1
+		map[string]any{
+			"sub_float_vector": []float32{0.1, 0.2},
+			"sub_str":          "hello1",
+		},
+		// struct array element 2
+		map[string]any{
+			"sub_float_vector": []float32{0.3, 0.4},
+			"sub_str":          "hello2",
+		},
+	}
 
 	rawContent[resetKey] = resetVal // reset a value
 	for _, deleteKey := range deleteKeys {
