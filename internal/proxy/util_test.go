@@ -2608,7 +2608,7 @@ func TestValidateFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "output field not found")
 	})
 
-	t.Run("Invalid function schema - nullable input field", func(t *testing.T) {
+	t.Run("Valid function schema - nullable input field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
@@ -2624,8 +2624,7 @@ func TestValidateFunction(t *testing.T) {
 			},
 		}
 		err := validateFunction(schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "function input field cannot be nullable")
+		assert.NoError(t, err)
 	})
 
 	t.Run("Invalid function schema - output field is primary key", func(t *testing.T) {
