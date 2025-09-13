@@ -6,6 +6,7 @@ package walimplstest
 import (
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -38,8 +39,8 @@ func unmarshalTestMessageID(data string) (testMessageID, error) {
 type testMessageID int64
 
 // WALName returns the name of message id related wal.
-func (id testMessageID) WALName() string {
-	return WALName
+func (id testMessageID) WALName() message.WALName {
+	return message.WALNameTest
 }
 
 // LT less than.
@@ -60,6 +61,14 @@ func (id testMessageID) EQ(other message.MessageID) bool {
 // Marshal marshal the message id.
 func (id testMessageID) Marshal() string {
 	return strconv.FormatInt(int64(id), 10)
+}
+
+// IntoProto marshal the message id to proto.
+func (id testMessageID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      id.Marshal(),
+		WALName: commonpb.WALName(id.WALName()),
+	}
 }
 
 func (id testMessageID) String() string {

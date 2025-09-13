@@ -156,7 +156,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	chunkManager := resource.Resource().ChunkManager()
 
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID)
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(mp.MsgID)
 		impl.RecoveryStorage.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
 			MessageID: messageID,
 			TimeTick:  mp.Timestamp,

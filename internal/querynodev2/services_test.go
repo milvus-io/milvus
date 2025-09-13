@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -53,8 +54,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -2420,12 +2421,14 @@ func TestQueryNodeService(t *testing.T) {
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
-	wal.EXPECT().WALName().Return(rmq.WALName).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)
 	scanner.EXPECT().Done().Return(make(chan struct{})).Maybe()
 	scanner.EXPECT().Error().Return(nil).Maybe()
 	scanner.EXPECT().Close().Return().Maybe()
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
+	paramtable.SetRole(typeutil.StandaloneRole)
+	paramtable.Get().MQCfg.Type.SwapTempValue(message.WALNameRocksmq.String())
+	util.InitAndSelectWALName()
 
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()

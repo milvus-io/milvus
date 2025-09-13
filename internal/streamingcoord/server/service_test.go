@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -19,6 +20,8 @@ func TestServer(t *testing.T) {
 	paramtable.Init()
 
 	params := paramtable.Get()
+
+	channel.RecoverPChannelStatsManager([]string{})
 
 	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	etcdEndpoints := strings.Split(endpoints, ",")

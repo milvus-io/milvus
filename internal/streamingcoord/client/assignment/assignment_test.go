@@ -15,10 +15,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestAssignmentService(t *testing.T) {
+	paramtable.Init()
+
 	s := mock_lazygrpc.NewMockService[streamingpb.StreamingCoordAssignmentServiceClient](t)
 	c := mock_streamingpb.NewMockStreamingCoordAssignmentServiceClient(t)
 	s.EXPECT().GetService(mock.Anything).Return(c, nil)

@@ -14,6 +14,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_walmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -59,9 +60,9 @@ func TestCreateProduceServer(t *testing.T) {
 
 	// Return error if create scanner failed.
 	l := mock_wal.NewMockWAL(t)
-	l.EXPECT().WALName().Return("test")
+	l.EXPECT().WALName().Return(message.WALNameTest)
 	manager.ExpectedCalls = nil
-	l.EXPECT().WALName().Return("test")
+	l.EXPECT().WALName().Return(message.WALNameTest)
 	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1}).Return(l, nil)
 	grpcProduceServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
 	assertCreateProduceServerFail(t, manager, grpcProduceServer)
@@ -118,7 +119,7 @@ func TestProduceSendArm(t *testing.T) {
 		RequestId: 1,
 		Response: &streamingpb.ProduceMessageResponse_Result{
 			Result: &streamingpb.ProduceMessageResponseResult{
-				Id: &messagespb.MessageID{
+				Id: &commonpb.MessageID{
 					Id: walimplstest.NewTestMessageID(1).Marshal(),
 				},
 			},
@@ -151,7 +152,7 @@ func TestProduceSendArm(t *testing.T) {
 		RequestId: 1,
 		Response: &streamingpb.ProduceMessageResponse_Result{
 			Result: &streamingpb.ProduceMessageResponseResult{
-				Id: &messagespb.MessageID{
+				Id: &commonpb.MessageID{
 					Id: walimplstest.NewTestMessageID(1).Marshal(),
 				},
 			},

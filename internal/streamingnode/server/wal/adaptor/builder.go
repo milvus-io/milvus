@@ -3,6 +3,7 @@ package adaptor
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 )
 
@@ -20,7 +21,7 @@ type builderAdaptorImpl struct {
 	interceptorBuilders []interceptors.InterceptorBuilder
 }
 
-func (b builderAdaptorImpl) Name() string {
+func (b builderAdaptorImpl) Name() message.WALName {
 	return b.builder.Name()
 }
 

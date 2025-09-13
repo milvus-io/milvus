@@ -37,9 +37,7 @@ func TestRecoveryStorage(t *testing.T) {
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	cp := &streamingpb.WALCheckpoint{
-		MessageId: &messagespb.MessageID{
-			Id: rmq.NewRmqID(1).Marshal(),
-		},
+		MessageId:     rmq.NewRmqID(1).IntoProto(),
 		TimeTick:      1,
 		RecoveryMagic: 0,
 	}
@@ -233,8 +231,8 @@ func (ts *testRecoveryStream) Close() error {
 	return nil
 }
 
-func (b *streamBuilder) WALName() string {
-	return "rocksmq"
+func (b *streamBuilder) WALName() message.WALName {
+	return message.WALNameRocksmq
 }
 
 func (b *streamBuilder) Channel() types.PChannelInfo {

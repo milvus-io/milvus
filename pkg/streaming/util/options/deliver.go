@@ -44,9 +44,7 @@ func DeliverPolicyLatest() DeliverPolicy {
 func DeliverPolicyStartFrom(messageID message.MessageID) DeliverPolicy {
 	return &streamingpb.DeliverPolicy{
 		Policy: &streamingpb.DeliverPolicy_StartFrom{
-			StartFrom: &messagespb.MessageID{
-				Id: messageID.Marshal(),
-			},
+			StartFrom: messageID.IntoProto(),
 		},
 	}
 }
@@ -55,9 +53,7 @@ func DeliverPolicyStartFrom(messageID message.MessageID) DeliverPolicy {
 func DeliverPolicyStartAfter(messageID message.MessageID) DeliverPolicy {
 	return &streamingpb.DeliverPolicy{
 		Policy: &streamingpb.DeliverPolicy_StartAfter{
-			StartAfter: &messagespb.MessageID{
-				Id: messageID.Marshal(),
-			},
+			StartAfter: messageID.IntoProto(),
 		},
 	}
 }

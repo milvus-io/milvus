@@ -3,11 +3,15 @@ package wal
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
-type AppendResult = types.AppendResult
+type (
+	AppendResult        = types.AppendResult
+	ReplicateCheckpoint = utility.ReplicateCheckpoint
+)
 
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
@@ -29,7 +33,7 @@ type WAL interface {
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type ROWAL interface {
 	// WALName returns the name of the wal.
-	WALName() string
+	WALName() message.WALName
 
 	// Metrics returns the metrics of the wal.
 	Metrics() types.WALMetrics

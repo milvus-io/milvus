@@ -3,7 +3,9 @@
 package mock_message
 
 import (
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -62,6 +64,53 @@ func (_c *MockMessageID_EQ_Call) Return(_a0 bool) *MockMessageID_EQ_Call {
 }
 
 func (_c *MockMessageID_EQ_Call) RunAndReturn(run func(message.MessageID) bool) *MockMessageID_EQ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IntoProto provides a mock function with no fields
+func (_m *MockMessageID) IntoProto() *commonpb.MessageID {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IntoProto")
+	}
+
+	var r0 *commonpb.MessageID
+	if rf, ok := ret.Get(0).(func() *commonpb.MessageID); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.MessageID)
+		}
+	}
+
+	return r0
+}
+
+// MockMessageID_IntoProto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IntoProto'
+type MockMessageID_IntoProto_Call struct {
+	*mock.Call
+}
+
+// IntoProto is a helper method to define mock.On call
+func (_e *MockMessageID_Expecter) IntoProto() *MockMessageID_IntoProto_Call {
+	return &MockMessageID_IntoProto_Call{Call: _e.mock.On("IntoProto")}
+}
+
+func (_c *MockMessageID_IntoProto_Call) Run(run func()) *MockMessageID_IntoProto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMessageID_IntoProto_Call) Return(_a0 *commonpb.MessageID) *MockMessageID_IntoProto_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMessageID_IntoProto_Call) RunAndReturn(run func() *commonpb.MessageID) *MockMessageID_IntoProto_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -249,18 +298,18 @@ func (_c *MockMessageID_String_Call) RunAndReturn(run func() string) *MockMessag
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockMessageID) WALName() string {
+func (_m *MockMessageID) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -283,12 +332,12 @@ func (_c *MockMessageID_WALName_Call) Run(run func()) *MockMessageID_WALName_Cal
 	return _c
 }
 
-func (_c *MockMessageID_WALName_Call) Return(_a0 string) *MockMessageID_WALName_Call {
+func (_c *MockMessageID_WALName_Call) Return(_a0 message.WALName) *MockMessageID_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockMessageID_WALName_Call) RunAndReturn(run func() string) *MockMessageID_WALName_Call {
+func (_c *MockMessageID_WALName_Call) RunAndReturn(run func() message.WALName) *MockMessageID_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }
