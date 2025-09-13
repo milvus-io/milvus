@@ -1,9 +1,0 @@
-{
-  "name": "azure-blob-storage",
-  "version-string": "1.0.0",
-  "dependencies": [
-    "azure-identity-cpp",
-    "azure-storage-blobs-cpp",
-    "gtest"
-  ]
-}

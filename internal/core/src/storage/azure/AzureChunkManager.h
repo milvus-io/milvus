@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string>
 #include <vector>
-#include "storage/azure-blob-storage/AzureBlobChunkManager.h"
+#include "AzureBlobChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "log/Log.h"

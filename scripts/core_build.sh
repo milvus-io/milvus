@@ -102,7 +102,7 @@ USE_DYNAMIC_SIMD="ON"
 USE_OPENDAL="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
-ENABLE_AZURE_FS="OFF"
+ENABLE_AZURE_FS="ON"
 : "${ENABLE_GCP_NATIVE:="OFF"}"
 
 while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
@@ -189,37 +189,7 @@ usage:
   esac
 done
 
-if [ -z "$BUILD_WITHOUT_AZURE" ]; then
-  AZURE_BUILD_DIR="${ROOT_DIR}/cmake_build/azure"
-  if [ ! -d ${AZURE_BUILD_DIR} ]; then
-    mkdir -p ${AZURE_BUILD_DIR}
-  fi
-  pushd ${AZURE_BUILD_DIR}
-  env bash ${ROOT_DIR}/scripts/azure_build.sh -p ${INSTALL_PREFIX} -s ${ROOT_DIR}/internal/core/src/storage/azure-blob-storage -t ${BUILD_UNITTEST}
-  if [ ! -e libblob-chunk-manager* ]; then
-    echo "build blob-chunk-manager fail..."
-    cat vcpkg-bootstrap.log
-    exit 1
-  fi
-  if [ ! -e ${INSTALL_PREFIX}/lib/libblob-chunk-manager* ]; then
-    echo "install blob-chunk-manager fail..."
-    exit 1
-  fi
-  popd
-  SYSTEM_NAME=$(uname -s)
-  if [[ ${SYSTEM_NAME} == "Darwin" ]]; then
-    SYSTEM_NAME="osx"
-  elif [[ ${SYSTEM_NAME} == "Linux" ]]; then
-    SYSTEM_NAME="linux"
-  fi
-  ARCHITECTURE=$(uname -m)
-  if [[ ${ARCHITECTURE} == "x86_64" ]]; then
-    ARCHITECTURE="x64"
-  elif [[ ${ARCHITECTURE} == "aarch64" ]]; then
-    ARCHITECTURE="arm64"
-  fi
-  VCPKG_TARGET_TRIPLET=${ARCHITECTURE}-${SYSTEM_NAME}
-fi
+# Azure SDK build has been removed as we now use Arrow with Azure support directly
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
@@ -266,10 +236,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
-if [ -z "$BUILD_WITHOUT_AZURE" ]; then
-CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
--DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
-fi
+# Azure build variables removed as we now use Arrow with Azure support directly
 CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 
 echo "CC $CC"
