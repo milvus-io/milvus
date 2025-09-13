@@ -33,6 +33,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -40,6 +41,17 @@ func Test_alterCollectionTask_Prepare(t *testing.T) {
 		task := &alterCollectionTask{Req: &milvuspb.AlterCollectionRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection}}}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
+	})
+
+	t.Run("banned_delete_keys", func(t *testing.T) {
+		task := &alterCollectionTask{Req: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+			CollectionName: "test_collection",
+			DeleteKeys:     []string{common.EnableDynamicSchemaKey},
+		}}
+		err := task.Prepare(context.Background())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("normal case", func(t *testing.T) {

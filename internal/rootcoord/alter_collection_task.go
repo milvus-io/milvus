@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -45,6 +46,10 @@ type alterCollectionTask struct {
 func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 	if a.Req.GetCollectionName() == "" {
 		return errors.New("alter collection failed, collection name does not exists")
+	}
+
+	if funcutil.SliceContain(a.Req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
+		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
 
 	return nil
