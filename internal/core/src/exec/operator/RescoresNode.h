@@ -72,6 +72,7 @@ class PhyRescoresNode : public Operator {
 
  private:
     std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
+    proto::plan::ScoreOption option_;
     bool is_finished_{false};
 };
 }  // namespace milvus::exec
