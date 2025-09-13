@@ -316,6 +316,9 @@ func (node *QueryNode) InitSegcore() error {
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
+	cEnableParquetStatsSkipIndex := C.bool(paramtable.Get().CommonCfg.EnableNamespace.GetAsBool())
+	C.SetDefaultEnableParquetStatsSkipIndex(cEnableParquetStatsSkipIndex)
+
 	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
 	C.SetExprResCacheEnable(cExprResCacheEnabled)
 

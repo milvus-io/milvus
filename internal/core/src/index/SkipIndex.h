@@ -21,7 +21,8 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
-
+#include "parquet/statistics.h"
+#include "parquet/types.h"
 namespace milvus {
 
 using Metrics =
@@ -65,6 +66,163 @@ struct FieldChunkMetrics {
     CellByteSize() const {
         return {0, 0};
     }
+};
+
+class FieldChunkMetricsTranslatorFromStatistics
+    : public cachinglayer::Translator<FieldChunkMetrics> {
+ public:
+    FieldChunkMetricsTranslatorFromStatistics(
+        int64_t segment_id,
+        FieldId field_id,
+        milvus::DataType data_type,
+        std::vector<std::shared_ptr<parquet::Statistics>> statistics)
+        : key_(fmt::format("skip_seg_{}_f_{}", segment_id, field_id.get())),
+          data_type_(data_type),
+          meta_(cachinglayer::StorageType::MEMORY,
+                milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
+                milvus::cachinglayer::CellDataType::OTHER,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                false) {
+        for (auto& statistic : statistics) {
+            auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
+            switch (data_type) {
+                case milvus::DataType::INT8: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::Int32Type>>(
+                        statistic);
+                    chunk_metrics->min_ =
+                        static_cast<int8_t>(typed_statistics->min());
+                    chunk_metrics->max_ =
+                        static_cast<int8_t>(typed_statistics->max());
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::INT16: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::Int32Type>>(
+                        statistic);
+                    chunk_metrics->min_ =
+                        static_cast<int16_t>(typed_statistics->min());
+                    chunk_metrics->max_ =
+                        static_cast<int16_t>(typed_statistics->max());
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::INT32: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::Int32Type>>(
+                        statistic);
+                    chunk_metrics->min_ = typed_statistics->min();
+                    chunk_metrics->max_ = typed_statistics->max();
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::INT64: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::Int64Type>>(
+                        statistic);
+                    chunk_metrics->min_ = typed_statistics->min();
+                    chunk_metrics->max_ = typed_statistics->max();
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::FLOAT: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::FloatType>>(
+                        statistic);
+                    chunk_metrics->min_ = typed_statistics->min();
+                    chunk_metrics->max_ = typed_statistics->max();
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::DOUBLE: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::DoubleType>>(
+                        statistic);
+                    chunk_metrics->min_ = typed_statistics->min();
+                    chunk_metrics->max_ = typed_statistics->max();
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                case milvus::DataType::VARCHAR: {
+                    auto typed_statistics = std::dynamic_pointer_cast<
+                        parquet::TypedStatistics<parquet::ByteArrayType>>(
+                        statistic);
+                    chunk_metrics->min_ =
+                        std::string(std::string_view(typed_statistics->min()));
+                    chunk_metrics->max_ =
+                        std::string(std::string_view(typed_statistics->max()));
+                    chunk_metrics->null_count_ = typed_statistics->null_count();
+                    chunk_metrics->hasValue_ = true;
+                    break;
+                }
+                default: {
+                    ThrowInfo(
+                        ErrorCode::UnexpectedError,
+                        fmt::format("Unsupported data type: {}", data_type));
+                }
+            }
+            cells_.emplace_back(std::move(chunk_metrics));
+        }
+    }
+
+    size_t
+    num_cells() const override {
+        return cells_.size();
+    }
+
+    milvus::cachinglayer::cid_t
+    cell_id_of(milvus::cachinglayer::uid_t uid) const override {
+        return uid;
+    }
+
+    std::pair<milvus::cachinglayer::ResourceUsage,
+              milvus::cachinglayer::ResourceUsage>
+    estimated_byte_size_of_cell(
+        milvus::cachinglayer::cid_t cid) const override {
+        // TODO(tiered storage 1): provide a better estimation.
+        return {{0, 0}, {0, 0}};
+    }
+
+    const std::string&
+    key() const override {
+        return key_;
+    }
+
+    std::vector<std::pair<milvus::cachinglayer::cid_t,
+                          std::unique_ptr<FieldChunkMetrics>>>
+    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override {
+        std::vector<std::pair<milvus::cachinglayer::cid_t,
+                              std::unique_ptr<FieldChunkMetrics>>>
+            cells;
+        cells.reserve(cids.size());
+        for (auto cid : cids) {
+            auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
+            chunk_metrics->min_ = cells_[cid]->min_;
+            chunk_metrics->max_ = cells_[cid]->max_;
+            chunk_metrics->null_count_ = cells_[cid]->null_count_;
+            chunk_metrics->hasValue_ = cells_[cid]->hasValue_;
+            cells.emplace_back(cid, std::move(chunk_metrics));
+        }
+        return cells;
+    }
+
+    milvus::cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
+
+ private:
+    std::string key_;
+    milvus::DataType data_type_;
+    cachinglayer::Meta meta_;
+    std::vector<std::unique_ptr<FieldChunkMetrics>> cells_;
 };
 
 class FieldChunkMetricsTranslator
@@ -252,6 +410,23 @@ class SkipIndex {
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
     }
 
+    void
+    LoadSkipFromStatistics(
+        int64_t segment_id,
+        milvus::FieldId field_id,
+        milvus::DataType data_type,
+        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+        auto translator =
+            std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
+                segment_id, field_id, data_type, statistics);
+        auto cache_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<FieldChunkMetrics>(std::move(translator));
+
+        std::unique_lock lck(mutex_);
+        fieldChunkMetrics_[field_id] = std::move(cache_slot);
+    }
+
  private:
     const cachinglayer::PinWrapper<const FieldChunkMetrics*>
     GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
@@ -374,6 +549,7 @@ class SkipIndex {
         FieldId,
         std::shared_ptr<cachinglayer::CacheSlot<FieldChunkMetrics>>>
         fieldChunkMetrics_;
+
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus

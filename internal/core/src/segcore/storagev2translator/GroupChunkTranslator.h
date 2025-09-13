@@ -26,6 +26,7 @@
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/GroupChunk.h"
+#include "parquet/metadata.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
@@ -75,6 +76,16 @@ class GroupChunkTranslator
         return &meta_;
     }
 
+    std::vector<std::shared_ptr<parquet::FileMetaData>>
+    parquet_file_metas() const {
+        return parquet_file_metadata_;
+    }
+
+    std::map<int64_t, milvus_storage::ColumnOffset>
+    field_id_mapping() const {
+        return field_id_mapping_;
+    }
+
  private:
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::shared_ptr<arrow::Table>& table,
@@ -96,6 +107,8 @@ class GroupChunkTranslator
     bool use_mmap_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    std::vector<std::shared_ptr<parquet::FileMetaData>> parquet_file_metadata_;
+    std::map<int64_t, milvus_storage::ColumnOffset> field_id_mapping_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

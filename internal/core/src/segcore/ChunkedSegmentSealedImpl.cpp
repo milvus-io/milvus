@@ -32,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
@@ -244,6 +245,39 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     }
 }
 
+std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
+parse_parquet_statistics(
+    const std::vector<std::shared_ptr<parquet::FileMetaData>>& file_metas,
+    const std::map<int64_t, milvus_storage::ColumnOffset>& field_id_mapping,
+    int64_t field_id) {
+    ChunkedSegmentSealedImpl::ParquetStatistics statistics;
+    if (file_metas.size() == 0) {
+        return std::nullopt;
+    }
+    AssertInfo(field_id_mapping.find(field_id) != field_id_mapping.end(),
+               "field id {} not found in field id mapping",
+               field_id);
+    auto offset = field_id_mapping.at(field_id);
+
+    for (auto& file_meta : file_metas) {
+        auto num_row_groups = file_meta->num_row_groups();
+        for (auto i = 0; i < num_row_groups; i++) {
+            auto row_group = file_meta->RowGroup(i);
+            auto column_chunk = row_group->ColumnChunk(offset.col_index);
+            if (!column_chunk->is_stats_set()) {
+                AssertInfo(statistics.size() == 0,
+                           "Statistics is not set for some column chunks "
+                           "for field {}",
+                           field_id);
+                continue;
+            }
+            auto stats = column_chunk->statistics();
+            statistics.push_back(stats);
+        }
+    }
+    return statistics;
+}
+
 void
 ChunkedSegmentSealedImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& load_info) {
@@ -306,6 +340,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
+        auto file_metas = translator->parquet_file_metas();
+        auto field_id_mapping = translator->field_id_mapping();
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -315,9 +351,21 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             auto column = std::make_shared<ProxyChunkColumn>(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
+            std::optional<ParquetStatistics> statistics_opt;
+            if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
+                statistics_opt = parse_parquet_statistics(
+                    file_metas, field_id_mapping, field_id.get());
+            }
 
-            load_field_data_common(
-                field_id, column, num_rows, data_type, info.enable_mmap, true);
+            load_field_data_common(field_id,
+                                   column,
+                                   num_rows,
+                                   data_type,
+                                   info.enable_mmap,
+                                   true,
+                                   ENABLE_PARQUET_STATS_SKIP_INDEX
+                                       ? statistics_opt
+                                       : std::nullopt);
             if (field_id == TimestampFieldID) {
                 auto timestamp_proxy_column = get_column(TimestampFieldID);
                 AssertInfo(timestamp_proxy_column != nullptr,
@@ -2339,7 +2387,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     size_t num_rows,
     DataType data_type,
     bool enable_mmap,
-    bool is_proxy_column) {
+    bool is_proxy_column,
+    std::optional<ParquetStatistics> statistics) {
     {
         std::unique_lock lck(mutex_);
         AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
@@ -2368,13 +2417,18 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
-        if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
-            LoadSkipIndex(field_id, data_type, column);
-        }
         if (IsVariableDataType(data_type)) {
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, column->DataByteSize());
+        }
+    }
+    if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
+        if (statistics) {
+            LoadSkipIndexFromStatistics(
+                field_id, data_type, statistics.value());
+        } else {
+            LoadSkipIndex(field_id, data_type, column);
         }
     }
 
