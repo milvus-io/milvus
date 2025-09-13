@@ -205,7 +205,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     pk_range(proto::plan::OpType op,
              const PkType& pk,
-             Timestamp timestamp,
              BitsetTypeView& bitset) const override;
 
     template <typename Condition>

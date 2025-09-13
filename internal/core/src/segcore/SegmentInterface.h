@@ -542,7 +542,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual void
     pk_range(proto::plan::OpType op,
              const PkType& pk,
-             Timestamp timestamp,
              BitsetTypeView& bitset) const = 0;
 
  protected:
