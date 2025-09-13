@@ -44,6 +44,13 @@ class InterimSealedIndexTranslator
     Meta*
     meta() override;
 
+    // TODO: implement this
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        return 0;
+    }
+
  private:
     std::shared_ptr<ChunkedColumnInterface> vec_data_;
     std::string segment_id_;

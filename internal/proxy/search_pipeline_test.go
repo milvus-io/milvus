@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
@@ -192,7 +193,7 @@ func (s *SearchPipelineSuite) TestRequeryOp() {
 
 	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 		FieldsData: []*schemapb.FieldData{f1},
-	}, nil).Build()
+	}, segcore.StorageCost{}, nil).Build()
 	defer mocker.UnPatch()
 
 	op := requeryOperator{
@@ -206,7 +207,7 @@ func (s *SearchPipelineSuite) TestRequeryOp() {
 			},
 		},
 	}
-	_, err := op.run(context.Background(), s.span, ids, []string{"int64"})
+	_, err := op.run(context.Background(), s.span, ids, segcore.StorageCost{})
 	s.NoError(err)
 }
 
@@ -296,9 +297,8 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 	}
 	pipeline, err := newPipeline(searchPipe, task)
 	s.NoError(err)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{
-		genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false),
-	})
+	sr := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
+	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{sr}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 250})
 	s.NoError(err)
 	s.NotNil(results)
 	s.NotNil(results.Results)
@@ -314,6 +314,8 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(100), storageCost.ScannedRemoteBytes)
+	s.Equal(int64(250), storageCost.ScannedTotalBytes)
 	fmt.Println(results)
 }
 
@@ -355,14 +357,14 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 	f2.FieldId = 100
 	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 		FieldsData: []*schemapb.FieldData{f1, f2},
-	}, nil).Build()
+	}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 200}, nil).Build()
 	defer mocker.UnPatch()
 
 	pipeline, err := newPipeline(searchWithRequeryPipe, task)
 	s.NoError(err)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{
+	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{
 		genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false),
-	})
+	}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 200})
 	s.NoError(err)
 	s.NotNil(results)
 	s.NotNil(results.Results)
@@ -378,6 +380,8 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(200), storageCost.ScannedRemoteBytes)
+	s.Equal(int64(400), storageCost.ScannedTotalBytes)
 }
 
 func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
@@ -431,7 +435,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 	s.NoError(err)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults})
+	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
 
 	s.NoError(err)
 	s.NotNil(results)
@@ -506,14 +510,14 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 	f2.FieldId = 100
 	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 		FieldsData: []*schemapb.FieldData{f1, f2},
-	}, nil).Build()
+	}, segcore.StorageCost{}, nil).Build()
 	defer mocker.UnPatch()
 
 	pipeline, err := newPipeline(searchWithRerankRequeryPipe, task)
 	s.NoError(err)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults})
+	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
 
 	s.NoError(err)
 	s.NotNil(results)
@@ -530,6 +534,8 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(0), storageCost.ScannedRemoteBytes)
+	s.Equal(int64(0), storageCost.ScannedTotalBytes)
 }
 
 func (s *SearchPipelineSuite) TestHybridSearchPipe() {
@@ -545,7 +551,7 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 
 	f1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	f2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{f1, f2})
+	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{f1, f2}, segcore.StorageCost{ScannedRemoteBytes: 900, ScannedTotalBytes: 2000})
 
 	s.NoError(err)
 	s.NotNil(results)
@@ -558,6 +564,8 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 	s.Len(results.Results.Ids.GetIntId().Data, 20) // 2 queries * 10 topk
 	s.NotNil(results.Results.Scores)
 	s.Len(results.Results.Scores, 20) // 2 queries * 10 topk
+	s.Equal(int64(900), storageCost.ScannedRemoteBytes)
+	s.Equal(int64(2000), storageCost.ScannedTotalBytes)
 }
 
 func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
@@ -647,7 +655,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	f2.FieldId = 100
 	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 		FieldsData: []*schemapb.FieldData{f1, f2},
-	}, nil).Build()
+	}, segcore.StorageCost{}, nil).Build()
 	defer mocker.UnPatch()
 
 	pipeline, err := newPipeline(hybridSearchWithRequeryPipe, task)
@@ -655,7 +663,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 
 	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
-	results, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{d1, d2})
+	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{d1, d2}, segcore.StorageCost{})
 
 	s.NoError(err)
 	s.NotNil(results)

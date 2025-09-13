@@ -48,15 +48,16 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 InterimSealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    auto size = vec_data_->DataByteSize();
-    auto row_count = vec_data_->NumRows();
+    int64_t size = vec_data_->DataByteSize();
+    int64_t row_count = vec_data_->NumRows();
     // TODO: hack, move these estimate logic to knowhere
     // ignore the size of centroids
     if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
-        auto vec_size = size_t(index::GetValueFromConfig<int>(
-                                   build_config_, knowhere::indexparam::SUB_DIM)
-                                   .value() /
-                               8 * dim_);
+        int64_t vec_size =
+            int64_t(index::GetValueFromConfig<int>(
+                        build_config_, knowhere::indexparam::SUB_DIM)
+                        .value() /
+                    8 * dim_);
         if (build_config_[knowhere::indexparam::REFINE_TYPE] ==
             knowhere::RefineType::UINT8_QUANT) {
             vec_size += dim_ * 1;
@@ -70,7 +71,7 @@ InterimSealedIndexTranslator::estimated_byte_size_of_cell(
                 {static_cast<int64_t>(vec_size * row_count + size * 0.5), 0}};
     } else if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         // fp16/bf16 all use float32 to build index
-        auto fp32_size = row_count * sizeof(float) * dim_;
+        int64_t fp32_size = row_count * sizeof(float) * dim_;
         return {{fp32_size, 0},
                 {static_cast<int64_t>(fp32_size + fp32_size * 0.5), 0}};
     } else {
@@ -95,6 +96,7 @@ InterimSealedIndexTranslator::get_cells(
                                               vec_data_](size_t id) {
             const void* data;
             int64_t data_id = id;
+
             field_raw_data_ptr->BulkValueAt(
                 [&data, &data_id](const char* value, size_t i) {
                     data = static_cast<const void*>(value);

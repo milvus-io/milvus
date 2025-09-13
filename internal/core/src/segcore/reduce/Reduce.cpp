@@ -55,10 +55,11 @@ ReduceHelper::Initialize() {
 
 void
 ReduceHelper::Reduce() {
-    FillPrimaryKey();
+    GetTotalStorageCost();
+    FillPrimaryKey();  // retrieve primary keys, need to record the cost
     ReduceResultData();
     RefreshSearchResults();
-    FillEntryData();
+    FillEntryData();  // retrieve other scalar data, need to record the cost
 }
 
 void
@@ -68,9 +69,12 @@ ReduceHelper::Marshal() {
     search_result_data_blobs_ =
         std::make_unique<milvus::segcore::SearchResultDataBlobs>();
     search_result_data_blobs_->blobs.resize(num_slices_);
+    search_result_data_blobs_->costs.resize(num_slices_);
     for (int i = 0; i < num_slices_; i++) {
-        auto proto = GetSearchResultDataSlice(i);
-        search_result_data_blobs_->blobs[i] = proto;
+        auto [proto, cost] =
+            GetSearchResultDataSlice(i, total_search_storage_cost_);
+        search_result_data_blobs_->blobs[i] = std::move(proto);
+        search_result_data_blobs_->costs[i] = cost;
     }
 }
 
@@ -138,7 +142,8 @@ ReduceHelper::FillPrimaryKey() {
                   search_result->seg_offsets_.size());
         auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
-            segment->FillPrimaryKeys(plan_, *search_result);
+            // TODO: support storage usage recording in op_context
+            segment->FillPrimaryKeys(plan_, op_context_, *search_result);
             search_results_[valid_index++] = search_result;
         }
     }
@@ -192,7 +197,8 @@ ReduceHelper::FillEntryData() {
             search_result->segment_);
         std::chrono::high_resolution_clock::time_point get_target_entry_start =
             std::chrono::high_resolution_clock::now();
-        segment->FillTargetEntry(plan_, *search_result);
+        // TODO: support storage usage recording in op_context
+        segment->FillTargetEntry(plan_, op_context_, *search_result);
         std::chrono::high_resolution_clock::time_point get_target_entry_end =
             std::chrono::high_resolution_clock::now();
         double get_entry_cost =
@@ -307,8 +313,9 @@ ReduceHelper::FillOtherData(
     //simple batch reduce do nothing for other data
 }
 
-std::vector<char>
-ReduceHelper::GetSearchResultDataSlice(int slice_index) {
+std::pair<std::vector<char>, StorageCost>
+ReduceHelper::GetSearchResultDataSlice(const int slice_index,
+                                       const StorageCost& total_cost) {
     auto nq_begin = slice_nqs_prefix_sum_[slice_index];
     auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
 
@@ -322,6 +329,8 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                         search_result->topk_per_nq_prefix_sum_[nq_begin];
         all_search_count += search_result->total_data_cnt_;
     }
+    // calculate the cost based on this slice's nq and total nq
+    StorageCost cost = total_cost * (1.0 * (nq_end - nq_begin) / total_nq_);
 
     auto search_result_data =
         std::make_unique<milvus::proto::schema::SearchResultData>();
@@ -448,13 +457,19 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());
     }
-
     // SearchResultData to blob
     auto size = search_result_data->ByteSizeLong();
     auto buffer = std::vector<char>(size);
     search_result_data->SerializePartialToArray(buffer.data(), size);
 
-    return buffer;
+    return {std::move(buffer), cost};
+}
+
+void
+ReduceHelper::GetTotalStorageCost() {
+    for (auto search_result : search_results_) {
+        total_search_storage_cost_ += search_result->search_storage_cost_;
+    }
 }
 
 }  // namespace milvus::segcore

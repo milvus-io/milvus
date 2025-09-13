@@ -75,8 +75,10 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.num_rows,
             index_load_info_.dim);
     // this is an estimation, error could be up to 20%.
-    return {{request.final_memory_cost, request.final_disk_cost},
-            {request.max_memory_cost, request.max_disk_cost}};
+    return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
+                                                request.final_disk_cost),
+            milvus::cachinglayer::ResourceUsage(request.max_memory_cost,
+                                                request.max_disk_cost)};
 }
 
 const std::string&
@@ -100,7 +102,8 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
             index_load_info_.dim);
-    index->SetCellSize({request.final_memory_cost, request.final_disk_cost});
+    index->SetCellSize(milvus::cachinglayer::ResourceUsage(
+        request.final_memory_cost, request.final_disk_cost));
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");

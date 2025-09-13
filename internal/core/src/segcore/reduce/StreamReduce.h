@@ -196,8 +196,12 @@ class StreamReducerHelper {
     void
     AssembleMergedResult();
 
-    std::vector<char>
-    GetSearchResultDataSlice(int slice_index);
+    std::pair<std::vector<char>, StorageCost>
+    GetSearchResultDataSlice(const int slice_index,
+                             const StorageCost& total_cost);
+
+    void
+    GetTotalStorageCost();
 
     void
     CleanReduceStatus();
@@ -218,5 +222,7 @@ class StreamReducerHelper {
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     int64_t total_nq_{0};
+    milvus::OpContext op_context_;
+    milvus::StorageCost total_search_storage_cost_;
 };
 }  // namespace milvus::segcore

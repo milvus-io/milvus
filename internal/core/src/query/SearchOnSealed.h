@@ -26,6 +26,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const size_t* query_lims,
                     int64_t num_queries,
                     const BitsetView& view,
+                    milvus::OpContext& op_context,
                     SearchResult& search_result);
 
 void
@@ -38,6 +39,7 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t num_queries,
                      int64_t row_count,
                      const BitsetView& bitset,
+                     milvus::OpContext& op_context,
                      SearchResult& result);
 
 }  // namespace milvus::query

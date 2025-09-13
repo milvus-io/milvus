@@ -14,6 +14,7 @@
 #include "common/BitsetView.h"
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
+#include "common/OpContext.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 
@@ -30,7 +31,8 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const std::map<std::string, std::string>& index_info,
                  const BitsetView& bitset,
                  DataType data_type,
-                 DataType element_type);
+                 DataType element_type,
+                 milvus::OpContext& op_context);
 
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 GetBruteForceSearchIterators(

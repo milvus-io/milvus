@@ -89,6 +89,8 @@ func (c *RetrieveResultCache) merge(result *internalpb.RetrieveResults) {
 	}
 	c.result.AllRetrieveCount = c.result.AllRetrieveCount + result.AllRetrieveCount
 	c.result.CostAggregation = mergeCostAggregation(c.result.GetCostAggregation(), result.GetCostAggregation())
+	c.result.ScannedRemoteBytes = c.result.GetScannedRemoteBytes() + result.GetScannedRemoteBytes()
+	c.result.ScannedTotalBytes = c.result.GetScannedTotalBytes() + result.GetScannedTotalBytes()
 	c.size = proto.Size(c.result)
 }
 
@@ -160,6 +162,8 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 		}
 	}
 	results[len(results)-1].AllRetrieveCount = result.AllRetrieveCount
+	results[len(results)-1].ScannedRemoteBytes = result.GetScannedRemoteBytes()
+	results[len(results)-1].ScannedTotalBytes = result.GetScannedTotalBytes()
 	results[len(results)-1].CostAggregation = result.CostAggregation
 	return results
 }

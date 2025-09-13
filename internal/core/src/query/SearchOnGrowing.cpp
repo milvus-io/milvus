@@ -31,6 +31,7 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                         const void* query_data,
                         int64_t num_queries,
                         const BitsetView& bitset,
+                        milvus::OpContext& op_context,
                         SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
@@ -62,6 +63,7 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                       *vec_index,
                       search_conf,
                       bitset,
+                      op_context,
                       search_result,
                       is_sparse);
     }
@@ -75,6 +77,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,
+                milvus::OpContext& op_context,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
@@ -103,8 +106,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             "vector array(embedding list) is not supported for growing segment "
             "indexing search");
 
-        FloatSegmentIndexSearch(
-            segment, info, query_data, num_queries, bitset, search_result);
+        FloatSegmentIndexSearch(segment,
+                                info,
+                                query_data,
+                                num_queries,
+                                bitset,
+                                op_context,
+                                search_result);
     } else {
         std::shared_lock<std::shared_mutex> read_chunk_mutex(
             segment.get_chunk_mutex());
@@ -114,8 +122,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                        "vector array(embedding list) is not supported for "
                        "growing segment indexing search");
 
-            return FloatSegmentIndexSearch(
-                segment, info, query_data, num_queries, bitset, search_result);
+            return FloatSegmentIndexSearch(segment,
+                                           info,
+                                           query_data,
+                                           num_queries,
+                                           bitset,
+                                           op_context,
+                                           search_result);
         }
         SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
         // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
@@ -233,7 +246,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                index_info,
                                                bitset,
                                                data_type,
-                                               element_type);
+                                               element_type,
+                                               op_context);
                 final_qr.merge(sub_qr);
             }
         }

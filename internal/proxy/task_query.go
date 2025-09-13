@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -75,6 +76,8 @@ type queryTask struct {
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
+
+	storageCost segcore.StorageCost
 }
 
 type queryParams struct {
@@ -624,6 +627,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	toReduceResults := make([]*internalpb.RetrieveResults, 0)
 	t.allQueryCnt = 0
 	t.totalRelatedDataSize = 0
+	t.storageCost = segcore.StorageCost{}
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -633,6 +637,8 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
 			toReduceResults = append(toReduceResults, res)
 			t.allQueryCnt += res.GetAllRetrieveCount()
+			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
+			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true

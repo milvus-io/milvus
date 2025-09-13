@@ -951,19 +951,23 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 	mockBlob := []byte{65, 66, 67, 65, 66, 67}
 	{
 		subRes1 := &internalpb.SearchResults{
-			MetricType: metricType,
-			NumQueries: nq,
-			TopK:       topK,
-			SlicedBlob: mockBlob,
+			MetricType:         metricType,
+			NumQueries:         nq,
+			TopK:               topK,
+			SlicedBlob:         mockBlob,
+			ScannedRemoteBytes: 100,
+			ScannedTotalBytes:  200,
 		}
 		results = append(results, subRes1)
 	}
 	{
 		subRes2 := &internalpb.SearchResults{
-			MetricType: metricType,
-			NumQueries: nq,
-			TopK:       topK,
-			SlicedBlob: mockBlob,
+			MetricType:         metricType,
+			NumQueries:         nq,
+			TopK:               topK,
+			SlicedBlob:         mockBlob,
+			ScannedRemoteBytes: 100,
+			ScannedTotalBytes:  200,
 		}
 		results = append(results, subRes2)
 	}
@@ -977,6 +981,44 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 	suite.Equal(nq, subRes1.GetNumQueries())
 	suite.Equal(topK, subRes1.GetTopK())
 	suite.Equal(mockBlob, subRes1.GetSlicedBlob())
+	suite.Equal(int64(200), reducedRes.GetScannedRemoteBytes())
+	suite.Equal(int64(400), reducedRes.GetScannedTotalBytes())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
+	ctx := context.Background()
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+	// build minimal valid blobs via encoder
+	srd1 := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+	srd2 := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{2}}}},
+		Scores:     []float32{0.8},
+		Topks:      []int64{1},
+	}
+	rEnc1, err := EncodeSearchResultData(ctx, srd1, nq, topK, metricType)
+	suite.NoError(err)
+	rEnc1.ScannedRemoteBytes = 111
+	rEnc1.ScannedTotalBytes = 222
+	rEnc2, err := EncodeSearchResultData(ctx, srd2, nq, topK, metricType)
+	suite.NoError(err)
+	rEnc2.ScannedRemoteBytes = 333
+	rEnc2.ScannedTotalBytes = 444
+
+	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{rEnc1, rEnc2}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	// costs should aggregate across both included results
+	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
+	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
 }
 
 func TestResult_MergeRequestCost(t *testing.T) {

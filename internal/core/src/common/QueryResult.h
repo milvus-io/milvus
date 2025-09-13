@@ -33,6 +33,88 @@
 
 namespace milvus {
 
+// scan cost in each search/query
+struct StorageCost {
+    int64_t scanned_remote_bytes = 0;
+    int64_t scanned_total_bytes = 0;
+
+    StorageCost() = default;
+
+    StorageCost(int64_t scanned_remote_bytes, int64_t scanned_total_bytes)
+        : scanned_remote_bytes(scanned_remote_bytes),
+          scanned_total_bytes(scanned_total_bytes) {
+    }
+
+    StorageCost
+    operator+(const StorageCost& rhs) const {
+        return {scanned_remote_bytes + rhs.scanned_remote_bytes,
+                scanned_total_bytes + rhs.scanned_total_bytes};
+    }
+
+    void
+    operator+=(const StorageCost& rhs) {
+        scanned_remote_bytes += rhs.scanned_remote_bytes;
+        scanned_total_bytes += rhs.scanned_total_bytes;
+    }
+
+    StorageCost
+    operator*(const double factor) const {
+        return {static_cast<int64_t>(scanned_remote_bytes * factor),
+                static_cast<int64_t>(scanned_total_bytes * factor)};
+    }
+
+    void
+    operator*=(const double factor) {
+        scanned_remote_bytes =
+            static_cast<int64_t>(scanned_remote_bytes * factor);
+        scanned_total_bytes =
+            static_cast<int64_t>(scanned_total_bytes * factor);
+    }
+
+    void
+    operator=(const StorageCost& rhs) {
+        scanned_remote_bytes = rhs.scanned_remote_bytes;
+        scanned_total_bytes = rhs.scanned_total_bytes;
+    }
+
+    void
+    operator=(const milvus::OpContext& op_context) {
+        scanned_remote_bytes =
+            op_context.storage_usage.scanned_cold_bytes.load();
+        scanned_total_bytes =
+            op_context.storage_usage.scanned_total_bytes.load();
+    }
+
+    StorageCost
+    operator+(const milvus::OpContext& op_context) const {
+        return {scanned_remote_bytes +
+                    op_context.storage_usage.scanned_cold_bytes.load(),
+                scanned_total_bytes +
+                    op_context.storage_usage.scanned_total_bytes.load()};
+    }
+
+    void
+    operator+=(const milvus::OpContext& op_context) {
+        scanned_remote_bytes +=
+            op_context.storage_usage.scanned_cold_bytes.load();
+        scanned_total_bytes +=
+            op_context.storage_usage.scanned_total_bytes.load();
+    }
+
+    std::string
+    ToString() const {
+        return fmt::format("scanned_remote_bytes: {}, scanned_total_bytes: {}",
+                           scanned_remote_bytes,
+                           scanned_total_bytes);
+    }
+};
+
+inline std::ostream&
+operator<<(std::ostream& os, const StorageCost& cost) {
+    os << cost.ToString();
+    return os;
+}
+
 struct OffsetDisPair {
  private:
     std::pair<int64_t, float> off_dis_;
@@ -215,6 +297,8 @@ struct SearchResult {
     //Vector iterators, used for group by
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         vector_iterators_;
+    // record the storage usage in search
+    StorageCost search_storage_cost_;
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;
@@ -229,6 +313,8 @@ struct RetrieveResult {
     std::vector<int64_t> result_offsets_;
     std::vector<DataArray> field_data_;
     bool has_more_result = true;
+    // record the storage usage in retrieve
+    StorageCost retrieve_storage_cost_;
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
