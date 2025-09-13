@@ -123,3 +123,4 @@ const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
 
 // VectorArray related, used for fetch metadata from Arrow schema
 const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
+const std::string NAMESPACE_FIELD_NAME = "$namespace_id";

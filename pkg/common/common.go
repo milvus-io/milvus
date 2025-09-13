@@ -515,3 +515,18 @@ func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, 
 	}
 	return false, false, nil
 }
+
+func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
+	enabled, _, err := ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
+	}
+	namespaceIsSet := namespace != nil
+	if enabled != namespaceIsSet {
+		if namespaceIsSet {
+			return fmt.Errorf("namespace data is set but namespace disabled")
+		}
+		return fmt.Errorf("namespace data is not set but namespace enabled")
+	}
+	return nil
+}

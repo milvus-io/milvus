@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -1351,4 +1352,73 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	}
 	assert.NotNil(t, valueField)
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
+}
+
+func TestUpsertTask_PlanNamespace_AfterPreExecute(t *testing.T) {
+	mockey.PatchConvey("TestUpsertTask_PlanNamespace_AfterPreExecute", t, func() {
+		// Setup global meta cache and common mocks
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(GetReplicateID).Return("", nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
+		mockey.Mock((*MetaCache).GetPartitionID).Return(int64(1002), nil).Build()
+		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+		mockey.Mock(validatePartitionTag).Return(nil).Build()
+
+		// Schema with namespace enabled
+		mockey.Mock((*MetaCache).GetCollectionSchema).To(func(_ *MetaCache, _ context.Context, _ string, _ string) (*schemaInfo, error) {
+			info := createTestSchema()
+			info.CollectionSchema.Properties = append(info.CollectionSchema.Properties, &commonpb.KeyValuePair{Key: common.NamespaceEnabledKey, Value: "true"})
+			return info, nil
+		}).Build()
+
+		// Capture plan to verify namespace
+		var capturedPlan *planpb.PlanNode
+		mockey.Mock(planparserv2.CreateRequeryPlan).To(func(_ *schemapb.FieldSchema, _ *schemapb.IDs) *planpb.PlanNode {
+			capturedPlan = &planpb.PlanNode{}
+			return capturedPlan
+		}).Build()
+
+		// Mock query to return a valid result for queryPreExecute merge path
+		mockey.Mock((*Proxy).query).Return(&milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id",
+					FieldId:   100,
+					Type:      schemapb.DataType_Int64,
+					Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+				},
+				{
+					FieldName: "name",
+					FieldId:   102,
+					Type:      schemapb.DataType_VarChar,
+					Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+				},
+				{
+					FieldName: "vector",
+					FieldId:   101,
+					Type:      schemapb.DataType_FloatVector,
+					Field:     &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 256)}}}},
+				},
+			},
+		}, nil).Build()
+
+		// Build task
+		task := createTestUpdateTask()
+		ns := "ns-1"
+		task.req.PartialUpdate = true
+		task.req.Namespace = &ns
+
+		// Skip insert/delete heavy logic
+		mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+		mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, capturedPlan)
+		assert.NotNil(t, capturedPlan.Namespace)
+		assert.Equal(t, *task.req.Namespace, *capturedPlan.Namespace)
+	})
 }
