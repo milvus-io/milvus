@@ -69,12 +69,6 @@ func setEndTime(endTime int64) compactionTaskOpt {
 	}
 }
 
-func setTimeoutInSeconds(dur int32) compactionTaskOpt {
-	return func(task *datapb.CompactionTask) {
-		task.TimeoutInSeconds = dur
-	}
-}
-
 func setResultSegments(segments []int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.ResultSegments = segments

@@ -120,20 +120,6 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 	}
 }
 
-func (t *l0CompactionTask) checkTimeout() bool {
-	if t.GetTaskProto().GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetTaskProto().GetStartTime(), 0)).Seconds()
-		if diff > float64(t.GetTaskProto().GetTimeoutInSeconds()) {
-			log.Ctx(context.TODO()).Warn("compaction timeout",
-				zap.Int32("timeout in seconds", t.GetTaskProto().GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetTaskProto().GetStartTime()),
-			)
-			return true
-		}
-	}
-	return false
-}
-
 func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Int64("nodeID", t.GetTaskProto().GetNodeID()))
 	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
@@ -166,13 +152,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 		t.processMetaSaved()
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
-		if t.checkTimeout() {
-			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err != nil {
-				log.Warn("update clustering compaction task meta failed", zap.Error(err))
-				return
-			}
-		}
+		return
 	case datapb.CompactionTaskState_timeout:
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		if err != nil {
@@ -339,16 +319,15 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	}
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
-		PlanID:           taskProto.GetPlanID(),
-		StartTime:        taskProto.GetStartTime(),
-		TimeoutInSeconds: taskProto.GetTimeoutInSeconds(),
-		Type:             taskProto.GetType(),
-		Channel:          taskProto.GetChannel(),
-		CollectionTtl:    taskProto.GetCollectionTtl(),
-		TotalRows:        taskProto.GetTotalRows(),
-		Schema:           taskProto.GetSchema(),
-		SlotUsage:        t.GetSlotUsage(),
-		JsonParams:       compactionParams,
+		PlanID:        taskProto.GetPlanID(),
+		StartTime:     taskProto.GetStartTime(),
+		Type:          taskProto.GetType(),
+		Channel:       taskProto.GetChannel(),
+		CollectionTtl: taskProto.GetCollectionTtl(),
+		TotalRows:     taskProto.GetTotalRows(),
+		Schema:        taskProto.GetSchema(),
+		SlotUsage:     t.GetSlotUsage(),
+		JsonParams:    compactionParams,
 	}
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
