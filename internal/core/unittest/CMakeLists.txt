@@ -25,32 +25,32 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tes
 
 # Collect test files from source directories using glob pattern
 file(GLOB_RECURSE SOURCE_TEST_FILES
-    "${CMAKE_HOME_DIRECTORY}/src/**/AzureChunkManagerTest.cpp"
-    # "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
+    "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
+    "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
 )
 
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
-        # test_c_api.cpp
-        # test_loading.cpp
-        # test_exec.cpp
-        # test_expr_materialized_view.cpp
-        # test_float16.cpp
-        # test_group_by.cpp
-        # test_iterative_filter.cpp
-        # test_indexing.cpp
-        # test_index_wrapper.cpp
-        # test_integer_overflow.cpp
-        # test_query.cpp
-        # test_sealed.cpp
-        # test_storage.cpp
-        # test_string_expr.cpp
-        # test_tracer.cpp
-        # test_rust_result.cpp
-        # test_storage_v2_index_raw_data.cpp
-        # test_group_by_json.cpp
+        test_c_api.cpp
+        test_loading.cpp
+        test_exec.cpp
+        test_expr_materialized_view.cpp
+        test_float16.cpp
+        test_group_by.cpp
+        test_iterative_filter.cpp
+        test_indexing.cpp
+        test_index_wrapper.cpp
+        test_integer_overflow.cpp
+        test_query.cpp
+        test_sealed.cpp
+        test_storage.cpp
+        test_string_expr.cpp
+        test_tracer.cpp
+        test_rust_result.cpp
+        test_storage_v2_index_raw_data.cpp
+        test_group_by_json.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
