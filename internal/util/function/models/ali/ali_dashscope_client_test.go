@@ -114,3 +114,44 @@ func TestEmbeddingFailed(t *testing.T) {
 		assert.True(t, err != nil)
 	}
 }
+
+func TestRerankOK(t *testing.T) {
+	repStr := `{"output":{"results":[{"index":0,"relevance_score":0},{"index":1,"relevance_score":0.1},{"index":2,"relevance_score":0.2}]},"usage":{"total_tokens":1},"request_id":"x"}`
+	var res RerankResponse
+	err := json.Unmarshal([]byte(repStr), &res)
+	assert.NoError(t, err)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	defer ts.Close()
+	url := ts.URL
+
+	{
+		c := NewAliDashScopeRerank("mock_key", url)
+		r, err := c.Rerank("gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		assert.True(t, err == nil)
+		assert.Equal(t, r.Output.Results[0].Index, 0)
+		assert.Equal(t, r.Output.Results[1].Index, 1)
+		assert.Equal(t, r.Output.Results[2].Index, 2)
+		assert.Equal(t, r.Output.Results[0].RelevanceScore, float32(0.0))
+		assert.Equal(t, r.Output.Results[1].RelevanceScore, float32(0.1))
+		assert.Equal(t, r.Output.Results[2].RelevanceScore, float32(0.2))
+	}
+}
+
+func TestRerankFailed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+
+	defer ts.Close()
+	url := ts.URL
+
+	{
+		c := NewAliDashScopeRerank("mock_key", url)
+		_, err := c.Rerank("gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		assert.True(t, err != nil)
+	}
+}
