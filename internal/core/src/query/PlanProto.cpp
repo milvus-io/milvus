@@ -35,8 +35,8 @@ ProtoParser::PlanOptionsFromProto(
     const proto::plan::PlanOption& plan_option_proto,
     PlanOptions& plan_options) {
     plan_options.expr_use_json_stats = plan_option_proto.expr_use_json_stats();
-    LOG_INFO("plan_options.expr_use_json_stats: {}",
-             plan_options.expr_use_json_stats);
+    LOG_TRACE("plan_options.expr_use_json_stats: {}",
+              plan_options.expr_use_json_stats);
 }
 
 std::unique_ptr<VectorPlanNode>
