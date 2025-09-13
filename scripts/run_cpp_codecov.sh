@@ -28,78 +28,6 @@ done
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 source ${ROOT_DIR}/scripts/setenv.sh
 
-# Function to run test with Azure SDK workaround
-# This handles Azure SDK double-free issues while keeping ASAN enabled
-# The Azure SDK has known issues with global object cleanup that cause false
-# positives in ASAN. This function identifies and ignores these specific issues
-# while still catching real memory problems.
-run_test_with_azure_workaround() {
-    local TEST_BINARY="$1"
-    local TEMP_OUTPUT=$(mktemp)
-    local TEMP_STDERR=$(mktemp)
-    
-    echo "Running test: $TEST_BINARY"
-    
-    # Keep ASAN enabled with minimal changes - only halt_on_error=0 to continue on errors
-    export ASAN_OPTIONS="halt_on_error=0:${ASAN_OPTIONS}"
-    
-    # Run with timeout, separate stdout and stderr
-    timeout 300s env LD_PRELOAD="$MILVUS_ENABLE_ASAN_LIB:$LD_PRELOAD" "$TEST_BINARY" > "$TEMP_OUTPUT" 2> "$TEMP_STDERR"
-    local TEST_EXIT_CODE=$?
-    
-    # Display output
-    cat "$TEMP_OUTPUT"
-    cat "$TEMP_STDERR" >&2
-    
-    # Check if tests actually passed
-    if grep -q "\[  PASSED  \]" "$TEMP_OUTPUT"; then
-        echo "Test passed successfully"
-        local FINAL_EXIT_CODE=0
-    elif grep -q "0 tests from 0 test suites ran" "$TEMP_OUTPUT"; then
-        echo "No tests to run"
-        local FINAL_EXIT_CODE=0
-    else
-        # Check if the test failed due to real issues or just Azure SDK issues
-        if grep -q "attempting double-free\|Shadow memory range interleaves" "$TEMP_STDERR"; then
-            # Check for Shadow memory range interleaves (happens with multiple ASAN instances)
-            if grep -q "Shadow memory range interleaves" "$TEMP_STDERR"; then
-                echo "Shadow memory conflict detected (multiple ASAN instances) - treating as success"
-                local FINAL_EXIT_CODE=0
-            # Check if all double-free errors are in Azure SDK or finalization code
-            elif grep -q "attempting double-free" "$TEMP_STDERR"; then
-                local AZURE_ERRORS=$(grep -c "Azure\|libblob-chunk-manager\|libmilvus-storage\|libmilvus_core\|__cxa_finalize\|_dl_fini" "$TEMP_STDERR" || true)
-                local TOTAL_ERRORS=$(grep -c "ERROR: AddressSanitizer" "$TEMP_STDERR" || true)
-                
-                if [ "$AZURE_ERRORS" -eq "$TOTAL_ERRORS" ] && [ "$TOTAL_ERRORS" -gt 0 ]; then
-                    echo "Only Azure SDK related ASAN errors detected - treating as success"
-                    local FINAL_EXIT_CODE=0
-                else
-                    echo "Non-Azure ASAN errors detected"
-                    local FINAL_EXIT_CODE=$TEST_EXIT_CODE
-                fi
-            else
-                local FINAL_EXIT_CODE=$TEST_EXIT_CODE
-            fi
-        else
-            local FINAL_EXIT_CODE=$TEST_EXIT_CODE
-        fi
-    fi
-    
-    # If timeout occurred, check if it's due to Azure issues
-    if [ $TEST_EXIT_CODE -eq 124 ]; then
-        if grep -q "Azure\|double-free" "$TEMP_STDERR"; then
-            echo "Test timed out with Azure SDK issues - treating as success"
-            local FINAL_EXIT_CODE=0
-        else
-            local FINAL_EXIT_CODE=$TEST_EXIT_CODE
-        fi
-    fi
-    
-    # Clean up
-    rm -f "$TEMP_OUTPUT" "$TEMP_STDERR"
-    return $FINAL_EXIT_CODE
-}
-
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
 
@@ -136,13 +64,16 @@ beginTime=$(date +%s)
 # run unittest
 for test in $(ls ${MILVUS_CORE_UNITTEST_DIR}); do
     echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
-    
-    # Use the Azure workaround function for all tests
-    run_test_with_azure_workaround "${MILVUS_CORE_UNITTEST_DIR}/${test}"
-    TEST_EXIT_CODE=$?
-    
-    if [ $TEST_EXIT_CODE -ne 0 ]; then
-        echo "${MILVUS_CORE_UNITTEST_DIR}/${test} run failed with exit code $TEST_EXIT_CODE"
+    # run unittest
+    if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
+        echo "ASAN is enabled with env MILVUS_ENABLE_ASAN_LIB, set {$MILVUS_ENABLE_ASAN_LIB} at the front of LD_PRELOAD"
+        LD_PRELOAD="$MILVUS_ENABLE_ASAN_LIB:$LD_PRELOAD" ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    else
+        ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    fi
+    if [ $? -ne 0 ]; then
+        echo ${args}
+        echo "${MILVUS_CORE_UNITTEST_DIR}/${test} run failed"
         exit -1
     fi
 done

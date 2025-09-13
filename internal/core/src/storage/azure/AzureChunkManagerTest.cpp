@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "storage/azure/AzureChunkManager.h"
+#include "AzureChunkManager.h"
 #include "storage/Util.h"
 
 using namespace std;
@@ -58,7 +58,9 @@ class AzureChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        GTEST_SKIP() << "Skipping Azure tests";
+        configs_ = get_default_storage_config(false);
+        chunk_manager_ = make_unique<AzureChunkManager>(configs_);
+        chunk_manager_ptr_ = CreateChunkManager(configs_);
     }
 
  protected:

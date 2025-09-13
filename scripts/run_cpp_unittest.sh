@@ -35,16 +35,6 @@ if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
-# Setup Azure SDK suppressions for ASAN builds
-ROOT_DIR="${SCRIPTS_DIR}/.."
-ASAN_LIB=$(ldd ${CORE_INSTALL_PREFIX}/lib/libmilvus_core.so 2>/dev/null | grep asan | awk '{print $3}')
-if [ -n "$ASAN_LIB" ]; then
-    echo "ASAN detected, setting up Azure SDK suppressions and preload..."
-    export ASAN_OPTIONS="abort_on_error=0:exit_code=0:detect_stack_use_after_return=false:allow_user_segv_handler=1"
-    export LSAN_OPTIONS="suppressions=${ROOT_DIR}/scripts/azure_lsan.supp"
-    export LD_PRELOAD="${ASAN_LIB}:${LD_PRELOAD}"
-fi
-
 # run unittest
 arg="$1"
 filter_value="${arg#*=}"
