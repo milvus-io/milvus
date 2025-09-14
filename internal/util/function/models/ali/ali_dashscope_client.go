@@ -152,17 +152,18 @@ type RerankResponse struct {
 
 type AliDashScopeRerank struct {
 	apiKey string
-	url    string
 }
 
-func NewAliDashScopeRerank(apiKey string, url string) *AliDashScopeRerank {
+func NewAliDashScopeRerank(apiKey string) (*AliDashScopeRerank, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.DashscopeAKEnvStr)
+	}
 	return &AliDashScopeRerank{
 		apiKey: apiKey,
-		url:    url,
-	}
+	}, nil
 }
 
-func (c *AliDashScopeRerank) Rerank(modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
 	var r RerankRequest
 	r.Model = modelName
 	r.Inputs = Inputs{query, texts}
@@ -171,9 +172,12 @@ func (c *AliDashScopeRerank) Rerank(modelName string, query string, texts []stri
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, url, headers, timeoutSec)
 	if err != nil {
 		return nil, err
 	}
+	sort.Slice(res.Output.Results, func(i, j int) bool {
+		return res.Output.Results[i].Index < res.Output.Results[j].Index
+	})
 	return res, nil
 }

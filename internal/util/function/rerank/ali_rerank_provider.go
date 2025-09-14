@@ -20,6 +20,7 @@ package rerank
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,21 +32,30 @@ import (
 type aliProvider struct {
 	baseProvider
 	client    *ali.AliDashScopeRerank
+	url       string
 	modelName string
 	params    map[string]any
 }
 
 func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "")
+	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.DashscopeAKEnvStr)
 	if err != nil {
 		return nil, err
 	}
-
-	maxBatch := 32
+	if url == "" {
+		url = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+	}
+	client, err := ali.NewAliDashScopeRerank(apiKey)
+	if err != nil {
+		return nil, err
+	}
+	var modelName string
 	truncateParams := map[string]any{}
-
+	maxBatch := 128
 	for _, param := range params {
 		switch strings.ToLower(param.Key) {
+		case models.ModelNameParamKey:
+			modelName = param.Value
 		case models.MaxClientBatchSizeParamKey:
 			if maxBatch, err = parseMaxBatch(param.Value); err != nil {
 				return nil, err
@@ -53,20 +63,21 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		default:
 		}
 	}
-
-	url := "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-	client := ali.NewAliDashScopeRerank(apiKey, url)
-
+	if modelName == "" {
+		return nil, fmt.Errorf("ali rerank model name is required")
+	}
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		client:       client,
+		url:          url,
+		modelName:    modelName,
 		params:       truncateParams,
 	}
 	return &provider, nil
 }
 
 func (provider *aliProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(provider.modelName, query, docs, provider.params, 30)
+	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, 30)
 	if err != nil {
 		return nil, err
 	}

@@ -250,6 +250,24 @@ func (s *RerankModelSuite) TestNewProvider() {
 		_, err := newProvider(params)
 		s.NoError(err)
 	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "ali rerank model name is required")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.ModelNameParamKey, Value: "ali-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
 }
 
 func (s *RerankModelSuite) TestCallVllm() {
