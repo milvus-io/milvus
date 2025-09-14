@@ -154,13 +154,10 @@ type AliDashScopeRerank struct {
 	apiKey string
 }
 
-func NewAliDashScopeRerank(apiKey string) (*AliDashScopeRerank, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.DashscopeAKEnvStr)
-	}
+func NewAliDashScopeRerank(apiKey string) *AliDashScopeRerank {
 	return &AliDashScopeRerank{
 		apiKey: apiKey,
-	}, nil
+	}
 }
 
 func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {

@@ -436,7 +436,9 @@ func (s *RerankModelSuite) TestCallAli() {
 			{Key: models.ModelNameParamKey, Value: "ali-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		provder, err := newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		provder, err := newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock_err"}))
+		s.ErrorContains(err, "can not find key")
+		provder, err = newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)

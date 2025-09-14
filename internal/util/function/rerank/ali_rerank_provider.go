@@ -45,10 +45,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 	if url == "" {
 		url = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 	}
-	client, err := ali.NewAliDashScopeRerank(apiKey)
-	if err != nil {
-		return nil, err
-	}
+	client := ali.NewAliDashScopeRerank(apiKey)
 	var modelName string
 	truncateParams := map[string]any{}
 	maxBatch := 128

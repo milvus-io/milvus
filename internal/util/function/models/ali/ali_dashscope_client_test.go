@@ -129,7 +129,7 @@ func TestRerankOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewAliDashScopeRerank("mock_key")
+		c := NewAliDashScopeRerank("mock_key")
 		r, err := c.Rerank(url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, r.Output.Results[0].Index, 0)
@@ -150,7 +150,7 @@ func TestRerankFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewAliDashScopeRerank("mock_key")
+		c := NewAliDashScopeRerank("mock_key")
 		_, err := c.Rerank(url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
 	}
