@@ -134,7 +134,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                                 1,
                                 total_row_count,
                                 bv,
-                                op_context,
+                                &op_context,
                                 search_result);
 
     std::set<int64_t> offsets;
@@ -161,7 +161,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
                                 1,
                                 total_row_count,
                                 bv,
-                                op_context,
+                                &op_context,
                                 search_result);
 
     ASSERT_EQ(1, search_result.vector_iterators_->size());

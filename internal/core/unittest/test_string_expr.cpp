@@ -1565,11 +1565,11 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
                                        nullptr,
                                        DataType::VECTOR_FLOAT,
                                        DataType::NONE,
-                                       op_context);
+                                       &op_context);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-    segment->FillPrimaryKeys(plan.get(), op_context, *sr);
-    segment->FillTargetEntry(plan.get(), op_context, *sr);
+    segment->FillPrimaryKeys(plan.get(), &op_context, *sr);
+    segment->FillTargetEntry(plan.get(), &op_context, *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);
     ASSERT_TRUE(sr->output_fields_data_.find(str_meta.get_id()) !=
                 sr->output_fields_data_.end());

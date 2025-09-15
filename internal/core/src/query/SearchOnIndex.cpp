@@ -19,7 +19,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const index::VectorIndex& indexing,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
-              milvus::OpContext& op_context,
+              milvus::OpContext* op_context,
               SearchResult& search_result,
               bool is_sparse) {
     auto num_queries = search_dataset.num_queries;

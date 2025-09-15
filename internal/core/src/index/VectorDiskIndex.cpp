@@ -245,7 +245,7 @@ void
 VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                              const SearchInfo& search_info,
                              const BitsetView& bitset,
-                             milvus::OpContext& op_context,
+                             milvus::OpContext* op_context,
                              SearchResult& search_result) const {
     AssertInfo(GetMetricType() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
@@ -274,7 +274,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
         if (CheckAndUpdateKnowhereRangeSearchParam(
                 search_info, topk, GetMetricType(), search_config)) {
             auto res =
-                index_.RangeSearch(dataset, search_config, bitset, &op_context);
+                index_.RangeSearch(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
                 ThrowInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to range search: {}: {}",
@@ -285,7 +285,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                 res.value(), topk, num_rows, GetMetricType());
         } else {
             auto res =
-                index_.Search(dataset, search_config, bitset, &op_context);
+                index_.Search(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
                 ThrowInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to search: {}: {}",

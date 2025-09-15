@@ -23,7 +23,7 @@ StreamReducerHelper::FillEntryData() {
     for (auto search_result : search_results_to_merge_) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
             search_result->segment_);
-        segment->FillTargetEntry(plan_, op_context_, *search_result);
+        segment->FillTargetEntry(plan_, &op_context_, *search_result);
     }
 }
 
@@ -191,7 +191,7 @@ StreamReducerHelper::SerializeMergedResult() {
                num_slice_);
     search_result_blobs->blobs.resize(num_slice_);
     search_result_blobs->costs.resize(num_slice_);
-    total_search_storage_cost_ += op_context_;
+    total_search_storage_cost_ += &op_context_;
     for (int i = 0; i < num_slice_; i++) {
         auto [proto, cost] =
             GetSearchResultDataSlice(i, total_search_storage_cost_);
@@ -266,7 +266,7 @@ StreamReducerHelper::FillPrimaryKeys() {
     for (auto& search_result : search_results_to_merge_) {
         auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
-            segment->FillPrimaryKeys(plan_, op_context_, *search_result);
+            segment->FillPrimaryKeys(plan_, &op_context_, *search_result);
         }
     }
 }

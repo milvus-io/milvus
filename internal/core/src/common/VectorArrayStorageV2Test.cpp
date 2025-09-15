@@ -344,7 +344,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         SearchResult result;
         milvus::OpContext op_context;
         vec_index->Query(
-            query_dataset, searchInfo, nullptr, op_context, result);
+            query_dataset, searchInfo, nullptr, &op_context, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
         EXPECT_EQ(result.total_nq_, 2);

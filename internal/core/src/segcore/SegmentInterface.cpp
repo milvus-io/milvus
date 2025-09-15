@@ -25,7 +25,7 @@ namespace milvus::segcore {
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
-                                          milvus::OpContext& op_context,
+                                          milvus::OpContext* op_context,
                                           SearchResult& results) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
@@ -51,7 +51,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
 
 void
 SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
-                                          milvus::OpContext& op_context,
+                                          milvus::OpContext* op_context,
                                           SearchResult& results) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
@@ -148,13 +148,13 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                     retrieve_results.result_offsets_.size(),
                     ignore_non_pk,
                     true,
-                    op_context);
+                    &op_context);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(
                                 get_target_entry_end - get_target_entry_start)
                                 .count();
-    retrieve_results.retrieve_storage_cost_ += op_context;
+    retrieve_results.retrieve_storage_cost_ += &op_context;
     results->set_scanned_remote_bytes(
         retrieve_results.retrieve_storage_cost_.scanned_remote_bytes);
     results->set_scanned_total_bytes(
@@ -173,7 +173,7 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids,
-    milvus::OpContext& op_context) const {
+    milvus::OpContext* op_context) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     auto fields_data = results->mutable_fields_data();
@@ -280,7 +280,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         std::chrono::high_resolution_clock::now();
     milvus::OpContext op_context;
     FillTargetEntry(
-        trace_ctx, Plan, results, offsets, size, false, false, op_context);
+        trace_ctx, Plan, results, offsets, size, false, false, &op_context);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(

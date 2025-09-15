@@ -79,7 +79,7 @@ class VectorMemIndex : public VectorIndex {
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset,
-          milvus::OpContext& op_context,
+          milvus::OpContext* op_context,
           SearchResult& search_result) const override;
 
     const bool

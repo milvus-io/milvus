@@ -32,7 +32,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const BitsetView& bitset,
                  DataType data_type,
                  DataType element_type,
-                 milvus::OpContext& op_context);
+                 milvus::OpContext* op_context);
 
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 GetBruteForceSearchIterators(

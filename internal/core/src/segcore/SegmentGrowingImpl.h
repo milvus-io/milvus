@@ -329,7 +329,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  milvus::OpContext& op_context,
+                  milvus::OpContext* op_context,
                   SearchResult& output) const override;
 
     DataType

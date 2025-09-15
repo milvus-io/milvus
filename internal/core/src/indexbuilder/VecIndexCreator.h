@@ -57,7 +57,7 @@ class VecIndexCreator : public IndexCreatorBase {
     Query(const milvus::DatasetPtr& dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset,
-          milvus::OpContext& op_context);
+          milvus::OpContext* op_context);
 
     index::IndexStatsPtr
     Upload() override;
