@@ -84,6 +84,9 @@ ChunkTranslator::ChunkTranslator(
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
+            milvus::segcore::getCellDataType(
+                IsVectorDataType(field_meta.get_data_type()),
+                /* is_index */ false),
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,

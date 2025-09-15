@@ -2,10 +2,10 @@ set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CARGO_CMD cargo build)
+    set(CARGO_CMD cargo +1.89 build --verbose)
     set(TARGET_DIR "debug")
 else ()
-    set(CARGO_CMD cargo build --release)
+    set(CARGO_CMD cargo +1.89 build --release --verbose)
     set(TARGET_DIR "release")
 endif ()
 

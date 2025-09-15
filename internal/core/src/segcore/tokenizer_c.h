@@ -13,7 +13,6 @@
 
 #include <stdint.h>
 
-#include "segcore/map_c.h"
 #include "segcore/token_stream_c.h"
 #include "common/type_c.h"
 

@@ -236,34 +236,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
         case 2: {
             load_column_group_data_internal(load_info);
-            auto timestamp_proxy_column = get_column(TimestampFieldID);
-            // TODO check timestamp_index ready instead of check system_ready_count_
-            if (timestamp_proxy_column && system_ready_count_ == 0) {
-                int64_t num_rows;
-                for (auto& [_, info] : load_info.field_infos) {
-                    num_rows = info.row_count;
-                }
-                std::vector<Timestamp> timestamps(num_rows);
-                int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(i);
-                    auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
-                    auto span = fixed_chunk->Span();
-                    for (size_t j = 0; j < span.row_count(); j++) {
-                        auto ts = *(int64_t*)((char*)span.data() +
-                                              j * span.element_sizeof());
-                        timestamps[offset++] = ts;
-                    }
-                }
-                init_timestamp_index(timestamps, num_rows);
-                system_ready_count_++;
-                AssertInfo(offset == num_rows,
-                           "[StorageV2] timestamp total row count {} not equal "
-                           "to expected {}",
-                           offset,
-                           num_rows);
-            }
             break;
         }
         default:
@@ -346,6 +318,36 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
             load_field_data_common(
                 field_id, column, num_rows, data_type, info.enable_mmap, true);
+            if (field_id == TimestampFieldID) {
+                auto timestamp_proxy_column = get_column(TimestampFieldID);
+                AssertInfo(timestamp_proxy_column != nullptr,
+                           "timestamp proxy column is nullptr");
+                // TODO check timestamp_index ready instead of check system_ready_count_
+                int64_t num_rows;
+                for (auto& [_, info] : load_info.field_infos) {
+                    num_rows = info.row_count;
+                }
+                std::vector<Timestamp> timestamps(num_rows);
+                int64_t offset = 0;
+                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
+                    auto chunk = timestamp_proxy_column->GetChunk(i);
+                    auto fixed_chunk =
+                        static_cast<FixedWidthChunk*>(chunk.get());
+                    auto span = fixed_chunk->Span();
+                    for (size_t j = 0; j < span.row_count(); j++) {
+                        auto ts = *(int64_t*)((char*)span.data() +
+                                              j * span.element_sizeof());
+                        timestamps[offset++] = ts;
+                    }
+                }
+                init_timestamp_index(timestamps, num_rows);
+                system_ready_count_++;
+                AssertInfo(offset == num_rows,
+                           "[StorageV2] timestamp total row count {} not equal "
+                           "to expected {}",
+                           offset,
+                           num_rows);
+            }
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
@@ -1919,7 +1921,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
     double get_vector_cost = std::chrono::duration<double, std::micro>(
                                  get_vector_end - get_vector_start)
                                  .count();
-    monitor::internal_core_get_vector_latency.Observe(get_vector_cost / 1000);
+    milvus::monitor::internal_core_get_vector_latency.Observe(get_vector_cost /
+                                                              1000);
 
     return vector;
 }

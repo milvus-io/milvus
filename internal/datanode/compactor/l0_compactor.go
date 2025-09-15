@@ -439,8 +439,20 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 		segment := segment
 		innerCtx := ctx
 		future := pool.Submit(func() (any, error) {
-			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
-				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			err := binlog.DecompressBinLogWithRootPath(
+				t.compactionParams.StorageConfig.GetRootPath(),
+				storage.StatsBinlog,
+				segment.GetCollectionID(),
+				segment.GetPartitionID(),
+				segment.GetSegmentID(),
+				segment.GetField2StatslogPaths())
+			if err != nil {
+				log.Warn("failed to decompress segment stats log",
+					zap.Int64("planID", t.plan.GetPlanID()),
+					zap.String("type", t.plan.GetType().String()),
+					zap.Error(err))
+				return err, err
+			}
 			pks, err := compaction.LoadStats(innerCtx, t.cm,
 				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {

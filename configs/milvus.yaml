@@ -501,7 +501,11 @@ queryNode:
       # This parameter is only valid when eviction is enabled.
       # It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].
       evictableDiskCacheRatio: 0.3
-      # Time in seconds after which an unaccessed cache cell will be evicted. 
+      # Enable background eviction for Tiered Storage. Defaults to false.
+      # Background eviction is used to do periodic eviction in a separate thread.
+      # And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.
+      backgroundEvictionEnabled: false
+      # Time in seconds after which an unaccessed cache cell will be evicted. 'backgroundEvictionEnabled' is required.
       # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
@@ -1006,6 +1010,13 @@ common:
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
     enablev2: true
+    stv2:
+      splitSystemColumn:
+        enabled: true # enable split system column policy in storage v2
+        includePK: true # whether split system column policy include pk field
+      splitByAvgSize:
+        enabled: false # enable split by average size policy in storage v2
+        threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data

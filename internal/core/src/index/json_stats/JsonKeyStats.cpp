@@ -363,7 +363,9 @@ JsonKeyStats::TraverseJsonForBuildStats(
     std::vector<std::string>& path,
     std::map<JsonKey, std::string>& values) {
     jsmntok current = tokens[0];
-    Assert(current.type != JSMN_UNDEFINED);
+    AssertInfo(current.type != JSMN_UNDEFINED,
+               "current token type is undefined for json: {}",
+               json);
     if (current.type == JSMN_OBJECT) {
         if (!path.empty() && current.size == 0) {
             AddKeyStats(
@@ -371,11 +373,20 @@ JsonKeyStats::TraverseJsonForBuildStats(
                 JSONType::OBJECT,
                 std::string(json + current.start, current.end - current.start),
                 values);
+            index++;
             return;
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            Assert(tokens[j].type == JSMN_STRING && tokens[j].size != 0);
+            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
+                       "current token type is not string for json: {} at "
+                       "index: {}, type: {}, size: {} value: {}",
+                       json,
+                       int(tokens[j].type),
+                       tokens[j].size,
+                       std::string(json + tokens[j].start,
+                                   tokens[j].end - tokens[j].start));
+
             std::string key(json + tokens[j].start,
                             tokens[j].end - tokens[j].start);
             path.push_back(key);
@@ -860,24 +871,24 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     auto column_group_info =
         FieldDataInfo(column_group_id, num_rows, mmap_filepath_);
     LOG_INFO(
-        "segment {} loads column group {} with num_rows {} for segment "
+        "loads column group {} with num_rows {} for segment "
         "{}",
-        segment_id_,
         column_group_id,
         num_rows,
         segment_id_);
 
     std::unordered_map<FieldId, FieldMeta> field_meta_map;
-    for (const auto& field_id : milvus_field_ids) {
-        auto field_name = field_id_to_name_map_[field_id.get()];
+    for (const auto& inner_field_id : milvus_field_ids) {
+        auto field_name = field_id_to_name_map_[inner_field_id.get()];
         FieldMeta field_meta(
             FieldName(field_name),
-            field_id,
+            inner_field_id,
+            field_id_,
             GetPrimitiveDataType(shred_field_data_type_map_[field_name]),
             true,
             std::nullopt);
-        field_meta_map.insert(
-            std::make_pair(FieldId(field_id.get()), std::move(field_meta)));
+        field_meta_map.insert(std::make_pair(FieldId(inner_field_id.get()),
+                                             std::move(field_meta)));
     }
 
     auto translator = std::make_unique<
@@ -894,15 +905,19 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
     // Create ProxyChunkColumn for each field in this column group
-    for (const auto& field_id : milvus_field_ids) {
-        auto field_meta = field_meta_map.at(field_id);
+    for (const auto& inner_field_id : milvus_field_ids) {
+        auto field_meta = field_meta_map.at(inner_field_id);
         auto column = std::make_shared<ProxyChunkColumn>(
-            chunked_column_group, field_id, field_meta);
+            chunked_column_group, inner_field_id, field_meta);
 
-        LOG_DEBUG("add shredding column: {}, field_id:{}, for segment {}",
-                  field_meta.get_name().get(),
-                  field_id.get(),
-                  segment_id_);
+        LOG_DEBUG(
+            "add shredding column: {}, inner_field_id:{}, for json field {} "
+            "segment "
+            "{}",
+            field_meta.get_name().get(),
+            inner_field_id.get(),
+            field_id_,
+            segment_id_);
         shredding_columns_[field_meta.get_name().get()] = column;
     }
     shared_column_ = shredding_columns_.at(shared_column_field_name_);

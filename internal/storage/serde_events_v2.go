@@ -343,6 +343,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
 	}
+	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
 }
 
@@ -350,7 +351,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
-			pw.columnGroups = storagecommon.SplitBySchema(allFields)
+			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {
@@ -368,6 +369,18 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 		}
 	}
 	return nil
+}
+
+func (pw *PackedBinlogRecordWriter) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
+	result := make(map[int64]storagecommon.ColumnStats)
+	for _, field := range allFields {
+		if arr := r.Column(field.FieldID); arr != nil {
+			result[field.FieldID] = storagecommon.ColumnStats{
+				AvgSize: int64(arr.Data().SizeInBytes()) / int64(arr.Len()),
+			}
+		}
+	}
+	return result
 }
 
 func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
@@ -395,7 +408,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
-	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
@@ -403,7 +415,8 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		columnGroupID := columnGroup.GroupID
 		if _, exists := pw.fieldBinlogs[columnGroupID]; !exists {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
-				FieldID: columnGroupID,
+				FieldID:     columnGroupID,
+				ChildFields: columnGroup.Fields,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{

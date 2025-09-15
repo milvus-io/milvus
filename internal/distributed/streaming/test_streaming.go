@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 var expectErr = make(chan error, 10)
@@ -137,6 +138,10 @@ func (n *noopTxn) Rollback(ctx context.Context) error {
 }
 
 type noopWALAccesser struct{}
+
+func (n *noopWALAccesser) ControlChannel() string {
+	return funcutil.GetControlChannel("noop")
+}
 
 func (n *noopWALAccesser) Balancer() Balancer {
 	return &noopBalancer{}

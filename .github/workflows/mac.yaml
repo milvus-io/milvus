@@ -42,6 +42,22 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '<3.12'
+      - name: Install CMake 3.31.8
+        run: |
+          cmake --version
+          which cmake
+          brew uninstall cmake -f
+          curl -LO https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz
+          tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/
+          sudo mv /tmp/cmake-3.31.8-macos-universal/CMake.app /Applications/
+          echo -e "\n=== Creating symlinks for CMake ==="
+          sudo ln -s /Applications/CMake.app/Contents/bin/cmake /usr/local/bin/cmake
+          sudo ln -s /Applications/CMake.app/Contents/bin/cpack /usr/local/bin/cpack
+          sudo ln -s /Applications/CMake.app/Contents/bin/ctest /usr/local/bin/ctest
+          CMAKE_MODULE_DIR="/Applications/CMake.app/Contents/share/cmake-3.31"
+          sudo ln -s "$CMAKE_MODULE_DIR" /usr/local/share/cmake-3.31          
+          cmake --version
+          which cmake
       - name: Setup Go environment
         uses: actions/setup-go@v4
         with:
@@ -53,8 +69,8 @@ jobs:
           CCACHE_DIR: /var/tmp/ccache
           CCACHE_COMPILERCHECK: content
           CCACHE_COMPRESS: 1
-          CCACHE_COMPRESSLEVEL: 5
-          CCACHE_MAXSIZE: 2G
+          CCACHE_COMPRESSLEVEL: 9
+          CCACHE_MAXSIZE: 1G
         run: |
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache

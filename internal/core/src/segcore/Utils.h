@@ -20,6 +20,7 @@
 #include "common/type_c.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "cachinglayer/Utils.h"
 #include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
@@ -138,5 +139,8 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
 
 CacheWarmupPolicy
 getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
+
+milvus::cachinglayer::CellDataType
+getCellDataType(bool is_vector, bool is_index);
 
 }  // namespace milvus::segcore
