@@ -646,9 +646,8 @@ func TestGeometryErrorHandling(t *testing.T) {
 				_, err := setup.Client.Query(setup.Ctx, client.NewQueryOption(setup.Collection).WithFilter(expr))
 				return err
 			},
-			// TODO: add validate logic for right geometry while query in the server side
-			expectedError: false,
-			errorKeywords: []string{"polygon", "close", "ring"},
+			expectedError: true,
+			errorKeywords: []string{"polygon", "close", "ring", "invalid"},
 			description:   "Incomplete polygon should return an error",
 		},
 		{

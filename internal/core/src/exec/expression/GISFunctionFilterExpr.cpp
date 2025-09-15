@@ -15,6 +15,8 @@
 #include "common/Types.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include <cmath>
+#include <fmt/core.h>
 namespace milvus {
 namespace exec {
 
@@ -33,6 +35,33 @@ namespace exec {
             }                                                                  \
             res[i] =                                                           \
                 Geometry(data[i].data(), data[i].size()).method(right_source); \
+        }                                                                      \
+    };                                                                         \
+    int64_t processed_size = ProcessDataChunks<_DataType>(                     \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);    \
+    AssertInfo(processed_size == real_batch_size,                              \
+               "internal error: expr processed rows {} not equal "             \
+               "expect batch size {}",                                         \
+               processed_size,                                                 \
+               real_batch_size);                                               \
+    return res_vec;
+
+// Specialized macro for distance-based operations (ST_DWITHIN)
+#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method) \
+    auto execute_sub_batch = [this](const _DataType* data,                     \
+                                    const bool* valid_data,                    \
+                                    const int32_t* offsets,                    \
+                                    const int size,                            \
+                                    TargetBitmapView res,                      \
+                                    TargetBitmapView valid_res,                \
+                                    const Geometry& right_source) {            \
+        for (int i = 0; i < size; ++i) {                                       \
+            if (valid_data != nullptr && !valid_data[i]) {                     \
+                res[i] = valid_res[i] = false;                                 \
+                continue;                                                      \
+            }                                                                  \
+            res[i] = Geometry(data[i].data(), data[i].size())                  \
+                         .method(right_source, expr_->distance_);              \
         }                                                                      \
     };                                                                         \
     int64_t processed_size = ProcessDataChunks<_DataType>(                     \
@@ -134,6 +163,15 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
                 GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(GrowingType, within);
             }
         }
+        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin: {
+            if (segment_->type() == SegmentType::Sealed) {
+                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(SealedType,
+                                                                    dwithin);
+            } else {
+                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(GrowingType,
+                                                                    dwithin);
+            }
+        }
         default: {
             PanicInfo(NotImplemented,
                       "internal error: unknown GIS op : {}",
@@ -143,6 +181,51 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     return res_vec;
 }
 
+// Helper function to calculate bounding box for range_within query optimization
+// Creates a rectangular bounding box around a query point with given distance in meters
+static Geometry
+create_bounding_box_for_dwithin(const Geometry& query_point,
+                                double distance_meters) {
+    // Extract query point coordinates
+    OGRPoint* point = static_cast<OGRPoint*>(query_point.GetGeometry());
+    double query_lon = point->getX();  // longitude
+    double query_lat = point->getY();  // latitude
+
+    const double metersPerDegreeLat = 111320.0;
+
+    // Calculate latitude offset (relatively constant)
+    double latOffset = distance_meters / metersPerDegreeLat;
+
+    // Calculate longitude offset (varies with latitude)
+    double latRad = query_lat * M_PI / 180.0;
+    double lonOffset =
+        distance_meters / (metersPerDegreeLat * std::cos(latRad));
+
+    // Calculate bounding box coordinates
+    double minLon = query_lon - lonOffset;
+    double maxLon = query_lon + lonOffset;
+    double minLat = query_lat - latOffset;
+    double maxLat = query_lat + latOffset;
+
+    // Create WKT POLYGON for bounding box
+    std::string bboxWKT = fmt::format(
+        "POLYGON(({:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, "
+        "{:.6f} {:.6f}))",
+        minLon,
+        minLat,  // Bottom-left
+        maxLon,
+        minLat,  // Bottom-right
+        maxLon,
+        maxLat,  // Top-right
+        minLon,
+        maxLat,  // Top-left
+        minLon,
+        minLat  // Close the ring
+    );
+
+    return Geometry(bboxWKT.c_str());
+}
+
 VectorPtr
 PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
@@ -150,13 +233,6 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-
-    using Index = index::ScalarIndex<std::string>;
-
-    // Prepare shared dataset for index query (coarse candidate set by R-Tree)
-    auto ds = std::make_shared<milvus::Dataset>();
-    ds->Set(milvus::index::OPERATOR_TYPE, expr_->op_);
-    ds->Set(milvus::index::MATCH_VALUE, expr_->geometry_);
 
     /* ------------------------------------------------------------------
      * Prefetch: if coarse results are not cached yet, run a single R-Tree
@@ -179,6 +255,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 return left.intersects(expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Within:
                 return left.within(expr_->geometry_);
+            case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+                return left.dwithin(expr_->geometry_, expr_->distance_);
             default:
                 PanicInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
         }
@@ -189,6 +267,26 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     int processed_rows = 0;
 
     if (!coarse_cached_) {
+        using Index = index::ScalarIndex<std::string>;
+
+        // Prepare shared dataset for index query (coarse candidate set by R-Tree)
+        auto ds = std::make_shared<milvus::Dataset>();
+        ds->Set(milvus::index::OPERATOR_TYPE, expr_->op_);
+
+        // For range_within operations, use bounding box for coarse filtering
+        if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
+            // Create bounding box geometry for index coarse filtering
+            Geometry bbox_geometry = create_bounding_box_for_dwithin(
+                expr_->geometry_, expr_->distance_);
+
+            ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
+
+            // Note: Distance is not used for bounding box intersection query
+        } else {
+            // For other operations, use original geometry
+            ds->Set(milvus::index::MATCH_VALUE, expr_->geometry_);
+        }
+
         // Query segment-level R-Tree index **once** since each chunk shares the same index
         const Index& idx_ref =
             segment_->chunk_scalar_index<std::string>(field_id_, 0);

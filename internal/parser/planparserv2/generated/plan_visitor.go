@@ -52,6 +52,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Boolean.
 	VisitBoolean(ctx *BooleanContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STDWithin.
+	VisitSTDWithin(ctx *STDWithinContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Shift.
 	VisitShift(ctx *ShiftContext) interface{}
 

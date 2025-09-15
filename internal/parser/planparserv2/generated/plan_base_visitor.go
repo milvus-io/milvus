@@ -67,6 +67,10 @@ func (v *BasePlanVisitor) VisitBoolean(ctx *BooleanContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitSTDWithin(ctx *STDWithinContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
 	return v.VisitChildren(ctx)
 }

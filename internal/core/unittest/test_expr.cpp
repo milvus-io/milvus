@@ -17367,6 +17367,164 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
                        });
 }
 
+TEST_P(ExprTest, TestSTDWithinFunction) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Create schema with geometry field
+    auto schema = std::make_shared<Schema>();
+    auto int_fid = schema->AddDebugField("int", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(int_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    int num_iters = 1;
+
+    // Generate controlled test data with known distances
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+
+        // Replace geometry data with controlled test data for distance testing
+        milvus::proto::schema::FieldData* geometry_field_data = nullptr;
+        for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+            if (fd.field_id() == geom_fid.get()) {
+                geometry_field_data = &fd;
+                break;
+            }
+        }
+        assert(geometry_field_data != nullptr);
+        geometry_field_data->mutable_scalars()
+            ->mutable_geometry_data()
+            ->clear_data();
+
+        // Create test points at known distances from origin (0,0)
+        for (int i = 0; i < N; ++i) {
+            OGRGeometry* geometry = nullptr;
+
+            if (i % 5 == 0) {
+                // Distance 0: Point at origin
+                OGRPoint point(0.0, 0.0);
+                geometry = point.clone();
+            } else if (i % 5 == 1) {
+                // Distance 1: Point at (1,0)
+                OGRPoint point(1.0, 0.0);
+                geometry = point.clone();
+            } else if (i % 5 == 2) {
+                // Distance 5: Point at (3,4) - Pythagorean triple
+                OGRPoint point(3.0, 4.0);
+                geometry = point.clone();
+            } else if (i % 5 == 3) {
+                // Distance 10: Point at (6,8)
+                OGRPoint point(6.0, 8.0);
+                geometry = point.clone();
+            } else {
+                // Distance 13: Point at (5,12)
+                OGRPoint point(5.0, 12.0);
+                geometry = point.clone();
+            }
+
+            // Convert to WKB format
+            size_t size = geometry->WkbSize();
+            std::vector<unsigned char> wkb(size);
+            geometry->exportToWkb(wkbNDR, wkb.data());
+
+            geometry_field_data->mutable_scalars()
+                ->mutable_geometry_data()
+                ->add_data(
+                    std::string(reinterpret_cast<char*>(wkb.data()), size));
+
+            OGRGeometryFactory::destroyGeometry(geometry);
+        }
+
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentInternalInterface*>(seg.get());
+
+    // Test ST_DWITHIN operations with different distances
+    auto test_dwithin_operation = [&](const std::string& center_wkt,
+                                      double distance,
+                                      std::function<bool(int)> expected_func) {
+        // Create Geometry object from WKT string
+        milvus::Geometry center_geometry(center_wkt.c_str());
+
+        // Create ST_DWITHIN expression
+        auto dwithin_expr =
+            std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+                milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
+                proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+                center_geometry,
+                distance);
+
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           dwithin_expr);
+
+        BitsetType final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        // Verify results match expectations
+        for (int i = 0; i < final.size(); ++i) {
+            bool expected = expected_func(i);
+            EXPECT_EQ(final[i], expected)
+                << "Mismatch at index " << i << " for distance " << distance
+                << ": expected " << expected << ", got " << final[i];
+        }
+    };
+
+    // Test distance 0.5 - only origin point should match
+    test_dwithin_operation("POINT(0 0)", 55660.0, [](int i) -> bool {
+        return (i % 5 == 0);  // Only points at distance 0
+    });
+
+    // Test distance 1.5 - origin and distance-1 points should match
+    test_dwithin_operation("POINT(0 0)", 166980.0, [](int i) -> bool {
+        return (i % 5 == 0) || (i % 5 == 1);  // Distance 0 and 1
+    });
+
+    // Test distance 7.0 - origin, distance-1, and distance-5 points should match
+    test_dwithin_operation("POINT(0 0)", 779240.0, [](int i) -> bool {
+        return (i % 5 == 0) || (i % 5 == 1) ||
+               (i % 5 == 2);  // Distance 0, 1, 5
+    });
+
+    // Test distance 12.0 - all but distance-13 points should match
+    test_dwithin_operation("POINT(0 0)", 1335840.0, [](int i) -> bool {
+        return (i % 5 != 4);  // All except distance 13
+    });
+
+    // Test distance 15.0 - all points should match
+    test_dwithin_operation("POINT(0 0)", 1669800.0, [](int i) -> bool {
+        return true;  // All points
+    });
+
+    // Test with different center point
+    test_dwithin_operation("POINT(1 0)", 11132.0, [](int i) -> bool {
+        return (i % 5 == 1);  // Only the point at (1,0)
+    });
+
+    // Test edge cases
+    test_dwithin_operation("POINT(0 0)", 111320.0, [](int i) -> bool {
+        return (i % 5 == 0) ||
+               (i % 5 == 1);  // Distance exactly 1.0 should be included
+    });
+
+    test_dwithin_operation("POINT(0 0)", 556600.0, [](int i) -> bool {
+        return (i % 5 == 0) || (i % 5 == 1) ||
+               (i % 5 == 2);  // Distance exactly 5.0 should be included
+    });
+}
+
 TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
     // Build Schema
     auto schema = std::make_shared<Schema>();

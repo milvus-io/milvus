@@ -8,6 +8,8 @@ import (
 	"unicode"
 
 	"github.com/cockroachdb/errors"
+	"github.com/twpayne/go-geom"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -786,4 +788,20 @@ func decodeUnicode(input string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
+}
+
+func checkValidWKT(wktStr string) error {
+	_, err := wkt.Unmarshal(wktStr)
+	return err
+}
+
+func checkValidPoint(wktStr string) error {
+	g, err := wkt.Unmarshal(wktStr)
+	if err != nil {
+		return err
+	}
+	if g.(*geom.Point) == nil {
+		return fmt.Errorf("only supports POINT geometry: %s", wktStr)
+	}
+	return nil
 }
