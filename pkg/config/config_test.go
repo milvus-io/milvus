@@ -19,6 +19,7 @@ package config
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,6 +44,76 @@ func TestConfigFromEnv(t *testing.T) {
 	_, v, err = mgr.GetConfig("TEST_ENV")
 	assert.NoError(t, err)
 	assert.Equal(t, "value", v)
+}
+
+func TestComplexArrayAndStruct(t *testing.T) {
+	// Create a temporary YAML file with complex array structures
+	yamlContent := `
+test:
+  simpleArray:
+    - item1
+    - item2
+    - item3
+  complexArray:
+    - name: region1
+      seeds:
+        - n1
+        - n2
+        - n3
+    - name: region2
+      seeds:
+        - n4
+        - n5
+        - n6
+  nestedConfig:
+    placement:
+      - name: replica-1
+        region: default-region-pool
+        az: az-1
+        resourceGroup: rg.*
+      - name: replica-2
+        region: default-region-pool
+        az: az-2
+        resourceGroup: rg.*
+  scalarValue: 10000
+`
+	// Create temporary file
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test_complex_array_and_struct_config.yaml")
+	err := os.WriteFile(tmpFile, []byte(yamlContent), 0o600)
+	assert.NoError(t, err)
+
+	// Initialize manager with temporary file
+	mgr, err := Init(WithFilesSource(&FileInfo{[]string{tmpFile}, -1}))
+	assert.NoError(t, err)
+
+	t.Run("test complex array serialization", func(t *testing.T) {
+		// Test complexArray with structs containing nested arrays
+		_, v, err := mgr.GetConfig("test.complexArray")
+		assert.NoError(t, err)
+		// Should be a JSON string
+		expectedComplexArray := `[{"name":"region1","seeds":["n1","n2","n3"]},{"name":"region2","seeds":["n4","n5","n6"]}]`
+		assert.Equal(t, expectedComplexArray, v)
+
+		// Test placement array with structs
+		_, v, err = mgr.GetConfig("test.nestedConfig.placement")
+		assert.NoError(t, err)
+		// Should be a JSON string
+		expectedPlacementArray := `[{"az":"az-1","name":"replica-1","region":"default-region-pool","resourceGroup":"rg.*"},{"az":"az-2","name":"replica-2","region":"default-region-pool","resourceGroup":"rg.*"}]`
+		assert.Equal(t, expectedPlacementArray, v)
+	})
+
+	t.Run("test simple array serialization", func(t *testing.T) {
+		// Test that simple arrays still work with comma-separated values
+		_, v, err := mgr.GetConfig("test.simpleArray")
+		assert.NoError(t, err)
+		assert.Equal(t, "item1,item2,item3", v)
+
+		// Test scalar values still work
+		_, v, err = mgr.GetConfig("test.scalarValue")
+		assert.NoError(t, err)
+		assert.Equal(t, "10000", v)
+	})
 }
 
 func TestConfigFromRemote(t *testing.T) {
