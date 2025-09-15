@@ -9,11 +9,14 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-# Copyright (c) Microsoft Corporation. All rights reserved.
-# SPDX-License-Identifier: MIT
+# Use Arrow's Azure support instead of vcpkg
+set(AZURE_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/AzureChunkManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AzureBlobChunkManager.cpp
+)
 
-project(azure-blob-test)
+# Add Azure source files to parent's SOURCE_FILES
+set(SOURCE_FILES ${SOURCE_FILES} ${AZURE_SRCS} PARENT_SCOPE)
 
-add_executable(azure-blob-test test_azure_blob_chunk_manager.cpp ../AzureBlobChunkManager.cpp)
-find_package(GTest CONFIG REQUIRED)
-target_link_libraries(azure-blob-test PRIVATE Azure::azure-identity Azure::azure-storage-blobs GTest::gtest blob-chunk-manager)
+# Include directories for Azure SDK from Arrow's dependencies
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})

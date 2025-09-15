@@ -336,9 +336,11 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	err = initcore.InitStorageV2FileSystem(paramtable.Get())
-	if err != nil {
-		return err
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		err = initcore.InitStorageV2FileSystem(paramtable.Get())
+		if err != nil {
+			return err
+		}
 	}
 
 	err = initcore.InitMmapManager(paramtable.Get(), node.GetNodeID())

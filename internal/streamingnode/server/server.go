@@ -46,8 +46,10 @@ func (s *Server) init() {
 	log.Info("streamingnode server initialized")
 
 	// init storage v2 file system.
-	if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
-		panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
+			panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
+		}
 	}
 
 	// init paramtable change callback for core related config

@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "storage/azure/AzureChunkManager.h"
+#include "AzureChunkManager.h"
 #include "storage/Util.h"
 
 using namespace std;
