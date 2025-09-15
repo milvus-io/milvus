@@ -57,7 +57,7 @@ class ChunkedColumnBase : public ColumnBase {
         nullable_ = field_meta.is_nullable();
     }
 
-    virtual ~ChunkedColumnBase() {};
+    virtual ~ChunkedColumnBase(){};
 
     virtual void
     AppendBatch(const FieldDataPtr data) override {
@@ -393,7 +393,8 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
 
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
         auto data = std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
-                        ->operator[](offset_in_chunk);
+                        ->
+                        operator[](offset_in_chunk);
 
         return ViewType(data.data(), data.length());
     }

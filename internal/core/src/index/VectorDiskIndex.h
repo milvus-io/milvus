@@ -86,8 +86,7 @@ class VectorDiskAnnIndex : public VectorIndex {
                   "get sparse vector not supported for disk index");
     }
 
-    void
-    CleanLocalData() override;
+    void CleanLocalData() override;
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
