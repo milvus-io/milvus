@@ -14,8 +14,12 @@ FROM ubuntu:focal-20240530
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
+# Install ca-certificates first, then switch to HTTPS and install other packages
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 libopenblas-dev && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    sed -i 's/http:/https:/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
