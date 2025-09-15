@@ -775,17 +775,15 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:           1,
-		Type:             datapb.CompactionType_MixCompaction,
-		TimeoutInSeconds: 1,
-		Channel:          "ch-1",
-		State:            datapb.CompactionTaskState_executing,
-		NodeID:           111,
+		PlanID:  1,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-1",
+		State:   datapb.CompactionTaskState_executing,
+		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
 	t1.plan = &datapb.CompactionPlan{
 		PlanID: 1, Channel: "ch-1",
-		TimeoutInSeconds: 1,
-		Type:             datapb.CompactionType_MixCompaction,
+		Type: datapb.CompactionType_MixCompaction,
 	}
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
