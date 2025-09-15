@@ -410,9 +410,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     pk_range(proto::plan::OpType op,
              const PkType& pk,
-             Timestamp timestamp,
              BitsetTypeView& bitset) const override {
-        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        insert_record_.search_pk_range(pk, op, bitset);
     }
 
     bool
