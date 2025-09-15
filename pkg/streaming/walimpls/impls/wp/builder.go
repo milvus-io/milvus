@@ -2,6 +2,7 @@ package wp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -55,7 +56,12 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("create etcd client finish while building wp opener")
-	wpClient, err := woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
+	var wpClient woodpecker.Client
+	if cfg.Woodpecker.Storage.IsStorageService() {
+		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
+	} else {
+		wpClient, err = woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -82,25 +88,29 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	// set the rootPath as the prefix for wp object storage
 	wpConfig.Woodpecker.Meta.Prefix = fmt.Sprintf("%s/wp", paramtable.Get().EtcdCfg.RootPath.GetValue())
 	// logClient
-	wpConfig.Woodpecker.Client.Auditor.MaxInterval = int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds())
+	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = cfg.SegmentRollingMaxSize.GetAsSize()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds())
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
+
+	// quorum configuration
+	b.setQuorumConfig(wpConfig, cfg)
+
 	// logStore
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds())
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds()))
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxEntries = cfg.SyncMaxEntries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = cfg.SyncMaxBytes.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = config.NewByteSize(cfg.SyncMaxBytes.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushRetries = cfg.FlushMaxRetries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = cfg.FlushMaxSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = config.NewByteSize(cfg.FlushMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushThreads = cfg.FlushMaxThreads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = cfg.CompactionSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = config.NewDurationMillisecondsFromInt(int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = cfg.ReaderMaxBatchSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	// storage
 	wpConfig.Woodpecker.Storage.Type = cfg.StorageType.GetValue()
@@ -137,7 +147,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Minio.CreateBucket = true
 	wpConfig.Minio.IamEndpoint = paramtable.Get().MinioCfg.IAMEndpoint.GetValue()
 	wpConfig.Minio.UseVirtualHost = paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool()
-	wpConfig.Minio.RequestTimeoutMs = paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt()
+	wpConfig.Minio.RequestTimeoutMs = config.NewDurationMillisecondsFromInt(paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt())
 	wpConfig.Minio.LogLevel = paramtable.Get().LogCfg.Level.GetValue()
 
 	// set log
@@ -150,6 +160,39 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Log.File.MaxBackups = paramtable.Get().LogCfg.MaxBackups.GetAsInt()
 
 	return nil
+}
+
+func (b *builderImpl) setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
+	// Parse buffer pools from JSON string
+	bufferPoolsJSON := cfg.QuorumBufferPools.GetValue()
+	if bufferPoolsJSON != "" {
+		var bufferPools []config.QuorumBufferPool
+		if err := json.Unmarshal([]byte(bufferPoolsJSON), &bufferPools); err != nil {
+			log.Ctx(context.Background()).Warn("failed to parse quorum buffer pools JSON, using empty configuration",
+				zap.String("json", bufferPoolsJSON),
+				zap.Error(err))
+		} else {
+			wpConfig.Woodpecker.Client.Quorum.BufferPools = bufferPools
+		}
+	}
+
+	// Quorum selection strategy
+	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.AffinityMode = cfg.QuorumAffinityMode.GetValue()
+	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.Replicas = cfg.QuorumReplicas.GetAsInt()
+	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.Strategy = cfg.QuorumStrategy.GetValue()
+
+	// Parse custom placement from JSON string
+	customPlacementJSON := cfg.QuorumCustomPlacement.GetValue()
+	if customPlacementJSON != "" {
+		var customPlacements []config.CustomPlacement
+		if err := json.Unmarshal([]byte(customPlacementJSON), &customPlacements); err != nil {
+			log.Ctx(context.Background()).Warn("failed to parse custom placement JSON, using empty configuration",
+				zap.String("json", customPlacementJSON),
+				zap.Error(err))
+		} else {
+			wpConfig.Woodpecker.Client.Quorum.SelectStrategy.CustomPlacement = customPlacements
+		}
+	}
 }
 
 func (b *builderImpl) getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
