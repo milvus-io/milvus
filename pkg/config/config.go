@@ -17,6 +17,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -99,16 +100,37 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		case map[interface{}]interface{}:
 			flattenAndMergeMap(fullKey, cast.ToStringMap(val), result)
 		case []interface{}:
-			str := ""
-			for i, item := range val {
-				itemStr, err := cast.ToStringE(item)
+			// Check if array contains complex types (maps/structs)
+			isComplexArray := false
+			if len(val) > 0 {
+				switch val[0].(type) {
+				case map[string]interface{}, map[interface{}]interface{}:
+					isComplexArray = true
+				}
+			}
+
+			var str string
+			if isComplexArray {
+				// For complex arrays (containing objects), convert to JSON-compatible format and serialize
+				jsonCompatible := convertToJSONCompatible(val)
+				jsonBytes, err := json.Marshal(jsonCompatible)
 				if err != nil {
+					fmt.Printf("marshal to json failed %s, error = %s\n", fullKey, err.Error())
 					continue
 				}
-				if i == 0 {
-					str = itemStr
-				} else {
-					str = str + "," + itemStr
+				str = string(jsonBytes)
+			} else {
+				// For simple arrays, use comma-separated values
+				for i, item := range val {
+					itemStr, err := cast.ToStringE(item)
+					if err != nil {
+						continue
+					}
+					if i == 0 {
+						str = itemStr
+					} else {
+						str = str + "," + itemStr
+					}
 				}
 			}
 			result[lowerKey(fullKey)] = str
@@ -122,5 +144,36 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 			result[lowerKey(fullKey)] = str
 			result[formatKey(fullKey)] = str
 		}
+	}
+}
+
+// convertToJSONCompatible converts map[interface{}]interface{} to map[string]interface{}
+// recursively to make it compatible with JSON marshaling
+func convertToJSONCompatible(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			keyStr, err := cast.ToStringE(k)
+			if err != nil {
+				continue
+			}
+			result[keyStr] = convertToJSONCompatible(v)
+		}
+		return result
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			result[k] = convertToJSONCompatible(v)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, item := range val {
+			result[i] = convertToJSONCompatible(item)
+		}
+		return result
+	default:
+		return v
 	}
 }
