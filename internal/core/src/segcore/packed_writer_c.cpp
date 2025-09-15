@@ -274,7 +274,7 @@ EnableSkipIndex(int64_t group_id,
             std::make_unique<milvus::ChunkSkipIndexAppender>(field_meta);
 
         packed_writer->AddMetadataAppender(
-            group_id, "skip_index", std::move(appender));
+            group_id, milvus::ChunkSkipIndex::KEY, std::move(appender));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

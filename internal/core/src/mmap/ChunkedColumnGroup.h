@@ -189,15 +189,20 @@ class ChunkedColumnGroup {
                     fs, insert_file, arrow_schema);
 
             auto skip_index_metadata =
-                file_reader->file_metadata()->GetMetadataArray<ChunkSkipIndex>(
-                    "skip_index");
-            if (skip_index_metadata) {
-                // 使用移动迭代器避免不必要的拷贝
-                field_chunk_skipindex.insert(
-                    field_chunk_skipindex.end(),
-                    std::make_move_iterator(skip_index_metadata->begin()),
-                    std::make_move_iterator(skip_index_metadata->end()));
+                file_reader->file_metadata()->GetMetadataVector<ChunkSkipIndex>(
+                    ChunkSkipIndex::KEY);
+
+            auto row_group_num = file_reader->file_metadata()
+                                     ->GetRowGroupMetadataVector()
+                                     .size();
+
+            if (field_chunk_skipindex.size() != row_group_num) {
+                return {};
             }
+            field_chunk_skipindex.insert(
+                field_chunk_skipindex.end(),
+                std::make_move_iterator(skip_index_metadata.begin()),
+                std::make_move_iterator(skip_index_metadata.end()));
 
             auto status = file_reader->Close();
             AssertInfo(status.ok(),
