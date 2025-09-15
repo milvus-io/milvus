@@ -292,9 +292,6 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	compactStart := time.Now()
 
-	ctx, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
-	defer cancelAll()
-
 	log := log.Ctx(ctx).With(zap.Int64("planID", t.GetPlanID()),
 		zap.Int64("collectionID", t.collectionID),
 		zap.Int64("partitionID", t.partitionID),
