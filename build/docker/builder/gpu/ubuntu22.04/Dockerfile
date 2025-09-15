@@ -21,14 +21,6 @@ RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.89 -y
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
-RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest
-
-
 # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
 RUN mkdir -p /home/milvus/.vscode-server/extensions \
     /home/milvus/.vscode-server-insiders/extensions \
