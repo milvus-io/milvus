@@ -248,10 +248,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 }
 
 CStatus
-EnableSkipIndex(int64_t group_id,
-                const int64_t* field_ids,
+EnableSkipIndex(const int64_t* group_ids,
                 const int64_t length,
-                CCollection c_collection,
                 CPackedWriter c_packed_writer) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -259,22 +257,16 @@ EnableSkipIndex(int64_t group_id,
         auto packed_writer =
             static_cast<milvus_storage::PackedRecordBatchWriter*>(
                 c_packed_writer);
-        auto col = static_cast<milvus::segcore::Collection*>(c_collection);
 
-        auto field_id_list =
-            std::vector<int64_t>(field_ids, field_ids + length);
-        std::vector<milvus::FieldId> milvus_field_ids;
-        for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.push_back(milvus::FieldId(field_id_list[i]));
+        auto group_id_list =
+            std::vector<int64_t>(group_ids, group_ids + length);
+
+        for (const auto& group_id : group_id_list) {
+            packed_writer->AddMetadataAppender(
+                group_id,
+                milvus::ChunkSkipIndex::KEY,
+                std::make_unique<milvus::ChunkSkipIndexAppender>());
         }
-        auto schema = col->get_schema();
-        auto field_meta = schema->get_field_metas(milvus_field_ids);
-
-        auto appender =
-            std::make_unique<milvus::ChunkSkipIndexAppender>(field_meta);
-
-        packed_writer->AddMetadataAppender(
-            group_id, "skip_index", std::move(appender));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

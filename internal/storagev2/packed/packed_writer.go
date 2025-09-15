@@ -28,8 +28,6 @@ import "C"
 import (
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
@@ -38,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -154,25 +151,16 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return nil
 }
 
-func (pw *PackedWriter) enableSkipIndex(GroupID typeutil.UniqueID, schema *schemapb.CollectionSchema, columns []typeutil.UniqueID) error {
-	cGroupID := C.int64_t(GroupID)
-
-	schemaBlob, err := proto.Marshal(schema)
-	if err != nil {
-		return nil, errors.New("marshal schema failed")
+func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID) error {
+	if len(groups) == 0 {
+		return nil
 	}
-	var cCollection C.CCollection
-	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &cCollection)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return err
+	cGroups := make([]C.int64_t, len(groups))
+	for i, col := range groups {
+		cGroups[i] = C.int64_t(col)
 	}
 
-	cColumns := make([]C.int64_t, len(columns))
-	for i, col := range columns {
-		cColumns[i] = C.int64_t(col)
-	}
-
-	status := C.EnableSkipIndex(cGroupID, &cColumns[0], C.int(len(columns)), &cCollection, pw.cPackedWriter)
+	status := C.EnableSkipIndex(&cGroups[0], C.int(len(groups)), pw.cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}

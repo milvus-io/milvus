@@ -9,132 +9,228 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
 #include "SkipIndex.h"
 
 namespace milvus {
 
-// static const FieldChunkMetrics defaultFieldChunkMetrics;
+FieldChunkMetrics::FieldChunkMetrics(
+    arrow::Type::type data_type,
+    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
+    int col_idx)
+    : data_type_(data_type) {
+    Load(batches, col_idx);
+}
 
-// const cachinglayer::PinWrapper<const FieldChunkMetrics*>
-// SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
-// skip index structure must be setup before using, thus we do not lock here.
-// auto field_metrics = fieldChunkMetrics_.find(field_id);
-// if (field_metrics != fieldChunkMetrics_.end()) {
-//     auto& field_chunk_metrics = field_metrics->second;
-//     auto ca = cachinglayer::SemiInlineGet(
-//         field_chunk_metrics->PinCells({chunk_id}));
-//     auto metrics = ca->get_cell_of(chunk_id);
-//     return cachinglayer::PinWrapper<const FieldChunkMetrics*>(ca, metrics);
-// }
-// return cachinglayer::PinWrapper<const FieldChunkMetrics*>(
-//     &defaultFieldChunkMetrics);
-// }
+void
+FieldChunkMetrics::Load(
+    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
+    int col_idx) {
+    switch (data_type_) {
+        case arrow::Type::BOOL:
+            LoadBooleanMetrics(batches, col_idx);
+            break;
+        case arrow::Type::INT8:
+            LoadMetrics<int8_t, arrow::Int8Array>(batches, col_idx);
+            break;
+        case arrow::Type::INT16:
+            LoadMetrics<int16_t, arrow::Int16Array>(batches, col_idx);
+            break;
+        case arrow::Type::INT32:
+            LoadMetrics<int32_t, arrow::Int32Array>(batches, col_idx);
+            break;
+        case arrow::Type::INT64:
+            LoadMetrics<int64_t, arrow::Int64Array>(batches, col_idx);
+            break;
+        case arrow::Type::FLOAT:
+            LoadMetrics<float, arrow::FloatArray>(batches, col_idx);
+            break;
+        case arrow::Type::DOUBLE:
+            LoadMetrics<double, arrow::DoubleArray>(batches, col_idx);
+            break;
+        case arrow::Type::STRING:
+            LoadStringMetrics(batches, col_idx);
+            break;
+        default:
+            return;
+    }
+}
 
-// std::vector<
-//     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<FieldChunkMetrics>>>
-// FieldChunkMetricsTranslator::get_cells(
-//     const std::vector<milvus::cachinglayer::cid_t>& cids) {
-//     std::vector<std::pair<milvus::cachinglayer::cid_t,
-//                           std::unique_ptr<FieldChunkMetrics>>>
-//         cells;
-//     cells.reserve(cids.size());
-//     if (data_type_ == milvus::DataType::VARCHAR) {
-//         for (auto chunk_id : cids) {
-//             auto pw = column_->GetChunk(chunk_id);
-//             auto chunk = static_cast<StringChunk*>(pw.get());
+std::unique_ptr<FieldChunkMetric>
+FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
+                              FieldChunkMetricType metric_type,
+                              const std::string& data) {
+    switch (data_type) {
+        case arrow::Type::BOOL:
+            switch (metric_type) {
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<bool>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::INT8:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<int8_t>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<int8_t>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<int8_t>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::INT16:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<int16_t>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<int16_t>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<int16_t>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::INT32:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<int32_t>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<int32_t>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<int32_t>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::INT64:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<int64_t>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<int64_t>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<int64_t>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::FLOAT:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<float>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<float>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<BloomFilterFieldChunkMetric<float>>(
+                        data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::DOUBLE:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<MinMaxFieldChunkMetric<double>>(
+                        data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<double>>(data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<double>>(data);
+                default:
+                    return nullptr;
+            }
+        case arrow::Type::STRING:
+            switch (metric_type) {
+                case FieldChunkMetricType::MINMAX:
+                    return std::make_unique<
+                        MinMaxFieldChunkMetric<std::string>>(data);
+                case FieldChunkMetricType::SET:
+                    return std::make_unique<SetFieldChunkMetric<std::string>>(
+                        data);
+                case FieldChunkMetricType::BLOOM_FILTER:
+                    return std::make_unique<
+                        BloomFilterFieldChunkMetric<std::string>>(data);
+                case FieldChunkMetricType::NGRAM_FILTER:
+                    return std::make_unique<NgramFieldChunkMetric>(data);
+                case FieldChunkMetricType::TOKEN_FILTER:
+                    return std::make_unique<TokenFieldChunkMetric>(data);
+                default:
+                    return nullptr;
+            }
+        default:
+            return nullptr;
+    }
+}
 
-//             int num_rows = chunk->RowNums();
-//             auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
-//             if (num_rows > 0) {
-//                 auto info = ProcessStringFieldMetrics(chunk);
-//                 chunk_metrics->min_ = Metrics(info.min_);
-//                 chunk_metrics->max_ = Metrics(info.max_);
-//                 chunk_metrics->null_count_ = info.null_count_;
-//             }
-//             chunk_metrics->hasValue_ = chunk_metrics->null_count_ != num_rows;
-//             cells.emplace_back(chunk_id, std::move(chunk_metrics));
-//         }
-//     } else {
-//         for (auto chunk_id : cids) {
-//             auto pw = column_->GetChunk(chunk_id);
-//             auto chunk = static_cast<FixedWidthChunk*>(pw.get());
-//             auto span = chunk->Span();
+std::string
+FieldChunkMetrics::Serialize() const {
+    std::stringstream ss(std::ios::binary | std::ios::out);
 
-//             const void* chunk_data = span.data();
-//             const bool* valid_data = span.valid_data();
-//             int64_t count = span.row_count();
+    uint32_t count = metrics_.size();
+    ss.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
-//             auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
+    for (const auto& [type, metric] : metrics_) {
+        ss.write(reinterpret_cast<const char*>(&type), sizeof(type));
 
-//             if (count > 0) {
-//                 switch (data_type_) {
-//                     case DataType::INT8: {
-//                         const int8_t* typedData =
-//                             static_cast<const int8_t*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<int8_t>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                     case DataType::INT16: {
-//                         const int16_t* typedData =
-//                             static_cast<const int16_t*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<int16_t>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                     case DataType::INT32: {
-//                         const int32_t* typedData =
-//                             static_cast<const int32_t*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<int32_t>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                     case DataType::INT64: {
-//                         const int64_t* typedData =
-//                             static_cast<const int64_t*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<int64_t>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                     case DataType::FLOAT: {
-//                         const float* typedData =
-//                             static_cast<const float*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<float>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                     case DataType::DOUBLE: {
-//                         const double* typedData =
-//                             static_cast<const double*>(chunk_data);
-//                         auto info = ProcessFieldMetrics<double>(
-//                             typedData, valid_data, count);
-//                         chunk_metrics->min_ = Metrics(info.min_);
-//                         chunk_metrics->max_ = Metrics(info.max_);
-//                         chunk_metrics->null_count_ = info.null_count_;
-//                         break;
-//                     }
-//                 }
-//             }
-//             chunk_metrics->hasValue_ = chunk_metrics->null_count_ != count;
-//             cells.emplace_back(chunk_id, std::move(chunk_metrics));
-//         }
-//     }
-//     return cells;
-// }
+        std::string data = metric->Serialize();
+        uint64_t len = data.length();
+        ss.write(reinterpret_cast<const char*>(&len), sizeof(len));
+        ss.write(data.data(), len);
+    }
+    return ss.str();
+}
+
+void
+FieldChunkMetrics::Deserialize(const std::string& data) {
+    std::stringstream ss(data, std::ios::binary | std::ios::in);
+    uint32_t metric_count;
+    ss.read(reinterpret_cast<char*>(&metric_count), sizeof(metric_count));
+    metrics_.reserve(metric_count);
+
+    for (uint32_t i = 0; i < metric_count; ++i) {
+        FieldChunkMetricType metric_type;
+        ss.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
+
+        uint64_t metric_len;
+        ss.read(reinterpret_cast<char*>(&metric_len), sizeof(metric_len));
+        std::string metric_data(metric_len, '\0');
+        ss.read(&metric_data[0], metric_len);
+
+        auto metric = LoadMetric(data_type_, metric_type, metric_data);
+        if (metric && metric->hasValue_) {
+            metrics_.emplace_back(metric_type, std::move(metric));
+        }
+    }
+}
+
+ChunkSkipIndex::ChunkSkipIndex(
+    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
+    if (batches.empty()) {
+        return;
+    }
+    auto schema = batches[0]->schema();
+    for (int col_idx = 0; col_idx < schema->num_fields(); ++col_idx) {
+        auto field_id = std::stoll(schema->field(col_idx)
+                                       ->metadata()
+                                       ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                       ->data());
+        auto fid = milvus::FieldId(field_id);
+        auto type = schema->field(col_idx)->type()->id();
+
+        if (fid == RowFieldID || !FieldChunkMetrics::CanSkipField(type)) {
+            continue;
+        }
+
+        field_chunk_metrics_.emplace_back(
+            fid, std::make_unique<FieldChunkMetrics>(type, batches, col_idx));
+    }
+}
 
 }  // namespace milvus

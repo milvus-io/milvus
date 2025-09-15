@@ -953,7 +953,9 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     auto skip_index_func = [this](const SkipIndex& skip_index,
                                   FieldId field_id,
                                   int64_t chunk_id) {
-        return skip_index.CanSkipInQuery<T>(field_id, chunk_id, arg_set_);
+        auto set = std::static_pointer_cast<SetElement<T>>(arg_set_);
+        return skip_index.CanSkipInQuery<T>(
+                field_id, chunk_id, set->GetElements());
     };
 
     int64_t processed_size;
