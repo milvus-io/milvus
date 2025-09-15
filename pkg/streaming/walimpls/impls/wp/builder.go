@@ -136,6 +136,7 @@ func (b *builderImpl) getMinioClient(ctx context.Context) (*minio.Client, error)
 		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
 		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
 		objectstorage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
+		objectstorage.SkipSSLVerify(params.MinioCfg.SkipSSLVerify.GetAsBool()),
 		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
 		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
