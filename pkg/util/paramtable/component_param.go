@@ -957,7 +957,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Version:      "2.6.2",
 		DefaultValue: "true",
 		Doc:          "whether split system column policy include partition key field",
-		Export:       true,
+		Export:       false,
 	}
 	p.Stv2SystemColumnIncludePartitionKey.Init(base.mgr)
 
@@ -966,7 +966,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Version:      "2.6.2",
 		DefaultValue: "true",
 		Doc:          "whether split system column policy include clustering key field",
-		Export:       true,
+		Export:       false,
 	}
 	p.Stv2SystemColumnIncludeClusteringKey.Init(base.mgr)
 
