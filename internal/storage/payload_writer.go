@@ -114,12 +114,12 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		if w.elementType == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("ArrayOfVector requires elementType, use WithElementType option")
 		}
-		arrowType, err := VectorArrayToArrowType(*w.elementType)
+		elemType, err := VectorArrayToArrowType(*w.elementType)
 		if err != nil {
 			return nil, err
 		}
-		w.arrowType = arrowType
-		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrowType.(*arrow.ListType).Elem())
+		w.arrowType = arrow.ListOf(elemType)
+		w.builder = array.NewListBuilder(memory.DefaultAllocator, elemType)
 	} else {
 		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
@@ -897,28 +897,6 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 	default:
 		panic("unsupported data type")
 	}
-}
-
-// VectorArrayToArrowType converts VectorArray type with elementType to Arrow ListArray type
-func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
-	var childType arrow.DataType
-
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		childType = arrow.PrimitiveTypes.Float32
-	case schemapb.DataType_BinaryVector:
-		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
-	case schemapb.DataType_Float16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
-	case schemapb.DataType_BFloat16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
-	case schemapb.DataType_Int8Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
-	}
-
-	return arrow.ListOf(childType), nil
 }
 
 // AddVectorArrayFieldDataToPayload adds VectorArrayFieldData to payload using Arrow ListArray
