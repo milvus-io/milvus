@@ -1311,11 +1311,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
             case proto::plan::LessThan:
             case proto::plan::LessEqual:
             case proto::plan::Equal:
-                segment_->pk_range(op_type, pk, query_timestamp, cache_view);
+                segment_->pk_range(op_type, pk, cache_view);
                 break;
             case proto::plan::NotEqual: {
-                segment_->pk_range(
-                    proto::plan::Equal, pk, query_timestamp, cache_view);
+                segment_->pk_range(proto::plan::Equal, pk, cache_view);
                 cache_view.flip();
                 break;
             }

@@ -1139,16 +1139,13 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
 void
 ChunkedSegmentSealedImpl::pk_range(proto::plan::OpType op,
                                    const PkType& pk,
-                                   Timestamp timestamp,
                                    BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
-        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        insert_record_.search_pk_range(pk, op, bitset);
         return;
     }
 
-    search_sorted_pk_range(op, pk, bitset, [this, timestamp](int64_t offset) {
-        return insert_record_.timestamps_[offset] <= timestamp;
-    });
+    search_sorted_pk_range(op, pk, bitset, [](int64_t offset) { return true; });
 }
 
 template <typename Condition>

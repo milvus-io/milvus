@@ -490,6 +490,14 @@ class InsertRecordSealed {
 
     void
     search_pk_range(const PkType& pk,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        pk2offset_->find_range(
+            pk, op, bitset, [](int64_t offset) { return true; });
+    }
+
+    void
+    search_pk_range(const PkType& pk,
                     Timestamp timestamp,
                     proto::plan::OpType op,
                     BitsetTypeView& bitset) const {
@@ -660,6 +668,14 @@ class InsertRecordGrowing {
             }
         }
         return res_offsets;
+    }
+
+    void
+    search_pk_range(const PkType& pk,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        pk2offset_->find_range(
+            pk, op, bitset, [](int64_t offset) { return true; });
     }
 
     void
