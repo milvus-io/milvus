@@ -1,10 +1,13 @@
 package wp
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/woodpecker/common/config"
+	"github.com/zilliztech/woodpecker/tests/utils"
 	"github.com/zilliztech/woodpecker/woodpecker"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -39,29 +42,75 @@ func TestWAL(t *testing.T) {
 		name        string
 		storageType string
 		rootPath    string
+		needCluster bool // Whether to start cluster for service mode
 	}{
 		{
 			name:        "LocalFsStorage",
 			storageType: "local",
 			rootPath:    rootPath,
+			needCluster: false,
 		},
 		{
 			name:        "ObjectStorage",
 			storageType: "minio", // Using default storage type minio-compatible
 			rootPath:    "",      // No need to specify path for this storage
+			needCluster: false,
+		},
+		{
+			name:        "ServiceStorage",
+			storageType: "service",             // Using default storage type minio-compatible
+			rootPath:    rootPath + "_service", // No need to specify path for this storage
+			needCluster: true,
 		},
 	}
 	wpBackendTypeKey := paramtable.Get().WoodpeckerCfg.StorageType.Key
 	wpBackendRootPathKey := paramtable.Get().WoodpeckerCfg.RootPath.Key
+	wpPoolKey := paramtable.Get().WoodpeckerCfg.QuorumBufferPools.Key
+	debugKey := paramtable.Get().LogCfg.Level.Key
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// set params
 			err := paramtable.Get().Save(wpBackendTypeKey, tc.storageType)
 			assert.NoError(t, err)
 			err = paramtable.Get().Save(wpBackendRootPathKey, tc.rootPath)
 			assert.NoError(t, err)
+
+			// startup cluster if need
+			if tc.needCluster {
+				paramtable.Get().Save(debugKey, "debug")
+				// get default cfg
+				cfg, err := config.NewConfiguration()
+				assert.NoError(t, err)
+				err = setCustomWpConfig(cfg, &paramtable.Get().WoodpeckerCfg)
+				assert.NoError(t, err)
+				// setup mini cluster
+				const nodeCount = 3
+				cluster, cfg, _, serviceSeeds := utils.StartMiniClusterWithCfg(t, nodeCount, tc.rootPath, cfg)
+				cfg.Woodpecker.Client.Quorum.BufferPools[0].Seeds = serviceSeeds
+				defer func() {
+					cluster.StopMultiNodeCluster(t)
+				}()
+				// set back config using miniCluster seeds
+				testPools := []config.QuorumBufferPool{
+					{
+						Name:  "defaultpool",
+						Seeds: serviceSeeds,
+					},
+				}
+				jsonBytes, err := json.Marshal(testPools)
+				assert.NoError(t, err)
+				jsonStr := string(jsonBytes)
+				_ = paramtable.Get().Save(wpPoolKey, jsonStr)
+			} else {
+				defer func() {
+					// stop embed LogStore singleton only for non-service mode
+					stopEmbedLogStoreErr := woodpecker.StopEmbedLogStore()
+					assert.NoError(t, stopEmbedLogStoreErr, "close embed LogStore instance error")
+				}()
+			}
+
+			// run test
 			walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
-			stopEmbedLogStoreErr := woodpecker.StopEmbedLogStore()
-			assert.NoError(t, stopEmbedLogStoreErr)
 		})
 	}
 }

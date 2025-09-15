@@ -196,6 +196,42 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+    quorum:
+      # Quorum Buffer Pools: Define groups of nodes for different purposes
+      # Example configuration below:
+      #   - name: region1 # Name of the region pool
+      #     seeds: [n1,n2,n3] # List of seed node addresses for this pool
+      #   - name: region2 # Name of the region pool
+      #     seeds: [n4,n5,n6] # List of seed node addresses for this pool
+      quorumBufferPools: 
+      quorumSelectStrategy:
+        affinityMode: soft # Affinity mode for node selection rules. Valid values: [soft, hard]
+        replicas: 3 # Number of replicas in the quorum ensemble. Valid values: [3, 5]
+        # Node selection strategy
+        # Valid values: [random, single-az-single-rg, single-az-multi-rg, multi-az-single-rg, multi-az-multi-rg, cross-region, custom]
+        # random: nodes are selected randomly
+        # single-az-single-rg: All nodes in same availability zone and resource group
+        # single-az-multi-rg: Same availability zone, multiple resource groups
+        # multi-az-single-rg: Multiple availability zones, single resource group
+        # multi-az-multi-rg: Multiple availability zones and resource groups
+        # cross-region: Nodes across different regions for maximum durability
+        # custom: Use custom expressions defined below
+        strategy: random
+        # Custom expressions for node selection (only used when strategy is 'custom')
+        # Example configuration below:
+        #   - name: replica-1
+        #     region: "default-region-pool"
+        #     az: "az-1"
+        #     resourceGroup: "rg.*"
+        #   - name: replica-2
+        #     region: "default-region-pool"
+        #     az: "az-2"
+        #     resourceGroup: "rg.*"
+        #   - name: replica-3
+        #     region: "default-region-pool"
+        #     az: "az.*"
+        #     resourceGroup: "rg.*"
+        customPlacement: 
   logstore:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
@@ -220,7 +256,7 @@ woodpecker:
       # Valid values: [auto, enable, disable]
       conditionWrite: auto
   storage:
-    type: minio # The Type of the storage provider. Valid values: [minio, local]
+    type: minio # The Type of the storage provider. Valid values: [minio, local, service]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
