@@ -201,7 +201,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 	for segID, writer := range segmentWriters {
 		blob, tr, err := writer.Finish()
 		if err != nil {
-			log.Warn("L0 compaction serializeUpload serialize failed", zap.Error(err))
+			log.Ctx(ctx).Warn("L0 compaction serializeUpload serialize failed", zap.Error(err))
 			return nil, err
 		}
 
@@ -211,7 +211,15 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 			return nil, err
 		}
 
-		blobKey, _ := binlog.BuildLogPath(storage.DeleteBinlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), -1, logID)
+		blobKey, _ := binlog.BuildLogPathWithRootPath(
+			t.compactionParams.StorageConfig.GetRootPath(),
+			storage.DeleteBinlog,
+			writer.GetCollectionID(),
+			writer.GetPartitionID(),
+			writer.GetSegmentID(),
+			-1,
+			logID,
+		)
 
 		allBlobs[blobKey] = blob.GetValue()
 		deltalog := &datapb.Binlog{
@@ -236,7 +244,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 	}
 
 	if err := t.Upload(traceCtx, allBlobs); err != nil {
-		log.Warn("L0 compaction serializeUpload upload failed", zap.Error(err))
+		log.Ctx(ctx).Warn("L0 compaction serializeUpload upload failed", zap.Error(err))
 		return nil, err
 	}
 
