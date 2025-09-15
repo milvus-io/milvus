@@ -718,8 +718,8 @@ TEST(Query, DISABLED_FillSegment) {
             FieldName("lack_default_value_binlog_varchar")));
         auto result = segment->Search(plan.get(), ph.get(), ts);
         result->result_offsets_.resize(topk * num_queries);
-        segment->FillTargetEntry(plan.get(), op_context, *result);
-        segment->FillPrimaryKeys(plan.get(), op_context, *result);
+        segment->FillTargetEntry(plan.get(), &op_context, *result);
+        segment->FillPrimaryKeys(plan.get(), &op_context, *result);
 
         auto& fields_data = result->output_fields_data_;
         ASSERT_EQ(fields_data.size(), 9);

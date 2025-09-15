@@ -686,7 +686,7 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     lck.unlock();
 
     milvus::OpContext ctx;
-    auto ca = SemiInlineGet(slot->PinCells(ctx, {0}));
+    auto ca = SemiInlineGet(slot->PinCells(&ctx, {0}));
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
@@ -708,7 +708,7 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
         auto slot = iter->second.at(nested_path).get();
 
         milvus::OpContext ctx;
-        auto ca = SemiInlineGet(slot->PinCells(ctx, {0}));
+        auto ca = SemiInlineGet(slot->PinCells(&ctx, {0}));
         auto index =
             dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
         AssertInfo(index != nullptr,
@@ -751,7 +751,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
-                                        milvus::OpContext& op_context,
+                                        milvus::OpContext* op_context,
                                         SearchResult& output) const {
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
@@ -844,7 +844,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
     milvus::OpContext ctx;
-    auto ca = SemiInlineGet(cache_index->PinCells(ctx, {0}));
+    auto ca = SemiInlineGet(cache_index->PinCells(&ctx, {0}));
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
@@ -1621,7 +1621,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                 });
             milvus::OpContext ctx;
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells(ctx, {0}));
+                SemiInlineGet(field_index_iter->second->PinCells(&ctx, {0}));
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "

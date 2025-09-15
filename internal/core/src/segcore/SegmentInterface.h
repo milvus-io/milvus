@@ -63,12 +63,12 @@ class SegmentInterface {
 
     virtual void
     FillPrimaryKeys(const query::Plan* plan,
-                    milvus::OpContext& op_context,
+                    milvus::OpContext* op_context,
                     SearchResult& results) const = 0;
 
     virtual void
     FillTargetEntry(const query::Plan* plan,
-                    milvus::OpContext& op_context,
+                    milvus::OpContext* op_context,
                     SearchResult& results) const = 0;
 
     virtual bool
@@ -288,12 +288,12 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     FillPrimaryKeys(const query::Plan* plan,
-                    milvus::OpContext& op_context,
+                    milvus::OpContext* op_context,
                     SearchResult& results) const override;
 
     void
     FillTargetEntry(const query::Plan* plan,
-                    milvus::OpContext& op_context,
+                    milvus::OpContext* op_context,
                     SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
@@ -370,7 +370,7 @@ class SegmentInternalInterface : public SegmentInterface {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  milvus::OpContext& op_context,
+                  milvus::OpContext* op_context,
                   SearchResult& output) const = 0;
 
     virtual void
@@ -467,7 +467,7 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
-        milvus::OpContext& op_context) const;
+        milvus::OpContext* op_context) const;
 
     // return whether field mmap or not
     virtual bool

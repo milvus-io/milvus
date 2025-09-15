@@ -143,7 +143,7 @@ ReduceHelper::FillPrimaryKey() {
         auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
             // TODO: support storage usage recording in op_context
-            segment->FillPrimaryKeys(plan_, op_context_, *search_result);
+            segment->FillPrimaryKeys(plan_, &op_context_, *search_result);
             search_results_[valid_index++] = search_result;
         }
     }
@@ -198,7 +198,7 @@ ReduceHelper::FillEntryData() {
         std::chrono::high_resolution_clock::time_point get_target_entry_start =
             std::chrono::high_resolution_clock::now();
         // TODO: support storage usage recording in op_context
-        segment->FillTargetEntry(plan_, op_context_, *search_result);
+        segment->FillTargetEntry(plan_, &op_context_, *search_result);
         std::chrono::high_resolution_clock::time_point get_target_entry_end =
             std::chrono::high_resolution_clock::now();
         double get_entry_cost =

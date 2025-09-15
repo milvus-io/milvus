@@ -85,7 +85,7 @@ std::unique_ptr<SearchResult>
 VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
                        const SearchInfo& search_info,
                        const BitsetView& bitset,
-                       milvus::OpContext& op_context) {
+                       milvus::OpContext* op_context) {
     auto vector_index = dynamic_cast<index::VectorIndex*>(index_.get());
     auto search_result = std::make_unique<SearchResult>();
     vector_index->Query(

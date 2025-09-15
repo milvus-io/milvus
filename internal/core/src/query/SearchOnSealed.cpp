@@ -34,7 +34,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const size_t* query_lims,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    milvus::OpContext& op_context,
+                    milvus::OpContext* op_context,
                     SearchResult& search_result) {
     auto topK = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
@@ -69,7 +69,7 @@ SearchOnSealedIndex(const Schema& schema,
     dataset->SetIsSparse(is_sparse);
     milvus::OpContext ctx;
     auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(ctx, {0}));
+        SemiInlineGet(field_indexing->indexing_->PinCells(&ctx, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
@@ -112,7 +112,7 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t num_queries,
                      int64_t row_count,
                      const BitsetView& bitview,
-                     milvus::OpContext& op_context,
+                     milvus::OpContext* op_context,
                      SearchResult& result) {
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];

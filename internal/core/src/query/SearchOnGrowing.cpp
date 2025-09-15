@@ -31,7 +31,7 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                         const void* query_data,
                         int64_t num_queries,
                         const BitsetView& bitset,
-                        milvus::OpContext& op_context,
+                        milvus::OpContext* op_context,
                         SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
@@ -77,7 +77,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,
-                milvus::OpContext& op_context,
+                milvus::OpContext* op_context,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();

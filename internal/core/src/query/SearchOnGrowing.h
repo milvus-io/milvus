@@ -25,7 +25,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,
-                milvus::OpContext& op_context,
+                milvus::OpContext* op_context,
                 SearchResult& search_result);
 
 }  // namespace milvus::query

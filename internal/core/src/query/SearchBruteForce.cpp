@@ -122,7 +122,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const BitsetView& bitset,
                  DataType data_type,
                  DataType element_type,
-                 milvus::OpContext& op_context) {
+                 milvus::OpContext* op_context) {
     SubSearchResult sub_result(query_ds.num_queries,
                                query_ds.topk,
                                query_ds.metric_type,
@@ -159,23 +159,23 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         knowhere::expected<knowhere::DataSetPtr> res;
         if (data_type == DataType::VECTOR_FLOAT) {
             res = knowhere::BruteForce::RangeSearch<float>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
             res = knowhere::BruteForce::RangeSearch<float16>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
             res = knowhere::BruteForce::RangeSearch<bfloat16>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else if (data_type == DataType::VECTOR_BINARY) {
             res = knowhere::BruteForce::RangeSearch<bin1>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             res = knowhere::BruteForce::RangeSearch<
                 knowhere::sparse::SparseRow<SparseValueType>>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else if (data_type == DataType::VECTOR_INT8) {
             res = knowhere::BruteForce::RangeSearch<int8>(
-                base_dataset, query_dataset, search_cfg, bitset, &op_context);
+                base_dataset, query_dataset, search_cfg, bitset, op_context);
         } else {
             ThrowInfo(
                 ErrorCode::Unsupported,
@@ -206,7 +206,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
             stat = knowhere::BruteForce::SearchWithBuf<float16>(
                 base_dataset,
@@ -215,7 +215,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
             stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
                 base_dataset,
@@ -224,7 +224,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else if (data_type == DataType::VECTOR_BINARY) {
             stat = knowhere::BruteForce::SearchWithBuf<bin1>(
                 base_dataset,
@@ -233,7 +233,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
             stat = knowhere::BruteForce::SearchSparseWithBuf(
                 base_dataset,
@@ -242,7 +242,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else if (data_type == DataType::VECTOR_INT8) {
             stat = knowhere::BruteForce::SearchWithBuf<int8>(
                 base_dataset,
@@ -251,7 +251,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
-                &op_context);
+                op_context);
         } else {
             ThrowInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force search:{}",

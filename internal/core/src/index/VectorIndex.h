@@ -59,7 +59,7 @@ class VectorIndex : public IndexBase {
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset,
-          milvus::OpContext& op_context,
+          milvus::OpContext* op_context,
           SearchResult& search_result) const = 0;
 
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
