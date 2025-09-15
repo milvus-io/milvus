@@ -32,7 +32,7 @@ RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
