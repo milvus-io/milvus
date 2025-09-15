@@ -61,7 +61,7 @@ pub fn grpc_builder(
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
-            "grpc tokenizer must be costum"
+            "grpc tokenizer must be customized"
         )));
     }
     let tokenizer = GrpcTokenizer::from_json(params.unwrap())?;
