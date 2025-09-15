@@ -84,7 +84,11 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 	if w.Channel().AccessMode != types.AccessModeRW {
 		panic("truncate on a wal that is not in read-write mode")
 	}
-	return w.l.Truncate(ctx, id.(wpID).logMsgId)
+	id2, ok := id.(wpID)
+	if !ok {
+		return errors.Wrap(message.ErrInvalidMessageID, "invalid message id")
+	}
+	return w.l.Truncate(ctx, id2.logMsgId)
 }
 
 func (w *walImpl) Close() {

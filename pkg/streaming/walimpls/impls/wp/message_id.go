@@ -47,16 +47,15 @@ func (id wpID) WoodpeckerID() *wp.LogMessageId {
 	return id.logMsgId
 }
 
-func (id wpID) WoodpeckerMsgId() *wp.LogMessageId {
-	return id.logMsgId
-}
-
 func (id wpID) WALName() message.WALName {
 	return message.WALNameWoodpecker
 }
 
 func (id wpID) LT(other message.MessageID) bool {
-	id2 := other.(wpID)
+	id2, ok := other.(wpID)
+	if !ok {
+		return false
+	}
 	if id.logMsgId.SegmentId != id2.logMsgId.SegmentId {
 		return id.logMsgId.SegmentId < id2.logMsgId.SegmentId
 	}
@@ -64,7 +63,10 @@ func (id wpID) LT(other message.MessageID) bool {
 }
 
 func (id wpID) LTE(other message.MessageID) bool {
-	id2 := other.(wpID)
+	id2, ok := other.(wpID)
+	if !ok {
+		return false
+	}
 	if id.logMsgId.SegmentId < id2.logMsgId.SegmentId {
 		return true
 	} else if id.logMsgId.SegmentId > id2.logMsgId.SegmentId {
@@ -74,7 +76,10 @@ func (id wpID) LTE(other message.MessageID) bool {
 }
 
 func (id wpID) EQ(other message.MessageID) bool {
-	id2 := other.(wpID)
+	id2, ok := other.(wpID)
+	if !ok {
+		return false
+	}
 	return id.logMsgId.SegmentId == id2.logMsgId.SegmentId && id.logMsgId.EntryId == id2.logMsgId.EntryId
 }
 
