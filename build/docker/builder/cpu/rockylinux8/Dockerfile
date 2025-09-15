@@ -14,7 +14,7 @@ ENV VCPKG_FORCE_SYSTEM_BINARIES 1
 
 # install vcpkg
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 
 # empty the vscpkg toolchains linux.cmake file to avoid the error
@@ -53,7 +53,7 @@ ENV VCPKG_FORCE_SYSTEM_BINARIES 1
 
 # install vcpkg
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 # Copy the vcpkg installed libraries
 COPY --from=vcpkg-installer /root/.cache/vcpkg /root/.cache/vcpkg
