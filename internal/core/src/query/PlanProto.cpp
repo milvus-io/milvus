@@ -20,6 +20,7 @@
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "log/Log.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
@@ -34,8 +35,8 @@ ProtoParser::PlanOptionsFromProto(
     const proto::plan::PlanOption& plan_option_proto,
     PlanOptions& plan_options) {
     plan_options.expr_use_json_stats = plan_option_proto.expr_use_json_stats();
-    LOG_INFO("plan_options.expr_use_json_stats: {}",
-             plan_options.expr_use_json_stats);
+    LOG_TRACE("plan_options.expr_use_json_stats: {}",
+              plan_options.expr_use_json_stats);
 }
 
 std::unique_ptr<VectorPlanNode>
@@ -102,6 +103,15 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                                           : 1;
             search_info.strict_group_size_ =
                 query_info_proto.strict_group_size();
+            // Always set json_path to distinguish between unset and empty string
+            // Empty string means accessing the entire JSON object
+            search_info.json_path_ = query_info_proto.json_path();
+            if (query_info_proto.json_type() !=
+                milvus::proto::schema::DataType::None) {
+                search_info.json_type_ =
+                    static_cast<milvus::DataType>(query_info_proto.json_type());
+            }
+            search_info.strict_cast_ = query_info_proto.strict_cast();
         }
 
         if (query_info_proto.has_search_iterator_v2_info()) {

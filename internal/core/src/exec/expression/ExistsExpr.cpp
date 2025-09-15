@@ -36,7 +36,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
         case DataType::JSON: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
                 result = EvalJsonExistsForDataSegment(context);

@@ -440,6 +440,7 @@ DataGen(SchemaPtr schema,
         uint64_t ts_offset = 0,
         int repeat_count = 1,
         int array_len = 10,
+        int group_count = 1,
         bool random_pk = false,
         bool random_val = true,
         bool random_valid = false) {
@@ -748,13 +749,48 @@ DataGen(SchemaPtr schema,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = R"({"int":)" + std::to_string(random()) +
-                               R"(,"double":)" +
-                               std::to_string(static_cast<double>(random())) +
-                               R"(,"string":")" + std::to_string(random()) +
-                               R"(","bool": true)" + R"(, "array": [1,2,3])" +
-                               "}";
-                    data[i] = str;
+                    for (int j = 0; j < repeat_count; j++) {
+                        if (group_count > 1) {
+                            auto str =
+                                R"({"int":)" +
+                                std::to_string(random() % group_count) +
+                                R"(,"double":)" +
+                                std::to_string(static_cast<double>(random())) +
+                                R"(,"string":")" +
+                                std::to_string(random() % group_count) +
+                                R"(","bool": )" +
+                                (group_count > 1
+                                     ? (random() % 2 ? "true" : "false")
+                                     : "true") +
+                                R"(, "array": [1,2,3])" + R"(,"int8":)" +
+                                std::to_string(static_cast<int8_t>(
+                                    random() % group_count)) +
+                                R"(,"int16":)" +
+                                std::to_string(static_cast<int16_t>(
+                                    random() % group_count)) +
+                                R"(,"int32":)" +
+                                std::to_string(static_cast<int32_t>(
+                                    random() % group_count)) +
+                                R"(,"int64":)" +
+                                std::to_string(static_cast<int64_t>(
+                                    random() % group_count)) +
+                                R"(,"float":)" +
+                                std::to_string(static_cast<float>(
+                                    random() % group_count)) +
+                                R"(,"nested": {"level1": {"level2": "value"}})" +
+                                "}";
+                            data[i * repeat_count + j] = str;
+                        } else {
+                            auto str =
+                                R"({"int":)" + std::to_string(random()) +
+                                R"(,"double":)" +
+                                std::to_string(static_cast<double>(random())) +
+                                R"(,"string":")" + std::to_string(random()) +
+                                R"(","bool": true)" + R"(, "array": [1,2,3])" +
+                                "}";
+                            data[i * repeat_count + j] = str;
+                        }
+                    }
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;

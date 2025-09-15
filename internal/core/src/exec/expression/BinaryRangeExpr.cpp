@@ -72,7 +72,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->lower_val_.val_case();
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 switch (value_type) {
                     case proto::plan::GenericValue::ValCase::kInt64Val: {
                         proto::plan::GenericValue double_lower_val;
@@ -167,7 +167,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (is_index_mode_ && !has_offset_input_) {
+    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -204,8 +204,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         }
         auto valid_res =
             (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-                : ProcessChunksForValid<T>(is_index_mode_);
+                ? ProcessChunksForValidByOffsets<T>(SegmentExpr::CanUseIndex(),
+                                                    *input)
+                : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
 
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
@@ -554,9 +555,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;

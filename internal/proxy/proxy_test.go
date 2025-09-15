@@ -1057,6 +1057,12 @@ func TestProxy(t *testing.T) {
 		// HINT: the order of stopping service refers to the `roles.go` file
 		log.Info("start to stop the services")
 		{
+			err := sn.Stop()
+			assert.NoError(t, err)
+			log.Info("stop StreamingNode")
+		}
+
+		{
 			err := mix.Stop()
 			assert.NoError(t, err)
 			log.Info("stop MixCoord")

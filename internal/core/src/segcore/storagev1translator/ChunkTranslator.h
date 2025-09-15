@@ -32,10 +32,12 @@ struct CTMeta : public milvus::cachinglayer::Meta {
         virt_chunk_order_;  // indicates the size of each virtual chunk, i.e. 2^virt_chunk_order_
     CTMeta(milvus::cachinglayer::StorageType storage_type,
            milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
+           milvus::cachinglayer::CellDataType cell_data_type,
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction)
         : milvus::cachinglayer::Meta(storage_type,
                                      cell_id_mapping_mode,
+                                     cell_data_type,
                                      cache_warmup_policy,
                                      support_eviction) {
     }

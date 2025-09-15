@@ -628,7 +628,7 @@ BatchUnaryCompare(const T* src,
 
 template <typename GetType, typename ValType>
 class ShreddingExecutor {
-    using IndexInnerType =
+    using InnerType =
         std::conditional_t<std::is_same_v<GetType, std::string_view>,
                            std::string,
                            GetType>;
@@ -659,7 +659,7 @@ class ShreddingExecutor {
  private:
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
-        BatchUnaryCompare<GetType, ValType>(src, size, val_, op_type_, res);
+        BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
     }
 
     void
@@ -677,7 +677,7 @@ class ShreddingExecutor {
     }
 
     proto::plan::OpType op_type_;
-    ValType val_;
+    InnerType val_;
     std::string pointer_;
 };
 
@@ -878,10 +878,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     ExecTextMatch();
 
     bool
-    CanExecNgramMatch();
-
-    bool
-    CanExecNgramMatchForJson();
+    CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
     ExecNgramMatch();

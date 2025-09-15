@@ -150,7 +150,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     double get_entry_cost = std::chrono::duration<double, std::micro>(
                                 get_target_entry_end - get_target_entry_start)
                                 .count();
-    monitor::internal_core_retrieve_get_target_entry_latency.Observe(
+    milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
     return results;
 }
@@ -274,7 +274,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     double get_entry_cost = std::chrono::duration<double, std::micro>(
                                 get_target_entry_end - get_target_entry_start)
                                 .count();
-    monitor::internal_core_retrieve_get_target_entry_latency.Observe(
+    milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
     return results;
 }

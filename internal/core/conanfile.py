@@ -71,6 +71,7 @@ class MilvusConan(ConanFile):
         "arrow:with_jemalloc": True,
         "arrow:with_openssl": True,
         "arrow:shared": False,
+        "arrow:with_azure": True,
         "arrow:with_s3": True,
         "arrow:encryption": True,
         "aws-sdk-cpp:config": True,

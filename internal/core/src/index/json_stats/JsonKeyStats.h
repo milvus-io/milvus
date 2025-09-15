@@ -16,6 +16,9 @@
 
 #pragma once
 
+// Forward declaration of test accessor in global namespace for friend declaration
+class TraverseJsonForBuildStatsAccessor;
+
 #include <string>
 #include <boost/filesystem.hpp>
 
@@ -667,6 +670,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string shared_column_field_name_;
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
+
+    // Friend accessor for unit tests to call private methods safely.
+    friend class ::TraverseJsonForBuildStatsAccessor;
 };
 
 }  // namespace milvus::index

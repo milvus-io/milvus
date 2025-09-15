@@ -91,10 +91,10 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (auto res = PreCheckNullable(input)) {
         return res;
     }
-    auto valid_res =
-        (input != nullptr)
-            ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-            : ProcessChunksForValid<T>(is_index_mode_);
+    auto valid_res = (input != nullptr)
+                         ? ProcessChunksForValidByOffsets<T>(
+                               SegmentExpr::CanUseIndex(), *input)
+                         : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();

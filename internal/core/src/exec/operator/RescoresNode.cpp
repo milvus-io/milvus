@@ -156,10 +156,10 @@ PhyRescoresNode::GetOutput() {
     double scalar_cost =
         std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
             .count();
-    monitor::internal_core_search_latency_rescore.Observe(scalar_cost / 1000);
+    milvus::monitor::internal_core_search_latency_rescore.Observe(scalar_cost /
+                                                                  1000);
 
     tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
-
     return input_;
 };
 

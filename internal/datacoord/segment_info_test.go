@@ -51,7 +51,7 @@ func TestCompactionTo(t *testing.T) {
 		segments.DropSegment(1)
 		compactTos, ok = segments.GetCompactionTo(1)
 		assert.False(t, ok)
-		assert.Nil(t, compactTos)
+		assert.NotNil(t, compactTos)
 		compactTos, ok = segments.GetCompactionTo(2)
 		assert.True(t, ok)
 		assert.NotNil(t, compactTos)

@@ -1186,14 +1186,14 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 			// Set the ElementType because it may not be set in the insert request.
 			if fieldData.Type == schemapb.DataType_Array {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok {
+				if !ok || fd.Scalars.GetArrayData() == nil {
 					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
 				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
 			} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
-				if !ok {
+				if !ok || fd.Vectors.GetVectorArray() == nil {
 					return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
@@ -2329,6 +2329,59 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	}
 	dynamicData := autoGenDynamicFieldData(defaultData)
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
+	return nil
+}
+
+func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
+	}
+	namespaceIsSet := insertMsg.InsertRequest.Namespace != nil
+
+	if namespaceEnabeld != namespaceIsSet {
+		if namespaceIsSet {
+			return fmt.Errorf("namespace data is set but namespace disabled")
+		}
+		return fmt.Errorf("namespace data is not set but namespace enabled")
+	}
+	if !namespaceEnabeld {
+		return nil
+	}
+
+	// check namespace field exists
+	namespaceField := typeutil.GetFieldByName(schema, common.NamespaceFieldName)
+	if namespaceField == nil {
+		return fmt.Errorf("namespace field not found")
+	}
+
+	// check namespace field data is already set
+	for _, fieldData := range insertMsg.FieldsData {
+		if fieldData.FieldId == namespaceField.FieldID {
+			return fmt.Errorf("namespace field data is already set by users")
+		}
+	}
+
+	// set namespace field data
+	namespaceData := make([]string, insertMsg.NRows())
+	namespace := *insertMsg.InsertRequest.Namespace
+	for i := range namespaceData {
+		namespaceData[i] = namespace
+	}
+	insertMsg.FieldsData = append(insertMsg.FieldsData, &schemapb.FieldData{
+		FieldName: namespaceField.Name,
+		FieldId:   namespaceField.FieldID,
+		Type:      namespaceField.DataType,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: namespaceData,
+					},
+				},
+			},
+		},
+	})
 	return nil
 }
 

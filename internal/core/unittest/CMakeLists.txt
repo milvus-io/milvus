@@ -50,6 +50,7 @@ set(MILVUS_TEST_FILES
         test_tracer.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
+        test_group_by_json.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -74,9 +75,10 @@ if (NOT (LINUX OR APPLE))
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)
-    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+    add_definitions(-DAZURE_BUILD_DIR)
 else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "AzureChunkManagerTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "AzureBlobChunkManagerTest\\.cpp$")
 endif()
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`

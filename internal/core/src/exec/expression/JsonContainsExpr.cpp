@@ -52,7 +52,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
             } else {
@@ -61,7 +61,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
@@ -400,10 +400,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -611,10 +611,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::vector<proto::plan::Array> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
@@ -891,10 +891,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
@@ -1140,10 +1140,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     std::set<int> elements_index;
@@ -1405,10 +1405,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::vector<proto::plan::Array> elements;
     for (auto const& element : expr_->vals_) {
@@ -1648,10 +1648,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     if (elements.empty()) {

@@ -476,6 +476,7 @@ message SegmentBinlogs {
 message FieldBinlog{
   int64 fieldID = 1;
   repeated Binlog binlogs = 2;
+  repeated int64 child_fields = 3;
 }
 
 message TextIndexStats {
