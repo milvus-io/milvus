@@ -1253,7 +1253,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.ClusterID = ParamItem{
 		Key:          "common.clusterID",
-		Version:      "2.6.0",
+		Version:      "2.6.3",
 		DefaultValue: "0",
 		Doc:          "cluster id",
 		Export:       true,
