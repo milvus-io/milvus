@@ -36,12 +36,14 @@ type RowParser interface {
 	Parse(raw []string) (Row, error)
 }
 type rowParser struct {
-	nullkey      string
-	header       []string
-	name2Dim     map[string]int
-	name2Field   map[string]*schemapb.FieldSchema
-	pkField      *schemapb.FieldSchema
-	dynamicField *schemapb.FieldSchema
+	nullkey              string
+	header               []string
+	name2Dim             map[string]int
+	name2Field           map[string]*schemapb.FieldSchema
+	structArrays         map[string]map[string]*schemapb.FieldSchema
+	structArraySubFields map[string]interface{}
+	pkField              *schemapb.FieldSchema
+	dynamicField         *schemapb.FieldSchema
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
@@ -58,14 +60,27 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 		}
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(schema)
+
 	name2Field := lo.SliceToMap(
-		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 			return field.GetName(), field
 		},
 	)
+
+	structArrays := make(map[string]map[string]*schemapb.FieldSchema)
+
+	structArraySubFields := make(map[string]interface{})
+	for _, sa := range schema.GetStructArrayFields() {
+		structArrays[sa.GetName()] = make(map[string]*schemapb.FieldSchema)
+		for _, subField := range sa.GetFields() {
+			structArraySubFields[subField.GetName()] = nil
+			structArrays[sa.GetName()][subField.GetName()] = subField
+		}
+	}
 
 	name2Dim := make(map[string]int)
 	for name, field := range name2Field {
@@ -103,7 +118,8 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 
 	for fieldName, field := range name2Field {
 		_, existInHeader := headerMap[fieldName]
-		if field.GetNullable() || field.GetDefaultValue() != nil {
+		_, subField := structArraySubFields[fieldName]
+		if field.GetNullable() || field.GetDefaultValue() != nil || subField {
 			// nullable/defaultValue fields, provide or not provide both ok
 		} else if !existInHeader {
 			// not nullable/defaultValue/autoPK/functionOutput fields, must provide
@@ -113,13 +129,74 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 	}
 
 	return &rowParser{
-		nullkey:      nullkey,
-		name2Dim:     name2Dim,
-		header:       header,
-		name2Field:   name2Field,
-		pkField:      pkField,
-		dynamicField: dynamicField,
+		nullkey:              nullkey,
+		name2Dim:             name2Dim,
+		header:               header,
+		name2Field:           name2Field,
+		structArrays:         structArrays,
+		structArraySubFields: structArraySubFields,
+		pkField:              pkField,
+		dynamicField:         dynamicField,
 	}, nil
+}
+
+// reconstructArrayForStructArray reconstructs the StructArray data format from CSV.
+// StructArray are passed in with format for one row: StructArray: [element 1, element 2, ...]
+// where each element contains one value of all sub-fields in StructArrayField.
+// So we need to reconstruct it to be handled by handleField.
+//
+// For example, let StructArrayFieldSchema { sub-field1: array of int32, sub-field2: array of float vector }
+// When we have one row in CSV (as JSON string):
+//
+//	"[{\"sub-field1\": 1, \"sub-field2\": [1.0, 2.0]}, {\"sub-field1\": 2, \"sub-field2\": [3.0, 4.0]}]"
+//
+// we reconstruct it to be handled by handleField as:
+//
+//	{"sub-field1": "[1, 2]", "sub-field2": "[[1.0, 2.0], [3.0, 4.0]]"}
+func (r *rowParser) reconstructArrayForStructArray(subFieldsMap map[string]*schemapb.FieldSchema, raw string) (map[string]string, error) {
+	// Parse the JSON array string
+	var rows []any
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&rows); err != nil {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in CSV, failed to parse JSON: %v", err))
+	}
+
+	buf := make(map[string][]any)
+	for _, elem := range rows {
+		row, ok := elem.(map[string]any)
+		if !ok {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
+		}
+		for key, value := range row {
+			field, ok := subFieldsMap[key]
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", key))
+			}
+			strVal, ok := value.(string)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid value type for field %s, expect string but got %T", key, value))
+			}
+
+			data, err := r.parseEntity(field, strVal, true)
+			if err != nil {
+				return nil, err
+			}
+			buf[key] = append(buf[key], data)
+		}
+	}
+
+	// Convert aggregated arrays to JSON strings
+	out := make(map[string]string, len(buf))
+	for k, v := range buf {
+		// Marshal the array as JSON string so it can be parsed by parseEntity
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = string(jsonBytes)
+	}
+	return out, nil
 }
 
 func (r *rowParser) Parse(strArr []string) (Row, error) {
@@ -131,8 +208,25 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 	dynamicValues := make(map[string]string)
 	// read values from csv file
 	for index, value := range strArr {
-		if field, ok := r.name2Field[r.header[index]]; ok {
-			data, err := r.parseEntity(field, value)
+		if subFieldsMap, ok := r.structArrays[r.header[index]]; ok {
+			values, err := r.reconstructArrayForStructArray(subFieldsMap, value)
+			if err != nil {
+				return nil, err
+			}
+
+			for subKey, subValue := range values {
+				field, ok := r.name2Field[subKey]
+				if !ok {
+					return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", subKey))
+				}
+				data, err := r.parseEntity(field, subValue, false)
+				if err != nil {
+					return nil, err
+				}
+				row[field.GetFieldID()] = data
+			}
+		} else if field, ok := r.name2Field[r.header[index]]; ok {
+			data, err := r.parseEntity(field, value, false)
 			if err != nil {
 				return nil, err
 			}
@@ -160,7 +254,8 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 				row[fieldID] = data
 			}
 		}
-		if _, ok := row[fieldID]; !ok {
+		_, subField := r.structArraySubFields[fieldName]
+		if _, ok := row[fieldID]; !ok && !subField {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", fieldName))
 		}
 	}
@@ -219,7 +314,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 	return nil
 }
 
-func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, error) {
+func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElementType bool) (any, error) {
 	if field.GetDefaultValue() != nil && obj == r.nullkey {
 		return nullutil.GetDefaultValue(field)
 	}
@@ -229,7 +324,12 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		return nil, nil
 	}
 
-	switch field.GetDataType() {
+	dataType := field.GetDataType()
+	if useElementType {
+		dataType = field.GetElementType()
+	}
+
+	switch dataType {
 	case schemapb.DataType_Bool:
 		b, err := strconv.ParseBool(obj)
 		if err != nil {
@@ -360,6 +460,26 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 			return nil, r.wrapDimError(len(vec), field)
 		}
 		return vec, nil
+	case schemapb.DataType_ArrayOfVector:
+		var vec []interface{}
+		desc := json.NewDecoder(strings.NewReader(obj))
+		desc.UseNumber()
+		err := desc.Decode(&vec)
+		if err != nil {
+			return nil, r.wrapTypeError(obj, field)
+		}
+		maxCapacity, err := parameterutil.GetMaxCapacity(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(vec), maxCapacity, field); err != nil {
+			return nil, err
+		}
+		vectorFieldData, err := r.arrayOfVectorToFieldData(vec, field)
+		if err != nil {
+			return nil, err
+		}
+		return vectorFieldData, nil
 	case schemapb.DataType_Array:
 		var vec []interface{}
 		desc := json.NewDecoder(strings.NewReader(obj))
@@ -539,6 +659,58 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 	default:
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("parse csv failed, unsupported array data type: %s", eleType.String()))
+	}
+}
+
+func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema) (*schemapb.VectorField, error) {
+	elementType := field.GetElementType()
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		values := make([]float32, 0, len(vectors)*int(dim))
+
+		for _, vectorAny := range vectors {
+			var vector []float32
+			v, ok := vectorAny.([]interface{})
+			if !ok {
+				return nil, r.wrapTypeError(vectorAny, field)
+			}
+			vector = make([]float32, len(v))
+			for i, elem := range v {
+				value, ok := elem.(json.Number)
+				if !ok {
+					return nil, r.wrapArrayValueTypeError(elem, elementType)
+				}
+				num, err := strconv.ParseFloat(value.String(), 32)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse float: %w", err)
+				}
+				vector[i] = float32(num)
+			}
+
+			if len(vector) != int(dim) {
+				return nil, r.wrapDimError(len(vector), field)
+			}
+			values = append(values, vector...)
+		}
+
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: values,
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("not implemented element type for CSV: %s", elementType.String()))
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type: %s", elementType.String()))
 	}
 }
 

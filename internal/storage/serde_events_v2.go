@@ -19,6 +19,7 @@ package storage
 import (
 	"fmt"
 	"io"
+	"path"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -221,8 +223,20 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-
-	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+	// if storage config is not passed, use common config
+	storageType := paramtable.Get().CommonCfg.StorageType.GetValue()
+	if storageConfig != nil {
+		storageType = storageConfig.GetStorageType()
+	}
+	// compose true path before create packed writer here
+	// and returned writtenPaths shall remain untouched
+	truePaths := lo.Map(paths, func(p string, _ int) string {
+		if storageType == "local" {
+			return p
+		}
+		return path.Join(bucketName, p)
+	})
+	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
