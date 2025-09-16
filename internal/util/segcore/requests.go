@@ -82,6 +82,14 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 			}
 		}
 
+		childField := field.Field.GetChildFields()
+		if len(childField) > 0 {
+			status = C.SetLoadFieldInfoChildFields(cLoadFieldDataInfo, cFieldID, (*C.int64_t)(unsafe.Pointer(&childField[0])), C.int64_t(len(childField)))
+			if err := ConsumeCStatusIntoError(&status); err != nil {
+				return nil, errors.Wrapf(err, "SetLoadFieldInfoChildFields failed at binlog, %d", field.Field.GetFieldID())
+			}
+		}
+
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
 	}
 	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))

@@ -260,8 +260,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
-        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-            column_group_id, insert_files[0], arrow_schema, fs);
+        milvus_storage::FieldIDList field_id_list;
+        if (info.child_field_ids.size() == 0) {
+            // legacy binlog meta, parse from reader
+            field_id_list = storage::GetFieldIDList(
+                column_group_id, insert_files[0], arrow_schema, fs);
+        } else {
+            field_id_list = milvus_storage::FieldIDList(info.child_field_ids);
+        }
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now

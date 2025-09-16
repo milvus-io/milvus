@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "log/Log.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "segcore/load_field_data_c.h"
@@ -60,6 +61,30 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
         binlog_info.field_id = field_id;
         binlog_info.row_count = row_count;
         load_field_data_info->field_infos[field_id] = binlog_info;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
+                            int64_t field_id,
+                            const int64_t* child_field_ids,
+                            const int64_t child_field_num) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto load_field_data_info =
+            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+        auto iter = load_field_data_info->field_infos.find(field_id);
+        if (iter == load_field_data_info->field_infos.end()) {
+            ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
+                      "please append field info first");
+        }
+        load_field_data_info->field_infos[field_id].child_field_ids =
+            std::vector<int64_t>(child_field_ids,
+                                 child_field_ids + child_field_num);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
