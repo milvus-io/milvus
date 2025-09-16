@@ -28,6 +28,7 @@
 
 #include "Utils.h"
 #include "Types.h"
+#include "common/GeometryCache.h"
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -1279,6 +1280,10 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
+    // Clean up geometry cache for all fields in this segment
+    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
+    cache_manager.RemoveSegmentCaches(this);
+
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;

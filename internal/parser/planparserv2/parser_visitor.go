@@ -1548,8 +1548,8 @@ func (v *ParserVisitor) VisitSTEuqals(ctx *parser.STEuqalsContext) interface{} {
 			"STEuqals operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText()
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1578,8 +1578,8 @@ func (v *ParserVisitor) VisitSTTouches(ctx *parser.STTouchesContext) interface{}
 			"STTouches operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText()
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1608,8 +1608,9 @@ func (v *ParserVisitor) VisitSTOverlaps(ctx *parser.STOverlapsContext) interface
 			"STOverlaps operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText()
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	// log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1638,8 +1639,9 @@ func (v *ParserVisitor) VisitSTCrosses(ctx *parser.STCrossesContext) interface{}
 			"STCrosses operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText()
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	// log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1668,8 +1670,9 @@ func (v *ParserVisitor) VisitSTContains(ctx *parser.STContainsContext) interface
 			"STContains operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText() // the wkt input
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	// log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1698,8 +1701,9 @@ func (v *ParserVisitor) VisitSTIntersects(ctx *parser.STIntersectsContext) inter
 			"STIntersects operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText() // the wkt input
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	// log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
@@ -1728,8 +1732,9 @@ func (v *ParserVisitor) VisitSTWithin(ctx *parser.STWithinContext) interface{} {
 			"STWithin operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 	element := ctx.StringLiteral().GetText() // the wkt input
-	if !isValidWKT(element[1 : len(element)-1]) {
-		return fmt.Errorf("invalid wkt string: %s", element[1:len(element)-1])
+	// log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{

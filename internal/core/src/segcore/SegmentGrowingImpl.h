@@ -32,6 +32,7 @@
 #include "common/IndexMeta.h"
 #include "common/Types.h"
 #include "query/PlanNode.h"
+#include "common/GeometryCache.h"
 
 namespace milvus::segcore {
 
@@ -259,6 +260,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     ~SegmentGrowingImpl() {
+        // Clean up geometry cache for all fields in this segment
+        auto& cache_manager =
+            milvus::exec::SimpleGeometryCacheManager::Instance();
+        cache_manager.RemoveSegmentCaches(this);
+
+        // Original mmap cleanup logic
         if (mmap_descriptor_ != nullptr) {
             auto mcm =
                 storage::MmapManager::GetInstance().GetMmapChunkManager();
