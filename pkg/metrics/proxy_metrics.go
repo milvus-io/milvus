@@ -465,31 +465,20 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName, functionTypeName, functionProvider, functionName})
 
-	ProxyScannedRemoteBytes = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	ProxyScannedRemoteBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "scanned_remote_bytes",
 			Help:      "the scanned remote bytes",
-			Buckets:   sizeBuckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
-	ProxyScannedTotalBytes = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	ProxyScannedTotalBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "scanned_total_bytes",
 			Help:      "the scanned total bytes",
-			Buckets:   sizeBuckets,
-		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
-
-	ProxyStorageCacheHitRatio = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "storage_cache_hit_ratio",
-			Help:      "the storage cache hit ratio",
-			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 )
 
@@ -563,7 +552,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyScannedRemoteBytes)
 	registry.MustRegister(ProxyScannedTotalBytes)
-	registry.MustRegister(ProxyStorageCacheHitRatio)
 	RegisterStreamingServiceClient(registry)
 }
 
@@ -747,12 +735,6 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	ProxyScannedTotalBytes.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: QueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyStorageCacheHitRatio.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
 		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})

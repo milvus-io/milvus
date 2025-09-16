@@ -122,7 +122,6 @@ class ReduceHelper {
     // output
     std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
     tracer::TraceContext* trace_ctx_;
-    milvus::OpContext op_context_;
     StorageCost total_search_storage_cost_;
 };
 

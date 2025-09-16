@@ -125,8 +125,7 @@ TEST(Sealed, without_predicate) {
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(query_dataset, searchInfo, nullptr, &op_context, result);
+    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
     auto ref_result = SearchResultToJson(result);
 
     LoadIndexInfo load_info;
@@ -331,8 +330,7 @@ TEST(Sealed, with_predicate) {
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(query_dataset, searchInfo, nullptr, &op_context, result);
+    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
@@ -2462,8 +2460,7 @@ TEST(Sealed, SearchVectorArray) {
     searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(query_dataset, searchInfo, nullptr, &op_context, result);
+    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
     auto ref_result = SearchResultToJson(result);
     std::cout << ref_result.dump(1) << std::endl;
     EXPECT_EQ(result.total_nq_, 2);

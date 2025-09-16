@@ -113,8 +113,7 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (best_match == nullptr) {
                     return nullptr;
                 }
-                milvus::OpContext ctx;
-                auto ca = SemiInlineGet(best_match->PinCells(&ctx, {0}));
+                auto ca = SemiInlineGet(best_match->PinCells(nullptr, {0}));
                 auto index = ca->get_cell_of(0);
                 return PinWrapper<const index::IndexBase*>(ca, index);
             });

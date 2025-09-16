@@ -136,7 +136,6 @@ class TestFloatSearchBruteForce : public ::testing::Test {
         search_info.metric_type_ = metric_type;
 
         auto raw_dataset = query::dataset::RawDataset{0, dim, nb, base.data()};
-        milvus::OpContext op_context;
         auto result = BruteForceSearch(query_dataset,
                                        raw_dataset,
                                        search_info,
@@ -144,7 +143,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
                                        bitset_view,
                                        DataType::VECTOR_FLOAT,
                                        DataType::NONE,
-                                       &op_context);
+                                       nullptr);
         for (int i = 0; i < nq; i++) {
             auto ref = Ref(base.data(),
                            query.data() + i * dim,

@@ -67,9 +67,8 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
-    milvus::OpContext ctx;
     auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(&ctx, {0}));
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 

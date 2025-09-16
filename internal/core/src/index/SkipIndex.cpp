@@ -24,9 +24,8 @@ SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
     auto field_metrics = fieldChunkMetrics_.find(field_id);
     if (field_metrics != fieldChunkMetrics_.end()) {
         auto& field_chunk_metrics = field_metrics->second;
-        milvus::OpContext ctx;
         auto ca = cachinglayer::SemiInlineGet(
-            field_chunk_metrics->PinCells(&ctx, {chunk_id}));
+            field_chunk_metrics->PinCells(nullptr, {chunk_id}));
         auto metrics = ca->get_cell_of(chunk_id);
         return cachinglayer::PinWrapper<const FieldChunkMetrics*>(ca, metrics);
     }

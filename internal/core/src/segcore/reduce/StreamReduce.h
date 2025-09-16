@@ -222,7 +222,6 @@ class StreamReducerHelper {
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     int64_t total_nq_{0};
-    milvus::OpContext op_context_;
-    milvus::StorageCost total_search_storage_cost_;
+    StorageCost total_search_storage_cost_;
 };
 }  // namespace milvus::segcore

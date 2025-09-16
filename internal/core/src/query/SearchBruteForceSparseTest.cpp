@@ -108,7 +108,6 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             metric_type, nq, topk, -1, kTestSparseDim, query.get()};
         auto raw_dataset =
             query::dataset::RawDataset{0, kTestSparseDim, nb, base.get()};
-        milvus::OpContext op_context;
         if (!is_supported_sparse_float_metric(metric_type)) {
             ASSERT_ANY_THROW(BruteForceSearch(query_dataset,
                                               raw_dataset,
@@ -117,7 +116,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                               bitset_view,
                                               DataType::VECTOR_SPARSE_U32_F32,
                                               DataType::NONE,
-                                              &op_context));
+                                              nullptr));
             return;
         }
         auto result = BruteForceSearch(query_dataset,
@@ -127,7 +126,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                        bitset_view,
                                        DataType::VECTOR_SPARSE_U32_F32,
                                        DataType::NONE,
-                                       &op_context);
+                                       nullptr);
         for (int i = 0; i < nq; i++) {
             auto ref = SearchRef(base.get(), *(query.get() + i), nb, topk);
             auto ans = result.get_seg_offsets() + i * topk;
@@ -143,7 +142,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                         bitset_view,
                                         DataType::VECTOR_SPARSE_U32_F32,
                                         DataType::NONE,
-                                        &op_context);
+                                        nullptr);
         for (int i = 0; i < nq; i++) {
             auto ref = RangeSearchRef(
                 base.get(), *(query.get() + i), nb, 0.1, 0.5, topk);

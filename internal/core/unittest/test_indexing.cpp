@@ -179,7 +179,6 @@ TEST(Indexing, BinaryBruteForce) {
     search_info.metric_type_ = metric_type;
     auto base_dataset = query::dataset::RawDataset{
         int64_t(0), dim, N, (const void*)bin_vec.data()};
-    milvus::OpContext op_context;
     auto sub_result = query::BruteForceSearch(search_dataset,
                                               base_dataset,
                                               search_info,
@@ -187,7 +186,7 @@ TEST(Indexing, BinaryBruteForce) {
                                               nullptr,
                                               DataType::VECTOR_BINARY,
                                               DataType::NONE,
-                                              &op_context);
+                                              nullptr);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;
@@ -298,8 +297,7 @@ TEST(Indexing, Naive) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(query_ds, searchInfo, view, &op_context, result);
+    vec_index->Query(query_ds, searchInfo, view, nullptr, result);
 
     for (int i = 0; i < TOPK; ++i) {
         ASSERT_FALSE(result.seg_offsets_[i] < N / 2);
@@ -522,8 +520,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -539,7 +536,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     if (!is_sparse) {
         // sparse doesn't support range search yet
         search_info.search_params_ = range_search_conf;
-        vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result);
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     }
 }
 
@@ -594,8 +591,7 @@ TEST_P(IndexTest, Mmap) {
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    milvus::OpContext op_context;
-    vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -604,7 +600,7 @@ TEST_P(IndexTest, Mmap) {
         EXPECT_EQ(result.seg_offsets_[0], query_offset);
     }
     search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
 }
 
 TEST_P(IndexTest, GetVector) {
@@ -847,9 +843,8 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
     };
     SearchResult result;
-    milvus::OpContext op_context;
     EXPECT_THROW(
-        vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result),
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result),
         std::runtime_error);
 }
 
@@ -935,9 +930,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    milvus::OpContext op_context;
     EXPECT_NO_THROW(
-        vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result));
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 
 TEST(Indexing, SearchDiskAnnWithBFloat16) {
@@ -1022,9 +1016,8 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    milvus::OpContext op_context;
     EXPECT_NO_THROW(
-        vec_index->Query(xq_dataset, search_info, nullptr, &op_context, result));
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 #endif
 

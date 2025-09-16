@@ -1557,7 +1557,6 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     search_info.round_decimal_ = round_decimal;
     search_info.metric_type_ = metric_type;
     auto raw_dataset = query::dataset::RawDataset{0, dim, N, vec_col.data()};
-    milvus::OpContext op_context;
     auto sub_result = BruteForceSearch(search_dataset,
                                        raw_dataset,
                                        search_info,
@@ -1565,11 +1564,11 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
                                        nullptr,
                                        DataType::VECTOR_FLOAT,
                                        DataType::NONE,
-                                       &op_context);
+                                       nullptr);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-    segment->FillPrimaryKeys(plan.get(), &op_context, *sr);
-    segment->FillTargetEntry(plan.get(), &op_context, *sr);
+    segment->FillPrimaryKeys(plan.get(), *sr);
+    segment->FillTargetEntry(plan.get(), *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);
     ASSERT_TRUE(sr->output_fields_data_.find(str_meta.get_id()) !=
                 sr->output_fields_data_.end());

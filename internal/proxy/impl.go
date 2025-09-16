@@ -2886,21 +2886,14 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
-	).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+	).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
 	metrics.ProxyScannedTotalBytes.WithLabelValues(
 		nodeID,
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
-	).Observe(float64(qt.storageCost.ScannedTotalBytes))
-
-	metrics.ProxyStorageCacheHitRatio.WithLabelValues(
-		nodeID,
-		metrics.SearchLabel,
-		dbName,
-		collectionName,
-	).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
+	).Add(float64(qt.storageCost.ScannedTotalBytes))
 
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
@@ -3115,21 +3108,14 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
-	).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+	).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
 	metrics.ProxyScannedTotalBytes.WithLabelValues(
 		nodeID,
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
-	).Observe(float64(qt.storageCost.ScannedTotalBytes))
-
-	metrics.ProxyStorageCacheHitRatio.WithLabelValues(
-		nodeID,
-		metrics.HybridSearchLabel,
-		dbName,
-		collectionName,
-	).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
+	).Add(float64(qt.storageCost.ScannedTotalBytes))
 
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
@@ -3378,21 +3364,15 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Observe(float64(qt.storageCost.ScannedRemoteBytes))
+		).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
 		metrics.ProxyScannedTotalBytes.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Observe(float64(qt.storageCost.ScannedTotalBytes))
+		).Add(float64(qt.storageCost.ScannedTotalBytes))
 
-		metrics.ProxyStorageCacheHitRatio.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
-			request.DbName,
-			request.CollectionName,
-		).Observe(100 * float64(qt.storageCost.ScannedTotalBytes-qt.storageCost.ScannedRemoteBytes) / float64(qt.storageCost.ScannedTotalBytes))
 	}
 
 	return qt.result, qt.storageCost, nil
