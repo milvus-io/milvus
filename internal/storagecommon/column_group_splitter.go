@@ -17,6 +17,7 @@
 package storagecommon
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -33,6 +34,10 @@ type ColumnGroup struct {
 	GroupID typeutil.UniqueID
 	Columns []int // column indices
 	Fields  []int64
+}
+
+func (cg ColumnGroup) String() string {
+	return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v]", cg.GroupID, cg.Columns, cg.Fields)
 }
 
 func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, policies ...ColumnGroupSplitPolicy) []ColumnGroup {
