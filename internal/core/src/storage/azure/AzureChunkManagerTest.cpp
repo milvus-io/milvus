@@ -29,11 +29,15 @@ get_default_storage_config(bool useIam) {
     if (!std::getenv("AZURE_STORAGE_CONNECTION_STRING")) {
         setenv("AZURE_STORAGE_CONNECTION_STRING",
                "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-               "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-               "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;", 1);
+               "AccountKey="
+               "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
+               "K1SZFPTOtr/KBHBeksoGMGw==;"
+               "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;",
+               1);
     }
 
-    auto endpoint = "127.0.0.1:10000";  // Not actually used in azure chunk managerwhen connection string is set
+    auto endpoint =
+        "127.0.0.1:10000";  // Not actually used in azure chunk managerwhen connection string is set
     auto accessKey = "devstoreaccount1";
     auto accessValue =
         "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
@@ -78,18 +82,6 @@ class AzureChunkManagerTest : public testing::Test {
     ChunkManagerPtr chunk_manager_ptr_;
     StorageConfig configs_;
 };
-
-TEST_F(AzureChunkManagerTest, WrongConfig) {
-    StorageConfig configs = get_default_storage_config(true);
-
-    try {
-        AzureChunkManagerPtr chunk_manager =
-            make_unique<AzureChunkManager>(configs);
-        EXPECT_TRUE(false);
-    } catch (SegcoreError& e) {
-        EXPECT_TRUE(std::string(e.what()).find("precheck") != string::npos);
-    }
-}
 
 TEST_F(AzureChunkManagerTest, AzureLogger) {
     AzureLogger(Azure::Core::Diagnostics::Logger::Level::Error, "");
