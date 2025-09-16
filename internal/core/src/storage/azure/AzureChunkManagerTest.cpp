@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 #include "common/EasyAssert.h"
 #include "AzureChunkManager.h"
@@ -21,9 +22,18 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
+// the accessKey and accessValue is the the fixed storage account used by Azure Storage Emulator
 StorageConfig
 get_default_storage_config(bool useIam) {
-    auto endpoint = "core.windows.net";
+    // Set AZURE_STORAGE_CONNECTION_STRING for local testing with Azurite
+    if (!std::getenv("AZURE_STORAGE_CONNECTION_STRING")) {
+        setenv("AZURE_STORAGE_CONNECTION_STRING",
+               "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
+               "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
+               "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;", 1);
+    }
+
+    auto endpoint = "127.0.0.1:10000";  // Not actually used in azure chunk managerwhen connection string is set
     auto accessKey = "devstoreaccount1";
     auto accessValue =
         "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
