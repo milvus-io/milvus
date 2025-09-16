@@ -24,11 +24,11 @@
 namespace milvus {
 namespace exec {
 
-// Custom hash function for segment address + field id pair
+// Custom hash function for segment id + field id pair
 struct SegmentFieldHash {
     std::size_t
-    operator()(const std::pair<const void*, int64_t>& p) const {
-        return std::hash<const void*>{}(p.first) ^
+    operator()(const std::pair<int64_t, int64_t>& p) const {
+        return std::hash<int64_t>{}(p.first) ^
                (std::hash<int64_t>{}(p.second) << 1);
     }
 };
@@ -103,9 +103,9 @@ class SimpleGeometryCacheManager {
     SimpleGeometryCacheManager() = default;
 
     SimpleGeometryCache&
-    GetCache(const void* segment_addr, FieldId field_id) {
+    GetCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto key = std::make_pair(segment_addr, field_id.get());
+        auto key = std::make_pair(segment_id, field_id.get());
         auto it = caches_.find(key);
         if (it != caches_.end()) {
             return *(it->second);
@@ -118,19 +118,19 @@ class SimpleGeometryCacheManager {
     }
 
     void
-    RemoveCache(const void* segment_addr, FieldId field_id) {
+    RemoveCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto key = std::make_pair(segment_addr, field_id.get());
+        auto key = std::make_pair(segment_id, field_id.get());
         caches_.erase(key);
     }
 
     // Remove all caches for a segment (useful when segment is destroyed)
     void
-    RemoveSegmentCaches(const void* segment_addr) {
+    RemoveSegmentCaches(int64_t segment_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = caches_.begin();
         while (it != caches_.end()) {
-            if (it->first.first == segment_addr) {
+            if (it->first.first == segment_id) {
                 it = caches_.erase(it);
             } else {
                 ++it;
@@ -161,7 +161,7 @@ class SimpleGeometryCacheManager {
     operator=(const SimpleGeometryCacheManager&) = delete;
 
     mutable std::mutex mutex_;
-    std::unordered_map<std::pair<const void*, int64_t>,
+    std::unordered_map<std::pair<int64_t, int64_t>,
                        std::unique_ptr<SimpleGeometryCache>,
                        SegmentFieldHash>
         caches_;

@@ -8,7 +8,6 @@ import (
 	"unicode"
 
 	"github.com/cockroachdb/errors"
-	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -787,9 +786,4 @@ func decodeUnicode(input string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
-}
-
-func isValidWKT(wktStr string) bool {
-	_, err := wkt.Unmarshal(wktStr)
-	return err == nil
 }

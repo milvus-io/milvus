@@ -29,8 +29,8 @@ namespace exec {
                                     const Geometry& right_source) {                                   \
         /* Unified path using simple WKB-content-based cache for both sealed and growing segments. */ \
         auto& geometry_cache =                                                                        \
-            SimpleGeometryCacheManager::Instance().GetCache(this->segment_,                           \
-                                                            field_id_);                               \
+            SimpleGeometryCacheManager::Instance().GetCache(                                          \
+                this->segment_->get_segment_id(), field_id_);                                         \
         for (int i = 0; i < size; ++i) {                                                              \
             if (valid_data != nullptr && !valid_data[i]) {                                            \
                 res[i] = valid_res[i] = false;                                                        \
@@ -252,8 +252,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
                 // Get simple geometry cache for this segment+field
                 auto& geometry_cache =
-                    SimpleGeometryCacheManager::Instance().GetCache(segment_,
-                                                                    field_id_);
+                    SimpleGeometryCacheManager::Instance().GetCache(
+                        segment_->get_segment_id(), field_id_);
 
                 auto data_array = segment_->bulk_subscript(
                     field_id_, hit_offsets.data(), hit_offsets.size());

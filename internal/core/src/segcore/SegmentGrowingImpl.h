@@ -263,7 +263,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         // Clean up geometry cache for all fields in this segment
         auto& cache_manager =
             milvus::exec::SimpleGeometryCacheManager::Instance();
-        cache_manager.RemoveSegmentCaches(this);
+        cache_manager.RemoveSegmentCaches(get_segment_id());
 
         // Original mmap cleanup logic
         if (mmap_descriptor_ != nullptr) {

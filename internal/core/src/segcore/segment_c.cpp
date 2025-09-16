@@ -94,7 +94,7 @@ DeleteSegment(CSegmentInterface c_segment) {
 
     // Clean up geometry cache for all fields in this segment
     auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(s);
+    cache_manager.RemoveSegmentCaches(s->get_segment_id());
 
     delete s;
 }

@@ -1282,7 +1282,7 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
 SegmentSealedImpl::~SegmentSealedImpl() {
     // Clean up geometry cache for all fields in this segment
     auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(this);
+    cache_manager.RemoveSegmentCaches(get_segment_id());
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
