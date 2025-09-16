@@ -19,6 +19,7 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
 
@@ -514,4 +515,15 @@ func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, 
 		}
 	}
 	return false, false, nil
+}
+func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
+	idStart, idEnd, err := allocFunc(rowNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	reversed := bits.Reverse64(clusterID)
+	// right shift by 1 to preserve sign bit
+	reversed = reversed >> 1
+
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
