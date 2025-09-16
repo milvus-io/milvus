@@ -97,6 +97,14 @@ GroupChunkTranslator::GroupChunkTranslator(
             storage::GetReaderProperties());
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
+        auto parquet_metadata = reader->file_metadata()->GetParquetMetadata();
+        auto num_row_groups = parquet_metadata->num_row_groups();
+        std::vector<int64_t> uncompressed_row_group_sizes(num_row_groups);
+        for (int64_t i = 0; i < num_row_groups; ++i) {
+            uncompressed_row_group_sizes[i] =
+                parquet_metadata->RowGroup(i)->total_compressed_size();
+        }
+        row_group_uncompressed_size_.push_back(uncompressed_row_group_sizes);
         auto status = reader->Close();
         AssertInfo(status.ok(),
                    "[StorageV2] translator {} failed to close file reader when "
@@ -209,6 +217,18 @@ GroupChunkTranslator::get_cid_from_file_and_row_group_index(
                            file_end - file_start));
 
     return file_start + row_group_idx;
+}
+
+int64_t
+GroupChunkTranslator::cells_storage_bytes(
+    const std::vector<cid_t>& cids) const {
+    int64_t result = 0;
+    for (auto& cid : cids) {
+        auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
+        // auto& row_group_meta = row_group_meta_list_[file_idx].Get(row_group_idx);
+        result += row_group_uncompressed_size_[file_idx][row_group_idx];
+    }
+    return result;
 }
 
 // the returned cids are sorted. It may not follow the order of cids.
