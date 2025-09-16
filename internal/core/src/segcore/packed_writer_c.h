@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "common/common_type_c.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,6 +54,14 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 
 CStatus
 CloseWriter(CPackedWriter c_packed_writer);
+
+CStatus
+GetFileSize(const char* path, int64_t* size);
+
+CStatus
+GetFileSizeWithStorageConfig(const char* path,
+                             int64_t* size,
+                             CStorageConfig c_storage_config);
 
 #ifdef __cplusplus
 }
