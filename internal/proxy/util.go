@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math/bits"
 	"reflect"
 	"strconv"
 	"strings"
