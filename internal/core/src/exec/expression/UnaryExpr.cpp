@@ -157,9 +157,9 @@ void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
-    tracer::AddEvent(fmt::format("data_type {}, op_type {}",
-                                 expr_->column_.data_type_,
-                                 expr_->op_type_));
+    span.GetSpan()->SetAttribute("data_type",
+                                 static_cast<int>(expr_->column_.data_type_));
+    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));

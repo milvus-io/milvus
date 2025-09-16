@@ -217,11 +217,9 @@ void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyCompareFilterExpr::Eval", tracer::GetRootSpan(), true);
-    tracer::AddEvent(
-        fmt::format("compare_expr: op={}, left_indexed={}, right_indexed={}",
-                    expr_->op_type_,
-                    is_left_indexed_,
-                    is_right_indexed_));
+    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
+    span.GetSpan()->SetAttribute("left_indexed", is_left_indexed_);
+    span.GetSpan()->SetAttribute("right_indexed", is_right_indexed_);
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
