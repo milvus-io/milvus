@@ -159,7 +159,7 @@ def generate_wkt_by_type(
 
 
 def generate_spatial_query_data_for_function(
-    spatial_func, base_data, geo_field_name="geo", pk_field_name="id"
+    spatial_func, base_data, geo_field_name="geo"
 ):
     """
     Generate query geometry for specific spatial function based on base data
@@ -167,9 +167,8 @@ def generate_spatial_query_data_for_function(
 
     Args:
         spatial_func: The spatial function name (e.g., "ST_INTERSECTS", "ST_CONTAINS")
-        base_data: List of base geometry data with format [{pk_field_name: int, geo_field_name: "WKT_STRING"}, ...]
+        base_data: List of base geometry data with format [{"id": int, geo_field_name: "WKT_STRING"}, ...]
         geo_field_name: Name of the geometry field in base_data (default: "geo")
-        pk_field_name: Name of the primary key field in base_data (default: "id")
 
     Returns:
         query_geom: WKT string of the query geometry that should match multiple base geometries
@@ -597,10 +596,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: create collection successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry collection"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -611,7 +610,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # Verify collection has geometry field
-        collections = client.list_collections()
+        collections, _ = self.list_collections(client)
         assert collection_name in collections
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -634,10 +633,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: insert successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_{wkt_type.lower()}")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description=f"test {wkt_type} data"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -671,20 +670,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Flush to ensure data is persisted
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Create index before loading
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
-        client.create_index(collection_name, index_params=index_params)
+        self.create_index(client,collection_name, index_params=index_params)
 
         # Verify insert
-        client.load_collection(collection_name)
+        self.load_collection(client,collection_name)
 
         # Use query to verify data insertion
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -710,10 +709,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: should insert successfully as these are valid WKT representations
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_valid_empty_geo")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test valid empty geometry"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -732,20 +731,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         ]
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes and load collection before querying
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Verify we can query the empty geometry
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter="id == 0",
             output_fields=["id", "geo"],
@@ -763,10 +762,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: build index successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with geometry field
-        schema = client.create_schema(auto_id=False, description="test rtree index")
+        schema, _ = self.create_schema(client,auto_id=False, description="test rtree index")
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("geo", DataType.GEOMETRY)
@@ -815,25 +814,25 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Prepare index params
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
         # Create index
-        client.create_index(collection_name, index_params=index_params)
+        self.create_index(client,collection_name, index_params=index_params)
 
         # Load collection
-        client.load_collection(collection_name)
+        self.load_collection(client,collection_name)
 
         # Verify index creation
-        indexes = client.list_indexes(collection_name)
+        indexes, _ = self.list_indexes(client,collection_name)
         geo_index_found = any("geo" in str(idx) for idx in indexes)
         assert geo_index_found, "RTREE index on geometry field not found"
 
         # Verify inserted geometry data can be queried
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -853,7 +852,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         # Test spatial query with ST_WITHIN to verify RTREE index functionality
         # Create a large polygon that contains all geometries
         query_polygon = "POLYGON ((-10 -10, 110 -10, 110 110, -10 110, -10 -10))"
-        spatial_results = client.query(
+        spatial_results, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo, '{query_polygon}')",
             output_fields=["id", "geo"],
@@ -885,9 +884,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: return correct results based on spatial relationships
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_{spatial_func.lower()}_{'with_index' if with_geo_index else 'no_index'}"
-        )
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Generate test data dynamically
         base_data = generate_diverse_base_data(
@@ -898,7 +895,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         query_geom = generate_spatial_query_data_for_function(
-            spatial_func, base_data, "geo", "id"
+            spatial_func, base_data, "geo"
         )
         expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
 
@@ -910,7 +907,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description=f"test {spatial_func} query"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -931,23 +928,23 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build index based on parameter
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         if with_geo_index:
             index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Query with spatial operator
         filter_expr = f"{spatial_func}(geo, '{query_geom}')"
 
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter=filter_expr,
             output_fields=["id", "geo"],
@@ -972,7 +969,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: return correct results based on both vector similarity and spatial relationships
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_search_geo_filter")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Generate test data
         base_data = generate_diverse_base_data(
@@ -982,7 +979,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             geo_field_name="geo",
         )
         query_geom = generate_spatial_query_data_for_function(
-            spatial_func, base_data, "geo", "id"
+            spatial_func, base_data, "geo"
         )
         expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
 
@@ -994,7 +991,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description=f"test search with {spatial_func} geo filter"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1015,24 +1012,24 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build index
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Search with geo filter
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         query_vector = [random.random() for _ in range(default_dim)]
         filter_expr = f"{spatial_func}(geo, '{query_geom}')"
 
-        results = client.search(
+        results, _ = self.search(client,
             collection_name=collection_name,
             data=[query_vector],
             anns_field="vector",
@@ -1061,10 +1058,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: create collection successfully and queries work correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_multi_geo")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with multiple geometry fields
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test multiple geometry fields"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1096,28 +1093,28 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo1", index_type="RTREE")
         index_params.add_index(field_name="geo2", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Test query on specific geometry field
         query_polygon = "POLYGON ((40 40, 60 40, 60 60, 40 60, 40 40))"
-        results_geo1 = client.query(
+        results_geo1, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo1, '{query_polygon}')",
             output_fields=["id", "geo1"],
         )
 
-        results_geo2 = client.query(
+        results_geo2, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_INTERSECTS(geo2, '{query_polygon}')",
             output_fields=["id", "geo2"],
@@ -1136,10 +1133,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: create collection successfully and handle NULL values correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_nullable_geo")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with nullable geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test nullable geometry field"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1168,20 +1165,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Test query excluding NULL values
-        results_non_null = client.query(
+        results_non_null, _ = self.query(client,
             collection_name=collection_name,
             filter="geo IS NOT NULL",
             output_fields=["id", "geo"],
@@ -1193,7 +1190,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Test query including NULL values
-        results_null = client.query(
+        results_null, _ = self.query(client,
             collection_name=collection_name,
             filter="geo IS NULL",
             output_fields=["id", "geo"],
@@ -1206,7 +1203,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Test spatial query (should only return non-null geometries)
         query_polygon = "POLYGON ((40 40, 60 40, 60 60, 40 60, 40 40))"
-        spatial_results = client.query(
+        spatial_results, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo, '{query_polygon}')",
             output_fields=["id", "geo"],
@@ -1222,7 +1219,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         query_vector = [random.random() for _ in range(default_dim)]
 
-        search_results = client.search(
+        search_results, _ = self.search(client,
             collection_name=collection_name,
             data=[query_vector],
             anns_field="vector",
@@ -1246,10 +1243,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: create collection successfully and handle default values correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_geo_default_value")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field having default value
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry field with default value"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1289,20 +1286,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Verify all data was inserted
-        all_results = client.query(
+        all_results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -1310,7 +1307,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         assert len(all_results) == 100, f"Expected 100 records, got {len(all_results)}"
 
         # Check that records using default value have the expected geometry
-        default_results = client.query(
+        default_results, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POINT (0 0)')",
             output_fields=["id", "geo"],
@@ -1331,7 +1328,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         # Test spatial query to find non-default geometries
-        non_default_results = client.query(
+        non_default_results, _ = self.query(client,
             collection_name=collection_name,
             filter="NOT ST_EQUALS(geo, 'POINT (0 0)')",
             output_fields=["id", "geo"],
@@ -1350,10 +1347,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: create collection successfully and handle nullable + default values correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_nullable_geo_default")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with nullable geometry field having default value
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test nullable geometry field with default value"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1399,20 +1396,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Verify all data was inserted
-        all_results = client.query(
+        all_results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -1420,7 +1417,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         assert len(all_results) == 120, f"Expected 120 records, got {len(all_results)}"
 
         # Check records using default value
-        default_results = client.query(
+        default_results, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POINT (50 50)')",
             output_fields=["id", "geo"],
@@ -1441,7 +1438,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         # Test that no records have NULL values (since default is used when None is provided)
-        null_results = client.query(
+        null_results, _ = self.query(client,
             collection_name=collection_name,
             filter="geo IS NULL",
             output_fields=["id", "geo"],
@@ -1451,7 +1448,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Check non-default geometries
-        non_default_results = client.query(
+        non_default_results, _ = self.query(client,
             collection_name=collection_name,
             filter="NOT ST_EQUALS(geo, 'POINT (50 50)')",
             output_fields=["id", "geo"],
@@ -1466,7 +1463,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Check polygon geometries specifically
-        polygon_results = client.query(
+        polygon_results, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POLYGON ((10 10, 20 10, 20 20, 10 20, 10 10))')",
             output_fields=["id", "geo"],
@@ -1503,12 +1500,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: handle various geometry types as default values correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_mixed_geo_default_{default_geom_type.lower()}"
-        )
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with specific geometry type as default value
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description=f"test {default_geom_type} as default geometry"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1551,20 +1546,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Verify all data was inserted
-        all_results = client.query(
+        all_results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -1572,7 +1567,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         assert len(all_results) == 60, f"Expected 60 records, got {len(all_results)}"
 
         # Check records using default value
-        default_results = client.query(
+        default_results, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_EQUALS(geo, '{default_wkt}')",
             output_fields=["id", "geo"],
@@ -1614,7 +1609,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             large_polygon = (
                 "POLYGON ((-500 -500, 500 -500, 500 500, -500 500, -500 -500))"
             )
-            spatial_results = client.query(
+            spatial_results, _ = self.query(client,
                 collection_name=collection_name,
                 filter=f"ST_WITHIN(geo, '{large_polygon}')",
                 output_fields=["id", "geo"],
@@ -1626,7 +1621,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         # Check non-default geometries
-        non_default_results = client.query(
+        non_default_results, _ = self.query(client,
             collection_name=collection_name,
             filter=f"NOT ST_EQUALS(geo, '{default_wkt}')",
             output_fields=["id", "geo"],
@@ -1647,10 +1642,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: search and query work correctly with default geometry values
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_search_query_geo_default")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field having default value
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False,
             description="test search and query with geometry default values",
         )
@@ -1697,20 +1692,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Query for records with default geometry value
-        default_geo_query = client.query(
+        default_geo_query, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POINT (25 25)')",
             output_fields=["id", "geo", "category"],
@@ -1732,7 +1727,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Spatial query that includes default geometry area
         near_default_area = "POLYGON ((15 15, 35 15, 35 35, 15 35, 15 15))"
-        spatial_query = client.query(
+        spatial_query, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo, '{near_default_area}')",
             output_fields=["id", "geo", "category"],
@@ -1752,7 +1747,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         query_vector = [random.random() for _ in range(default_dim)]
 
-        search_with_geo_filter = client.search(
+        search_with_geo_filter, _ = self.search(client,
             collection_name=collection_name,
             data=[query_vector],
             anns_field="vector",
@@ -1773,7 +1768,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Range query excluding default geometry area
         far_area = "POLYGON ((75 75, 95 75, 95 95, 75 95, 75 75))"
-        far_query = client.query(
+        far_query, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo, '{far_area}')",
             output_fields=["id", "geo", "category"],
@@ -1794,7 +1789,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Search excluding default geometry area
-        search_far_area = client.search(
+        search_far_area, _ = self.search(client,
             collection_name=collection_name,
             data=[query_vector],
             anns_field="vector",
@@ -1833,10 +1828,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: all case variations should work correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_case_insensitive")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test case insensitive spatial functions"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1850,7 +1845,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             count=100, bounds=(0, 100, 0, 100), pk_field_name="id", geo_field_name="geo"
         )
         query_geom = generate_spatial_query_data_for_function(
-            spatial_func, base_data, "geo", "id"
+            spatial_func, base_data, "geo"
         )
         expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
 
@@ -1870,17 +1865,17 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Test different case variations of the spatial function
         case_variations = [
@@ -1893,7 +1888,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         for case_func in case_variations:
             filter_expr = f"{case_func}(geo, '{query_geom}')"
 
-            results = client.query(
+            results, _ = self.query(client,
                 collection_name=collection_name,
                 filter=filter_expr,
                 output_fields=["id", "geo"],
@@ -1912,10 +1907,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: handle valid boundary conditions successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_boundary_positive")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test positive geometry boundary conditions"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -1953,20 +1948,20 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Insert boundary test data
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Verify all boundary data was inserted correctly
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter="id >= 0",
             output_fields=["id", "geo"],
@@ -1978,7 +1973,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Test spatial queries with boundary geometries
         # Query for zero point
-        zero_results = client.query(
+        zero_results, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POINT (0 0)')",
             output_fields=["id", "geo"],
@@ -1989,7 +1984,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Test precision - query for high precision point
-        precision_results = client.query(
+        precision_results, _ = self.query(client,
             collection_name=collection_name,
             filter="ST_EQUALS(geo, 'POINT (1.23456789012345 9.87654321098765)')",
             output_fields=["id", "geo"],
@@ -2001,7 +1996,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Test large coordinate range query
         large_polygon = "POLYGON ((-2000000 -2000000, 2000000 -2000000, 2000000 2000000, -2000000 2000000, -2000000 -2000000))"
-        large_results = client.query(
+        large_results, _ = self.query(client,
             collection_name=collection_name,
             filter=f"ST_WITHIN(geo, '{large_polygon}')",
             output_fields=["id", "geo"],
@@ -2022,7 +2017,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             ("geo_varchar", "OR"),
         ],
     )
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/44102")
     def test_complex_filter_combinations(self, filter_type, logical_op):
         """
         target: test complex filter combinations with multiple geo functions and mixed data types
@@ -2030,12 +2024,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: all complex filter combinations should work correctly
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_complex_{filter_type}_{logical_op.lower()}"
-        )
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with multiple field types
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False,
             description=f"test complex {filter_type} filter with {logical_op}",
         )
@@ -2097,23 +2089,23 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
-        client.create_index(collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.create_index(client,collection_name, index_params=index_params)
+        self.load_collection(client,collection_name)
 
         # Define spatial regions
         northeast_region = "POLYGON ((55 55, 85 55, 85 85, 55 85, 55 55))"
         northwest_region = "POLYGON ((15 55, 45 55, 45 85, 15 85, 15 55))"
         center_region = "POLYGON ((40 40, 60 40, 60 60, 40 60, 40 40))"
-        southeast_region = "POLYGON ((55 15, 85 15, 85 45, 55 45, 55 45))"
+        southeast_region = "POLYGON ((55 15, 85 15, 85 45, 55 45, 55 15))"
         large_region = "POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0))"
 
         # Create filter expressions based on test type and logical operator
@@ -2156,7 +2148,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 filter_expr = f"ST_WITHIN(geo, '{southeast_region}') OR category == 'enterprise' OR category == 'standard'"
 
         # Execute complex filter query
-        results = client.query(
+        results, _ = self.query(client,
             collection_name=collection_name,
             filter=filter_expr,
             output_fields=["id", "geo", "age", "category"],
@@ -2173,7 +2165,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 for result in results:
                     # Check each spatial condition individually
                     for validation_query in validation_queries:
-                        check_result = client.query(
+                        check_result, _ = self.query(client,
                             collection_name=collection_name,
                             filter=f"id == {result['id']} AND {validation_query}",
                             output_fields=["id"],
@@ -2185,7 +2177,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 # Results should satisfy at least one spatial condition
                 individual_results = []
                 for validation_query in validation_queries:
-                    individual_result = client.query(
+                    individual_result, _ = self.query(client,
                         collection_name=collection_name,
                         filter=validation_query,
                         output_fields=["id"],
@@ -2202,7 +2194,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 # All results should satisfy both geo and int conditions
                 for result in results:
                     # Check spatial condition
-                    spatial_check = client.query(
+                    spatial_check, _ = self.query(client,
                         collection_name=collection_name,
                         filter=f"id == {result['id']} AND ST_WITHIN(geo, '{northeast_region}')",
                         output_fields=["id"],
@@ -2217,17 +2209,17 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                     )
             else:  # OR
                 # Check individual conditions
-                center_results = client.query(
+                center_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter=f"ST_INTERSECTS(geo, '{center_region}')",
                     output_fields=["id"],
                 )
-                older_results = client.query(
+                older_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter="age > 50",
                     output_fields=["id"],
                 )
-                younger_results = client.query(
+                younger_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter="age < 30",
                     output_fields=["id"],
@@ -2248,7 +2240,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 # All results should satisfy both geo and varchar conditions
                 for result in results:
                     # Check spatial condition
-                    spatial_check = client.query(
+                    spatial_check, _ = self.query(client,
                         collection_name=collection_name,
                         filter=f"id == {result['id']} AND ST_WITHIN(geo, '{northeast_region}')",
                         output_fields=["id"],
@@ -2263,17 +2255,17 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                     )
             else:  # OR
                 # Check individual conditions
-                southeast_results = client.query(
+                southeast_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter=f"ST_WITHIN(geo, '{southeast_region}')",
                     output_fields=["id"],
                 )
-                enterprise_results = client.query(
+                enterprise_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter="category == 'enterprise'",
                     output_fields=["id"],
                 )
-                standard_results = client.query(
+                standard_results, _ = self.query(client,
                     collection_name=collection_name,
                     filter="category == 'standard'",
                     output_fields=["id"],
@@ -2293,7 +2285,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         query_vector = [random.random() for _ in range(default_dim)]
 
-        search_results = client.search(
+        search_results, _ = self.search(client,
             collection_name=collection_name,
             data=[query_vector],
             anns_field="vector",
@@ -2314,7 +2306,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         if filter_type == "multi_geo" and logical_op == "AND":
             # Test three geo functions with AND
             triple_geo_filter = f"ST_WITHIN(geo, '{large_region}') AND ST_INTERSECTS(geo, '{center_region}') AND NOT ST_EQUALS(geo, 'POINT (0 0)')"
-            triple_results = client.query(
+            triple_results, _ = self.query(client,
                 collection_name=collection_name,
                 filter=triple_geo_filter,
                 output_fields=["id", "geo"],
@@ -2326,7 +2318,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         elif filter_type == "geo_varchar" and logical_op == "OR":
             # Test mixed geo and multiple varchar conditions
             mixed_filter = f"ST_WITHIN(geo, '{center_region}') OR category IN ['premium', 'enterprise'] OR category == 'trial'"
-            mixed_results = client.query(
+            mixed_results, _ = self.query(client,
                 collection_name=collection_name,
                 filter=mixed_filter,
                 output_fields=["id", "geo", "category"],
@@ -2343,10 +2335,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: upsert successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry collection"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2354,7 +2346,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         schema.add_field("geo", DataType.GEOMETRY)
 
         # Create collection
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index("vector")
         index_params.add_index("geo", index_type="RTREE")
         self.create_collection(
@@ -2371,11 +2363,11 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 {"id": i, "vector": rng.random(default_dim).tolist(), "geo": point_wkt}
             )
 
-        insert_res = client.insert(collection_name, initial_data)
+        insert_res, _ = self.insert(client,collection_name, initial_data)
         assert insert_res["insert_count"] == 10
 
         # Store original geometry values before upsert for comparison
-        original_records = client.query(
+        original_records, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         original_geometries = {
@@ -2393,10 +2385,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
             expected_upserted_geometries[i] = point_wkt
 
-        upsert_res = client.upsert(collection_name, upsert_data)
+        upsert_res, _ = self.upsert(client,collection_name, upsert_data)
         assert upsert_res["upsert_count"] == 10
         # Query to verify total count after upsert
-        results = client.query(
+        results, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         assert len(results) == 15  # 10 original + 5 new - 0 duplicates = 15 total
@@ -2451,10 +2443,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: delete successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry collection"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2462,7 +2454,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         schema.add_field("geo", DataType.GEOMETRY)
 
         # Create collection
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index("vector")
         index_params.add_index("geo", index_type="RTREE")
         self.create_collection(
@@ -2481,11 +2473,11 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 {"id": i, "vector": rng.random(default_dim).tolist(), "geo": point_wkt}
             )
 
-        insert_res = client.insert(collection_name, data)
+        insert_res, _ = self.insert(client,collection_name, data)
         assert insert_res["insert_count"] == 20
 
         # Store original data before deletion for verification
-        original_results = client.query(
+        original_results, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         original_ids = {r["id"] for r in original_results}
@@ -2494,10 +2486,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Delete some records by IDs
         delete_ids = [1, 3, 5, 7, 9]
-        client.delete(collection_name, ids=delete_ids)
+        self.delete(client,collection_name, ids=delete_ids)
 
         # Verify deletion - records should be completely gone
-        results = client.query(
+        results, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         print(results)
@@ -2511,7 +2503,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 f"Deleted record {deleted_id} should not exist"
             )
             # Also verify by trying to query the specific deleted record
-            specific_query = client.query(
+            specific_query, _ = self.query(client,
                 collection_name, filter=f"id == {deleted_id}", output_fields=["id"]
             )
             assert len(specific_query) == 0, (
@@ -2539,10 +2531,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         expected: delete successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry collection"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2550,7 +2542,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         schema.add_field("geo", DataType.GEOMETRY)
 
         # Create collection
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index("vector")
         index_params.add_index("geo", index_type="RTREE")
         self.create_collection(
@@ -2580,18 +2572,18 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 {"id": i, "vector": rng.random(default_dim).tolist(), "geo": point_wkt}
             )
 
-        insert_res = client.insert(collection_name, data)
+        insert_res, _ = self.insert(client,collection_name, data)
         assert insert_res["insert_count"] == 20
 
         # Store original data before deletion for verification
-        before_results = client.query(
+        before_results, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         assert len(before_results) == 20
 
         # Identify which records should be deleted by the spatial filter
         spatial_filter = f"ST_WITHIN(geo, '{region_to_delete}')"
-        records_to_delete = client.query(
+        records_to_delete, _ = self.query(client,
             collection_name,
             filter=spatial_filter,
             output_fields=["id", "geo"],
@@ -2606,10 +2598,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
 
         # Delete with spatial filter
-        client.delete(collection_name, filter=spatial_filter)
+        self.delete(client,collection_name, filter=spatial_filter)
 
         # Verify deletion
-        after_results = client.query(
+        after_results, _ = self.query(client,
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         remaining_ids = {r["id"] for r in after_results}
@@ -2622,7 +2614,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
                 f"Spatially deleted record {deleted_id} should not exist"
             )
             # Also verify by trying to query the specific deleted record
-            specific_query = client.query(
+            specific_query, _ = self.query(client,
                 collection_name,
                 filter=f"id == {deleted_id}",
                 output_fields=["id"],
@@ -2645,7 +2637,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         # Double-check: verify no remaining records are within the deletion region
-        remaining_in_region = client.query(
+        remaining_in_region, _ = self.query(client,
             collection_name, filter=spatial_filter, output_fields=["id"], limit=100
         )
         assert len(remaining_in_region) == 0, (
@@ -2654,7 +2646,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Verify that spatial queries still work on remaining data
         remaining_region = "POLYGON ((15 15, 35 15, 35 35, 15 35, 15 15))"
-        spatial_query_results = client.query(
+        spatial_query_results, _ = self.query(client,
             collection_name,
             filter=f"ST_WITHIN(geo, '{remaining_region}')",
             output_fields=["id", "geo"],
@@ -2689,10 +2681,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise appropriate errors for invalid WKT
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_invalid_wkt")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test invalid WKT error handling"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2730,10 +2722,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise appropriate errors
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_non_geo_field")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with non-geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test spatial query on non-geometry field"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2756,16 +2748,16 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
 
         self.create_index(client, collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.load_collection(client,collection_name)
 
         # Try spatial query on non-geometry fields - should fail
         query_polygon = "POLYGON ((40 40, 60 40, 60 60, 40 60, 40 40))"
@@ -2815,10 +2807,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise appropriate errors
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_invalid_func")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with valid data
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test invalid spatial functions"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2837,17 +2829,17 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         ]
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
         self.create_index(client, collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.load_collection(client,collection_name)
 
         # Try query with invalid spatial function - should fail
         query_polygon = "POLYGON ((40 40, 60 40, 60 60, 40 60, 40 40))"
@@ -2874,10 +2866,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise appropriate errors
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_wrong_params")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with valid data
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test wrong parameter count"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2896,17 +2888,17 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         ]
 
         self.insert(client, collection_name, data)
-        client.flush(collection_name)
+        self.flush(client,collection_name)
 
         # Build indexes
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
         index_params.add_index(field_name="geo", index_type="RTREE")
 
         self.create_index(client, collection_name, index_params=index_params)
-        client.load_collection(collection_name)
+        self.load_collection(client,collection_name)
 
         # Test cases with wrong parameter counts
         invalid_filters = [
@@ -2937,10 +2929,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise PartitionKeyException
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_geo_partition_key")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create schema with geometry field as partition key
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test geometry partition key error"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2968,10 +2960,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise error as INVERTED index is not supported for geometry fields
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_inverted_index_geo")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with geometry field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test invalid index on geo field"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -2981,7 +2973,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # Try to create INVERTED index on geometry field
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
@@ -3008,10 +3000,10 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         expected: should raise error as RTREE index is only supported for geometry fields
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_rtree_index_int")
+        collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Create collection with int field
-        schema = client.create_schema(
+        schema, _ = self.create_schema(client,
             auto_id=False, description="test invalid index on int field"
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -3021,7 +3013,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # Try to create RTREE index on int field
-        index_params = client.prepare_index_params()
+        index_params, _ = self.prepare_index_params(client)
         index_params.add_index(
             field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
         )
