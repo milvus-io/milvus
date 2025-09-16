@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/common_type_c.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
 #include "parquet/types.h"
@@ -22,6 +23,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
+#include "storage/Util.h"
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
@@ -257,6 +259,83 @@ CloseWriter(CPackedWriter c_packed_writer) {
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
                                           status.ToString());
         }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+GetFileSize(const char* path, int64_t* size) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                          .GetArrowFileSystem();
+        if (!trueFs) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
+        }
+
+        auto result = trueFs->GetFileInfo(path);
+        if (!result.ok()) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get file info");
+        }
+        *size = result.ValueOrDie().size();
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+GetFileSizeWithStorageConfig(const char* path,
+                             int64_t* size,
+                             CStorageConfig c_storage_config) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        milvus_storage::ArrowFileSystemConfig conf;
+        conf.address = std::string(c_storage_config.address);
+        conf.bucket_name = std::string(c_storage_config.bucket_name);
+        conf.access_key_id = std::string(c_storage_config.access_key_id);
+        conf.access_key_value = std::string(c_storage_config.access_key_value);
+        conf.root_path = std::string(c_storage_config.root_path);
+        conf.storage_type = std::string(c_storage_config.storage_type);
+        conf.cloud_provider = std::string(c_storage_config.cloud_provider);
+        conf.iam_endpoint = std::string(c_storage_config.iam_endpoint);
+        conf.log_level = std::string(c_storage_config.log_level);
+        conf.region = std::string(c_storage_config.region);
+        conf.useSSL = c_storage_config.useSSL;
+        conf.sslCACert = std::string(c_storage_config.sslCACert);
+        conf.useIAM = c_storage_config.useIAM;
+        conf.useVirtualHost = c_storage_config.useVirtualHost;
+        conf.requestTimeoutMs = c_storage_config.requestTimeoutMs;
+        conf.gcp_credential_json =
+            std::string(c_storage_config.gcp_credential_json);
+        conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                          .GetArrowFileSystem();
+
+        if (!trueFs) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
+        }
+
+        auto result = trueFs->GetFileInfo(path);
+        if (!result.ok()) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get file info");
+        }
+        *size = result.ValueOrDie().size();
+
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
