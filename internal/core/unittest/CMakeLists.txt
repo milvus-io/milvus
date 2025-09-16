@@ -51,6 +51,7 @@ set(MILVUS_TEST_FILES
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
+        test_string_index_sort_mmap.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

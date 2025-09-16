@@ -1,8 +1,9 @@
 package indexparamcheck
 
 import (
-	"github.com/cockroachdb/errors"
+	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -17,8 +18,8 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 }
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
-	if !typeutil.IsArithmetic(field.GetDataType()) {
-		return errors.New("STL_SORT are only supported on numeric field")
+	if !typeutil.IsArithmetic(field.GetDataType()) && !typeutil.IsStringType(field.GetDataType()) {
+		return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric or varchar field, got %s", field.GetDataType()))
 	}
 	return nil
 }
