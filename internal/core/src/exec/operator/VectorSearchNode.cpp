@@ -95,7 +95,10 @@ PhyVectorSearchNode::GetOutput() {
                             search_result);
 
     search_result.total_data_cnt_ = final_view.size();
-    search_result.search_storage_cost_ = &op_context;
+    search_result.search_storage_cost_.scanned_remote_bytes =
+        op_context.storage_usage.scanned_cold_bytes.load();
+    search_result.search_storage_cost_.scanned_total_bytes =
+        op_context.storage_usage.scanned_total_bytes.load();
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
         std::chrono::high_resolution_clock::now();

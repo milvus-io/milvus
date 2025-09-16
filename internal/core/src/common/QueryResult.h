@@ -77,36 +77,6 @@ struct StorageCost {
         scanned_total_bytes = rhs.scanned_total_bytes;
     }
 
-    void
-    operator=(const milvus::OpContext* op_context) {
-        scanned_remote_bytes =
-            op_context ? op_context->storage_usage.scanned_cold_bytes.load()
-                       : 0;
-        scanned_total_bytes =
-            op_context ? op_context->storage_usage.scanned_total_bytes.load()
-                       : 0;
-    }
-
-    StorageCost
-    operator+(const milvus::OpContext* op_context) const {
-        return {scanned_remote_bytes + op_context
-                    ? op_context->storage_usage.scanned_cold_bytes.load()
-                    : 0,
-                scanned_total_bytes + op_context
-                    ? op_context->storage_usage.scanned_total_bytes.load()
-                    : 0};
-    }
-
-    void
-    operator+=(const milvus::OpContext* op_context) {
-        scanned_remote_bytes +=
-            op_context ? op_context->storage_usage.scanned_cold_bytes.load()
-                       : 0;
-        scanned_total_bytes +=
-            op_context ? op_context->storage_usage.scanned_total_bytes.load()
-                       : 0;
-    }
-
     std::string
     ToString() const {
         return fmt::format("scanned_remote_bytes: {}, scanned_total_bytes: {}",
