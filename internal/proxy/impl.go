@@ -3372,7 +3372,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Add(float64(qt.storageCost.ScannedTotalBytes))
-
 	}
 
 	return qt.result, qt.storageCost, nil

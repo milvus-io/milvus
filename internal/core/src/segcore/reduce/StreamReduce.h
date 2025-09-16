@@ -152,6 +152,7 @@ class StreamReducerHelper {
                          slice_nqs_.end(),
                          slice_nqs_prefix_sum_.begin() + 1);
         total_nq_ = slice_nqs_prefix_sum_[num_slice_];
+        AssertInfo(total_nq_ > 0, "empty nq is not allowed");
     }
 
     void

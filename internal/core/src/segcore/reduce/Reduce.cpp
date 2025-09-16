@@ -37,6 +37,7 @@ ReduceHelper::Initialize() {
 
     // prefix sum, get slices offsets
     AssertInfo(num_slices_ > 0, "empty slice_nqs is not allowed");
+    AssertInfo(total_nq_ > 0, "empty nq is not allowed");
     slice_nqs_prefix_sum_.resize(num_slices_ + 1);
     std::partial_sum(slice_nqs_.begin(),
                      slice_nqs_.end(),
