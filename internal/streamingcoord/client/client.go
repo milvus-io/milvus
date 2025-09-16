@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
@@ -16,13 +17,13 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -32,6 +33,12 @@ var _ Client = (*clientImpl)(nil)
 type AssignmentService interface {
 	// AssignmentDiscover is used to watches the assignment discovery.
 	types.AssignmentDiscoverWatcher
+
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+
+	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
+	GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error)
 
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
@@ -89,7 +96,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		conn:              conn,
 		rb:                rb,
 		assignmentService: assignmentServiceImpl,
-		broadcastService:  broadcast.NewGRPCBroadcastService(util.MustSelectWALName(), broadcastService),
+		broadcastService:  broadcast.NewGRPCBroadcastService(broadcastService),
 	}
 }
 

@@ -7,10 +7,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -20,9 +24,11 @@ var ErrChannelNotExist = errors.New("channel not exist")
 
 type (
 	WatchChannelAssignmentsCallbackParam struct {
-		Version            typeutil.VersionInt64Pair
-		CChannelAssignment *streamingpb.CChannelAssignment
-		Relations          []types.PChannelInfoAssigned
+		Version                typeutil.VersionInt64Pair
+		CChannelAssignment     *streamingpb.CChannelAssignment
+		PChannelView           *PChannelView
+		Relations              []types.PChannelInfoAssigned
+		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
 	WatchChannelAssignmentsCallback func(param WatchChannelAssignmentsCallbackParam) error
 )
@@ -39,7 +45,10 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 	if err != nil {
 		return nil, err
 	}
-
+	replicateConfig, err := recoverReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
 	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, incomingChannel...)
 	if err != nil {
 		return nil, err
@@ -56,6 +65,7 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		metrics:          metrics,
 		cchannelMeta:     cchannelMeta,
 		streamingVersion: streamingVersion,
+		replicateConfig:  replicateConfig,
 	}, nil
 }
 
@@ -116,6 +126,14 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	return channels, metrics, nil
 }
 
+func recoverReplicateConfiguration(ctx context.Context) (*replicateConfigHelper, error) {
+	config, err := resource.Resource().StreamingCatalog().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return newReplicateConfigHelper(config), nil
+}
+
 // ChannelManager manages the channels.
 // ChannelManager is the `wal` of channel assignment and unassignment.
 // Every operation applied to the streaming node should be recorded in ChannelManager first.
@@ -129,6 +147,7 @@ type ChannelManager struct {
 	// null if no streaming service has been run.
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
+	replicateConfig          *replicateConfigHelper
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -320,6 +339,18 @@ func (cm *ChannelManager) GetLatestWALLocated(ctx context.Context, pchannel stri
 	return 0, false
 }
 
+// GetLatestChannelAssignment returns the latest channel assignment.
+func (cm *ChannelManager) GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error) {
+	var result WatchChannelAssignmentsCallbackParam
+	if _, err := cm.applyAssignments(func(param WatchChannelAssignmentsCallbackParam) error {
+		result = param
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb WatchChannelAssignmentsCallback) error {
 	// push the first balance result to watcher callback function if balance result is ready.
 	version, err := cm.applyAssignments(cb)
@@ -337,6 +368,52 @@ func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb WatchCha
 	}
 }
 
+// UpdateReplicateConfiguration updates the in-memory replicate configuration.
+func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
+	config := replicateutil.MustNewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), msgs[0].Header().ReplicateConfiguration)
+	pchannels := make([]types.AckedCheckpoint, 0, len(msgs))
+
+	for _, msg := range msgs {
+		pchannels = append(pchannels, types.AckedCheckpoint{
+			Channel:                funcutil.ToPhysicalChannel(msg.VChannel()),
+			MessageID:              msg.LastConfirmedMessageID(),
+			LastConfirmedMessageID: msg.LastConfirmedMessageID(),
+			TimeTick:               msg.TimeTick(),
+		})
+	}
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	if cm.replicateConfig == nil {
+		cm.replicateConfig = newReplicateConfigHelperFromMessage(msgs[0])
+	} else {
+		// StartUpdating starts the updating process.
+		if !cm.replicateConfig.StartUpdating(config.GetReplicateConfiguration(), msgs[0].BroadcastHeader().VChannels) {
+			return nil
+		}
+	}
+	cm.replicateConfig.Apply(config.GetReplicateConfiguration(), pchannels)
+
+	dirtyConfig, dirtyCDCTasks, dirty := cm.replicateConfig.ConsumeIfDirty(config.GetReplicateConfiguration())
+	if !dirty {
+		// the meta is not dirty, so nothing updated, return it directly.
+		return nil
+	}
+	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, dirtyConfig, dirtyCDCTasks); err != nil {
+		return err
+	}
+
+	// If the acked result is nil, it means the all the channels are acked,
+	// so we can update the version and push the new replicate configuration into client.
+	if dirtyConfig.AckedResult == nil {
+		// update metrics.
+		cm.cond.UnsafeBroadcast()
+		cm.version.Local++
+		cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+	}
+	return nil
+}
+
 // applyAssignments applies the assignments.
 func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (typeutil.VersionInt64Pair, error) {
 	cm.cond.L.Lock()
@@ -348,13 +425,21 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 	}
 	version := cm.version
 	cchannelAssignment := proto.Clone(cm.cchannelMeta).(*streamingpb.CChannelMeta)
+	pchannelViews := newPChannelView(cm.channels)
 	cm.cond.L.Unlock()
+
+	var replicateConfig *commonpb.ReplicateConfiguration
+	if cm.replicateConfig != nil {
+		replicateConfig = cm.replicateConfig.GetReplicateConfiguration()
+	}
 	return version, cb(WatchChannelAssignmentsCallbackParam{
 		Version: version,
 		CChannelAssignment: &streamingpb.CChannelAssignment{
 			Meta: cchannelAssignment,
 		},
-		Relations: assignments,
+		PChannelView:           pchannelViews,
+		Relations:              assignments,
+		ReplicateConfiguration: replicateConfig,
 	})
 }
 

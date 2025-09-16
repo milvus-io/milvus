@@ -65,6 +65,18 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 	return w.GetLatestMVCCTimestamp(ctx, vchannel)
 }
 
+// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner.
+func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	return nil, nil
+
+	// TODO: sheep, implement it.
+}
+
 // GetWALMetricsIfLocal gets the metrics of the local wal.
 func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {

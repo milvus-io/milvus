@@ -121,6 +121,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.PutReplicateConfigMessageHeader",
+                "BodyType": "messagespb.PutReplicateConfigMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypePutReplicateConfig",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.BeginTxnMessageHeader",
                 "BodyType": "messagespb.BeginTxnMessageBody"
             },

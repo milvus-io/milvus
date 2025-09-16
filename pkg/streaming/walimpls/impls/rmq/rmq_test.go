@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
@@ -26,11 +27,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestRegistry(t *testing.T) {
-	registeredB := registry.MustGetBuilder(WALName)
+	registeredB := registry.MustGetBuilder(message.WALNameRocksmq)
 	assert.NotNil(t, registeredB)
-	assert.Equal(t, WALName, registeredB.Name())
+	assert.Equal(t, message.WALNameRocksmq, registeredB.Name())
 
-	id, err := message.UnmarshalMessageID(WALName, rmqID(1).Marshal())
+	id, err := message.UnmarshalMessageID(&commonpb.MessageID{
+		WALName: commonpb.WALName(message.WALNameRocksmq),
+		Id:      rmqID(1).Marshal(),
+	})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(rmqID(1)))
 }

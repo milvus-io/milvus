@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
@@ -17,12 +18,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestRegistry(t *testing.T) {
-	registeredB := registry.MustGetBuilder(walName)
+	registeredB := registry.MustGetBuilder(message.WALNameKafka)
 	assert.NotNil(t, registeredB)
-	assert.Equal(t, walName, registeredB.Name())
+	assert.Equal(t, message.WALNameKafka, registeredB.Name())
 
-	id, err := message.UnmarshalMessageID(walName,
-		kafkaID(123).Marshal())
+	id, err := message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameKafka), Id: kafkaID(123).Marshal()})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(kafkaID(123)))
 }

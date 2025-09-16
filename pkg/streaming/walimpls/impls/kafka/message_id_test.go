@@ -12,7 +12,7 @@ import (
 func TestMessageID(t *testing.T) {
 	assert.Equal(t, kafka.Offset(1), message.MessageID(kafkaID(1)).(interface{ KafkaID() kafka.Offset }).KafkaID())
 
-	assert.Equal(t, walName, kafkaID(1).WALName())
+	assert.Equal(t, message.WALNameKafka, kafkaID(1).WALName())
 
 	assert.True(t, kafkaID(1).LT(kafkaID(2)))
 	assert.True(t, kafkaID(1).EQ(kafkaID(1)))

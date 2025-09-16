@@ -12,9 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
-const (
-	createProducerKey = "create-producer"
-)
+const createProducerKey = "create-producer"
 
 // WithCreateProducer attaches create producer request to context.
 func WithCreateProducer(ctx context.Context, req *streamingpb.CreateProducerRequest) context.Context {

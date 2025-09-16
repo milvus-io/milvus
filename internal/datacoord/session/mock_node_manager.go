@@ -259,8 +259,7 @@ func (_c *MockNodeManager_Startup_Call) RunAndReturn(run func(context.Context, [
 func NewMockNodeManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockNodeManager {
+}) *MockNodeManager {
 	mock := &MockNodeManager{}
 	mock.Mock.Test(t)
 
