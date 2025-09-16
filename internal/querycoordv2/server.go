@@ -662,24 +662,36 @@ func (s *Server) watchNodes(revision int64) {
 
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
-				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
 					NodeID:   nodeID,
 					Address:  addr,
 					Hostname: event.Session.HostName,
 					Version:  event.Session.Version,
 					Labels:   event.Session.GetServerLabel(),
-				}))
+				})
+				s.nodeMgr.Add(nodeInfo)
 				s.handleNodeUp(nodeID)
+				if nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+					s.applyNodeChangesForAutoReplicaEnable(s.ctx, "node up")
+				}
 
 			case sessionutil.SessionUpdateEvent:
 				log.Info("stopping the node")
+				nodeInfo := s.nodeMgr.Get(nodeID)
 				s.nodeMgr.Stopping(nodeID)
 				s.handleNodeStopping(nodeID)
+				if nodeInfo != nil && nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+					s.applyNodeChangesForAutoReplicaEnable(s.ctx, "node stopping")
+				}
 
 			case sessionutil.SessionDelEvent:
 				log.Info("a node down, remove it")
+				nodeInfo := s.nodeMgr.Get(nodeID)
 				s.nodeMgr.Remove(nodeID)
 				s.handleNodeDown(nodeID)
+				if nodeInfo != nil && nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+					s.applyNodeChangesForAutoReplicaEnable(s.ctx, "node down")
+				}
 			}
 		}
 	}
@@ -854,7 +866,7 @@ func (s *Server) applyLoadConfigChanges(ctx context.Context, newReplicaNum int32
 	collectionIDs := s.meta.GetAll(ctx)
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection.UserSpecifiedReplicaMode {
+		if collection.UserSpecifiedReplicaMode || collection.AutoReplicaEnable {
 			log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
 			return false
 		}
@@ -870,7 +882,31 @@ func (s *Server) applyLoadConfigChanges(ctx context.Context, newReplicaNum int32
 		zap.Int64s("collectionIDs", collectionIDs),
 		zap.Int32("replicaNum", newReplicaNum),
 		zap.Strings("resourceGroups", newRGs))
-	err := s.updateLoadConfig(ctx, collectionIDs, newReplicaNum, newRGs)
+	err := s.updateLoadConfig(ctx, collectionIDs, newReplicaNum, newRGs, map[int64]bool{})
+	if err != nil {
+		log.Warn("failed to update load config", zap.Error(err))
+	}
+}
+
+func (s *Server) applyNodeChangesForAutoReplicaEnable(ctx context.Context, triggerAction string) {
+	collectionIDs := s.meta.GetAll(ctx)
+	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
+		collection := s.meta.GetCollection(ctx, collectionID)
+		return collection.AutoReplicaEnable
+	})
+
+	if len(collectionIDs) == 0 {
+		log.Info("no collection to update load config, skip it")
+		return
+	}
+	newAutoReplicaEnable := lo.SliceToMap(collectionIDs, func(collectionID int64) (int64, bool) {
+		return collectionID, true
+	})
+	log.Info("apply node changes for auto replica enable",
+		zap.String("triggerAction", triggerAction),
+		zap.Int64s("collectionIDs", collectionIDs))
+
+	err := s.updateLoadConfig(ctx, collectionIDs, 0, []string{}, newAutoReplicaEnable)
 	if err != nil {
 		log.Warn("failed to update load config", zap.Error(err))
 	}

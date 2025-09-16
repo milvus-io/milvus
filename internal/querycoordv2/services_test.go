@@ -235,7 +235,10 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return(&meta.CollectionLoadConfig{
+		ResourceGroups: []string{meta.DefaultResourceGroupName},
+		ReplicaNumber:  1,
+	}, nil).Maybe()
 }
 
 func (suite *ServiceSuite) TestShowCollections() {
@@ -1919,6 +1922,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()
@@ -1943,6 +1947,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 				false,
 			)
 			suite.jobScheduler.Add(job)
@@ -2172,6 +2177,101 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
+}
+
+func (suite *ServiceSuite) TestResolveLoadConfiguration() {
+	ctx := context.Background()
+	server := suite.server
+	collectionID := int64(1000)
+
+	// Test 1: User specifies auto replica mode - since computeReplicaNumberWithNodeCount returns 0, it will default to 1
+	replicaNumber, resourceGroups, enableAutoReplica := server.ResolveLoadConfiguration(
+		ctx, collectionID, 0, []string{}, true)
+	suite.Equal(int32(1), replicaNumber) // Defaults to 1 when node count is 0
+	suite.Equal([]string{meta.DefaultResourceGroupName}, resourceGroups)
+	suite.True(enableAutoReplica)
+
+	// Test 2: User specifies replica number and resource groups (should override auto replica)
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 3, []string{"rg1", "rg2"}, false)
+	suite.Equal(int32(3), replicaNumber)
+	suite.Equal([]string{"rg1", "rg2"}, resourceGroups)
+	suite.False(enableAutoReplica)
+
+	// Test 3: User specifies only replica number
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 5, []string{}, false)
+	suite.Equal(int32(5), replicaNumber)
+	suite.Equal([]string{meta.DefaultResourceGroupName}, resourceGroups)
+	suite.False(enableAutoReplica)
+
+	// Test 4: User specifies only resource groups
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 0, []string{"custom-rg"}, false)
+	suite.Equal(int32(1), replicaNumber)
+	suite.Equal([]string{"custom-rg"}, resourceGroups)
+	suite.False(enableAutoReplica)
+
+	// Test 5: No user specified values, use broker config with auto replica enabled
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collectionID).Return(&meta.CollectionLoadConfig{
+		ResourceGroups:    []string{"rg3"},
+		ReplicaNumber:     2,
+		AutoReplicaEnable: true,
+	}, nil).Once()
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 0, []string{}, false)
+	suite.Equal(int32(1), replicaNumber) // Defaults to 1 when node count is 0
+	suite.Equal([]string{"rg3"}, resourceGroups)
+	suite.True(enableAutoReplica)
+
+	// Test 6: No user specified values, use broker config with auto replica disabled
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collectionID).Return(&meta.CollectionLoadConfig{
+		ResourceGroups:    []string{"rg4"},
+		ReplicaNumber:     4,
+		AutoReplicaEnable: false,
+	}, nil).Once()
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 0, []string{}, false)
+	suite.Equal(int32(4), replicaNumber)
+	suite.Equal([]string{"rg4"}, resourceGroups)
+	suite.False(enableAutoReplica)
+
+	// Test 7: Broker error, should use default values
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collectionID).Return(nil, errors.New("broker error")).Once()
+	replicaNumber, resourceGroups, enableAutoReplica = server.ResolveLoadConfiguration(
+		ctx, collectionID, 0, []string{}, false)
+	suite.Equal(int32(1), replicaNumber)
+	suite.Equal([]string{meta.DefaultResourceGroupName}, resourceGroups)
+	suite.False(enableAutoReplica)
+}
+
+func (suite *ServiceSuite) TestComputeReplicaNumberWithNodeCount() {
+	ctx := context.Background()
+	server := suite.server
+
+	// Test with current nodes - the method counts only embedded query nodes in streaming node
+	// Since test nodes are not embedded streaming nodes, count should be 0
+	nodeCount := server.computeReplicaNumberWithNodeCount(ctx)
+	suite.Equal(int32(0), nodeCount)
+
+	// Test with no nodes
+	for _, node := range suite.nodes {
+		suite.nodeMgr.Remove(node)
+	}
+	nodeCount = server.computeReplicaNumberWithNodeCount(ctx)
+	suite.Equal(int32(0), nodeCount)
+
+	// Re-add nodes for other tests
+	for _, node := range suite.nodes {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+	}
 }
 
 func TestService(t *testing.T) {

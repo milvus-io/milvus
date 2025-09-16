@@ -54,6 +54,7 @@ type LoadCollectionJob struct {
 	nodeMgr                  *session.NodeManager
 	collInfo                 *milvuspb.DescribeCollectionResponse
 	userSpecifiedReplicaMode bool
+	autoReplicaEnable        bool
 }
 
 func NewLoadCollectionJob(
@@ -67,6 +68,7 @@ func NewLoadCollectionJob(
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
 	userSpecifiedReplicaMode bool,
+	autoReplicaEnable bool,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
 		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -80,6 +82,7 @@ func NewLoadCollectionJob(
 		collectionObserver:       collectionObserver,
 		nodeMgr:                  nodeMgr,
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		autoReplicaEnable:        autoReplicaEnable,
 	}
 }
 
@@ -172,7 +175,7 @@ func (job *LoadCollectionJob) Execute() error {
 		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
 		// Then we can implement dynamic replica changed in different resource group independently.
 		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(),
-			req.GetReplicaNumber(), job.collInfo.GetVirtualChannelNames(), req.GetPriority())
+			req.GetReplicaNumber(), job.collInfo.GetVirtualChannelNames(), req.GetPriority(), job.nodeMgr)
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -206,6 +209,7 @@ func (job *LoadCollectionJob) Execute() error {
 			LoadFields:               req.GetLoadFields(),
 			DbID:                     job.collInfo.GetDbId(),
 			UserSpecifiedReplicaMode: job.userSpecifiedReplicaMode,
+			AutoReplicaEnable:        job.autoReplicaEnable,
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -255,6 +259,7 @@ type LoadPartitionJob struct {
 	nodeMgr                  *session.NodeManager
 	collInfo                 *milvuspb.DescribeCollectionResponse
 	userSpecifiedReplicaMode bool
+	autoReplicaEnable        bool
 }
 
 func NewLoadPartitionJob(
@@ -268,6 +273,7 @@ func NewLoadPartitionJob(
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
 	userSpecifiedReplicaMode bool,
+	autoReplicaEnable bool,
 ) *LoadPartitionJob {
 	return &LoadPartitionJob{
 		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -281,6 +287,7 @@ func NewLoadPartitionJob(
 		collectionObserver:       collectionObserver,
 		nodeMgr:                  nodeMgr,
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		autoReplicaEnable:        autoReplicaEnable,
 	}
 }
 
@@ -366,7 +373,7 @@ func (job *LoadPartitionJob) Execute() error {
 	replicas := job.meta.ReplicaManager.GetByCollection(context.TODO(), req.GetCollectionID())
 	if len(replicas) == 0 {
 		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(),
-			job.collInfo.GetVirtualChannelNames(), req.GetPriority())
+			job.collInfo.GetVirtualChannelNames(), req.GetPriority(), job.nodeMgr)
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -402,6 +409,7 @@ func (job *LoadPartitionJob) Execute() error {
 				LoadFields:               req.GetLoadFields(),
 				DbID:                     job.collInfo.GetDbId(),
 				UserSpecifiedReplicaMode: job.userSpecifiedReplicaMode,
+				AutoReplicaEnable:        job.autoReplicaEnable,
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,

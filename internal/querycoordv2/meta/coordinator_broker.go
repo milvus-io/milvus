@@ -50,7 +50,13 @@ type Broker interface {
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
-	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
+	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) (*CollectionLoadConfig, error)
+}
+
+type CollectionLoadConfig struct {
+	ResourceGroups    []string
+	ReplicaNumber     int64
+	AutoReplicaEnable bool
 }
 
 type CoordinatorBroker struct {
@@ -103,13 +109,20 @@ func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName st
 }
 
 // try to get database level replica_num and resource groups, return (resource_groups, replica_num, error)
-func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error) {
+func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) (*CollectionLoadConfig, error) {
 	collectionInfo, err := broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
-		return nil, 0, err
+		return &CollectionLoadConfig{}, err
 	}
 
 	log := log.Ctx(ctx)
+	autoReplicaEnable, err := common.IsCollectionAutoReplicaEnable(collectionInfo.GetProperties())
+	if err != nil {
+		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+	} else if autoReplicaEnable {
+		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Bool("auto_replica_enable", autoReplicaEnable))
+	}
+
 	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
 	if err != nil {
 		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
@@ -127,7 +140,7 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 	if replicaNum <= 0 || len(rgs) == 0 {
 		dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 
 		if replicaNum <= 0 {
@@ -165,7 +178,11 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		}
 	}
 
-	return rgs, replicaNum, nil
+	return &CollectionLoadConfig{
+		ResourceGroups:    rgs,
+		ReplicaNumber:     replicaNum,
+		AutoReplicaEnable: autoReplicaEnable,
+	}, nil
 }
 
 func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {

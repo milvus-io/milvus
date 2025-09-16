@@ -259,6 +259,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -287,6 +288,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -312,6 +314,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -340,6 +343,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -377,6 +381,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.collectionObserver,
 		suite.nodeMgr,
 		false,
+		false,
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
@@ -398,6 +403,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.targetObserver,
 		suite.collectionObserver,
 		suite.nodeMgr,
+		false,
 		false,
 	)
 	suite.scheduler.Add(job)
@@ -428,6 +434,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -461,6 +468,7 @@ func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -491,6 +499,7 @@ func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -518,6 +527,7 @@ func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 				false,
 			)
 			suite.scheduler.Add(job)
@@ -554,6 +564,7 @@ func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -587,6 +598,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -618,6 +630,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -645,6 +658,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -674,6 +688,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -700,6 +715,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -737,6 +753,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.collectionObserver,
 		suite.nodeMgr,
 		false,
+		false,
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
@@ -759,6 +776,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.targetObserver,
 		suite.collectionObserver,
 		suite.nodeMgr,
+		false,
 		false,
 	)
 	suite.scheduler.Add(job)
@@ -793,6 +811,7 @@ func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -826,6 +845,7 @@ func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -855,6 +875,7 @@ func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 				false,
 			)
 			suite.scheduler.Add(job)
@@ -892,6 +913,7 @@ func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -922,6 +944,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		return job
 	}
@@ -940,6 +963,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		return job
@@ -1040,6 +1064,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -1335,6 +1360,7 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -1378,6 +1404,7 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			false,
+			false,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -1405,6 +1432,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 			suite.targetObserver,
 			suite.collectionObserver,
 			suite.nodeMgr,
+			false,
 			false,
 		)
 		suite.scheduler.Add(job)
@@ -1496,6 +1524,7 @@ func (suite *JobSuite) loadAll() {
 				suite.collectionObserver,
 				suite.nodeMgr,
 				false,
+				false,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -1520,6 +1549,7 @@ func (suite *JobSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 				false,
 			)
 			suite.scheduler.Add(job)
@@ -1700,6 +1730,7 @@ func (suite *JobSuite) TestLoadCollectionWithUserSpecifiedReplicaMode() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			true, // userSpecifiedReplicaMode = true
+			false,
 		)
 
 		suite.scheduler.Add(job)
@@ -1742,6 +1773,7 @@ func (suite *JobSuite) TestLoadPartitionWithUserSpecifiedReplicaMode() {
 			suite.collectionObserver,
 			suite.nodeMgr,
 			true, // userSpecifiedReplicaMode = true
+			false,
 		)
 
 		suite.scheduler.Add(job)
@@ -1784,6 +1816,7 @@ func (suite *JobSuite) TestLoadPartitionUpdateUserSpecifiedReplicaMode() {
 		suite.collectionObserver,
 		suite.nodeMgr,
 		false, // userSpecifiedReplicaMode = false
+		false,
 	)
 
 	suite.scheduler.Add(job)
@@ -1813,6 +1846,7 @@ func (suite *JobSuite) TestLoadPartitionUpdateUserSpecifiedReplicaMode() {
 		suite.collectionObserver,
 		suite.nodeMgr,
 		true, // userSpecifiedReplicaMode = true
+		false,
 	)
 
 	suite.scheduler.Add(job2)

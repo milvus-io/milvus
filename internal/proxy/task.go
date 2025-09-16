@@ -128,6 +128,8 @@ const (
 	RRFParamsKey     = "k"
 	WeightsParamsKey = "weights"
 	NormScoreKey     = "norm_score"
+
+	EnableAutoReplicaName = "enable_auto_replica"
 )
 
 type task interface {
@@ -2069,20 +2071,22 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		log.Debug(errMsg)
 		return errors.New(errMsg)
 	}
+
 	request := &querypb.LoadCollectionRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			t.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadCollection),
 		),
-		DbID:           0,
-		CollectionID:   collID,
-		Schema:         collSchema.CollectionSchema,
-		ReplicaNumber:  t.ReplicaNumber,
-		FieldIndexID:   fieldIndexIDs,
-		Refresh:        t.Refresh,
-		ResourceGroups: t.ResourceGroups,
-		LoadFields:     loadFields,
-		Priority:       t.GetLoadPriority(),
+		DbID:              0,
+		CollectionID:      collID,
+		Schema:            collSchema.CollectionSchema,
+		ReplicaNumber:     t.ReplicaNumber,
+		FieldIndexID:      fieldIndexIDs,
+		Refresh:           t.Refresh,
+		ResourceGroups:    t.ResourceGroups,
+		LoadFields:        loadFields,
+		Priority:          t.GetLoadPriority(),
+		EnableAutoReplica: GetEnableAutoReplica(t.LoadCollectionRequest.GetLoadParams()),
 	}
 	log.Info("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema),
@@ -2342,16 +2346,17 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 			t.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadPartitions),
 		),
-		DbID:           0,
-		CollectionID:   collID,
-		PartitionIDs:   partitionIDs,
-		Schema:         collSchema.CollectionSchema,
-		ReplicaNumber:  t.ReplicaNumber,
-		FieldIndexID:   fieldIndexIDs,
-		Refresh:        t.Refresh,
-		ResourceGroups: t.ResourceGroups,
-		LoadFields:     loadFields,
-		Priority:       t.GetLoadPriority(),
+		DbID:              0,
+		CollectionID:      collID,
+		PartitionIDs:      partitionIDs,
+		Schema:            collSchema.CollectionSchema,
+		ReplicaNumber:     t.ReplicaNumber,
+		FieldIndexID:      fieldIndexIDs,
+		Refresh:           t.Refresh,
+		ResourceGroups:    t.ResourceGroups,
+		LoadFields:        loadFields,
+		Priority:          t.GetLoadPriority(),
+		EnableAutoReplica: GetEnableAutoReplica(t.LoadPartitionsRequest.GetLoadParams()),
 	}
 	log.Info("send LoadPartitionRequest to query coordinator",
 		zap.Any("schema", request.Schema),
@@ -2362,6 +2367,14 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func GetEnableAutoReplica(params map[string]string) bool {
+	enableAutoReplicaStr, ok := params[EnableAutoReplicaName]
+	if ok && enableAutoReplicaStr == "true" {
+		return true
+	}
+	return false
 }
 
 func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {

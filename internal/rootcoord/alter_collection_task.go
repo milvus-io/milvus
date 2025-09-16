@@ -186,26 +186,34 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
-	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldColl.Properties)
-	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldColl.Properties)
-	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newColl.Properties)
-	newResourceGroups, _ := common.DatabaseLevelResourceGroups(newColl.Properties)
+	oldReplicaNumber, _ := common.CollectionLevelReplicaNumber(oldColl.Properties)
+	oldResourceGroups, _ := common.CollectionLevelResourceGroups(oldColl.Properties)
+	newReplicaNumber, _ := common.CollectionLevelReplicaNumber(newColl.Properties)
+	newResourceGroups, _ := common.CollectionLevelResourceGroups(newColl.Properties)
+	oldAutoReplicaEnable, _ := common.IsCollectionAutoReplicaEnable(oldColl.Properties)
+	newAutoReplicaEnable, _ := common.IsCollectionAutoReplicaEnable(newColl.Properties)
+	autoReplicaEnableChanged := newAutoReplicaEnable != oldAutoReplicaEnable
 	left, right := lo.Difference(oldResourceGroups, newResourceGroups)
 	rgChanged := len(left) > 0 || len(right) > 0
 	replicaChanged := oldReplicaNumber != newReplicaNumber
-	if rgChanged || replicaChanged {
+	if rgChanged || replicaChanged || autoReplicaEnableChanged {
 		log.Ctx(ctx).Warn("alter collection trigger update load config",
 			zap.Int64("collectionID", oldColl.CollectionID),
 			zap.Int64("oldReplicaNumber", oldReplicaNumber),
 			zap.Int64("newReplicaNumber", newReplicaNumber),
 			zap.Strings("oldResourceGroups", oldResourceGroups),
 			zap.Strings("newResourceGroups", newResourceGroups),
+			zap.Bool("oldAutoReplicaEnable", oldAutoReplicaEnable),
+			zap.Bool("newAutoReplicaEnable", newAutoReplicaEnable),
 		)
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
 			resp, err := core.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 				CollectionIDs:  []int64{oldColl.CollectionID},
 				ReplicaNumber:  int32(newReplicaNumber),
 				ResourceGroups: newResourceGroups,
+				AutoReplicaEnable: map[int64]bool{
+					oldColl.CollectionID: newAutoReplicaEnable,
+				},
 			})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Ctx(ctx).Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
