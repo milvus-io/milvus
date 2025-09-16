@@ -424,18 +424,18 @@ func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if err := pw.writeStats(); err != nil {
-		return err
-	}
-	if err := pw.writeBm25Stats(); err != nil {
-		return err
-	}
 	if pw.writer != nil {
 		if err := pw.writer.Close(); err != nil {
 			return err
 		}
 	}
 	pw.finalizeBinlogs()
+	if err := pw.writeStats(); err != nil {
+		return err
+	}
+	if err := pw.writeBm25Stats(); err != nil {
+		return err
+	}
 	return nil
 }
 
