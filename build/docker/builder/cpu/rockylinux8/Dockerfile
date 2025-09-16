@@ -10,22 +10,6 @@ RUN dnf -y update && \
     dnf config-manager --set-enabled powertools && \
     dnf -y install ninja-build
 
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-
-# install vcpkg
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-
-# empty the vscpkg toolchains linux.cmake file to avoid the error
-RUN echo "" > /opt/vcpkg/scripts/toolchains/linux.cmake
-
-# install azure-identity-cpp azure-storage-blobs-cpp gtest via vcpkg
-RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && \
-    ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && \
-    vcpkg version && \
-    vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest 
-
 ########################################################################################
 FROM rockylinux/rockylinux:8
 
@@ -48,16 +32,6 @@ RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.89 -y
 
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
-
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-
-# install vcpkg
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/2025.06.13.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-# Copy the vcpkg installed libraries
-COPY --from=vcpkg-installer /root/.cache/vcpkg /root/.cache/vcpkg
-
 
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
