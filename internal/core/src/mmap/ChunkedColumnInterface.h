@@ -33,18 +33,19 @@ class ChunkedColumnInterface {
 
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
-    DataOfChunk(int chunk_id) const = 0;
+    DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const = 0;
 
     // Check if the value at given offset is valid (not null)
     virtual bool
-    IsValid(size_t offset) const = 0;
+    IsValid(milvus::OpContext* op_ctx, size_t offset) const = 0;
 
     // fn: (bool is_valid, size_t offset) -> void
     // If offsets is nullptr, this function will iterate over all rows.
     // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
     // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
     virtual void
-    BulkIsValid(std::function<void(bool, size_t)> fn,
+    BulkIsValid(milvus::OpContext* ctx,
+                std::function<void(bool, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const = 0;
 
@@ -69,34 +70,39 @@ class ChunkedColumnInterface {
     chunk_row_nums(int64_t chunk_id) const = 0;
 
     virtual PinWrapper<SpanBase>
-    Span(int64_t chunk_id) const = 0;
+    Span(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViews(int64_t chunk_id,
+    StringViews(milvus::OpContext* op_ctx,
+                int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const = 0;
 
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViews(int64_t chunk_id,
+    ArrayViews(milvus::OpContext* op_ctx,
+               int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
+        milvus::OpContext* op_ctx,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<const size_t*>
-    VectorArrayLims(int64_t chunk_id) const = 0;
+    VectorArrayLims(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViewsByOffsets(int64_t chunk_id,
+    StringViewsByOffsets(milvus::OpContext* op_ctx,
+                         int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const = 0;
 
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViewsByOffsets(int64_t chunk_id,
+    ArrayViewsByOffsets(milvus::OpContext* op_ctx,
+                        int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
@@ -108,10 +114,10 @@ class ChunkedColumnInterface {
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const = 0;
 
     virtual PinWrapper<Chunk*>
-    GetChunk(int64_t chunk_id) const = 0;
+    GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
     virtual std::vector<PinWrapper<Chunk*>>
-    GetAllChunks() const = 0;
+    GetAllChunks(milvus::OpContext* op_ctx) const = 0;
 
     // Get number of rows before a specific chunk
     virtual int64_t
@@ -122,15 +128,20 @@ class ChunkedColumnInterface {
     GetNumRowsUntilChunk() const = 0;
 
     virtual void
-    BulkValueAt(std::function<void(const char*, size_t)> fn,
+    BulkValueAt(milvus::OpContext* op_ctx,
+                std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) = 0;
 
     virtual void
-    BulkPrimitiveValueAt(void* dst, const int64_t* offsets, int64_t count) = 0;
+    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
+                         void* dst,
+                         const int64_t* offsets,
+                         int64_t count) = 0;
 
     virtual void
-    BulkVectorValueAt(void* dst,
+    BulkVectorValueAt(milvus::OpContext* op_ctx,
+                      void* dst,
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) = 0;
@@ -140,7 +151,8 @@ class ChunkedColumnInterface {
     // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
     // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
     virtual void
-    BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
+    BulkRawStringAt(milvus::OpContext* op_ctx,
+                    std::function<void(std::string_view, size_t, bool)> fn,
                     const int64_t* offsets = nullptr,
                     int64_t count = 0) const {
         ThrowInfo(ErrorCode::Unsupported,
@@ -149,7 +161,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
+    BulkRawJsonAt(milvus::OpContext* op_ctx,
+                  std::function<void(Json, size_t, bool)> fn,
                   const int64_t* offsets,
                   int64_t count) const {
         ThrowInfo(
@@ -158,7 +171,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+    BulkRawBsonAt(milvus::OpContext* op_ctx,
+                  std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
                   const uint32_t* value_offsets,
                   int64_t count) const {
@@ -168,7 +182,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
+    BulkArrayAt(milvus::OpContext* op_ctx,
+                std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
         ThrowInfo(ErrorCode::Unsupported,
@@ -176,7 +191,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
+    BulkVectorArrayAt(milvus::OpContext* op_ctx,
+                      std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,
                       int64_t count) const {
         ThrowInfo(

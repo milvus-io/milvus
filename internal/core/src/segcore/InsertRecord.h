@@ -515,7 +515,7 @@ class InsertRecordSealed {
             case DataType::INT64: {
                 auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto pw = data->DataOfChunk(i);
+                    auto pw = data->DataOfChunk(nullptr, i);
                     auto pks = reinterpret_cast<const int64_t*>(pw.get());
                     auto chunk_num_rows = data->chunk_row_nums(i);
                     for (int j = 0; j < chunk_num_rows; ++j) {
@@ -530,7 +530,7 @@ class InsertRecordSealed {
                     auto column =
                         reinterpret_cast<ChunkedVariableColumn<std::string>*>(
                             data);
-                    auto pw = column->StringViews(i);
+                    auto pw = column->StringViews(nullptr, i);
                     auto pks = pw.get().first;
                     for (auto& pk : pks) {
                         pk2offset_->insert(std::string(pk), offset++);

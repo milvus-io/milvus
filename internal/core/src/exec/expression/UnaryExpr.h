@@ -738,12 +738,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
@@ -767,9 +769,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 auto pointer =
                     milvus::Json::pointer(expr_->column_.nested_path_);
                 pinned_ngram_index_ =
-                    segment->GetNgramIndexForJson(field_id, pointer);
+                    segment->GetNgramIndexForJson(op_ctx_, field_id, pointer);
             } else {
-                pinned_ngram_index_ = segment->GetNgramIndex(field_id);
+                pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
     }

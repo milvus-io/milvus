@@ -79,7 +79,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetFieldDataIfExist(FieldId field_id) const;
 
     std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(FieldId field_id, bool include_ngram = false) const override {
+    PinIndex(milvus::OpContext* op_ctx,
+             FieldId field_id,
+             bool include_ngram = false) const override {
         auto [scalar_indexings, ngram_fields] =
             lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
         if (!include_ngram) {
@@ -92,7 +94,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (iter == scalar_indexings->end()) {
             return {};
         }
-        auto ca = SemiInlineGet(iter->second->PinCells(nullptr, {0}));
+        auto ca = SemiInlineGet(iter->second->PinCells(op_ctx, {0}));
         auto index = ca->get_cell_of(0);
         return {PinWrapper<const index::IndexBase*>(ca, index)};
     }
@@ -141,7 +143,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     index::JsonKeyStats*
-    GetJsonStats(FieldId field_id) const override {
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
         std::shared_lock lck(mutex_);
         auto iter = json_stats_.find(field_id);
         if (iter == json_stats_.end()) {
@@ -151,19 +153,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(FieldId field_id) const override;
+    GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(FieldId field_id,
+    GetNgramIndexForJson(milvus::OpContext* op_ctx,
+                         FieldId field_id,
                          const std::string& nested_path) const override;
 
     void
-    BulkGetJsonData(FieldId field_id,
+    BulkGetJsonData(milvus::OpContext* op_ctx,
+                    FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const override {
         auto column = fields_.rlock()->at(field_id);
-        column->BulkRawJsonAt(fn, offsets, count);
+        column->BulkRawJsonAt(op_ctx, fn, offsets, count);
     }
 
     void
@@ -196,26 +200,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     get_schema() const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const override;
+    search_pk(milvus::OpContext* op_ctx,
+              const PkType& pk,
+              Timestamp timestamp) const override;
 
     template <typename Condition>
     std::vector<SegOffset>
-    search_sorted_pk(const PkType& pk, Condition condition) const;
+    search_sorted_pk(milvus::OpContext* op_ctx,
+                     const PkType& pk,
+                     Condition condition) const;
 
     void
-    pk_range(proto::plan::OpType op,
+    pk_range(milvus::OpContext* op_ctx,
+             proto::plan::OpType op,
              const PkType& pk,
              BitsetTypeView& bitset) const override;
 
     template <typename Condition>
     void
-    search_sorted_pk_range(proto::plan::OpType op,
+    search_sorted_pk_range(milvus::OpContext* op_ctx,
+                           proto::plan::OpType op,
                            const PkType& pk,
                            BitsetTypeView& bitset,
                            Condition condition) const;
 
     std::unique_ptr<DataArray>
-    get_vector(FieldId field_id,
+    get_vector(milvus::OpContext* op_ctx,
+               FieldId field_id,
                const int64_t* ids,
                int64_t count) const override;
 
@@ -273,12 +284,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
     std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
     std::unique_ptr<DataArray>
     bulk_subscript(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         const int64_t* seg_offsets,
         int64_t count,
@@ -299,34 +312,41 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
  protected:
     // blob and row_count
     PinWrapper<SpanBase>
-    chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+    chunk_data_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     chunk_vector_array_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override;
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_views_by_offsets(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override;
@@ -334,7 +354,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
     void
-    bulk_subscript(SystemFieldType system_type,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   SystemFieldType system_type,
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override;
@@ -356,20 +377,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(const void* src_raw,
+    bulk_subscript_impl(milvus::OpContext* op_ctx,
+                        const void* src_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
                         T* dst_raw);
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(ChunkedColumnInterface* field,
+    bulk_subscript_impl(milvus::OpContext* op_ctx,
+                        ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         T* dst_raw);
 
     static void
-    bulk_subscript_impl(int64_t element_sizeof,
+    bulk_subscript_impl(milvus::OpContext* op_ctx,
+                        int64_t element_sizeof,
                         ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
@@ -378,6 +402,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     template <typename S>
     static void
     bulk_subscript_ptr_impl(
+        milvus::OpContext* op_ctx,
         ChunkedColumnInterface* field,
         const int64_t* seg_offsets,
         int64_t count,
@@ -385,7 +410,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename T>
     static void
-    bulk_subscript_array_impl(ChunkedColumnInterface* column,
+    bulk_subscript_array_impl(milvus::OpContext* op_ctx,
+                              ChunkedColumnInterface* column,
                               const int64_t* seg_offsets,
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst);
@@ -393,6 +419,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     template <typename T>
     static void
     bulk_subscript_vector_array_impl(
+        milvus::OpContext* op_ctx,
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
@@ -402,7 +429,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     fill_with_empty(FieldId field_id, int64_t count) const;
 
     std::unique_ptr<DataArray>
-    get_raw_data(FieldId field_id,
+    get_raw_data(milvus::OpContext* op_ctx,
+                 FieldId field_id,
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;

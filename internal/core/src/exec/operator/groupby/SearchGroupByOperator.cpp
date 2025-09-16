@@ -22,7 +22,8 @@ namespace milvus {
 namespace exec {
 
 void
-SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
+SearchGroupBy(milvus::OpContext* op_ctx,
+              const std::vector<std::shared_ptr<VectorIterator>>& iterators,
               const SearchInfo& search_info,
               std::vector<GroupByValueType>& group_by_values,
               const segcore::SegmentInternalInterface& segment,
@@ -40,7 +41,8 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
     topk_per_nq_prefix_sum.reserve(iterators.size() + 1);
     switch (data_type) {
         case DataType::INT8: {
-            auto dataGetter = GetDataGetter<int8_t>(segment, group_by_field_id);
+            auto dataGetter =
+                GetDataGetter<int8_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int8_t>(iterators,
                                          search_info.topk_,
                                          search_info.group_size_,
@@ -55,7 +57,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT16: {
             auto dataGetter =
-                GetDataGetter<int16_t>(segment, group_by_field_id);
+                GetDataGetter<int16_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int16_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -70,7 +72,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT32: {
             auto dataGetter =
-                GetDataGetter<int32_t>(segment, group_by_field_id);
+                GetDataGetter<int32_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int32_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -85,7 +87,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT64: {
             auto dataGetter =
-                GetDataGetter<int64_t>(segment, group_by_field_id);
+                GetDataGetter<int64_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int64_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -100,7 +102,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::TIMESTAMPTZ: {
             auto dataGetter =
-                GetDataGetter<int64_t>(segment, group_by_field_id);
+                GetDataGetter<int64_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int64_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -114,7 +116,8 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             break;
         }
         case DataType::BOOL: {
-            auto dataGetter = GetDataGetter<bool>(segment, group_by_field_id);
+            auto dataGetter =
+                GetDataGetter<bool>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<bool>(iterators,
                                        search_info.topk_,
                                        search_info.group_size_,
@@ -129,7 +132,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::VARCHAR: {
             auto dataGetter =
-                GetDataGetter<std::string>(segment, group_by_field_id);
+                GetDataGetter<std::string>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<std::string>(iterators,
                                               search_info.topk_,
                                               search_info.group_size_,
@@ -150,6 +153,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                 switch (search_info.json_type_.value()) {
                     case DataType::BOOL: {
                         auto data_getter = GetDataGetter<bool, milvus::Json>(
+                            op_ctx,
                             segment,
                             group_by_field_id,
                             search_info.json_path_,
@@ -170,6 +174,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                     }
                     case DataType::INT8: {
                         auto data_getter = GetDataGetter<int8_t, milvus::Json>(
+                            op_ctx,
                             segment,
                             group_by_field_id,
                             search_info.json_path_,
@@ -190,6 +195,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                     }
                     case DataType::INT16: {
                         auto data_getter = GetDataGetter<int16_t, milvus::Json>(
+                            op_ctx,
                             segment,
                             group_by_field_id,
                             search_info.json_path_,
@@ -210,6 +216,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                     }
                     case DataType::INT32: {
                         auto data_getter = GetDataGetter<int32_t, milvus::Json>(
+                            op_ctx,
                             segment,
                             group_by_field_id,
                             search_info.json_path_,
@@ -230,6 +237,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                     }
                     case DataType::INT64: {
                         auto data_getter = GetDataGetter<int64_t, milvus::Json>(
+                            op_ctx,
                             segment,
                             group_by_field_id,
                             search_info.json_path_,
@@ -251,6 +259,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                     case DataType::VARCHAR: {
                         auto data_getter =
                             GetDataGetter<std::string, milvus::Json>(
+                                op_ctx,
                                 segment,
                                 group_by_field_id,
                                 search_info.json_path_,
@@ -278,6 +287,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                 }
             } else {
                 auto data_getter = GetDataGetter<std::string, milvus::Json>(
+                    op_ctx,
                     segment,
                     group_by_field_id,
                     search_info.json_path_,

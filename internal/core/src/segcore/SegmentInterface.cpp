@@ -42,7 +42,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                "Primary key field is not INT64 or VARCHAR type");
 
     auto field_data =
-        bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
+        bulk_subscript(nullptr, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
     ParsePksFromFieldData(results.primary_keys_, *field_data.get());
@@ -65,15 +65,16 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(field_id,
+            field_data = bulk_subscript(nullptr,
+                                        field_id,
                                         results.seg_offsets_.data(),
                                         size,
                                         target_dynamic_fields);
         } else if (!is_field_exist(field_id)) {
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            field_data =
-                bulk_subscript(field_id, results.seg_offsets_.data(), size);
+            field_data = bulk_subscript(
+                nullptr, field_id, results.seg_offsets_.data(), size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
@@ -180,7 +181,7 @@ SegmentInternalInterface::FillTargetEntry(
                 SystemProperty::Instance().GetSystemFieldType(field_id);
 
             FixedVector<int64_t> output(size);
-            bulk_subscript(system_type, offsets, size, output.data());
+            bulk_subscript(nullptr, system_type, offsets, size, output.data());
 
             auto data_array = std::make_unique<DataArray>();
             data_array->set_field_id(field_id.get());
@@ -202,8 +203,8 @@ SegmentInternalInterface::FillTargetEntry(
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col =
-                bulk_subscript(field_id, offsets, size, target_dynamic_fields);
+            auto col = bulk_subscript(
+                nullptr, field_id, offsets, size, target_dynamic_fields);
             fields_data->AddAllocated(col.release());
             continue;
         }
@@ -212,7 +213,7 @@ SegmentInternalInterface::FillTargetEntry(
         if (!is_field_exist(field_id)) {
             col = std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
-            col = bulk_subscript(field_id, offsets, size);
+            col = bulk_subscript(nullptr, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -417,7 +418,8 @@ SegmentInternalInterface::GetSkipIndex() const {
 }
 
 index::TextMatchIndex*
-SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
+SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
+                                       FieldId field_id) const {
     std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
@@ -551,18 +553,22 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
 // Only sealed segment has ngram index
 PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
+SegmentInternalInterface::GetNgramIndex(milvus::OpContext* op_ctx,
+                                        FieldId field_id) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
 PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndexForJson(
-    FieldId field_id, const std::string& nested_path) const {
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::string& nested_path) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
 index::JsonKeyStats*
-SegmentInternalInterface::GetJsonStats(FieldId field_id) const {
+SegmentInternalInterface::GetJsonStats(milvus::OpContext* op_ctx,
+                                       FieldId field_id) const {
     std::shared_lock lock(mutex_);
     auto iter = json_stats_.find(field_id);
     if (iter == json_stats_.end()) {

@@ -565,7 +565,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -605,7 +605,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                             }
                         }
                     };
-                index->ExecutorForShreddingData<ColType>(target_field,
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
                                                          shredding_executor,
                                                          nullptr,
                                                          res_view,
@@ -706,7 +707,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 }
             };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
