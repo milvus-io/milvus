@@ -225,7 +225,6 @@ GroupChunkTranslator::cells_storage_bytes(
     int64_t result = 0;
     for (auto& cid : cids) {
         auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
-        // auto& row_group_meta = row_group_meta_list_[file_idx].Get(row_group_idx);
         result += row_group_uncompressed_size_[file_idx][row_group_idx];
     }
     return result;
