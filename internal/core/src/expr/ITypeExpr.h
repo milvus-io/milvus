@@ -763,22 +763,34 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
  public:
     GISFunctionFilterExpr(ColumnInfo cloumn,
                           GISFunctionType op,
-                          const Geometry& geometry)
-        : column_(cloumn), op_(op), geometry_(geometry){};
+                          const Geometry& geometry,
+                          double distance = 0.0)
+        : column_(cloumn), op_(op), geometry_(geometry), distance_(distance) {};
     std::string
     ToString() const override {
-        return fmt::format(
-            "GISFunctionFilterExpr:[Column: {}, Operator: {} "
-            "WktValue: {}]",
-            column_.ToString(),
-            GISFunctionFilterExpr_GISOp_Name(op_),
-            geometry_.to_wkt_string());
+        if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}, Distance: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_.to_wkt_string(),
+                distance_);
+        } else {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_.to_wkt_string());
+        }
     }
 
  public:
     const ColumnInfo column_;
     const GISFunctionType op_;
     const Geometry geometry_;
+    const double distance_;
 };
 
 class JsonContainsExpr : public ITypeFilterExpr {

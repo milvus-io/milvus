@@ -32,6 +32,7 @@ expr:
 	| STContains'('Identifier','StringLiteral')'						 		 # STContains
 	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
 	| STWithin'('Identifier','StringLiteral')'									 # STWithin
+	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
@@ -110,6 +111,7 @@ STCrosses: 'st_crosses' | 'ST_CROSSES';
 STContains: 'st_contains' | 'ST_CONTAINS';
 STIntersects : 'st_intersects' | 'ST_INTERSECTS';
 STWithin :'st_within' | 'ST_WITHIN';
+STDWithin: 'st_dwithin' | 'ST_DWITHIN';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

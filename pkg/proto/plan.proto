@@ -179,8 +179,10 @@ message GISFunctionFilterExpr{
     Contains = 5;
     Intersects = 6;
     Within = 7;
+    DWithin = 8;
   }
   GISOp op = 3;
+  double distance = 4;  // Distance parameter for DWithin
 }
 
 message UnaryExpr {

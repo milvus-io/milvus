@@ -489,8 +489,9 @@ ProtoParser::ParseGISFunctionFilterExprs(
     Assert(data_type == (DataType)columnInfo.data_type());
     const std::string& str = expr_pb.wkt_string();
     Geometry geometry(str.data());
+
     return std::make_shared<expr::GISFunctionFilterExpr>(
-        columnInfo, expr_pb.op(), geometry);
+        columnInfo, expr_pb.op(), geometry, expr_pb.distance());
 }
 
 expr::TypedExprPtr

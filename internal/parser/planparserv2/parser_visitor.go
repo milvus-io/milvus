@@ -1547,15 +1547,18 @@ func (v *ParserVisitor) VisitSTEuqals(ctx *parser.STEuqalsContext) interface{} {
 		return fmt.Errorf(
 			"STEuqals operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
+	// Process the WKT string
 	element := ctx.StringLiteral().GetText()
-	if err := getError(element); err != nil {
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Equals,
 			},
 		},
@@ -1577,15 +1580,18 @@ func (v *ParserVisitor) VisitSTTouches(ctx *parser.STTouchesContext) interface{}
 		return fmt.Errorf(
 			"STTouches operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
+	// Process the WKT string
 	element := ctx.StringLiteral().GetText()
-	if err := getError(element); err != nil {
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Touches,
 			},
 		},
@@ -1607,16 +1613,18 @@ func (v *ParserVisitor) VisitSTOverlaps(ctx *parser.STOverlapsContext) interface
 		return fmt.Errorf(
 			"STOverlaps operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
+	// Process the WKT string
 	element := ctx.StringLiteral().GetText()
-	// log.Warn(element)
-	if err := getError(element); err != nil {
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Overlaps,
 			},
 		},
@@ -1638,16 +1646,18 @@ func (v *ParserVisitor) VisitSTCrosses(ctx *parser.STCrossesContext) interface{}
 		return fmt.Errorf(
 			"STCrosses operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
+	// Process the WKT string
 	element := ctx.StringLiteral().GetText()
-	// log.Warn(element)
-	if err := getError(element); err != nil {
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Crosses,
 			},
 		},
@@ -1669,16 +1679,17 @@ func (v *ParserVisitor) VisitSTContains(ctx *parser.STContainsContext) interface
 		return fmt.Errorf(
 			"STContains operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
-	element := ctx.StringLiteral().GetText() // the wkt input
-	// log.Warn(element)
-	if err := getError(element); err != nil {
+	// Process the WKT string
+	element := ctx.StringLiteral().GetText()
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Contains,
 			},
 		},
@@ -1700,16 +1711,18 @@ func (v *ParserVisitor) VisitSTIntersects(ctx *parser.STIntersectsContext) inter
 		return fmt.Errorf(
 			"STIntersects operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
-	element := ctx.StringLiteral().GetText() // the wkt input
-	// log.Warn(element)
-	if err := getError(element); err != nil {
+	// Process the WKT string
+	element := ctx.StringLiteral().GetText()
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Intersects,
 			},
 		},
@@ -1731,20 +1744,93 @@ func (v *ParserVisitor) VisitSTWithin(ctx *parser.STWithinContext) interface{} {
 		return fmt.Errorf(
 			"STWithin operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
-	element := ctx.StringLiteral().GetText() // the wkt input
-	// log.Warn(element)
-	if err := getError(element); err != nil {
+	// Process the WKT string
+	element := ctx.StringLiteral().GetText()
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err := checkValidWKT(wktString); err != nil {
 		return err
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				WktString:  element[1 : len(element)-1],
+				WktString:  wktString,
 				Op:         planpb.GISFunctionFilterExpr_Within,
 			},
 		},
 	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{} {
+	// Process the geometry field identifier
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"ST_DWITHIN operation are only supported on geometry fields now, got: %s", ctx.GetText())
+	}
+
+	// Process the WKT string
+	element := ctx.StringLiteral().GetText()
+	wktString := element[1 : len(element)-1] // Remove surrounding quotes
+
+	if err = checkValidPoint(wktString); err != nil {
+		return err
+	}
+
+	// Process the distance expression (can be int or float)
+	distanceExpr := ctx.Expr().Accept(v)
+	if err := getError(distanceExpr); err != nil {
+		return err
+	}
+
+	// Extract distance value - must be a constant expression
+	distanceValueExpr := getValueExpr(distanceExpr)
+	if distanceValueExpr == nil {
+		return fmt.Errorf("distance parameter must be a constant numeric value, got: %s", ctx.Expr().GetText())
+	}
+
+	var distance float64
+	genericValue := distanceValueExpr.GetValue()
+	if genericValue == nil {
+		return fmt.Errorf("invalid distance value: %s", ctx.Expr().GetText())
+	}
+
+	// Handle both integer and floating point values using type assertion
+	switch val := genericValue.GetVal().(type) {
+	case *planpb.GenericValue_Int64Val:
+		distance = float64(val.Int64Val)
+	case *planpb.GenericValue_FloatVal:
+		distance = val.FloatVal
+	default:
+		return fmt.Errorf("distance parameter must be a numeric value (int or float), got: %s", ctx.Expr().GetText())
+	}
+
+	if distance < 0 {
+		return fmt.Errorf("distance parameter must be non-negative, got: %f", distance)
+	}
+
+	// Create the GIS function expression using the bounding box
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  wktString, // Use bounding box instead of original point
+				Op:         planpb.GISFunctionFilterExpr_DWithin,
+				Distance:   distance, // Keep distance for reference
+			},
+		},
+	}
+
 	return &ExprWithType{
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
