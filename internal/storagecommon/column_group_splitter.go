@@ -50,7 +50,9 @@ func DefaultPolicies() []ColumnGroupSplitPolicy {
 	paramtable.Init()
 	result := make([]ColumnGroupSplitPolicy, 0, 4)
 	if paramtable.Get().CommonCfg.Stv2SplitSystemColumn.GetAsBool() {
-		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool()))
+		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludePartitionKey.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludeClusteringKey.GetAsBool()))
 	}
 	if paramtable.Get().CommonCfg.Stv2SplitByAvgSize.GetAsBool() {
 		result = append(result, NewAvgSizePolicy(paramtable.Get().CommonCfg.Stv2SplitAvgSizeThreshold.GetAsInt64()))
