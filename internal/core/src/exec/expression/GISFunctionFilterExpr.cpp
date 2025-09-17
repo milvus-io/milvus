@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "GISFunctionFilterExpr.h"
+#include <cstdlib>
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "common/Types.h"
@@ -20,30 +21,46 @@
 namespace milvus {
 namespace exec {
 
-#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)          \
-    auto execute_sub_batch = [](const _DataType* data,                         \
-                                const bool* valid_data,                        \
-                                const int32_t* offsets,                        \
-                                const int size,                                \
-                                TargetBitmapView res,                          \
-                                TargetBitmapView valid_res,                    \
-                                const Geometry& right_source) {                \
-        for (int i = 0; i < size; ++i) {                                       \
-            if (valid_data != nullptr && !valid_data[i]) {                     \
-                res[i] = valid_res[i] = false;                                 \
-                continue;                                                      \
-            }                                                                  \
-            res[i] =                                                           \
-                Geometry(data[i].data(), data[i].size()).method(right_source); \
-        }                                                                      \
-    };                                                                         \
-    int64_t processed_size = ProcessDataChunks<_DataType>(                     \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);    \
-    AssertInfo(processed_size == real_batch_size,                              \
-               "internal error: expr processed rows {} not equal "             \
-               "expect batch size {}",                                         \
-               processed_size,                                                 \
-               real_batch_size);                                               \
+#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)                                 \
+    auto execute_sub_batch = [this](const _DataType* data,                                            \
+                                    const bool* valid_data,                                           \
+                                    const int32_t* offsets,                                           \
+                                    const int size,                                                   \
+                                    TargetBitmapView res,                                             \
+                                    TargetBitmapView valid_res,                                       \
+                                    const Geometry& right_source) {                                   \
+        /* Unified path using simple WKB-content-based cache for both sealed and growing segments. */ \
+        auto& geometry_cache =                                                                        \
+            SimpleGeometryCacheManager::Instance().GetCache(                                          \
+                this->segment_->get_segment_id(), field_id_);                                         \
+        for (int i = 0; i < size; ++i) {                                                              \
+            if (valid_data != nullptr && !valid_data[i]) {                                            \
+                res[i] = valid_res[i] = false;                                                        \
+                continue;                                                                             \
+            }                                                                                         \
+            /* Create string_view from WKB data for cache lookup */                                   \
+            std::string_view wkb_view(data[i].data(), data[i].size());                                \
+            auto cached_geometry = geometry_cache.GetOrCreate(wkb_view);                              \
+                                                                                                      \
+            bool result = false;                                                                      \
+            if (cached_geometry != nullptr) {                                                         \
+                /* Use cached geometry for operation */                                               \
+                result = cached_geometry->method(right_source);                                       \
+            } else {                                                                                  \
+                /* Fallback: construct temporary geometry (cache construction failed) */              \
+                Geometry tmp(data[i].data(), data[i].size());                                         \
+                result = tmp.method(right_source);                                                    \
+            }                                                                                         \
+            res[i] = result;                                                                          \
+        }                                                                                             \
+    };                                                                                                \
+    int64_t processed_size = ProcessDataChunks<_DataType>(                                            \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);                           \
+    AssertInfo(processed_size == real_batch_size,                                                     \
+               "internal error: expr processed rows {} not equal "                                    \
+               "expect batch size {}",                                                                \
+               processed_size,                                                                        \
+               real_batch_size);                                                                      \
     return res_vec;
 
 // Specialized macro for distance-based operations (ST_DWITHIN)
@@ -325,11 +342,16 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             return hit_offsets;
         };
 
-        // Lambda: Process sealed segment data using bulk_subscript
+        // Lambda: Process sealed segment data using bulk_subscript with SimpleGeometryCache
         auto process_sealed_data =
             [&](const std::vector<int64_t>& hit_offsets) {
                 if (hit_offsets.empty())
                     return;
+
+                // Get simple geometry cache for this segment+field
+                auto& geometry_cache =
+                    SimpleGeometryCacheManager::Instance().GetCache(
+                        segment_->get_segment_id(), field_id_);
 
                 auto data_array = segment_->bulk_subscript(
                     field_id_, hit_offsets.data(), hit_offsets.size());
@@ -348,9 +370,23 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
 
                     const auto& wkb_data = geometry_array->data(i);
-                    Geometry left(wkb_data.data(), wkb_data.size());
 
-                    if (evaluate_geometry(left)) {
+                    // Get or create cached Geometry from simple cache
+                    std::string_view wkb_view(wkb_data.data(), wkb_data.size());
+                    auto cached_geometry = geometry_cache.GetOrCreate(wkb_view);
+
+                    // Evaluate geometry: use cached if available, otherwise construct temporarily
+                    bool result = false;
+                    if (cached_geometry != nullptr) {
+                        result = evaluate_geometry(*cached_geometry);
+                    } else {
+                        // Fallback: construct temporary geometry (cache construction failed)
+                        Geometry temp_geometry(wkb_data.data(),
+                                               wkb_data.size());
+                        result = evaluate_geometry(temp_geometry);
+                    }
+
+                    if (result) {
                         refined.set(pos);
                     }
                 }

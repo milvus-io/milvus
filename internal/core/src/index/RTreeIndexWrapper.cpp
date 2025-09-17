@@ -140,16 +140,25 @@ RTreeIndexWrapper::finish() {
 
         // Write meta json
         nlohmann::json meta;
-        // index/leaf capacities are not used in Boost implementation
         meta["dimension"] = dimension_;
         meta["count"] = static_cast<uint64_t>(values_.size());
 
         std::ofstream ofs(index_path_ + ".meta.json", std::ios::trunc);
-        ofs << meta.dump();
+        if (ofs.fail()) {
+            PanicInfo(ErrorCode::FileOpenFailed,
+                      "Failed to open R-Tree meta file: {}.meta.json",
+                      index_path_);
+        }
+        if (!(ofs << meta.dump())) {
+            PanicInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write R-Tree meta file: {}.meta.json",
+                      index_path_);
+        }
         ofs.close();
         LOG_INFO("R-Tree meta written: {}.meta.json", index_path_);
     } catch (const std::exception& e) {
-        LOG_WARN("Failed to write R-Tree files: {}", e.what());
+        PanicInfo(ErrorCode::UnexpectedError,
+                  fmt::format("Failed to write R-Tree files: {}", e.what()));
     }
 
     finished_ = true;

@@ -12,12 +12,14 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <memory>
 
 #include "common/FieldDataInterface.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "segcore/SegmentInterface.h"
+#include "common/GeometryCache.h"
 
 namespace milvus {
 namespace exec {
@@ -46,6 +48,11 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
 
  private:
     VectorPtr
