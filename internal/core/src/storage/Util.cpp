@@ -1005,7 +1005,6 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.root_path = path;
         conf.storage_type = "local";
     } else {
-        milvus_storage::ArrowFileSystemConfig conf;
         conf.address = std::string(storage_config.address);
         conf.bucket_name = std::string(storage_config.bucket_name);
         conf.access_key_id = std::string(storage_config.access_key_id);
@@ -1025,7 +1024,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
     }
-    auto trueFs = milvus_storage::CreateArrowFileSystem(conf).value();
+    return milvus_storage::CreateArrowFileSystem(conf).value();
 }
 
 FieldDataPtr
