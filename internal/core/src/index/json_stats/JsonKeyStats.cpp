@@ -442,12 +442,11 @@ JsonKeyStats::TraverseJsonForBuildStats(
         }
         index = j;
     } else if (current.type == JSMN_STRING) {
+        auto value =
+            std::string(json + current.start, current.end - current.start);
+        auto unescaped = UnescapeJsonString(value);
         Assert(current.size == 0);
-        AddKeyStats(
-            path,
-            JSONType::STRING,
-            std::string(json + current.start, current.end - current.start),
-            values);
+        AddKeyStats(path, JSONType::STRING, unescaped, values);
         index++;
     }
 }
