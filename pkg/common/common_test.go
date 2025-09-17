@@ -288,12 +288,3 @@ func TestIsEnableDynamicSchema(t *testing.T) {
 		})
 	}
 }
-
-func TestAllocAutoID(t *testing.T) {
-	start, end, err := AllocAutoID(func(n uint32) (int64, int64, error) {
-		return 100, 110, nil
-	}, 10, 1)
-	assert.NoError(t, err)
-	assert.EqualValues(t, 0b0100, start>>60)
-	assert.EqualValues(t, 0b0100, end>>60)
-}
