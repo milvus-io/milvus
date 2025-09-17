@@ -821,7 +821,6 @@ StringIndexSortMemoryImpl::Reverse_Lookup(
         return std::nullopt;
     }
 
-    // Now idx_to_offsets correctly maps row_id to unique_values_ index
     if (offset < idx_to_offsets.size()) {
         size_t unique_idx = idx_to_offsets[offset];
         if (unique_idx < unique_values_.size()) {
@@ -910,13 +909,10 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
             idx_to_offsets[row_id] = unique_idx;
         });
     }
-
-    LOG_INFO("MmapImpl: Loaded {} unique values", unique_count_);
 }
 
 size_t
 StringIndexSortMmapImpl::FindValueIndex(const std::string& value) const {
-    // Binary search using offsets_ptr_
     size_t left = 0;
     size_t right = unique_count_;
 

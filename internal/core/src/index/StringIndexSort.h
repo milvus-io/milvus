@@ -64,7 +64,6 @@ class StringIndexSort : public StringIndex {
         return true;
     }
 
-    // Build methods - handled by base class
     void
     Build(size_t n,
           const std::string* values,
@@ -80,11 +79,9 @@ class StringIndexSort : public StringIndex {
     BinarySet
     Serialize(const Config& config) override;
 
-    // Upload - handled by base class
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 
-    // Load methods - will create impl based on config
     void
     Load(const BinarySet& index_binary, const Config& config = {}) override;
 
@@ -127,6 +124,9 @@ class StringIndexSort : public StringIndex {
     Size() override;
 
  protected:
+    int64_t
+    CalculateTotalSize() const;
+
     // Common fields
     int64_t field_id_ = 0;
     bool is_built_ = false;
@@ -137,15 +137,8 @@ class StringIndexSort : public StringIndex {
     std::vector<int32_t> idx_to_offsets_;
     std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 
-    // Implementation pointer - created during Load
-    std::unique_ptr<StringIndexSortImpl> impl_;
-
-    // Cached total size to avoid runtime calculation
     int64_t total_size_{0};
-
-    // Helper function to calculate total size
-    int64_t
-    CalculateTotalSize() const;
+    std::unique_ptr<StringIndexSortImpl> impl_;
 };
 
 // Abstract interface for implementations
@@ -159,7 +152,6 @@ class StringIndexSortImpl {
                    TargetBitmap& valid_bitset,
                    std::vector<int32_t>& idx_to_offsets) = 0;
 
-    // Common parsing logic that both implementations can use
     struct ParsedData {
         uint32_t unique_count;
         const uint32_t* string_offsets;
