@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -184,8 +183,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	tr := timerecord.NewTimeRecorder("applyPK")
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	rowIDBegin, rowIDEnd, _ = common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
+	rowIDBegin, rowIDEnd, _ = it.idAllocator.Alloc(rowNums)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.insertMsg.RowIDs = make([]UniqueID, rowNums)

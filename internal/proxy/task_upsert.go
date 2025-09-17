@@ -767,8 +767,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	rowIDBegin, rowIDEnd, _ := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
+	rowIDBegin, rowIDEnd, _ := it.idAllocator.Alloc(rowNums)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
