@@ -346,6 +346,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
+		request:                &milvuspb.SearchRequest{Namespace: nil},
 	}
 
 	// Mock requery operation
@@ -499,6 +500,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
 		functionScore:          funcScore,
+		request:                &milvuspb.SearchRequest{Namespace: nil},
 	}
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
 	f1.FieldId = 101
