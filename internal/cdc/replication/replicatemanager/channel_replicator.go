@@ -150,7 +150,7 @@ func (r *channelReplicator) replicateLoop() error {
 				panic(fmt.Sprintf("replicate message failed due to unrecoverable error: %v", err))
 			}
 			logger.Debug("replicate message success", log.FieldMessage(msg))
-			if msg.MessageType() == message.MessageTypePutReplicateConfig {
+			if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 				roleChanged := r.handlePutReplicateConfigMessage(msg)
 				if roleChanged {
 					// Role changed, return and stop replicate.
@@ -207,7 +207,7 @@ func (r *channelReplicator) handlePutReplicateConfigMessage(msg message.Immutabl
 		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
 	)
 	logger.Info("handle PutReplicateConfigMessage", log.FieldMessage(msg))
-	prcMsg := message.MustAsImmutablePutReplicateConfigMessageV2(msg)
+	prcMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
 	replicateConfig := prcMsg.Header().ReplicateConfiguration
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()

@@ -22,148 +22,148 @@ const (
 
 // Export message types
 const (
-	MessageTypeUnknown            MessageType = MessageType(messagespb.MessageType_Unknown)
-	MessageTypeTimeTick           MessageType = MessageType(messagespb.MessageType_TimeTick)
-	MessageTypeInsert             MessageType = MessageType(messagespb.MessageType_Insert)
-	MessageTypeDelete             MessageType = MessageType(messagespb.MessageType_Delete)
-	MessageTypeCreateCollection   MessageType = MessageType(messagespb.MessageType_CreateCollection)
-	MessageTypeDropCollection     MessageType = MessageType(messagespb.MessageType_DropCollection)
-	MessageTypeCreatePartition    MessageType = MessageType(messagespb.MessageType_CreatePartition)
-	MessageTypeDropPartition      MessageType = MessageType(messagespb.MessageType_DropPartition)
-	MessageTypeImport             MessageType = MessageType(messagespb.MessageType_Import)
-	MessageTypeCreateSegment      MessageType = MessageType(messagespb.MessageType_CreateSegment)
-	MessageTypeFlush              MessageType = MessageType(messagespb.MessageType_Flush)
-	MessageTypeManualFlush        MessageType = MessageType(messagespb.MessageType_ManualFlush)
-	MessageTypePutReplicateConfig MessageType = MessageType(messagespb.MessageType_PutReplicateConfig)
-	MessageTypeBeginTxn           MessageType = MessageType(messagespb.MessageType_BeginTxn)
-	MessageTypeCommitTxn          MessageType = MessageType(messagespb.MessageType_CommitTxn)
-	MessageTypeRollbackTxn        MessageType = MessageType(messagespb.MessageType_RollbackTxn)
-	MessageTypeTxn                MessageType = MessageType(messagespb.MessageType_Txn)
-	MessageTypeSchemaChange       MessageType = MessageType(messagespb.MessageType_SchemaChange)
-	MessageTypePutCollection      MessageType = MessageType(messagespb.MessageType_PutCollection)
-	MessageTypePutLoadConfig      MessageType = MessageType(messagespb.MessageType_PutLoadConfig)
-	MessageTypeDropLoadConfig     MessageType = MessageType(messagespb.MessageType_DropLoadConfig)
-	MessageTypeCreateDatabase     MessageType = MessageType(messagespb.MessageType_CreateDatabase)
-	MessageTypePutDatabase        MessageType = MessageType(messagespb.MessageType_PutDatabase)
-	MessageTypeDropDatabase       MessageType = MessageType(messagespb.MessageType_DropDatabase)
-	MessageTypePutAlias           MessageType = MessageType(messagespb.MessageType_PutAlias)
-	MessageTypeDropAlias          MessageType = MessageType(messagespb.MessageType_DropAlias)
-	MessageTypePutUser            MessageType = MessageType(messagespb.MessageType_PutUser)
-	MessageTypeDropUser           MessageType = MessageType(messagespb.MessageType_DropUser)
-	MessageTypePutRole            MessageType = MessageType(messagespb.MessageType_PutRole)
-	MessageTypeDropRole           MessageType = MessageType(messagespb.MessageType_DropRole)
-	MessageTypePutUserRole        MessageType = MessageType(messagespb.MessageType_PutUserRole)
-	MessageTypeDropUserRole       MessageType = MessageType(messagespb.MessageType_DropUserRole)
-	MessageTypeGrantPrivilege     MessageType = MessageType(messagespb.MessageType_GrantPrivilege)
-	MessageTypeRevokePrivilege    MessageType = MessageType(messagespb.MessageType_RevokePrivilege)
-	MessageTypePutPrivilegeGroup  MessageType = MessageType(messagespb.MessageType_PutPrivilegeGroup)
-	MessageTypeDropPrivilegeGroup MessageType = MessageType(messagespb.MessageType_DropPrivilegeGroup)
-	MessageTypeRestoreRBAC        MessageType = MessageType(messagespb.MessageType_RestoreRBAC)
-	MessageTypePutResourceGroup   MessageType = MessageType(messagespb.MessageType_PutResourceGroup)
-	MessageTypeDropResourceGroup  MessageType = MessageType(messagespb.MessageType_DropResourceGroup)
-	MessageTypeCreateIndex        MessageType = MessageType(messagespb.MessageType_CreateIndex)
-	MessageTypeAlterIndex         MessageType = MessageType(messagespb.MessageType_AlterIndex)
-	MessageTypeDropIndex          MessageType = MessageType(messagespb.MessageType_DropIndex)
+	MessageTypeUnknown              MessageType = MessageType(messagespb.MessageType_Unknown)
+	MessageTypeTimeTick             MessageType = MessageType(messagespb.MessageType_TimeTick)
+	MessageTypeInsert               MessageType = MessageType(messagespb.MessageType_Insert)
+	MessageTypeDelete               MessageType = MessageType(messagespb.MessageType_Delete)
+	MessageTypeCreateCollection     MessageType = MessageType(messagespb.MessageType_CreateCollection)
+	MessageTypeDropCollection       MessageType = MessageType(messagespb.MessageType_DropCollection)
+	MessageTypeCreatePartition      MessageType = MessageType(messagespb.MessageType_CreatePartition)
+	MessageTypeDropPartition        MessageType = MessageType(messagespb.MessageType_DropPartition)
+	MessageTypeImport               MessageType = MessageType(messagespb.MessageType_Import)
+	MessageTypeCreateSegment        MessageType = MessageType(messagespb.MessageType_CreateSegment)
+	MessageTypeFlush                MessageType = MessageType(messagespb.MessageType_Flush)
+	MessageTypeManualFlush          MessageType = MessageType(messagespb.MessageType_ManualFlush)
+	MessageTypeAlterReplicateConfig MessageType = MessageType(messagespb.MessageType_AlterReplicateConfig)
+	MessageTypeBeginTxn             MessageType = MessageType(messagespb.MessageType_BeginTxn)
+	MessageTypeCommitTxn            MessageType = MessageType(messagespb.MessageType_CommitTxn)
+	MessageTypeRollbackTxn          MessageType = MessageType(messagespb.MessageType_RollbackTxn)
+	MessageTypeTxn                  MessageType = MessageType(messagespb.MessageType_Txn)
+	MessageTypeSchemaChange         MessageType = MessageType(messagespb.MessageType_SchemaChange)
+	MessageTypeAlterCollection      MessageType = MessageType(messagespb.MessageType_AlterCollection)
+	MessageTypeAlterLoadConfig      MessageType = MessageType(messagespb.MessageType_AlterLoadConfig)
+	MessageTypeDropLoadConfig       MessageType = MessageType(messagespb.MessageType_DropLoadConfig)
+	MessageTypeCreateDatabase       MessageType = MessageType(messagespb.MessageType_CreateDatabase)
+	MessageTypeAlterDatabase        MessageType = MessageType(messagespb.MessageType_AlterDatabase)
+	MessageTypeDropDatabase         MessageType = MessageType(messagespb.MessageType_DropDatabase)
+	MessageTypeAlterAlias           MessageType = MessageType(messagespb.MessageType_AlterAlias)
+	MessageTypeDropAlias            MessageType = MessageType(messagespb.MessageType_DropAlias)
+	MessageTypeAlterUser            MessageType = MessageType(messagespb.MessageType_AlterUser)
+	MessageTypeDropUser             MessageType = MessageType(messagespb.MessageType_DropUser)
+	MessageTypeAlterRole            MessageType = MessageType(messagespb.MessageType_AlterRole)
+	MessageTypeDropRole             MessageType = MessageType(messagespb.MessageType_DropRole)
+	MessageTypeAlterUserRole        MessageType = MessageType(messagespb.MessageType_AlterUserRole)
+	MessageTypeDropUserRole         MessageType = MessageType(messagespb.MessageType_DropUserRole)
+	MessageTypeAlterPrivilege       MessageType = MessageType(messagespb.MessageType_AlterPrivilege)
+	MessageTypeDropPrivilege        MessageType = MessageType(messagespb.MessageType_DropPrivilege)
+	MessageTypeAlterPrivilegeGroup  MessageType = MessageType(messagespb.MessageType_AlterPrivilegeGroup)
+	MessageTypeDropPrivilegeGroup   MessageType = MessageType(messagespb.MessageType_DropPrivilegeGroup)
+	MessageTypeRestoreRBAC          MessageType = MessageType(messagespb.MessageType_RestoreRBAC)
+	MessageTypeAlterResourceGroup   MessageType = MessageType(messagespb.MessageType_AlterResourceGroup)
+	MessageTypeDropResourceGroup    MessageType = MessageType(messagespb.MessageType_DropResourceGroup)
+	MessageTypeCreateIndex          MessageType = MessageType(messagespb.MessageType_CreateIndex)
+	MessageTypeAlterIndex           MessageType = MessageType(messagespb.MessageType_AlterIndex)
+	MessageTypeDropIndex            MessageType = MessageType(messagespb.MessageType_DropIndex)
 )
 
 // Export extra message type
 type (
-	PartitionSegmentAssignment     = messagespb.PartitionSegmentAssignment
-	SegmentAssignment              = messagespb.SegmentAssignment
-	ManualFlushExtraResponse       = messagespb.ManualFlushExtraResponse
-	RoleBinding                    = messagespb.RoleBinding
-	PutLoadConfigOfPutDatabase     = messagespb.PutLoadConfigOfPutDatabase
-	PutLoadConfigOfPutCollection   = messagespb.PutLoadConfigOfPutCollection
-	PutCollectionMessageUpdates    = messagespb.PutCollectionMessageUpdates
-	CacheExpirations               = messagespb.CacheExpirations
-	CacheExpiration                = messagespb.CacheExpiration
-	LegacyProxyCollectionMetaCache = messagespb.LegacyProxyCollectionMetaCache
+	PartitionSegmentAssignment       = messagespb.PartitionSegmentAssignment
+	SegmentAssignment                = messagespb.SegmentAssignment
+	ManualFlushExtraResponse         = messagespb.ManualFlushExtraResponse
+	RoleBinding                      = messagespb.RoleBinding
+	AlterLoadConfigOfAlterDatabase   = messagespb.AlterLoadConfigOfAlterDatabase
+	AlterLoadConfigOfAlterCollection = messagespb.AlterLoadConfigOfAlterCollection
+	AlterCollectionMessageUpdates    = messagespb.AlterCollectionMessageUpdates
+	CacheExpirations                 = messagespb.CacheExpirations
+	CacheExpiration                  = messagespb.CacheExpiration
+	LegacyProxyCollectionMetaCache   = messagespb.LegacyProxyCollectionMetaCache
 )
 
 // Export message header and body types
 type (
-	TimeTickMessageHeader           = messagespb.TimeTickMessageHeader
-	TimeTickMsg                     = msgpb.TimeTickMsg
-	InsertMessageHeader             = messagespb.InsertMessageHeader
-	InsertRequest                   = msgpb.InsertRequest
-	DeleteMessageHeader             = messagespb.DeleteMessageHeader
-	DeleteRequest                   = msgpb.DeleteRequest
-	CreateCollectionMessageHeader   = messagespb.CreateCollectionMessageHeader
-	CreateCollectionRequest         = msgpb.CreateCollectionRequest
-	DropCollectionMessageHeader     = messagespb.DropCollectionMessageHeader
-	DropCollectionRequest           = msgpb.DropCollectionRequest
-	CreatePartitionMessageHeader    = messagespb.CreatePartitionMessageHeader
-	CreatePartitionRequest          = msgpb.CreatePartitionRequest
-	DropPartitionMessageHeader      = messagespb.DropPartitionMessageHeader
-	DropPartitionRequest            = msgpb.DropPartitionRequest
-	ImportMessageHeader             = messagespb.ImportMessageHeader
-	ImportMsg                       = msgpb.ImportMsg
-	CreateSegmentMessageHeader      = messagespb.CreateSegmentMessageHeader
-	CreateSegmentMessageBody        = messagespb.CreateSegmentMessageBody
-	FlushMessageHeader              = messagespb.FlushMessageHeader
-	FlushMessageBody                = messagespb.FlushMessageBody
-	ManualFlushMessageHeader        = messagespb.ManualFlushMessageHeader
-	ManualFlushMessageBody          = messagespb.ManualFlushMessageBody
-	PutReplicateConfigMessageHeader = messagespb.PutReplicateConfigMessageHeader
-	PutReplicateConfigMessageBody   = messagespb.PutReplicateConfigMessageBody
-	BeginTxnMessageHeader           = messagespb.BeginTxnMessageHeader
-	BeginTxnMessageBody             = messagespb.BeginTxnMessageBody
-	CommitTxnMessageHeader          = messagespb.CommitTxnMessageHeader
-	CommitTxnMessageBody            = messagespb.CommitTxnMessageBody
-	RollbackTxnMessageHeader        = messagespb.RollbackTxnMessageHeader
-	RollbackTxnMessageBody          = messagespb.RollbackTxnMessageBody
-	TxnMessageHeader                = messagespb.TxnMessageHeader
-	TxnMessageBody                  = messagespb.TxnMessageBody
-	SchemaChangeMessageHeader       = messagespb.SchemaChangeMessageHeader
-	SchemaChangeMessageBody         = messagespb.SchemaChangeMessageBody
-	PutCollectionMessageHeader      = messagespb.PutCollectionMessageHeader
-	PutCollectionMessageBody        = messagespb.PutCollectionMessageBody
-	PutLoadConfigMessageHeader      = messagespb.PutLoadConfigMessageHeader
-	PutLoadConfigMessageBody        = messagespb.PutLoadConfigMessageBody
-	DropLoadConfigMessageHeader     = messagespb.DropLoadConfigMessageHeader
-	DropLoadConfigMessageBody       = messagespb.DropLoadConfigMessageBody
-	CreateDatabaseMessageHeader     = messagespb.CreateDatabaseMessageHeader
-	CreateDatabaseMessageBody       = messagespb.CreateDatabaseMessageBody
-	PutDatabaseMessageHeader        = messagespb.PutDatabaseMessageHeader
-	PutDatabaseMessageBody          = messagespb.PutDatabaseMessageBody
-	DropDatabaseMessageHeader       = messagespb.DropDatabaseMessageHeader
-	DropDatabaseMessageBody         = messagespb.DropDatabaseMessageBody
-	PutAliasMessageHeader           = messagespb.PutAliasMessageHeader
-	PutAliasMessageBody             = messagespb.PutAliasMessageBody
-	DropAliasMessageHeader          = messagespb.DropAliasMessageHeader
-	DropAliasMessageBody            = messagespb.DropAliasMessageBody
-	PutUserMessageHeader            = messagespb.PutUserMessageHeader
-	PutUserMessageBody              = messagespb.PutUserMessageBody
-	DropUserMessageHeader           = messagespb.DropUserMessageHeader
-	DropUserMessageBody             = messagespb.DropUserMessageBody
-	PutRoleMessageHeader            = messagespb.PutRoleMessageHeader
-	PutRoleMessageBody              = messagespb.PutRoleMessageBody
-	DropRoleMessageHeader           = messagespb.DropRoleMessageHeader
-	DropRoleMessageBody             = messagespb.DropRoleMessageBody
-	PutUserRoleMessageHeader        = messagespb.PutUserRoleMessageHeader
-	PutUserRoleMessageBody          = messagespb.PutUserRoleMessageBody
-	DropUserRoleMessageHeader       = messagespb.DropUserRoleMessageHeader
-	DropUserRoleMessageBody         = messagespb.DropUserRoleMessageBody
-	GrantPrivilegeMessageHeader     = messagespb.GrantPrivilegeMessageHeader
-	GrantPrivilegeMessageBody       = messagespb.GrantPrivilegeMessageBody
-	RevokePrivilegeMessageHeader    = messagespb.RevokePrivilegeMessageHeader
-	RevokePrivilegeMessageBody      = messagespb.RevokePrivilegeMessageBody
-	PutPrivilegeGroupMessageHeader  = messagespb.PutPrivilegeGroupMessageHeader
-	PutPrivilegeGroupMessageBody    = messagespb.PutPrivilegeGroupMessageBody
-	DropPrivilegeGroupMessageHeader = messagespb.DropPrivilegeGroupMessageHeader
-	DropPrivilegeGroupMessageBody   = messagespb.DropPrivilegeGroupMessageBody
-	RestoreRBACMessageHeader        = messagespb.RestoreRBACMessageHeader
-	RestoreRBACMessageBody          = messagespb.RestoreRBACMessageBody
-	PutResourceGroupMessageHeader   = messagespb.PutResourceGroupMessageHeader
-	PutResourceGroupMessageBody     = messagespb.PutResourceGroupMessageBody
-	DropResourceGroupMessageHeader  = messagespb.DropResourceGroupMessageHeader
-	DropResourceGroupMessageBody    = messagespb.DropResourceGroupMessageBody
-	CreateIndexMessageHeader        = messagespb.CreateIndexMessageHeader
-	CreateIndexMessageBody          = messagespb.CreateIndexMessageBody
-	AlterIndexMessageHeader         = messagespb.AlterIndexMessageHeader
-	AlterIndexMessageBody           = messagespb.AlterIndexMessageBody
-	DropIndexMessageHeader          = messagespb.DropIndexMessageHeader
-	DropIndexMessageBody            = messagespb.DropIndexMessageBody
+	TimeTickMessageHeader             = messagespb.TimeTickMessageHeader
+	TimeTickMsg                       = msgpb.TimeTickMsg
+	InsertMessageHeader               = messagespb.InsertMessageHeader
+	InsertRequest                     = msgpb.InsertRequest
+	DeleteMessageHeader               = messagespb.DeleteMessageHeader
+	DeleteRequest                     = msgpb.DeleteRequest
+	CreateCollectionMessageHeader     = messagespb.CreateCollectionMessageHeader
+	CreateCollectionRequest           = msgpb.CreateCollectionRequest
+	DropCollectionMessageHeader       = messagespb.DropCollectionMessageHeader
+	DropCollectionRequest             = msgpb.DropCollectionRequest
+	CreatePartitionMessageHeader      = messagespb.CreatePartitionMessageHeader
+	CreatePartitionRequest            = msgpb.CreatePartitionRequest
+	DropPartitionMessageHeader        = messagespb.DropPartitionMessageHeader
+	DropPartitionRequest              = msgpb.DropPartitionRequest
+	ImportMessageHeader               = messagespb.ImportMessageHeader
+	ImportMsg                         = msgpb.ImportMsg
+	CreateSegmentMessageHeader        = messagespb.CreateSegmentMessageHeader
+	CreateSegmentMessageBody          = messagespb.CreateSegmentMessageBody
+	FlushMessageHeader                = messagespb.FlushMessageHeader
+	FlushMessageBody                  = messagespb.FlushMessageBody
+	ManualFlushMessageHeader          = messagespb.ManualFlushMessageHeader
+	ManualFlushMessageBody            = messagespb.ManualFlushMessageBody
+	AlterReplicateConfigMessageHeader = messagespb.AlterReplicateConfigMessageHeader
+	AlterReplicateConfigMessageBody   = messagespb.AlterReplicateConfigMessageBody
+	BeginTxnMessageHeader             = messagespb.BeginTxnMessageHeader
+	BeginTxnMessageBody               = messagespb.BeginTxnMessageBody
+	CommitTxnMessageHeader            = messagespb.CommitTxnMessageHeader
+	CommitTxnMessageBody              = messagespb.CommitTxnMessageBody
+	RollbackTxnMessageHeader          = messagespb.RollbackTxnMessageHeader
+	RollbackTxnMessageBody            = messagespb.RollbackTxnMessageBody
+	TxnMessageHeader                  = messagespb.TxnMessageHeader
+	TxnMessageBody                    = messagespb.TxnMessageBody
+	SchemaChangeMessageHeader         = messagespb.SchemaChangeMessageHeader
+	SchemaChangeMessageBody           = messagespb.SchemaChangeMessageBody
+	AlterCollectionMessageHeader      = messagespb.AlterCollectionMessageHeader
+	AlterCollectionMessageBody        = messagespb.AlterCollectionMessageBody
+	AlterLoadConfigMessageHeader      = messagespb.AlterLoadConfigMessageHeader
+	AlterLoadConfigMessageBody        = messagespb.AlterLoadConfigMessageBody
+	DropLoadConfigMessageHeader       = messagespb.DropLoadConfigMessageHeader
+	DropLoadConfigMessageBody         = messagespb.DropLoadConfigMessageBody
+	CreateDatabaseMessageHeader       = messagespb.CreateDatabaseMessageHeader
+	CreateDatabaseMessageBody         = messagespb.CreateDatabaseMessageBody
+	AlterDatabaseMessageHeader        = messagespb.AlterDatabaseMessageHeader
+	AlterDatabaseMessageBody          = messagespb.AlterDatabaseMessageBody
+	DropDatabaseMessageHeader         = messagespb.DropDatabaseMessageHeader
+	DropDatabaseMessageBody           = messagespb.DropDatabaseMessageBody
+	AlterAliasMessageHeader           = messagespb.AlterAliasMessageHeader
+	AlterAliasMessageBody             = messagespb.AlterAliasMessageBody
+	DropAliasMessageHeader            = messagespb.DropAliasMessageHeader
+	DropAliasMessageBody              = messagespb.DropAliasMessageBody
+	AlterUserMessageHeader            = messagespb.AlterUserMessageHeader
+	AlterUserMessageBody              = messagespb.AlterUserMessageBody
+	DropUserMessageHeader             = messagespb.DropUserMessageHeader
+	DropUserMessageBody               = messagespb.DropUserMessageBody
+	AlterRoleMessageHeader            = messagespb.AlterRoleMessageHeader
+	AlterRoleMessageBody              = messagespb.AlterRoleMessageBody
+	DropRoleMessageHeader             = messagespb.DropRoleMessageHeader
+	DropRoleMessageBody               = messagespb.DropRoleMessageBody
+	AlterUserRoleMessageHeader        = messagespb.AlterUserRoleMessageHeader
+	AlterUserRoleMessageBody          = messagespb.AlterUserRoleMessageBody
+	DropUserRoleMessageHeader         = messagespb.DropUserRoleMessageHeader
+	DropUserRoleMessageBody           = messagespb.DropUserRoleMessageBody
+	AlterPrivilegeMessageHeader       = messagespb.AlterPrivilegeMessageHeader
+	AlterPrivilegeMessageBody         = messagespb.AlterPrivilegeMessageBody
+	DropPrivilegeMessageHeader        = messagespb.DropPrivilegeMessageHeader
+	DropPrivilegeMessageBody          = messagespb.DropPrivilegeMessageBody
+	AlterPrivilegeGroupMessageHeader  = messagespb.AlterPrivilegeGroupMessageHeader
+	AlterPrivilegeGroupMessageBody    = messagespb.AlterPrivilegeGroupMessageBody
+	DropPrivilegeGroupMessageHeader   = messagespb.DropPrivilegeGroupMessageHeader
+	DropPrivilegeGroupMessageBody     = messagespb.DropPrivilegeGroupMessageBody
+	RestoreRBACMessageHeader          = messagespb.RestoreRBACMessageHeader
+	RestoreRBACMessageBody            = messagespb.RestoreRBACMessageBody
+	AlterResourceGroupMessageHeader   = messagespb.AlterResourceGroupMessageHeader
+	AlterResourceGroupMessageBody     = messagespb.AlterResourceGroupMessageBody
+	DropResourceGroupMessageHeader    = messagespb.DropResourceGroupMessageHeader
+	DropResourceGroupMessageBody      = messagespb.DropResourceGroupMessageBody
+	CreateIndexMessageHeader          = messagespb.CreateIndexMessageHeader
+	CreateIndexMessageBody            = messagespb.CreateIndexMessageBody
+	AlterIndexMessageHeader           = messagespb.AlterIndexMessageHeader
+	AlterIndexMessageBody             = messagespb.AlterIndexMessageBody
+	DropIndexMessageHeader            = messagespb.DropIndexMessageHeader
+	DropIndexMessageBody              = messagespb.DropIndexMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -617,46 +617,46 @@ var MustAsBroadcastManualFlushMessageV2 = MustAsSpecializedBroadcastMessage[*Man
 // NewManualFlushMessageBuilderV2 creates a new message builder for ManualFlushMessageV2
 var NewManualFlushMessageBuilderV2 = newMutableMessageBuilder[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 
-// Type aliases for PutReplicateConfigMessageV2
+// Type aliases for AlterReplicateConfigMessageV2
 type (
-	MutablePutReplicateConfigMessageV2         = specializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
-	ImmutablePutReplicateConfigMessageV2       = SpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
-	BroadcastPutReplicateConfigMessageV2       = SpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
-	BroadcastResultPutReplicateConfigMessageV2 = BroadcastResult[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+	MutableAlterReplicateConfigMessageV2         = specializedMutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
+	ImmutableAlterReplicateConfigMessageV2       = SpecializedImmutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
+	BroadcastAlterReplicateConfigMessageV2       = SpecializedBroadcastMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
+	BroadcastResultAlterReplicateConfigMessageV2 = BroadcastResult[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 )
 
-// MessageTypeWithVersion for PutReplicateConfigMessageV2
-var MessageTypePutReplicateConfigV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutReplicateConfig,
+// MessageTypeWithVersion for AlterReplicateConfigMessageV2
+var MessageTypeAlterReplicateConfigV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterReplicateConfig,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutReplicateConfigMessageV2
-var SpecializedTypePutReplicateConfigV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutReplicateConfigMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutReplicateConfigMessageHeader)(nil)),
+// MessageSpecializedType for AlterReplicateConfigMessageV2
+var SpecializedTypeAlterReplicateConfigV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterReplicateConfigMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterReplicateConfigMessageHeader)(nil)),
 }
 
-// AsMutablePutReplicateConfigMessageV2 converts a BasicMessage to MutablePutReplicateConfigMessageV2
-var AsMutablePutReplicateConfigMessageV2 = asSpecializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// AsMutableAlterReplicateConfigMessageV2 converts a BasicMessage to MutableAlterReplicateConfigMessageV2
+var AsMutableAlterReplicateConfigMessageV2 = asSpecializedMutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// MustAsMutablePutReplicateConfigMessageV2 converts a BasicMessage to MutablePutReplicateConfigMessageV2, panics on error
-var MustAsMutablePutReplicateConfigMessageV2 = mustAsSpecializedMutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// MustAsMutableAlterReplicateConfigMessageV2 converts a BasicMessage to MutableAlterReplicateConfigMessageV2, panics on error
+var MustAsMutableAlterReplicateConfigMessageV2 = mustAsSpecializedMutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// AsImmutablePutReplicateConfigMessageV2 converts an ImmutableMessage to ImmutablePutReplicateConfigMessageV2
-var AsImmutablePutReplicateConfigMessageV2 = asSpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// AsImmutableAlterReplicateConfigMessageV2 converts an ImmutableMessage to ImmutableAlterReplicateConfigMessageV2
+var AsImmutableAlterReplicateConfigMessageV2 = asSpecializedImmutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// MustAsImmutablePutReplicateConfigMessageV2 converts an ImmutableMessage to ImmutablePutReplicateConfigMessageV2, panics on error
-var MustAsImmutablePutReplicateConfigMessageV2 = MustAsSpecializedImmutableMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// MustAsImmutableAlterReplicateConfigMessageV2 converts an ImmutableMessage to ImmutableAlterReplicateConfigMessageV2, panics on error
+var MustAsImmutableAlterReplicateConfigMessageV2 = MustAsSpecializedImmutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// AsBroadcastPutReplicateConfigMessageV2 converts a BasicMessage to BroadcastPutReplicateConfigMessageV2
-var AsBroadcastPutReplicateConfigMessageV2 = asSpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// AsBroadcastAlterReplicateConfigMessageV2 converts a BasicMessage to BroadcastAlterReplicateConfigMessageV2
+var AsBroadcastAlterReplicateConfigMessageV2 = asSpecializedBroadcastMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// MustAsBroadcastPutReplicateConfigMessageV2 converts a BasicMessage to BroadcastPutReplicateConfigMessageV2, panics on error
-var MustAsBroadcastPutReplicateConfigMessageV2 = MustAsSpecializedBroadcastMessage[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// MustAsBroadcastAlterReplicateConfigMessageV2 converts a BasicMessage to BroadcastAlterReplicateConfigMessageV2, panics on error
+var MustAsBroadcastAlterReplicateConfigMessageV2 = MustAsSpecializedBroadcastMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
-// NewPutReplicateConfigMessageBuilderV2 creates a new message builder for PutReplicateConfigMessageV2
-var NewPutReplicateConfigMessageBuilderV2 = newMutableMessageBuilder[*PutReplicateConfigMessageHeader, *PutReplicateConfigMessageBody]
+// NewAlterReplicateConfigMessageBuilderV2 creates a new message builder for AlterReplicateConfigMessageV2
+var NewAlterReplicateConfigMessageBuilderV2 = newMutableMessageBuilder[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 
 // Type aliases for BeginTxnMessageV2
 type (
@@ -842,87 +842,87 @@ var MustAsBroadcastSchemaChangeMessageV2 = MustAsSpecializedBroadcastMessage[*Sc
 // NewSchemaChangeMessageBuilderV2 creates a new message builder for SchemaChangeMessageV2
 var NewSchemaChangeMessageBuilderV2 = newMutableMessageBuilder[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 
-// Type aliases for PutCollectionMessageV2
+// Type aliases for AlterCollectionMessageV2
 type (
-	MutablePutCollectionMessageV2         = specializedMutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
-	ImmutablePutCollectionMessageV2       = SpecializedImmutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
-	BroadcastPutCollectionMessageV2       = SpecializedBroadcastMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
-	BroadcastResultPutCollectionMessageV2 = BroadcastResult[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+	MutableAlterCollectionMessageV2         = specializedMutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
+	ImmutableAlterCollectionMessageV2       = SpecializedImmutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
+	BroadcastAlterCollectionMessageV2       = SpecializedBroadcastMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
+	BroadcastResultAlterCollectionMessageV2 = BroadcastResult[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 )
 
-// MessageTypeWithVersion for PutCollectionMessageV2
-var MessageTypePutCollectionV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutCollection,
+// MessageTypeWithVersion for AlterCollectionMessageV2
+var MessageTypeAlterCollectionV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterCollection,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutCollectionMessageV2
-var SpecializedTypePutCollectionV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutCollectionMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutCollectionMessageHeader)(nil)),
+// MessageSpecializedType for AlterCollectionMessageV2
+var SpecializedTypeAlterCollectionV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterCollectionMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterCollectionMessageHeader)(nil)),
 }
 
-// AsMutablePutCollectionMessageV2 converts a BasicMessage to MutablePutCollectionMessageV2
-var AsMutablePutCollectionMessageV2 = asSpecializedMutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// AsMutableAlterCollectionMessageV2 converts a BasicMessage to MutableAlterCollectionMessageV2
+var AsMutableAlterCollectionMessageV2 = asSpecializedMutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// MustAsMutablePutCollectionMessageV2 converts a BasicMessage to MutablePutCollectionMessageV2, panics on error
-var MustAsMutablePutCollectionMessageV2 = mustAsSpecializedMutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// MustAsMutableAlterCollectionMessageV2 converts a BasicMessage to MutableAlterCollectionMessageV2, panics on error
+var MustAsMutableAlterCollectionMessageV2 = mustAsSpecializedMutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// AsImmutablePutCollectionMessageV2 converts an ImmutableMessage to ImmutablePutCollectionMessageV2
-var AsImmutablePutCollectionMessageV2 = asSpecializedImmutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// AsImmutableAlterCollectionMessageV2 converts an ImmutableMessage to ImmutableAlterCollectionMessageV2
+var AsImmutableAlterCollectionMessageV2 = asSpecializedImmutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// MustAsImmutablePutCollectionMessageV2 converts an ImmutableMessage to ImmutablePutCollectionMessageV2, panics on error
-var MustAsImmutablePutCollectionMessageV2 = MustAsSpecializedImmutableMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// MustAsImmutableAlterCollectionMessageV2 converts an ImmutableMessage to ImmutableAlterCollectionMessageV2, panics on error
+var MustAsImmutableAlterCollectionMessageV2 = MustAsSpecializedImmutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// AsBroadcastPutCollectionMessageV2 converts a BasicMessage to BroadcastPutCollectionMessageV2
-var AsBroadcastPutCollectionMessageV2 = asSpecializedBroadcastMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// AsBroadcastAlterCollectionMessageV2 converts a BasicMessage to BroadcastAlterCollectionMessageV2
+var AsBroadcastAlterCollectionMessageV2 = asSpecializedBroadcastMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// MustAsBroadcastPutCollectionMessageV2 converts a BasicMessage to BroadcastPutCollectionMessageV2, panics on error
-var MustAsBroadcastPutCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// MustAsBroadcastAlterCollectionMessageV2 converts a BasicMessage to BroadcastAlterCollectionMessageV2, panics on error
+var MustAsBroadcastAlterCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// NewPutCollectionMessageBuilderV2 creates a new message builder for PutCollectionMessageV2
-var NewPutCollectionMessageBuilderV2 = newMutableMessageBuilder[*PutCollectionMessageHeader, *PutCollectionMessageBody]
+// NewAlterCollectionMessageBuilderV2 creates a new message builder for AlterCollectionMessageV2
+var NewAlterCollectionMessageBuilderV2 = newMutableMessageBuilder[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 
-// Type aliases for PutLoadConfigMessageV2
+// Type aliases for AlterLoadConfigMessageV2
 type (
-	MutablePutLoadConfigMessageV2         = specializedMutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
-	ImmutablePutLoadConfigMessageV2       = SpecializedImmutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
-	BroadcastPutLoadConfigMessageV2       = SpecializedBroadcastMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
-	BroadcastResultPutLoadConfigMessageV2 = BroadcastResult[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+	MutableAlterLoadConfigMessageV2         = specializedMutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
+	ImmutableAlterLoadConfigMessageV2       = SpecializedImmutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
+	BroadcastAlterLoadConfigMessageV2       = SpecializedBroadcastMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
+	BroadcastResultAlterLoadConfigMessageV2 = BroadcastResult[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 )
 
-// MessageTypeWithVersion for PutLoadConfigMessageV2
-var MessageTypePutLoadConfigV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutLoadConfig,
+// MessageTypeWithVersion for AlterLoadConfigMessageV2
+var MessageTypeAlterLoadConfigV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterLoadConfig,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutLoadConfigMessageV2
-var SpecializedTypePutLoadConfigV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutLoadConfigMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutLoadConfigMessageHeader)(nil)),
+// MessageSpecializedType for AlterLoadConfigMessageV2
+var SpecializedTypeAlterLoadConfigV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterLoadConfigMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterLoadConfigMessageHeader)(nil)),
 }
 
-// AsMutablePutLoadConfigMessageV2 converts a BasicMessage to MutablePutLoadConfigMessageV2
-var AsMutablePutLoadConfigMessageV2 = asSpecializedMutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// AsMutableAlterLoadConfigMessageV2 converts a BasicMessage to MutableAlterLoadConfigMessageV2
+var AsMutableAlterLoadConfigMessageV2 = asSpecializedMutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// MustAsMutablePutLoadConfigMessageV2 converts a BasicMessage to MutablePutLoadConfigMessageV2, panics on error
-var MustAsMutablePutLoadConfigMessageV2 = mustAsSpecializedMutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// MustAsMutableAlterLoadConfigMessageV2 converts a BasicMessage to MutableAlterLoadConfigMessageV2, panics on error
+var MustAsMutableAlterLoadConfigMessageV2 = mustAsSpecializedMutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// AsImmutablePutLoadConfigMessageV2 converts an ImmutableMessage to ImmutablePutLoadConfigMessageV2
-var AsImmutablePutLoadConfigMessageV2 = asSpecializedImmutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// AsImmutableAlterLoadConfigMessageV2 converts an ImmutableMessage to ImmutableAlterLoadConfigMessageV2
+var AsImmutableAlterLoadConfigMessageV2 = asSpecializedImmutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// MustAsImmutablePutLoadConfigMessageV2 converts an ImmutableMessage to ImmutablePutLoadConfigMessageV2, panics on error
-var MustAsImmutablePutLoadConfigMessageV2 = MustAsSpecializedImmutableMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// MustAsImmutableAlterLoadConfigMessageV2 converts an ImmutableMessage to ImmutableAlterLoadConfigMessageV2, panics on error
+var MustAsImmutableAlterLoadConfigMessageV2 = MustAsSpecializedImmutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// AsBroadcastPutLoadConfigMessageV2 converts a BasicMessage to BroadcastPutLoadConfigMessageV2
-var AsBroadcastPutLoadConfigMessageV2 = asSpecializedBroadcastMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// AsBroadcastAlterLoadConfigMessageV2 converts a BasicMessage to BroadcastAlterLoadConfigMessageV2
+var AsBroadcastAlterLoadConfigMessageV2 = asSpecializedBroadcastMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// MustAsBroadcastPutLoadConfigMessageV2 converts a BasicMessage to BroadcastPutLoadConfigMessageV2, panics on error
-var MustAsBroadcastPutLoadConfigMessageV2 = MustAsSpecializedBroadcastMessage[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// MustAsBroadcastAlterLoadConfigMessageV2 converts a BasicMessage to BroadcastAlterLoadConfigMessageV2, panics on error
+var MustAsBroadcastAlterLoadConfigMessageV2 = MustAsSpecializedBroadcastMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
-// NewPutLoadConfigMessageBuilderV2 creates a new message builder for PutLoadConfigMessageV2
-var NewPutLoadConfigMessageBuilderV2 = newMutableMessageBuilder[*PutLoadConfigMessageHeader, *PutLoadConfigMessageBody]
+// NewAlterLoadConfigMessageBuilderV2 creates a new message builder for AlterLoadConfigMessageV2
+var NewAlterLoadConfigMessageBuilderV2 = newMutableMessageBuilder[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 
 // Type aliases for DropLoadConfigMessageV2
 type (
@@ -1006,46 +1006,46 @@ var MustAsBroadcastCreateDatabaseMessageV2 = MustAsSpecializedBroadcastMessage[*
 // NewCreateDatabaseMessageBuilderV2 creates a new message builder for CreateDatabaseMessageV2
 var NewCreateDatabaseMessageBuilderV2 = newMutableMessageBuilder[*CreateDatabaseMessageHeader, *CreateDatabaseMessageBody]
 
-// Type aliases for PutDatabaseMessageV2
+// Type aliases for AlterDatabaseMessageV2
 type (
-	MutablePutDatabaseMessageV2         = specializedMutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
-	ImmutablePutDatabaseMessageV2       = SpecializedImmutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
-	BroadcastPutDatabaseMessageV2       = SpecializedBroadcastMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
-	BroadcastResultPutDatabaseMessageV2 = BroadcastResult[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+	MutableAlterDatabaseMessageV2         = specializedMutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
+	ImmutableAlterDatabaseMessageV2       = SpecializedImmutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
+	BroadcastAlterDatabaseMessageV2       = SpecializedBroadcastMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
+	BroadcastResultAlterDatabaseMessageV2 = BroadcastResult[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 )
 
-// MessageTypeWithVersion for PutDatabaseMessageV2
-var MessageTypePutDatabaseV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutDatabase,
+// MessageTypeWithVersion for AlterDatabaseMessageV2
+var MessageTypeAlterDatabaseV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterDatabase,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutDatabaseMessageV2
-var SpecializedTypePutDatabaseV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutDatabaseMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutDatabaseMessageHeader)(nil)),
+// MessageSpecializedType for AlterDatabaseMessageV2
+var SpecializedTypeAlterDatabaseV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterDatabaseMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterDatabaseMessageHeader)(nil)),
 }
 
-// AsMutablePutDatabaseMessageV2 converts a BasicMessage to MutablePutDatabaseMessageV2
-var AsMutablePutDatabaseMessageV2 = asSpecializedMutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// AsMutableAlterDatabaseMessageV2 converts a BasicMessage to MutableAlterDatabaseMessageV2
+var AsMutableAlterDatabaseMessageV2 = asSpecializedMutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// MustAsMutablePutDatabaseMessageV2 converts a BasicMessage to MutablePutDatabaseMessageV2, panics on error
-var MustAsMutablePutDatabaseMessageV2 = mustAsSpecializedMutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// MustAsMutableAlterDatabaseMessageV2 converts a BasicMessage to MutableAlterDatabaseMessageV2, panics on error
+var MustAsMutableAlterDatabaseMessageV2 = mustAsSpecializedMutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// AsImmutablePutDatabaseMessageV2 converts an ImmutableMessage to ImmutablePutDatabaseMessageV2
-var AsImmutablePutDatabaseMessageV2 = asSpecializedImmutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// AsImmutableAlterDatabaseMessageV2 converts an ImmutableMessage to ImmutableAlterDatabaseMessageV2
+var AsImmutableAlterDatabaseMessageV2 = asSpecializedImmutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// MustAsImmutablePutDatabaseMessageV2 converts an ImmutableMessage to ImmutablePutDatabaseMessageV2, panics on error
-var MustAsImmutablePutDatabaseMessageV2 = MustAsSpecializedImmutableMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// MustAsImmutableAlterDatabaseMessageV2 converts an ImmutableMessage to ImmutableAlterDatabaseMessageV2, panics on error
+var MustAsImmutableAlterDatabaseMessageV2 = MustAsSpecializedImmutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// AsBroadcastPutDatabaseMessageV2 converts a BasicMessage to BroadcastPutDatabaseMessageV2
-var AsBroadcastPutDatabaseMessageV2 = asSpecializedBroadcastMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// AsBroadcastAlterDatabaseMessageV2 converts a BasicMessage to BroadcastAlterDatabaseMessageV2
+var AsBroadcastAlterDatabaseMessageV2 = asSpecializedBroadcastMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// MustAsBroadcastPutDatabaseMessageV2 converts a BasicMessage to BroadcastPutDatabaseMessageV2, panics on error
-var MustAsBroadcastPutDatabaseMessageV2 = MustAsSpecializedBroadcastMessage[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// MustAsBroadcastAlterDatabaseMessageV2 converts a BasicMessage to BroadcastAlterDatabaseMessageV2, panics on error
+var MustAsBroadcastAlterDatabaseMessageV2 = MustAsSpecializedBroadcastMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
-// NewPutDatabaseMessageBuilderV2 creates a new message builder for PutDatabaseMessageV2
-var NewPutDatabaseMessageBuilderV2 = newMutableMessageBuilder[*PutDatabaseMessageHeader, *PutDatabaseMessageBody]
+// NewAlterDatabaseMessageBuilderV2 creates a new message builder for AlterDatabaseMessageV2
+var NewAlterDatabaseMessageBuilderV2 = newMutableMessageBuilder[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 
 // Type aliases for DropDatabaseMessageV2
 type (
@@ -1088,46 +1088,46 @@ var MustAsBroadcastDropDatabaseMessageV2 = MustAsSpecializedBroadcastMessage[*Dr
 // NewDropDatabaseMessageBuilderV2 creates a new message builder for DropDatabaseMessageV2
 var NewDropDatabaseMessageBuilderV2 = newMutableMessageBuilder[*DropDatabaseMessageHeader, *DropDatabaseMessageBody]
 
-// Type aliases for PutAliasMessageV2
+// Type aliases for AlterAliasMessageV2
 type (
-	MutablePutAliasMessageV2         = specializedMutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
-	ImmutablePutAliasMessageV2       = SpecializedImmutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
-	BroadcastPutAliasMessageV2       = SpecializedBroadcastMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
-	BroadcastResultPutAliasMessageV2 = BroadcastResult[*PutAliasMessageHeader, *PutAliasMessageBody]
+	MutableAlterAliasMessageV2         = specializedMutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
+	ImmutableAlterAliasMessageV2       = SpecializedImmutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
+	BroadcastAlterAliasMessageV2       = SpecializedBroadcastMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
+	BroadcastResultAlterAliasMessageV2 = BroadcastResult[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 )
 
-// MessageTypeWithVersion for PutAliasMessageV2
-var MessageTypePutAliasV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutAlias,
+// MessageTypeWithVersion for AlterAliasMessageV2
+var MessageTypeAlterAliasV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterAlias,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutAliasMessageV2
-var SpecializedTypePutAliasV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutAliasMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutAliasMessageHeader)(nil)),
+// MessageSpecializedType for AlterAliasMessageV2
+var SpecializedTypeAlterAliasV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterAliasMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterAliasMessageHeader)(nil)),
 }
 
-// AsMutablePutAliasMessageV2 converts a BasicMessage to MutablePutAliasMessageV2
-var AsMutablePutAliasMessageV2 = asSpecializedMutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// AsMutableAlterAliasMessageV2 converts a BasicMessage to MutableAlterAliasMessageV2
+var AsMutableAlterAliasMessageV2 = asSpecializedMutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// MustAsMutablePutAliasMessageV2 converts a BasicMessage to MutablePutAliasMessageV2, panics on error
-var MustAsMutablePutAliasMessageV2 = mustAsSpecializedMutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// MustAsMutableAlterAliasMessageV2 converts a BasicMessage to MutableAlterAliasMessageV2, panics on error
+var MustAsMutableAlterAliasMessageV2 = mustAsSpecializedMutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// AsImmutablePutAliasMessageV2 converts an ImmutableMessage to ImmutablePutAliasMessageV2
-var AsImmutablePutAliasMessageV2 = asSpecializedImmutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// AsImmutableAlterAliasMessageV2 converts an ImmutableMessage to ImmutableAlterAliasMessageV2
+var AsImmutableAlterAliasMessageV2 = asSpecializedImmutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// MustAsImmutablePutAliasMessageV2 converts an ImmutableMessage to ImmutablePutAliasMessageV2, panics on error
-var MustAsImmutablePutAliasMessageV2 = MustAsSpecializedImmutableMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// MustAsImmutableAlterAliasMessageV2 converts an ImmutableMessage to ImmutableAlterAliasMessageV2, panics on error
+var MustAsImmutableAlterAliasMessageV2 = MustAsSpecializedImmutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// AsBroadcastPutAliasMessageV2 converts a BasicMessage to BroadcastPutAliasMessageV2
-var AsBroadcastPutAliasMessageV2 = asSpecializedBroadcastMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// AsBroadcastAlterAliasMessageV2 converts a BasicMessage to BroadcastAlterAliasMessageV2
+var AsBroadcastAlterAliasMessageV2 = asSpecializedBroadcastMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// MustAsBroadcastPutAliasMessageV2 converts a BasicMessage to BroadcastPutAliasMessageV2, panics on error
-var MustAsBroadcastPutAliasMessageV2 = MustAsSpecializedBroadcastMessage[*PutAliasMessageHeader, *PutAliasMessageBody]
+// MustAsBroadcastAlterAliasMessageV2 converts a BasicMessage to BroadcastAlterAliasMessageV2, panics on error
+var MustAsBroadcastAlterAliasMessageV2 = MustAsSpecializedBroadcastMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
-// NewPutAliasMessageBuilderV2 creates a new message builder for PutAliasMessageV2
-var NewPutAliasMessageBuilderV2 = newMutableMessageBuilder[*PutAliasMessageHeader, *PutAliasMessageBody]
+// NewAlterAliasMessageBuilderV2 creates a new message builder for AlterAliasMessageV2
+var NewAlterAliasMessageBuilderV2 = newMutableMessageBuilder[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 
 // Type aliases for DropAliasMessageV2
 type (
@@ -1170,46 +1170,46 @@ var MustAsBroadcastDropAliasMessageV2 = MustAsSpecializedBroadcastMessage[*DropA
 // NewDropAliasMessageBuilderV2 creates a new message builder for DropAliasMessageV2
 var NewDropAliasMessageBuilderV2 = newMutableMessageBuilder[*DropAliasMessageHeader, *DropAliasMessageBody]
 
-// Type aliases for PutUserMessageV2
+// Type aliases for AlterUserMessageV2
 type (
-	MutablePutUserMessageV2         = specializedMutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
-	ImmutablePutUserMessageV2       = SpecializedImmutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
-	BroadcastPutUserMessageV2       = SpecializedBroadcastMessage[*PutUserMessageHeader, *PutUserMessageBody]
-	BroadcastResultPutUserMessageV2 = BroadcastResult[*PutUserMessageHeader, *PutUserMessageBody]
+	MutableAlterUserMessageV2         = specializedMutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
+	ImmutableAlterUserMessageV2       = SpecializedImmutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
+	BroadcastAlterUserMessageV2       = SpecializedBroadcastMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
+	BroadcastResultAlterUserMessageV2 = BroadcastResult[*AlterUserMessageHeader, *AlterUserMessageBody]
 )
 
-// MessageTypeWithVersion for PutUserMessageV2
-var MessageTypePutUserV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutUser,
+// MessageTypeWithVersion for AlterUserMessageV2
+var MessageTypeAlterUserV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterUser,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutUserMessageV2
-var SpecializedTypePutUserV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutUserMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutUserMessageHeader)(nil)),
+// MessageSpecializedType for AlterUserMessageV2
+var SpecializedTypeAlterUserV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterUserMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterUserMessageHeader)(nil)),
 }
 
-// AsMutablePutUserMessageV2 converts a BasicMessage to MutablePutUserMessageV2
-var AsMutablePutUserMessageV2 = asSpecializedMutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// AsMutableAlterUserMessageV2 converts a BasicMessage to MutableAlterUserMessageV2
+var AsMutableAlterUserMessageV2 = asSpecializedMutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// MustAsMutablePutUserMessageV2 converts a BasicMessage to MutablePutUserMessageV2, panics on error
-var MustAsMutablePutUserMessageV2 = mustAsSpecializedMutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// MustAsMutableAlterUserMessageV2 converts a BasicMessage to MutableAlterUserMessageV2, panics on error
+var MustAsMutableAlterUserMessageV2 = mustAsSpecializedMutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// AsImmutablePutUserMessageV2 converts an ImmutableMessage to ImmutablePutUserMessageV2
-var AsImmutablePutUserMessageV2 = asSpecializedImmutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// AsImmutableAlterUserMessageV2 converts an ImmutableMessage to ImmutableAlterUserMessageV2
+var AsImmutableAlterUserMessageV2 = asSpecializedImmutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// MustAsImmutablePutUserMessageV2 converts an ImmutableMessage to ImmutablePutUserMessageV2, panics on error
-var MustAsImmutablePutUserMessageV2 = MustAsSpecializedImmutableMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// MustAsImmutableAlterUserMessageV2 converts an ImmutableMessage to ImmutableAlterUserMessageV2, panics on error
+var MustAsImmutableAlterUserMessageV2 = MustAsSpecializedImmutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// AsBroadcastPutUserMessageV2 converts a BasicMessage to BroadcastPutUserMessageV2
-var AsBroadcastPutUserMessageV2 = asSpecializedBroadcastMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// AsBroadcastAlterUserMessageV2 converts a BasicMessage to BroadcastAlterUserMessageV2
+var AsBroadcastAlterUserMessageV2 = asSpecializedBroadcastMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// MustAsBroadcastPutUserMessageV2 converts a BasicMessage to BroadcastPutUserMessageV2, panics on error
-var MustAsBroadcastPutUserMessageV2 = MustAsSpecializedBroadcastMessage[*PutUserMessageHeader, *PutUserMessageBody]
+// MustAsBroadcastAlterUserMessageV2 converts a BasicMessage to BroadcastAlterUserMessageV2, panics on error
+var MustAsBroadcastAlterUserMessageV2 = MustAsSpecializedBroadcastMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 
-// NewPutUserMessageBuilderV2 creates a new message builder for PutUserMessageV2
-var NewPutUserMessageBuilderV2 = newMutableMessageBuilder[*PutUserMessageHeader, *PutUserMessageBody]
+// NewAlterUserMessageBuilderV2 creates a new message builder for AlterUserMessageV2
+var NewAlterUserMessageBuilderV2 = newMutableMessageBuilder[*AlterUserMessageHeader, *AlterUserMessageBody]
 
 // Type aliases for DropUserMessageV2
 type (
@@ -1252,46 +1252,46 @@ var MustAsBroadcastDropUserMessageV2 = MustAsSpecializedBroadcastMessage[*DropUs
 // NewDropUserMessageBuilderV2 creates a new message builder for DropUserMessageV2
 var NewDropUserMessageBuilderV2 = newMutableMessageBuilder[*DropUserMessageHeader, *DropUserMessageBody]
 
-// Type aliases for PutRoleMessageV2
+// Type aliases for AlterRoleMessageV2
 type (
-	MutablePutRoleMessageV2         = specializedMutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
-	ImmutablePutRoleMessageV2       = SpecializedImmutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
-	BroadcastPutRoleMessageV2       = SpecializedBroadcastMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
-	BroadcastResultPutRoleMessageV2 = BroadcastResult[*PutRoleMessageHeader, *PutRoleMessageBody]
+	MutableAlterRoleMessageV2         = specializedMutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
+	ImmutableAlterRoleMessageV2       = SpecializedImmutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
+	BroadcastAlterRoleMessageV2       = SpecializedBroadcastMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
+	BroadcastResultAlterRoleMessageV2 = BroadcastResult[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 )
 
-// MessageTypeWithVersion for PutRoleMessageV2
-var MessageTypePutRoleV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutRole,
+// MessageTypeWithVersion for AlterRoleMessageV2
+var MessageTypeAlterRoleV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterRole,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutRoleMessageV2
-var SpecializedTypePutRoleV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutRoleMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutRoleMessageHeader)(nil)),
+// MessageSpecializedType for AlterRoleMessageV2
+var SpecializedTypeAlterRoleV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterRoleMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterRoleMessageHeader)(nil)),
 }
 
-// AsMutablePutRoleMessageV2 converts a BasicMessage to MutablePutRoleMessageV2
-var AsMutablePutRoleMessageV2 = asSpecializedMutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// AsMutableAlterRoleMessageV2 converts a BasicMessage to MutableAlterRoleMessageV2
+var AsMutableAlterRoleMessageV2 = asSpecializedMutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// MustAsMutablePutRoleMessageV2 converts a BasicMessage to MutablePutRoleMessageV2, panics on error
-var MustAsMutablePutRoleMessageV2 = mustAsSpecializedMutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// MustAsMutableAlterRoleMessageV2 converts a BasicMessage to MutableAlterRoleMessageV2, panics on error
+var MustAsMutableAlterRoleMessageV2 = mustAsSpecializedMutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// AsImmutablePutRoleMessageV2 converts an ImmutableMessage to ImmutablePutRoleMessageV2
-var AsImmutablePutRoleMessageV2 = asSpecializedImmutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// AsImmutableAlterRoleMessageV2 converts an ImmutableMessage to ImmutableAlterRoleMessageV2
+var AsImmutableAlterRoleMessageV2 = asSpecializedImmutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// MustAsImmutablePutRoleMessageV2 converts an ImmutableMessage to ImmutablePutRoleMessageV2, panics on error
-var MustAsImmutablePutRoleMessageV2 = MustAsSpecializedImmutableMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// MustAsImmutableAlterRoleMessageV2 converts an ImmutableMessage to ImmutableAlterRoleMessageV2, panics on error
+var MustAsImmutableAlterRoleMessageV2 = MustAsSpecializedImmutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// AsBroadcastPutRoleMessageV2 converts a BasicMessage to BroadcastPutRoleMessageV2
-var AsBroadcastPutRoleMessageV2 = asSpecializedBroadcastMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// AsBroadcastAlterRoleMessageV2 converts a BasicMessage to BroadcastAlterRoleMessageV2
+var AsBroadcastAlterRoleMessageV2 = asSpecializedBroadcastMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// MustAsBroadcastPutRoleMessageV2 converts a BasicMessage to BroadcastPutRoleMessageV2, panics on error
-var MustAsBroadcastPutRoleMessageV2 = MustAsSpecializedBroadcastMessage[*PutRoleMessageHeader, *PutRoleMessageBody]
+// MustAsBroadcastAlterRoleMessageV2 converts a BasicMessage to BroadcastAlterRoleMessageV2, panics on error
+var MustAsBroadcastAlterRoleMessageV2 = MustAsSpecializedBroadcastMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
-// NewPutRoleMessageBuilderV2 creates a new message builder for PutRoleMessageV2
-var NewPutRoleMessageBuilderV2 = newMutableMessageBuilder[*PutRoleMessageHeader, *PutRoleMessageBody]
+// NewAlterRoleMessageBuilderV2 creates a new message builder for AlterRoleMessageV2
+var NewAlterRoleMessageBuilderV2 = newMutableMessageBuilder[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 
 // Type aliases for DropRoleMessageV2
 type (
@@ -1334,46 +1334,46 @@ var MustAsBroadcastDropRoleMessageV2 = MustAsSpecializedBroadcastMessage[*DropRo
 // NewDropRoleMessageBuilderV2 creates a new message builder for DropRoleMessageV2
 var NewDropRoleMessageBuilderV2 = newMutableMessageBuilder[*DropRoleMessageHeader, *DropRoleMessageBody]
 
-// Type aliases for PutUserRoleMessageV2
+// Type aliases for AlterUserRoleMessageV2
 type (
-	MutablePutUserRoleMessageV2         = specializedMutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
-	ImmutablePutUserRoleMessageV2       = SpecializedImmutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
-	BroadcastPutUserRoleMessageV2       = SpecializedBroadcastMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
-	BroadcastResultPutUserRoleMessageV2 = BroadcastResult[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+	MutableAlterUserRoleMessageV2         = specializedMutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
+	ImmutableAlterUserRoleMessageV2       = SpecializedImmutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
+	BroadcastAlterUserRoleMessageV2       = SpecializedBroadcastMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
+	BroadcastResultAlterUserRoleMessageV2 = BroadcastResult[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 )
 
-// MessageTypeWithVersion for PutUserRoleMessageV2
-var MessageTypePutUserRoleV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutUserRole,
+// MessageTypeWithVersion for AlterUserRoleMessageV2
+var MessageTypeAlterUserRoleV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterUserRole,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutUserRoleMessageV2
-var SpecializedTypePutUserRoleV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutUserRoleMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutUserRoleMessageHeader)(nil)),
+// MessageSpecializedType for AlterUserRoleMessageV2
+var SpecializedTypeAlterUserRoleV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterUserRoleMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterUserRoleMessageHeader)(nil)),
 }
 
-// AsMutablePutUserRoleMessageV2 converts a BasicMessage to MutablePutUserRoleMessageV2
-var AsMutablePutUserRoleMessageV2 = asSpecializedMutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// AsMutableAlterUserRoleMessageV2 converts a BasicMessage to MutableAlterUserRoleMessageV2
+var AsMutableAlterUserRoleMessageV2 = asSpecializedMutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// MustAsMutablePutUserRoleMessageV2 converts a BasicMessage to MutablePutUserRoleMessageV2, panics on error
-var MustAsMutablePutUserRoleMessageV2 = mustAsSpecializedMutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// MustAsMutableAlterUserRoleMessageV2 converts a BasicMessage to MutableAlterUserRoleMessageV2, panics on error
+var MustAsMutableAlterUserRoleMessageV2 = mustAsSpecializedMutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// AsImmutablePutUserRoleMessageV2 converts an ImmutableMessage to ImmutablePutUserRoleMessageV2
-var AsImmutablePutUserRoleMessageV2 = asSpecializedImmutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// AsImmutableAlterUserRoleMessageV2 converts an ImmutableMessage to ImmutableAlterUserRoleMessageV2
+var AsImmutableAlterUserRoleMessageV2 = asSpecializedImmutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// MustAsImmutablePutUserRoleMessageV2 converts an ImmutableMessage to ImmutablePutUserRoleMessageV2, panics on error
-var MustAsImmutablePutUserRoleMessageV2 = MustAsSpecializedImmutableMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// MustAsImmutableAlterUserRoleMessageV2 converts an ImmutableMessage to ImmutableAlterUserRoleMessageV2, panics on error
+var MustAsImmutableAlterUserRoleMessageV2 = MustAsSpecializedImmutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// AsBroadcastPutUserRoleMessageV2 converts a BasicMessage to BroadcastPutUserRoleMessageV2
-var AsBroadcastPutUserRoleMessageV2 = asSpecializedBroadcastMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// AsBroadcastAlterUserRoleMessageV2 converts a BasicMessage to BroadcastAlterUserRoleMessageV2
+var AsBroadcastAlterUserRoleMessageV2 = asSpecializedBroadcastMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// MustAsBroadcastPutUserRoleMessageV2 converts a BasicMessage to BroadcastPutUserRoleMessageV2, panics on error
-var MustAsBroadcastPutUserRoleMessageV2 = MustAsSpecializedBroadcastMessage[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// MustAsBroadcastAlterUserRoleMessageV2 converts a BasicMessage to BroadcastAlterUserRoleMessageV2, panics on error
+var MustAsBroadcastAlterUserRoleMessageV2 = MustAsSpecializedBroadcastMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
-// NewPutUserRoleMessageBuilderV2 creates a new message builder for PutUserRoleMessageV2
-var NewPutUserRoleMessageBuilderV2 = newMutableMessageBuilder[*PutUserRoleMessageHeader, *PutUserRoleMessageBody]
+// NewAlterUserRoleMessageBuilderV2 creates a new message builder for AlterUserRoleMessageV2
+var NewAlterUserRoleMessageBuilderV2 = newMutableMessageBuilder[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 
 // Type aliases for DropUserRoleMessageV2
 type (
@@ -1416,128 +1416,128 @@ var MustAsBroadcastDropUserRoleMessageV2 = MustAsSpecializedBroadcastMessage[*Dr
 // NewDropUserRoleMessageBuilderV2 creates a new message builder for DropUserRoleMessageV2
 var NewDropUserRoleMessageBuilderV2 = newMutableMessageBuilder[*DropUserRoleMessageHeader, *DropUserRoleMessageBody]
 
-// Type aliases for GrantPrivilegeMessageV2
+// Type aliases for AlterPrivilegeMessageV2
 type (
-	MutableGrantPrivilegeMessageV2         = specializedMutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
-	ImmutableGrantPrivilegeMessageV2       = SpecializedImmutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
-	BroadcastGrantPrivilegeMessageV2       = SpecializedBroadcastMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
-	BroadcastResultGrantPrivilegeMessageV2 = BroadcastResult[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+	MutableAlterPrivilegeMessageV2         = specializedMutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
+	ImmutableAlterPrivilegeMessageV2       = SpecializedImmutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
+	BroadcastAlterPrivilegeMessageV2       = SpecializedBroadcastMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
+	BroadcastResultAlterPrivilegeMessageV2 = BroadcastResult[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 )
 
-// MessageTypeWithVersion for GrantPrivilegeMessageV2
-var MessageTypeGrantPrivilegeV2 = MessageTypeWithVersion{
-	MessageType: MessageTypeGrantPrivilege,
+// MessageTypeWithVersion for AlterPrivilegeMessageV2
+var MessageTypeAlterPrivilegeV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterPrivilege,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for GrantPrivilegeMessageV2
-var SpecializedTypeGrantPrivilegeV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*GrantPrivilegeMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*GrantPrivilegeMessageHeader)(nil)),
+// MessageSpecializedType for AlterPrivilegeMessageV2
+var SpecializedTypeAlterPrivilegeV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterPrivilegeMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterPrivilegeMessageHeader)(nil)),
 }
 
-// AsMutableGrantPrivilegeMessageV2 converts a BasicMessage to MutableGrantPrivilegeMessageV2
-var AsMutableGrantPrivilegeMessageV2 = asSpecializedMutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// AsMutableAlterPrivilegeMessageV2 converts a BasicMessage to MutableAlterPrivilegeMessageV2
+var AsMutableAlterPrivilegeMessageV2 = asSpecializedMutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// MustAsMutableGrantPrivilegeMessageV2 converts a BasicMessage to MutableGrantPrivilegeMessageV2, panics on error
-var MustAsMutableGrantPrivilegeMessageV2 = mustAsSpecializedMutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// MustAsMutableAlterPrivilegeMessageV2 converts a BasicMessage to MutableAlterPrivilegeMessageV2, panics on error
+var MustAsMutableAlterPrivilegeMessageV2 = mustAsSpecializedMutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// AsImmutableGrantPrivilegeMessageV2 converts an ImmutableMessage to ImmutableGrantPrivilegeMessageV2
-var AsImmutableGrantPrivilegeMessageV2 = asSpecializedImmutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// AsImmutableAlterPrivilegeMessageV2 converts an ImmutableMessage to ImmutableAlterPrivilegeMessageV2
+var AsImmutableAlterPrivilegeMessageV2 = asSpecializedImmutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// MustAsImmutableGrantPrivilegeMessageV2 converts an ImmutableMessage to ImmutableGrantPrivilegeMessageV2, panics on error
-var MustAsImmutableGrantPrivilegeMessageV2 = MustAsSpecializedImmutableMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// MustAsImmutableAlterPrivilegeMessageV2 converts an ImmutableMessage to ImmutableAlterPrivilegeMessageV2, panics on error
+var MustAsImmutableAlterPrivilegeMessageV2 = MustAsSpecializedImmutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// AsBroadcastGrantPrivilegeMessageV2 converts a BasicMessage to BroadcastGrantPrivilegeMessageV2
-var AsBroadcastGrantPrivilegeMessageV2 = asSpecializedBroadcastMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// AsBroadcastAlterPrivilegeMessageV2 converts a BasicMessage to BroadcastAlterPrivilegeMessageV2
+var AsBroadcastAlterPrivilegeMessageV2 = asSpecializedBroadcastMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// MustAsBroadcastGrantPrivilegeMessageV2 converts a BasicMessage to BroadcastGrantPrivilegeMessageV2, panics on error
-var MustAsBroadcastGrantPrivilegeMessageV2 = MustAsSpecializedBroadcastMessage[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// MustAsBroadcastAlterPrivilegeMessageV2 converts a BasicMessage to BroadcastAlterPrivilegeMessageV2, panics on error
+var MustAsBroadcastAlterPrivilegeMessageV2 = MustAsSpecializedBroadcastMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// NewGrantPrivilegeMessageBuilderV2 creates a new message builder for GrantPrivilegeMessageV2
-var NewGrantPrivilegeMessageBuilderV2 = newMutableMessageBuilder[*GrantPrivilegeMessageHeader, *GrantPrivilegeMessageBody]
+// NewAlterPrivilegeMessageBuilderV2 creates a new message builder for AlterPrivilegeMessageV2
+var NewAlterPrivilegeMessageBuilderV2 = newMutableMessageBuilder[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 
-// Type aliases for RevokePrivilegeMessageV2
+// Type aliases for DropPrivilegeMessageV2
 type (
-	MutableRevokePrivilegeMessageV2         = specializedMutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
-	ImmutableRevokePrivilegeMessageV2       = SpecializedImmutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
-	BroadcastRevokePrivilegeMessageV2       = SpecializedBroadcastMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
-	BroadcastResultRevokePrivilegeMessageV2 = BroadcastResult[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+	MutableDropPrivilegeMessageV2         = specializedMutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
+	ImmutableDropPrivilegeMessageV2       = SpecializedImmutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
+	BroadcastDropPrivilegeMessageV2       = SpecializedBroadcastMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
+	BroadcastResultDropPrivilegeMessageV2 = BroadcastResult[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 )
 
-// MessageTypeWithVersion for RevokePrivilegeMessageV2
-var MessageTypeRevokePrivilegeV2 = MessageTypeWithVersion{
-	MessageType: MessageTypeRevokePrivilege,
+// MessageTypeWithVersion for DropPrivilegeMessageV2
+var MessageTypeDropPrivilegeV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeDropPrivilege,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for RevokePrivilegeMessageV2
-var SpecializedTypeRevokePrivilegeV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*RevokePrivilegeMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*RevokePrivilegeMessageHeader)(nil)),
+// MessageSpecializedType for DropPrivilegeMessageV2
+var SpecializedTypeDropPrivilegeV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*DropPrivilegeMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*DropPrivilegeMessageHeader)(nil)),
 }
 
-// AsMutableRevokePrivilegeMessageV2 converts a BasicMessage to MutableRevokePrivilegeMessageV2
-var AsMutableRevokePrivilegeMessageV2 = asSpecializedMutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// AsMutableDropPrivilegeMessageV2 converts a BasicMessage to MutableDropPrivilegeMessageV2
+var AsMutableDropPrivilegeMessageV2 = asSpecializedMutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// MustAsMutableRevokePrivilegeMessageV2 converts a BasicMessage to MutableRevokePrivilegeMessageV2, panics on error
-var MustAsMutableRevokePrivilegeMessageV2 = mustAsSpecializedMutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// MustAsMutableDropPrivilegeMessageV2 converts a BasicMessage to MutableDropPrivilegeMessageV2, panics on error
+var MustAsMutableDropPrivilegeMessageV2 = mustAsSpecializedMutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// AsImmutableRevokePrivilegeMessageV2 converts an ImmutableMessage to ImmutableRevokePrivilegeMessageV2
-var AsImmutableRevokePrivilegeMessageV2 = asSpecializedImmutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// AsImmutableDropPrivilegeMessageV2 converts an ImmutableMessage to ImmutableDropPrivilegeMessageV2
+var AsImmutableDropPrivilegeMessageV2 = asSpecializedImmutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// MustAsImmutableRevokePrivilegeMessageV2 converts an ImmutableMessage to ImmutableRevokePrivilegeMessageV2, panics on error
-var MustAsImmutableRevokePrivilegeMessageV2 = MustAsSpecializedImmutableMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// MustAsImmutableDropPrivilegeMessageV2 converts an ImmutableMessage to ImmutableDropPrivilegeMessageV2, panics on error
+var MustAsImmutableDropPrivilegeMessageV2 = MustAsSpecializedImmutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// AsBroadcastRevokePrivilegeMessageV2 converts a BasicMessage to BroadcastRevokePrivilegeMessageV2
-var AsBroadcastRevokePrivilegeMessageV2 = asSpecializedBroadcastMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// AsBroadcastDropPrivilegeMessageV2 converts a BasicMessage to BroadcastDropPrivilegeMessageV2
+var AsBroadcastDropPrivilegeMessageV2 = asSpecializedBroadcastMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// MustAsBroadcastRevokePrivilegeMessageV2 converts a BasicMessage to BroadcastRevokePrivilegeMessageV2, panics on error
-var MustAsBroadcastRevokePrivilegeMessageV2 = MustAsSpecializedBroadcastMessage[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// MustAsBroadcastDropPrivilegeMessageV2 converts a BasicMessage to BroadcastDropPrivilegeMessageV2, panics on error
+var MustAsBroadcastDropPrivilegeMessageV2 = MustAsSpecializedBroadcastMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// NewRevokePrivilegeMessageBuilderV2 creates a new message builder for RevokePrivilegeMessageV2
-var NewRevokePrivilegeMessageBuilderV2 = newMutableMessageBuilder[*RevokePrivilegeMessageHeader, *RevokePrivilegeMessageBody]
+// NewDropPrivilegeMessageBuilderV2 creates a new message builder for DropPrivilegeMessageV2
+var NewDropPrivilegeMessageBuilderV2 = newMutableMessageBuilder[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 
-// Type aliases for PutPrivilegeGroupMessageV2
+// Type aliases for AlterPrivilegeGroupMessageV2
 type (
-	MutablePutPrivilegeGroupMessageV2         = specializedMutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
-	ImmutablePutPrivilegeGroupMessageV2       = SpecializedImmutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
-	BroadcastPutPrivilegeGroupMessageV2       = SpecializedBroadcastMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
-	BroadcastResultPutPrivilegeGroupMessageV2 = BroadcastResult[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+	MutableAlterPrivilegeGroupMessageV2         = specializedMutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
+	ImmutableAlterPrivilegeGroupMessageV2       = SpecializedImmutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
+	BroadcastAlterPrivilegeGroupMessageV2       = SpecializedBroadcastMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
+	BroadcastResultAlterPrivilegeGroupMessageV2 = BroadcastResult[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 )
 
-// MessageTypeWithVersion for PutPrivilegeGroupMessageV2
-var MessageTypePutPrivilegeGroupV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutPrivilegeGroup,
+// MessageTypeWithVersion for AlterPrivilegeGroupMessageV2
+var MessageTypeAlterPrivilegeGroupV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterPrivilegeGroup,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutPrivilegeGroupMessageV2
-var SpecializedTypePutPrivilegeGroupV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutPrivilegeGroupMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutPrivilegeGroupMessageHeader)(nil)),
+// MessageSpecializedType for AlterPrivilegeGroupMessageV2
+var SpecializedTypeAlterPrivilegeGroupV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterPrivilegeGroupMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterPrivilegeGroupMessageHeader)(nil)),
 }
 
-// AsMutablePutPrivilegeGroupMessageV2 converts a BasicMessage to MutablePutPrivilegeGroupMessageV2
-var AsMutablePutPrivilegeGroupMessageV2 = asSpecializedMutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// AsMutableAlterPrivilegeGroupMessageV2 converts a BasicMessage to MutableAlterPrivilegeGroupMessageV2
+var AsMutableAlterPrivilegeGroupMessageV2 = asSpecializedMutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// MustAsMutablePutPrivilegeGroupMessageV2 converts a BasicMessage to MutablePutPrivilegeGroupMessageV2, panics on error
-var MustAsMutablePutPrivilegeGroupMessageV2 = mustAsSpecializedMutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// MustAsMutableAlterPrivilegeGroupMessageV2 converts a BasicMessage to MutableAlterPrivilegeGroupMessageV2, panics on error
+var MustAsMutableAlterPrivilegeGroupMessageV2 = mustAsSpecializedMutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// AsImmutablePutPrivilegeGroupMessageV2 converts an ImmutableMessage to ImmutablePutPrivilegeGroupMessageV2
-var AsImmutablePutPrivilegeGroupMessageV2 = asSpecializedImmutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// AsImmutableAlterPrivilegeGroupMessageV2 converts an ImmutableMessage to ImmutableAlterPrivilegeGroupMessageV2
+var AsImmutableAlterPrivilegeGroupMessageV2 = asSpecializedImmutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// MustAsImmutablePutPrivilegeGroupMessageV2 converts an ImmutableMessage to ImmutablePutPrivilegeGroupMessageV2, panics on error
-var MustAsImmutablePutPrivilegeGroupMessageV2 = MustAsSpecializedImmutableMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// MustAsImmutableAlterPrivilegeGroupMessageV2 converts an ImmutableMessage to ImmutableAlterPrivilegeGroupMessageV2, panics on error
+var MustAsImmutableAlterPrivilegeGroupMessageV2 = MustAsSpecializedImmutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// AsBroadcastPutPrivilegeGroupMessageV2 converts a BasicMessage to BroadcastPutPrivilegeGroupMessageV2
-var AsBroadcastPutPrivilegeGroupMessageV2 = asSpecializedBroadcastMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// AsBroadcastAlterPrivilegeGroupMessageV2 converts a BasicMessage to BroadcastAlterPrivilegeGroupMessageV2
+var AsBroadcastAlterPrivilegeGroupMessageV2 = asSpecializedBroadcastMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// MustAsBroadcastPutPrivilegeGroupMessageV2 converts a BasicMessage to BroadcastPutPrivilegeGroupMessageV2, panics on error
-var MustAsBroadcastPutPrivilegeGroupMessageV2 = MustAsSpecializedBroadcastMessage[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// MustAsBroadcastAlterPrivilegeGroupMessageV2 converts a BasicMessage to BroadcastAlterPrivilegeGroupMessageV2, panics on error
+var MustAsBroadcastAlterPrivilegeGroupMessageV2 = MustAsSpecializedBroadcastMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
-// NewPutPrivilegeGroupMessageBuilderV2 creates a new message builder for PutPrivilegeGroupMessageV2
-var NewPutPrivilegeGroupMessageBuilderV2 = newMutableMessageBuilder[*PutPrivilegeGroupMessageHeader, *PutPrivilegeGroupMessageBody]
+// NewAlterPrivilegeGroupMessageBuilderV2 creates a new message builder for AlterPrivilegeGroupMessageV2
+var NewAlterPrivilegeGroupMessageBuilderV2 = newMutableMessageBuilder[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 
 // Type aliases for DropPrivilegeGroupMessageV2
 type (
@@ -1621,46 +1621,46 @@ var MustAsBroadcastRestoreRBACMessageV2 = MustAsSpecializedBroadcastMessage[*Res
 // NewRestoreRBACMessageBuilderV2 creates a new message builder for RestoreRBACMessageV2
 var NewRestoreRBACMessageBuilderV2 = newMutableMessageBuilder[*RestoreRBACMessageHeader, *RestoreRBACMessageBody]
 
-// Type aliases for PutResourceGroupMessageV2
+// Type aliases for AlterResourceGroupMessageV2
 type (
-	MutablePutResourceGroupMessageV2         = specializedMutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
-	ImmutablePutResourceGroupMessageV2       = SpecializedImmutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
-	BroadcastPutResourceGroupMessageV2       = SpecializedBroadcastMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
-	BroadcastResultPutResourceGroupMessageV2 = BroadcastResult[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+	MutableAlterResourceGroupMessageV2         = specializedMutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
+	ImmutableAlterResourceGroupMessageV2       = SpecializedImmutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
+	BroadcastAlterResourceGroupMessageV2       = SpecializedBroadcastMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
+	BroadcastResultAlterResourceGroupMessageV2 = BroadcastResult[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 )
 
-// MessageTypeWithVersion for PutResourceGroupMessageV2
-var MessageTypePutResourceGroupV2 = MessageTypeWithVersion{
-	MessageType: MessageTypePutResourceGroup,
+// MessageTypeWithVersion for AlterResourceGroupMessageV2
+var MessageTypeAlterResourceGroupV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterResourceGroup,
 	Version:     VersionV2,
 }
 
-// MessageSpecializedType for PutResourceGroupMessageV2
-var SpecializedTypePutResourceGroupV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*PutResourceGroupMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*PutResourceGroupMessageHeader)(nil)),
+// MessageSpecializedType for AlterResourceGroupMessageV2
+var SpecializedTypeAlterResourceGroupV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterResourceGroupMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterResourceGroupMessageHeader)(nil)),
 }
 
-// AsMutablePutResourceGroupMessageV2 converts a BasicMessage to MutablePutResourceGroupMessageV2
-var AsMutablePutResourceGroupMessageV2 = asSpecializedMutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// AsMutableAlterResourceGroupMessageV2 converts a BasicMessage to MutableAlterResourceGroupMessageV2
+var AsMutableAlterResourceGroupMessageV2 = asSpecializedMutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// MustAsMutablePutResourceGroupMessageV2 converts a BasicMessage to MutablePutResourceGroupMessageV2, panics on error
-var MustAsMutablePutResourceGroupMessageV2 = mustAsSpecializedMutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// MustAsMutableAlterResourceGroupMessageV2 converts a BasicMessage to MutableAlterResourceGroupMessageV2, panics on error
+var MustAsMutableAlterResourceGroupMessageV2 = mustAsSpecializedMutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// AsImmutablePutResourceGroupMessageV2 converts an ImmutableMessage to ImmutablePutResourceGroupMessageV2
-var AsImmutablePutResourceGroupMessageV2 = asSpecializedImmutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// AsImmutableAlterResourceGroupMessageV2 converts an ImmutableMessage to ImmutableAlterResourceGroupMessageV2
+var AsImmutableAlterResourceGroupMessageV2 = asSpecializedImmutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// MustAsImmutablePutResourceGroupMessageV2 converts an ImmutableMessage to ImmutablePutResourceGroupMessageV2, panics on error
-var MustAsImmutablePutResourceGroupMessageV2 = MustAsSpecializedImmutableMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// MustAsImmutableAlterResourceGroupMessageV2 converts an ImmutableMessage to ImmutableAlterResourceGroupMessageV2, panics on error
+var MustAsImmutableAlterResourceGroupMessageV2 = MustAsSpecializedImmutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// AsBroadcastPutResourceGroupMessageV2 converts a BasicMessage to BroadcastPutResourceGroupMessageV2
-var AsBroadcastPutResourceGroupMessageV2 = asSpecializedBroadcastMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// AsBroadcastAlterResourceGroupMessageV2 converts a BasicMessage to BroadcastAlterResourceGroupMessageV2
+var AsBroadcastAlterResourceGroupMessageV2 = asSpecializedBroadcastMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// MustAsBroadcastPutResourceGroupMessageV2 converts a BasicMessage to BroadcastPutResourceGroupMessageV2, panics on error
-var MustAsBroadcastPutResourceGroupMessageV2 = MustAsSpecializedBroadcastMessage[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// MustAsBroadcastAlterResourceGroupMessageV2 converts a BasicMessage to BroadcastAlterResourceGroupMessageV2, panics on error
+var MustAsBroadcastAlterResourceGroupMessageV2 = MustAsSpecializedBroadcastMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
-// NewPutResourceGroupMessageBuilderV2 creates a new message builder for PutResourceGroupMessageV2
-var NewPutResourceGroupMessageBuilderV2 = newMutableMessageBuilder[*PutResourceGroupMessageHeader, *PutResourceGroupMessageBody]
+// NewAlterResourceGroupMessageBuilderV2 creates a new message builder for AlterResourceGroupMessageV2
+var NewAlterResourceGroupMessageBuilderV2 = newMutableMessageBuilder[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 
 // Type aliases for DropResourceGroupMessageV2
 type (
@@ -1828,47 +1828,47 @@ var NewDropIndexMessageBuilderV2 = newMutableMessageBuilder[*DropIndexMessageHea
 
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
-	reflect.TypeOf(&messagespb.AlterIndexMessageHeader{}):         MessageTypeAlterIndex,
-	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):           MessageTypeBeginTxn,
-	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):          MessageTypeCommitTxn,
-	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):   MessageTypeCreateCollection,
-	reflect.TypeOf(&messagespb.CreateDatabaseMessageHeader{}):     MessageTypeCreateDatabase,
-	reflect.TypeOf(&messagespb.CreateIndexMessageHeader{}):        MessageTypeCreateIndex,
-	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):    MessageTypeCreatePartition,
-	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):      MessageTypeCreateSegment,
-	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):             MessageTypeDelete,
-	reflect.TypeOf(&messagespb.DropAliasMessageHeader{}):          MessageTypeDropAlias,
-	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):     MessageTypeDropCollection,
-	reflect.TypeOf(&messagespb.DropDatabaseMessageHeader{}):       MessageTypeDropDatabase,
-	reflect.TypeOf(&messagespb.DropIndexMessageHeader{}):          MessageTypeDropIndex,
-	reflect.TypeOf(&messagespb.DropLoadConfigMessageHeader{}):     MessageTypeDropLoadConfig,
-	reflect.TypeOf(&messagespb.DropPartitionMessageHeader{}):      MessageTypeDropPartition,
-	reflect.TypeOf(&messagespb.DropPrivilegeGroupMessageHeader{}): MessageTypeDropPrivilegeGroup,
-	reflect.TypeOf(&messagespb.DropResourceGroupMessageHeader{}):  MessageTypeDropResourceGroup,
-	reflect.TypeOf(&messagespb.DropRoleMessageHeader{}):           MessageTypeDropRole,
-	reflect.TypeOf(&messagespb.DropUserMessageHeader{}):           MessageTypeDropUser,
-	reflect.TypeOf(&messagespb.DropUserRoleMessageHeader{}):       MessageTypeDropUserRole,
-	reflect.TypeOf(&messagespb.FlushMessageHeader{}):              MessageTypeFlush,
-	reflect.TypeOf(&messagespb.GrantPrivilegeMessageHeader{}):     MessageTypeGrantPrivilege,
-	reflect.TypeOf(&messagespb.ImportMessageHeader{}):             MessageTypeImport,
-	reflect.TypeOf(&messagespb.InsertMessageHeader{}):             MessageTypeInsert,
-	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):        MessageTypeManualFlush,
-	reflect.TypeOf(&messagespb.PutAliasMessageHeader{}):           MessageTypePutAlias,
-	reflect.TypeOf(&messagespb.PutCollectionMessageHeader{}):      MessageTypePutCollection,
-	reflect.TypeOf(&messagespb.PutDatabaseMessageHeader{}):        MessageTypePutDatabase,
-	reflect.TypeOf(&messagespb.PutLoadConfigMessageHeader{}):      MessageTypePutLoadConfig,
-	reflect.TypeOf(&messagespb.PutPrivilegeGroupMessageHeader{}):  MessageTypePutPrivilegeGroup,
-	reflect.TypeOf(&messagespb.PutReplicateConfigMessageHeader{}): MessageTypePutReplicateConfig,
-	reflect.TypeOf(&messagespb.PutResourceGroupMessageHeader{}):   MessageTypePutResourceGroup,
-	reflect.TypeOf(&messagespb.PutRoleMessageHeader{}):            MessageTypePutRole,
-	reflect.TypeOf(&messagespb.PutUserMessageHeader{}):            MessageTypePutUser,
-	reflect.TypeOf(&messagespb.PutUserRoleMessageHeader{}):        MessageTypePutUserRole,
-	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):        MessageTypeRestoreRBAC,
-	reflect.TypeOf(&messagespb.RevokePrivilegeMessageHeader{}):    MessageTypeRevokePrivilege,
-	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):        MessageTypeRollbackTxn,
-	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):       MessageTypeSchemaChange,
-	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):           MessageTypeTimeTick,
-	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                MessageTypeTxn,
+	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
+	reflect.TypeOf(&messagespb.AlterCollectionMessageHeader{}):      MessageTypeAlterCollection,
+	reflect.TypeOf(&messagespb.AlterDatabaseMessageHeader{}):        MessageTypeAlterDatabase,
+	reflect.TypeOf(&messagespb.AlterIndexMessageHeader{}):           MessageTypeAlterIndex,
+	reflect.TypeOf(&messagespb.AlterLoadConfigMessageHeader{}):      MessageTypeAlterLoadConfig,
+	reflect.TypeOf(&messagespb.AlterPrivilegeGroupMessageHeader{}):  MessageTypeAlterPrivilegeGroup,
+	reflect.TypeOf(&messagespb.AlterPrivilegeMessageHeader{}):       MessageTypeAlterPrivilege,
+	reflect.TypeOf(&messagespb.AlterReplicateConfigMessageHeader{}): MessageTypeAlterReplicateConfig,
+	reflect.TypeOf(&messagespb.AlterResourceGroupMessageHeader{}):   MessageTypeAlterResourceGroup,
+	reflect.TypeOf(&messagespb.AlterRoleMessageHeader{}):            MessageTypeAlterRole,
+	reflect.TypeOf(&messagespb.AlterUserMessageHeader{}):            MessageTypeAlterUser,
+	reflect.TypeOf(&messagespb.AlterUserRoleMessageHeader{}):        MessageTypeAlterUserRole,
+	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):             MessageTypeBeginTxn,
+	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):            MessageTypeCommitTxn,
+	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):     MessageTypeCreateCollection,
+	reflect.TypeOf(&messagespb.CreateDatabaseMessageHeader{}):       MessageTypeCreateDatabase,
+	reflect.TypeOf(&messagespb.CreateIndexMessageHeader{}):          MessageTypeCreateIndex,
+	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):      MessageTypeCreatePartition,
+	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):        MessageTypeCreateSegment,
+	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):               MessageTypeDelete,
+	reflect.TypeOf(&messagespb.DropAliasMessageHeader{}):            MessageTypeDropAlias,
+	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):       MessageTypeDropCollection,
+	reflect.TypeOf(&messagespb.DropDatabaseMessageHeader{}):         MessageTypeDropDatabase,
+	reflect.TypeOf(&messagespb.DropIndexMessageHeader{}):            MessageTypeDropIndex,
+	reflect.TypeOf(&messagespb.DropLoadConfigMessageHeader{}):       MessageTypeDropLoadConfig,
+	reflect.TypeOf(&messagespb.DropPartitionMessageHeader{}):        MessageTypeDropPartition,
+	reflect.TypeOf(&messagespb.DropPrivilegeGroupMessageHeader{}):   MessageTypeDropPrivilegeGroup,
+	reflect.TypeOf(&messagespb.DropPrivilegeMessageHeader{}):        MessageTypeDropPrivilege,
+	reflect.TypeOf(&messagespb.DropResourceGroupMessageHeader{}):    MessageTypeDropResourceGroup,
+	reflect.TypeOf(&messagespb.DropRoleMessageHeader{}):             MessageTypeDropRole,
+	reflect.TypeOf(&messagespb.DropUserMessageHeader{}):             MessageTypeDropUser,
+	reflect.TypeOf(&messagespb.DropUserRoleMessageHeader{}):         MessageTypeDropUserRole,
+	reflect.TypeOf(&messagespb.FlushMessageHeader{}):                MessageTypeFlush,
+	reflect.TypeOf(&messagespb.ImportMessageHeader{}):               MessageTypeImport,
+	reflect.TypeOf(&messagespb.InsertMessageHeader{}):               MessageTypeInsert,
+	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):          MessageTypeManualFlush,
+	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):          MessageTypeRestoreRBAC,
+	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):          MessageTypeRollbackTxn,
+	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):         MessageTypeSchemaChange,
+	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):             MessageTypeTimeTick,
+	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                  MessageTypeTxn,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -1889,90 +1889,90 @@ type MessageSpecializedType struct {
 
 // messageTypeVersionSpecializedMap maps MessageTypeWithVersion to MessageSpecializedType
 var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecializedType{
-	MessageTypeAlterIndexV2:         SpecializedTypeAlterIndexV2,
-	MessageTypeBeginTxnV2:           SpecializedTypeBeginTxnV2,
-	MessageTypeCommitTxnV2:          SpecializedTypeCommitTxnV2,
-	MessageTypeCreateCollectionV1:   SpecializedTypeCreateCollectionV1,
-	MessageTypeCreateDatabaseV2:     SpecializedTypeCreateDatabaseV2,
-	MessageTypeCreateIndexV2:        SpecializedTypeCreateIndexV2,
-	MessageTypeCreatePartitionV1:    SpecializedTypeCreatePartitionV1,
-	MessageTypeCreateSegmentV2:      SpecializedTypeCreateSegmentV2,
-	MessageTypeDeleteV1:             SpecializedTypeDeleteV1,
-	MessageTypeDropAliasV2:          SpecializedTypeDropAliasV2,
-	MessageTypeDropCollectionV1:     SpecializedTypeDropCollectionV1,
-	MessageTypeDropDatabaseV2:       SpecializedTypeDropDatabaseV2,
-	MessageTypeDropIndexV2:          SpecializedTypeDropIndexV2,
-	MessageTypeDropLoadConfigV2:     SpecializedTypeDropLoadConfigV2,
-	MessageTypeDropPartitionV1:      SpecializedTypeDropPartitionV1,
-	MessageTypeDropPrivilegeGroupV2: SpecializedTypeDropPrivilegeGroupV2,
-	MessageTypeDropResourceGroupV2:  SpecializedTypeDropResourceGroupV2,
-	MessageTypeDropRoleV2:           SpecializedTypeDropRoleV2,
-	MessageTypeDropUserRoleV2:       SpecializedTypeDropUserRoleV2,
-	MessageTypeDropUserV2:           SpecializedTypeDropUserV2,
-	MessageTypeFlushV2:              SpecializedTypeFlushV2,
-	MessageTypeGrantPrivilegeV2:     SpecializedTypeGrantPrivilegeV2,
-	MessageTypeImportV1:             SpecializedTypeImportV1,
-	MessageTypeInsertV1:             SpecializedTypeInsertV1,
-	MessageTypeManualFlushV2:        SpecializedTypeManualFlushV2,
-	MessageTypePutAliasV2:           SpecializedTypePutAliasV2,
-	MessageTypePutCollectionV2:      SpecializedTypePutCollectionV2,
-	MessageTypePutDatabaseV2:        SpecializedTypePutDatabaseV2,
-	MessageTypePutLoadConfigV2:      SpecializedTypePutLoadConfigV2,
-	MessageTypePutPrivilegeGroupV2:  SpecializedTypePutPrivilegeGroupV2,
-	MessageTypePutReplicateConfigV2: SpecializedTypePutReplicateConfigV2,
-	MessageTypePutResourceGroupV2:   SpecializedTypePutResourceGroupV2,
-	MessageTypePutRoleV2:            SpecializedTypePutRoleV2,
-	MessageTypePutUserRoleV2:        SpecializedTypePutUserRoleV2,
-	MessageTypePutUserV2:            SpecializedTypePutUserV2,
-	MessageTypeRestoreRBACV2:        SpecializedTypeRestoreRBACV2,
-	MessageTypeRevokePrivilegeV2:    SpecializedTypeRevokePrivilegeV2,
-	MessageTypeRollbackTxnV2:        SpecializedTypeRollbackTxnV2,
-	MessageTypeSchemaChangeV2:       SpecializedTypeSchemaChangeV2,
-	MessageTypeTimeTickV1:           SpecializedTypeTimeTickV1,
-	MessageTypeTxnV2:                SpecializedTypeTxnV2,
+	MessageTypeAlterAliasV2:           SpecializedTypeAlterAliasV2,
+	MessageTypeAlterCollectionV2:      SpecializedTypeAlterCollectionV2,
+	MessageTypeAlterDatabaseV2:        SpecializedTypeAlterDatabaseV2,
+	MessageTypeAlterIndexV2:           SpecializedTypeAlterIndexV2,
+	MessageTypeAlterLoadConfigV2:      SpecializedTypeAlterLoadConfigV2,
+	MessageTypeAlterPrivilegeGroupV2:  SpecializedTypeAlterPrivilegeGroupV2,
+	MessageTypeAlterPrivilegeV2:       SpecializedTypeAlterPrivilegeV2,
+	MessageTypeAlterReplicateConfigV2: SpecializedTypeAlterReplicateConfigV2,
+	MessageTypeAlterResourceGroupV2:   SpecializedTypeAlterResourceGroupV2,
+	MessageTypeAlterRoleV2:            SpecializedTypeAlterRoleV2,
+	MessageTypeAlterUserRoleV2:        SpecializedTypeAlterUserRoleV2,
+	MessageTypeAlterUserV2:            SpecializedTypeAlterUserV2,
+	MessageTypeBeginTxnV2:             SpecializedTypeBeginTxnV2,
+	MessageTypeCommitTxnV2:            SpecializedTypeCommitTxnV2,
+	MessageTypeCreateCollectionV1:     SpecializedTypeCreateCollectionV1,
+	MessageTypeCreateDatabaseV2:       SpecializedTypeCreateDatabaseV2,
+	MessageTypeCreateIndexV2:          SpecializedTypeCreateIndexV2,
+	MessageTypeCreatePartitionV1:      SpecializedTypeCreatePartitionV1,
+	MessageTypeCreateSegmentV2:        SpecializedTypeCreateSegmentV2,
+	MessageTypeDeleteV1:               SpecializedTypeDeleteV1,
+	MessageTypeDropAliasV2:            SpecializedTypeDropAliasV2,
+	MessageTypeDropCollectionV1:       SpecializedTypeDropCollectionV1,
+	MessageTypeDropDatabaseV2:         SpecializedTypeDropDatabaseV2,
+	MessageTypeDropIndexV2:            SpecializedTypeDropIndexV2,
+	MessageTypeDropLoadConfigV2:       SpecializedTypeDropLoadConfigV2,
+	MessageTypeDropPartitionV1:        SpecializedTypeDropPartitionV1,
+	MessageTypeDropPrivilegeGroupV2:   SpecializedTypeDropPrivilegeGroupV2,
+	MessageTypeDropPrivilegeV2:        SpecializedTypeDropPrivilegeV2,
+	MessageTypeDropResourceGroupV2:    SpecializedTypeDropResourceGroupV2,
+	MessageTypeDropRoleV2:             SpecializedTypeDropRoleV2,
+	MessageTypeDropUserRoleV2:         SpecializedTypeDropUserRoleV2,
+	MessageTypeDropUserV2:             SpecializedTypeDropUserV2,
+	MessageTypeFlushV2:                SpecializedTypeFlushV2,
+	MessageTypeImportV1:               SpecializedTypeImportV1,
+	MessageTypeInsertV1:               SpecializedTypeInsertV1,
+	MessageTypeManualFlushV2:          SpecializedTypeManualFlushV2,
+	MessageTypeRestoreRBACV2:          SpecializedTypeRestoreRBACV2,
+	MessageTypeRollbackTxnV2:          SpecializedTypeRollbackTxnV2,
+	MessageTypeSchemaChangeV2:         SpecializedTypeSchemaChangeV2,
+	MessageTypeTimeTickV1:             SpecializedTypeTimeTickV1,
+	MessageTypeTxnV2:                  SpecializedTypeTxnV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
 var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWithVersion{
-	SpecializedTypeAlterIndexV2:         MessageTypeAlterIndexV2,
-	SpecializedTypeBeginTxnV2:           MessageTypeBeginTxnV2,
-	SpecializedTypeCommitTxnV2:          MessageTypeCommitTxnV2,
-	SpecializedTypeCreateCollectionV1:   MessageTypeCreateCollectionV1,
-	SpecializedTypeCreateDatabaseV2:     MessageTypeCreateDatabaseV2,
-	SpecializedTypeCreateIndexV2:        MessageTypeCreateIndexV2,
-	SpecializedTypeCreatePartitionV1:    MessageTypeCreatePartitionV1,
-	SpecializedTypeCreateSegmentV2:      MessageTypeCreateSegmentV2,
-	SpecializedTypeDeleteV1:             MessageTypeDeleteV1,
-	SpecializedTypeDropAliasV2:          MessageTypeDropAliasV2,
-	SpecializedTypeDropCollectionV1:     MessageTypeDropCollectionV1,
-	SpecializedTypeDropDatabaseV2:       MessageTypeDropDatabaseV2,
-	SpecializedTypeDropIndexV2:          MessageTypeDropIndexV2,
-	SpecializedTypeDropLoadConfigV2:     MessageTypeDropLoadConfigV2,
-	SpecializedTypeDropPartitionV1:      MessageTypeDropPartitionV1,
-	SpecializedTypeDropPrivilegeGroupV2: MessageTypeDropPrivilegeGroupV2,
-	SpecializedTypeDropResourceGroupV2:  MessageTypeDropResourceGroupV2,
-	SpecializedTypeDropRoleV2:           MessageTypeDropRoleV2,
-	SpecializedTypeDropUserRoleV2:       MessageTypeDropUserRoleV2,
-	SpecializedTypeDropUserV2:           MessageTypeDropUserV2,
-	SpecializedTypeFlushV2:              MessageTypeFlushV2,
-	SpecializedTypeGrantPrivilegeV2:     MessageTypeGrantPrivilegeV2,
-	SpecializedTypeImportV1:             MessageTypeImportV1,
-	SpecializedTypeInsertV1:             MessageTypeInsertV1,
-	SpecializedTypeManualFlushV2:        MessageTypeManualFlushV2,
-	SpecializedTypePutAliasV2:           MessageTypePutAliasV2,
-	SpecializedTypePutCollectionV2:      MessageTypePutCollectionV2,
-	SpecializedTypePutDatabaseV2:        MessageTypePutDatabaseV2,
-	SpecializedTypePutLoadConfigV2:      MessageTypePutLoadConfigV2,
-	SpecializedTypePutPrivilegeGroupV2:  MessageTypePutPrivilegeGroupV2,
-	SpecializedTypePutReplicateConfigV2: MessageTypePutReplicateConfigV2,
-	SpecializedTypePutResourceGroupV2:   MessageTypePutResourceGroupV2,
-	SpecializedTypePutRoleV2:            MessageTypePutRoleV2,
-	SpecializedTypePutUserRoleV2:        MessageTypePutUserRoleV2,
-	SpecializedTypePutUserV2:            MessageTypePutUserV2,
-	SpecializedTypeRestoreRBACV2:        MessageTypeRestoreRBACV2,
-	SpecializedTypeRevokePrivilegeV2:    MessageTypeRevokePrivilegeV2,
-	SpecializedTypeRollbackTxnV2:        MessageTypeRollbackTxnV2,
-	SpecializedTypeSchemaChangeV2:       MessageTypeSchemaChangeV2,
-	SpecializedTypeTimeTickV1:           MessageTypeTimeTickV1,
-	SpecializedTypeTxnV2:                MessageTypeTxnV2,
+	SpecializedTypeAlterAliasV2:           MessageTypeAlterAliasV2,
+	SpecializedTypeAlterCollectionV2:      MessageTypeAlterCollectionV2,
+	SpecializedTypeAlterDatabaseV2:        MessageTypeAlterDatabaseV2,
+	SpecializedTypeAlterIndexV2:           MessageTypeAlterIndexV2,
+	SpecializedTypeAlterLoadConfigV2:      MessageTypeAlterLoadConfigV2,
+	SpecializedTypeAlterPrivilegeGroupV2:  MessageTypeAlterPrivilegeGroupV2,
+	SpecializedTypeAlterPrivilegeV2:       MessageTypeAlterPrivilegeV2,
+	SpecializedTypeAlterReplicateConfigV2: MessageTypeAlterReplicateConfigV2,
+	SpecializedTypeAlterResourceGroupV2:   MessageTypeAlterResourceGroupV2,
+	SpecializedTypeAlterRoleV2:            MessageTypeAlterRoleV2,
+	SpecializedTypeAlterUserRoleV2:        MessageTypeAlterUserRoleV2,
+	SpecializedTypeAlterUserV2:            MessageTypeAlterUserV2,
+	SpecializedTypeBeginTxnV2:             MessageTypeBeginTxnV2,
+	SpecializedTypeCommitTxnV2:            MessageTypeCommitTxnV2,
+	SpecializedTypeCreateCollectionV1:     MessageTypeCreateCollectionV1,
+	SpecializedTypeCreateDatabaseV2:       MessageTypeCreateDatabaseV2,
+	SpecializedTypeCreateIndexV2:          MessageTypeCreateIndexV2,
+	SpecializedTypeCreatePartitionV1:      MessageTypeCreatePartitionV1,
+	SpecializedTypeCreateSegmentV2:        MessageTypeCreateSegmentV2,
+	SpecializedTypeDeleteV1:               MessageTypeDeleteV1,
+	SpecializedTypeDropAliasV2:            MessageTypeDropAliasV2,
+	SpecializedTypeDropCollectionV1:       MessageTypeDropCollectionV1,
+	SpecializedTypeDropDatabaseV2:         MessageTypeDropDatabaseV2,
+	SpecializedTypeDropIndexV2:            MessageTypeDropIndexV2,
+	SpecializedTypeDropLoadConfigV2:       MessageTypeDropLoadConfigV2,
+	SpecializedTypeDropPartitionV1:        MessageTypeDropPartitionV1,
+	SpecializedTypeDropPrivilegeGroupV2:   MessageTypeDropPrivilegeGroupV2,
+	SpecializedTypeDropPrivilegeV2:        MessageTypeDropPrivilegeV2,
+	SpecializedTypeDropResourceGroupV2:    MessageTypeDropResourceGroupV2,
+	SpecializedTypeDropRoleV2:             MessageTypeDropRoleV2,
+	SpecializedTypeDropUserRoleV2:         MessageTypeDropUserRoleV2,
+	SpecializedTypeDropUserV2:             MessageTypeDropUserV2,
+	SpecializedTypeFlushV2:                MessageTypeFlushV2,
+	SpecializedTypeImportV1:               MessageTypeImportV1,
+	SpecializedTypeInsertV1:               MessageTypeInsertV1,
+	SpecializedTypeManualFlushV2:          MessageTypeManualFlushV2,
+	SpecializedTypeRestoreRBACV2:          MessageTypeRestoreRBACV2,
+	SpecializedTypeRollbackTxnV2:          MessageTypeRollbackTxnV2,
+	SpecializedTypeSchemaChangeV2:         MessageTypeSchemaChangeV2,
+	SpecializedTypeTimeTickV1:             MessageTypeTimeTickV1,
+	SpecializedTypeTxnV2:                  MessageTypeTxnV2,
 }

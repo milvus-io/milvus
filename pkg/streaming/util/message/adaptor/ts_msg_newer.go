@@ -150,21 +150,21 @@ func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, 
 	}, nil
 }
 
-type PutCollectionMessageBody struct {
+type AlterCollectionMessageBody struct {
 	*tsMsgImpl
-	PutCollectionMessage message.ImmutablePutCollectionMessageV2
+	AlterCollectionMessage message.ImmutableAlterCollectionMessageV2
 }
 
-func (p *PutCollectionMessageBody) ID() msgstream.UniqueID {
+func (p *AlterCollectionMessageBody) ID() msgstream.UniqueID {
 	return 0
 }
 
-func NewPutCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	putCollMsg, err := message.AsImmutablePutCollectionMessageV2(msg)
+func NewAlterCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	alterCollMsg, err := message.AsImmutableAlterCollectionMessageV2(msg)
 	if err != nil {
 		return nil, err
 	}
-	return &PutCollectionMessageBody{
+	return &AlterCollectionMessageBody{
 		tsMsgImpl: &tsMsgImpl{
 			BaseMsg: msgstream.BaseMsg{
 				BeginTimestamp: msg.TimeTick(),
@@ -174,6 +174,6 @@ func NewPutCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg,
 			sz:      msg.EstimateSize(),
 			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
 		},
-		PutCollectionMessage: putCollMsg,
+		AlterCollectionMessage: alterCollMsg,
 	}, nil
 }

@@ -116,7 +116,7 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 }
 
 // UpdateReplicateConfiguration updates the replicate configuration.
-func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}

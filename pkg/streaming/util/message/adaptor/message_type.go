@@ -18,7 +18,7 @@ var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
 	message.MessageTypeDropPartition:    commonpb.MsgType_DropPartition,
 	message.MessageTypeImport:           commonpb.MsgType_Import,
 	message.MessageTypeSchemaChange:     commonpb.MsgType_AddCollectionField, // TODO change to schema change
-	message.MessageTypePutCollection:    commonpb.MsgType_AlterCollection,
+	message.MessageTypeAlterCollection:  commonpb.MsgType_AlterCollection,
 }
 
 // MustGetCommonpbMsgTypeFromMessageType returns the commonpb.MsgType from message.MessageType.

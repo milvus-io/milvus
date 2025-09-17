@@ -25,13 +25,13 @@ var (
 	RegisterImportV1AckCallback = registerMessageAckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
 
 	// Cluster
-	RegisterPutReplicateConfigV2AckCallback = registerMessageAckCallback[*message.PutReplicateConfigMessageHeader, *message.PutReplicateConfigMessageBody]
+	RegisterAlterReplicateConfigV2AckCallback = registerMessageAckCallback[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]
 
 	// Collection
-	RegisterPutCollectionV2AckCallback    = registerMessageAckCallback[*message.PutCollectionMessageHeader, *message.PutCollectionMessageBody]
+	RegisterAlterCollectionV2AckCallback  = registerMessageAckCallback[*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody]
 	RegisterCreateCollectionV1AckCallback = registerMessageAckCallback[*message.CreateCollectionMessageHeader, *message.CreateCollectionRequest]
 	RegisterDropCollectionV1AckCallback   = registerMessageAckCallback[*message.DropCollectionMessageHeader, *message.DropCollectionRequest]
-	RegisterPutLoadConfigV2AckCallback    = registerMessageAckCallback[*message.PutLoadConfigMessageHeader, *message.PutLoadConfigMessageBody]
+	RegisterAlterLoadConfigV2AckCallback  = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
 	RegisterDropLoadConfigV2AckCallback   = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
 
 	// Partition
@@ -40,12 +40,12 @@ var (
 
 	// Database
 	RegisterCreateDatabaseV2AckCallback = registerMessageAckCallback[*message.CreateDatabaseMessageHeader, *message.CreateDatabaseMessageBody]
-	RegisterPutDatabaseV2AckCallback    = registerMessageAckCallback[*message.PutDatabaseMessageHeader, *message.PutDatabaseMessageBody]
+	RegisterAlterDatabaseV2AckCallback  = registerMessageAckCallback[*message.AlterDatabaseMessageHeader, *message.AlterDatabaseMessageBody]
 	RegisterDropDatabaseV2AckCallback   = registerMessageAckCallback[*message.DropDatabaseMessageHeader, *message.DropDatabaseMessageBody]
 
 	// Alias
-	RegisterPutAliasV2AckCallback  = registerMessageAckCallback[*message.PutAliasMessageHeader, *message.PutAliasMessageBody]
-	RegisterDropAliasV2AckCallback = registerMessageAckCallback[*message.DropAliasMessageHeader, *message.DropAliasMessageBody]
+	RegisterAlterAliasV2AckCallback = registerMessageAckCallback[*message.AlterAliasMessageHeader, *message.AlterAliasMessageBody]
+	RegisterDropAliasV2AckCallback  = registerMessageAckCallback[*message.DropAliasMessageHeader, *message.DropAliasMessageBody]
 
 	// Index
 	RegisterCreateIndexV2AckCallback = registerMessageAckCallback[*message.CreateIndexMessageHeader, *message.CreateIndexMessageBody]
@@ -53,21 +53,21 @@ var (
 	RegisterDropIndexV2AckCallback   = registerMessageAckCallback[*message.DropIndexMessageHeader, *message.DropIndexMessageBody]
 
 	// RBAC
-	RegisterPutUserV2AckCallback            = registerMessageAckCallback[*message.PutUserMessageHeader, *message.PutUserMessageBody]
-	RegisterDropUserV2AckCallback           = registerMessageAckCallback[*message.DropUserMessageHeader, *message.DropUserMessageBody]
-	RegisterPutRoleV2AckCallback            = registerMessageAckCallback[*message.PutRoleMessageHeader, *message.PutRoleMessageBody]
-	RegisterDropRoleV2AckCallback           = registerMessageAckCallback[*message.DropRoleMessageHeader, *message.DropRoleMessageBody]
-	RegisterPutUserRoleV2AckCallback        = registerMessageAckCallback[*message.PutUserRoleMessageHeader, *message.PutUserRoleMessageBody]
-	RegisterDropUserRoleV2AckCallback       = registerMessageAckCallback[*message.DropUserRoleMessageHeader, *message.DropUserRoleMessageBody]
-	RegisterGrantPrivilegeV2AckCallback     = registerMessageAckCallback[*message.GrantPrivilegeMessageHeader, *message.GrantPrivilegeMessageBody]
-	RegisterRevokePrivilegeV2AckCallback    = registerMessageAckCallback[*message.RevokePrivilegeMessageHeader, *message.RevokePrivilegeMessageBody]
-	RegisterPutPrivilegeGroupV2AckCallback  = registerMessageAckCallback[*message.PutPrivilegeGroupMessageHeader, *message.PutPrivilegeGroupMessageBody]
-	RegisterDropPrivilegeGroupV2AckCallback = registerMessageAckCallback[*message.DropPrivilegeGroupMessageHeader, *message.DropPrivilegeGroupMessageBody]
-	RegisterRestoreRBACV2AckCallback        = registerMessageAckCallback[*message.RestoreRBACMessageHeader, *message.RestoreRBACMessageBody]
+	RegisterAlterUserV2AckCallback           = registerMessageAckCallback[*message.AlterUserMessageHeader, *message.AlterUserMessageBody]
+	RegisterDropUserV2AckCallback            = registerMessageAckCallback[*message.DropUserMessageHeader, *message.DropUserMessageBody]
+	RegisterAlterRoleV2AckCallback           = registerMessageAckCallback[*message.AlterRoleMessageHeader, *message.AlterRoleMessageBody]
+	RegisterDropRoleV2AckCallback            = registerMessageAckCallback[*message.DropRoleMessageHeader, *message.DropRoleMessageBody]
+	RegisterAlterUserRoleV2AckCallback       = registerMessageAckCallback[*message.AlterUserRoleMessageHeader, *message.AlterUserRoleMessageBody]
+	RegisterDropUserRoleV2AckCallback        = registerMessageAckCallback[*message.DropUserRoleMessageHeader, *message.DropUserRoleMessageBody]
+	RegisterAlterPrivilegeV2AckCallback      = registerMessageAckCallback[*message.AlterPrivilegeMessageHeader, *message.AlterPrivilegeMessageBody]
+	RegisterDropPrivilegeV2AckCallback       = registerMessageAckCallback[*message.DropPrivilegeMessageHeader, *message.DropPrivilegeMessageBody]
+	RegisterAlterPrivilegeGroupV2AckCallback = registerMessageAckCallback[*message.AlterPrivilegeGroupMessageHeader, *message.AlterPrivilegeGroupMessageBody]
+	RegisterDropPrivilegeGroupV2AckCallback  = registerMessageAckCallback[*message.DropPrivilegeGroupMessageHeader, *message.DropPrivilegeGroupMessageBody]
+	RegisterRestoreRBACV2AckCallback         = registerMessageAckCallback[*message.RestoreRBACMessageHeader, *message.RestoreRBACMessageBody]
 
 	// Resource Group
-	RegisterPutResourceGroupV2AckCallback  = registerMessageAckCallback[*message.PutResourceGroupMessageHeader, *message.PutResourceGroupMessageBody]
-	RegisterDropResourceGroupV2AckCallback = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
+	RegisterAlterResourceGroupV2AckCallback = registerMessageAckCallback[*message.AlterResourceGroupMessageHeader, *message.AlterResourceGroupMessageBody]
+	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -76,13 +76,13 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Cluster
-		message.MessageTypePutReplicateConfigV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterReplicateConfigV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Collection
-		message.MessageTypePutCollectionV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterCollectionV2:  syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeCreateCollectionV1: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropCollectionV1:   syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypePutLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterLoadConfigV2:  syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropLoadConfigV2:   syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
@@ -91,12 +91,12 @@ func resetMessageAckCallbacks() {
 
 		// Database
 		message.MessageTypeCreateDatabaseV2: syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypePutDatabaseV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterDatabaseV2:  syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropDatabaseV2:   syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Alias
-		message.MessageTypePutAliasV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropAliasV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterAliasV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropAliasV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Index
 		message.MessageTypeCreateIndexV2: syncutil.NewFuture[messageInnerAckCallback](),
@@ -104,20 +104,20 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropIndexV2:   syncutil.NewFuture[messageInnerAckCallback](),
 
 		// RBAC
-		message.MessageTypePutUserV2:            syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropUserV2:           syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypePutRoleV2:            syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropRoleV2:           syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypePutUserRoleV2:        syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropUserRoleV2:       syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeGrantPrivilegeV2:     syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeRevokePrivilegeV2:    syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypePutPrivilegeGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropPrivilegeGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeRestoreRBACV2:        syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterUserV2:           syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropUserV2:            syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterRoleV2:           syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropRoleV2:            syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterUserRoleV2:       syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropUserRoleV2:        syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterPrivilegeV2:      syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropPrivilegeV2:       syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterPrivilegeGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropPrivilegeGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRestoreRBACV2:         syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Resource Group
-		message.MessageTypePutResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

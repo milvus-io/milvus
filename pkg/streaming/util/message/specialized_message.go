@@ -29,13 +29,14 @@ var cipherMessageType = map[MessageType]struct{}{
 }
 
 var exclusiveRequiredMessageType = map[MessageType]struct{}{
-	MessageTypeCreateCollection:   {},
-	MessageTypeDropCollection:     {},
-	MessageTypeCreatePartition:    {},
-	MessageTypeDropPartition:      {},
-	MessageTypeManualFlush:        {},
-	MessageTypeSchemaChange:       {},
-	MessageTypePutReplicateConfig: {},
+	MessageTypeCreateCollection:     {},
+	MessageTypeDropCollection:       {},
+	MessageTypeCreatePartition:      {},
+	MessageTypeDropPartition:        {},
+	MessageTypeManualFlush:          {},
+	MessageTypeSchemaChange:         {},
+	MessageTypeAlterReplicateConfig: {},
+	MessageTypeAlterCollection:      {},
 }
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.

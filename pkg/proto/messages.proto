@@ -33,39 +33,39 @@ enum MessageType {
     ManualFlush          = 9;
     CreateSegment        = 10;
     Import               = 11;
-    SchemaChange         = 12 [deprecated = true]; // merged into PutCollection
-    PutCollection        = 13;
-    PutLoadConfig        = 14;
+    SchemaChange         = 12 [deprecated = true]; // merged into AlterCollection
+    AlterCollection      = 13;
+    AlterLoadConfig      = 14; // load config is simple, so CreateLoadConfig and AlterLoadConfig share one message.
     DropLoadConfig       = 15;
     CreateDatabase       = 16;
-    PutDatabase          = 17;
+    AlterDatabase        = 17;
     DropDatabase         = 18;
-    PutAlias             = 19;
+    AlterAlias           = 19; // alias is simple, so CreateAlias and AlterAlias share one message.
     DropAlias            = 20;
     RestoreRBAC          = 21;
-    PutUser              = 22;
+    AlterUser            = 22; // user is simple, so CreateUser and AlterUser share one message.
     DropUser             = 23;
-    PutRole              = 24;
+    AlterRole            = 24; // role is simple, so CreateRole and AlterRole share one message.
     DropRole             = 25;
-    PutUserRole          = 26;
+    AlterUserRole        = 26; // user role is simple, so CreateUserRole and AlterUserRole share one message.
     DropUserRole         = 27;
-    GrantPrivilege       = 28;
-    RevokePrivilege      = 29;
-    PutPrivilegeGroup    = 30;
+    AlterPrivilege       = 28; // privilege is simple, so CreatePrivilege and AlterPrivilege share one message.
+    DropPrivilege        = 29;
+    AlterPrivilegeGroup  = 30; // privilege group is simple, so CreatePrivilegeGroup and AlterPrivilegeGroup share one message.
     DropPrivilegeGroup   = 31;
-    PutResourceGroup     = 32;
+    AlterResourceGroup   = 32; // resource group is simple, so CreateResourceGroup and AlterResourceGroup share one message.
     DropResourceGroup    = 33;
     CreateIndex          = 34;
     AlterIndex           = 35;
     DropIndex            = 36;
 
-    // PutReplicateConfig is used to put the replicate configuration to the current cluster.
-    // When the PutReplicateConfig message is received, the replication topology is changed.
+    // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
+    // When the AlterReplicateConfig message is received, the replication topology is changed.
     // Maybe some cluster give up the leader role, no any other message will be received from this cluster.
     // So leader will stop writing message into wal and stop replicating any message to the other cluster,
     // and the follower will stop receiving any message from the old leader.
     // New leader will start to write message into wal and start replicating message to the other cluster.
-    PutReplicateConfig = 800;
+    AlterReplicateConfig = 800;
 
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
@@ -137,7 +137,7 @@ message TxnMessageBody {
 /// Message Header Definitions
 /// Used to fast handling at streaming node write ahead.
 /// The header should be simple and light enough to be parsed.
-/// Do not put too much information in the header if unnecessary.
+/// Do not alter too much information in the header if unnecessary.
 ///
 
 // TimeTickMessageHeader just nothing.
@@ -217,13 +217,13 @@ message DropPartitionMessageHeader {
     int64 partition_id  = 2;
 }
 
-// PutReplicateConfigMessageHeader is the header of put replicate configuration message.
-message PutReplicateConfigMessageHeader {
+// AlterReplicateConfigMessageHeader is the header of alter replicate configuration message.
+message AlterReplicateConfigMessageHeader {
     common.ReplicateConfiguration replicate_configuration = 1;
 }
 
-// PutReplicateConfigMessageBody is the body of put replicate configuration message.
-message PutReplicateConfigMessageBody {
+// AlterReplicateConfigMessageBody is the body of alter replicate configuration message.
+message AlterReplicateConfigMessageBody {
 }
 
 // BeginTxnMessageHeader is the header of begin transaction message.
@@ -261,8 +261,8 @@ message SchemaChangeMessageBody{
     schema.CollectionSchema schema = 1;
 }
 
-// PutCollectionMessageHeader is the header of put collection message.
-message PutCollectionMessageHeader {
+// AlterCollectionMessageHeader is the header of alter collection message.
+message AlterCollectionMessageHeader {
     int64 db_id                  = 1;
     int64 collection_id          = 2;
     google.protobuf.FieldMask update_mask = 3;
@@ -270,13 +270,13 @@ message PutCollectionMessageHeader {
     repeated int64 flushed_segment_ids = 5; // will be filled by wal shard manager.
 }
 
-// PutCollectionMessageBody is the body of put collection message.
-message PutCollectionMessageBody {
-    PutCollectionMessageUpdates updates = 1;
+// AlterCollectionMessageBody is the body of alter collection message.
+message AlterCollectionMessageBody {
+    AlterCollectionMessageUpdates updates = 1;
 }
 
-// PutCollectionMessageUpdates is the updates of put collection message.
-message PutCollectionMessageUpdates {
+// AlterCollectionMessageUpdates is the updates of alter collection message.
+message AlterCollectionMessageUpdates {
     int64 db_id                               = 1; // collection db id should be updated.
     string db_name                            = 2; // collection db name should be updated.
     string collection_name                    = 3; // collection name should be updated.
@@ -284,17 +284,17 @@ message PutCollectionMessageUpdates {
     schema.CollectionSchema schema            = 5; // collection schema should be updated.
     common.ConsistencyLevel consistency_level = 6; // consistency level should be updated.
     repeated common.KeyValuePair properties   = 7; // collection properties should be updated.
-    PutLoadConfigOfPutCollection put_load_config = 8; // put load config of put collection.
+    AlterLoadConfigOfAlterCollection alter_load_config = 8; // alter load config of alter collection.
 }
 
-// PutLoadConfigOfPutCollection is the body of put load config of put collection message.
-message PutLoadConfigOfPutCollection {
+// AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.
+message AlterLoadConfigOfAlterCollection {
     int32 replica_number = 1;
     repeated string resource_groups = 2;
 }
 
-// PutLoadConfigMessageHeader is the header of put load config message.
-message PutLoadConfigMessageHeader {
+// AlterLoadConfigMessageHeader is the header of alter load config message.
+message AlterLoadConfigMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2; // the collection id that has to be loaded.
     repeated int64 partition_ids = 3; // the partition ids that has to be loaded, empty means no partition has to be loaded.
@@ -303,8 +303,8 @@ message PutLoadConfigMessageHeader {
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
 }
 
-// PutLoadConfigMessageBody is the body of put load config message.
-message PutLoadConfigMessageBody {
+// AlterLoadConfigMessageBody is the body of alter load config message.
+message AlterLoadConfigMessageBody {
 }
 
 // LoadFieldConfig is the config to load fields.
@@ -338,21 +338,21 @@ message CreateDatabaseMessageBody {
     repeated common.KeyValuePair properties = 1;
 }
 
-// PutDatabaseMessageHeader is the header of put database message.
-message PutDatabaseMessageHeader {
+// AlterDatabaseMessageHeader is the header of alter database message.
+message AlterDatabaseMessageHeader {
     string db_name = 1;
     int64 db_id = 2;
 }
 
-// PutDatabaseMessageBody is the body of put database message.
-message PutDatabaseMessageBody {
+// AlterDatabaseMessageBody is the body of alter database message.
+message AlterDatabaseMessageBody {
     repeated common.KeyValuePair properties = 1;
-    PutLoadConfigOfPutDatabase put_load_config = 2;
+    AlterLoadConfigOfAlterDatabase alter_load_config = 2;
 }
 
-// PutLoadConfigOfPutDatabase is the body of put load config of put database message.
+// AlterLoadConfigOfAlterDatabase is the body of alter load config of alter database message.
 // When the database's resource group or replica number is changed, the load config of all collection in database will be updated.
-message PutLoadConfigOfPutDatabase {
+message AlterLoadConfigOfAlterDatabase {
     repeated int64 collection_ids = 1;
     int32 replica_number = 2;
     repeated string resource_groups = 3;
@@ -368,8 +368,8 @@ message DropDatabaseMessageHeader {
 message DropDatabaseMessageBody {
 }
 
-// PutAliasMessageHeader is the header of put alias message.
-message PutAliasMessageHeader {
+// AlterAliasMessageHeader is the header of alter alias message.
+message AlterAliasMessageHeader {
     int64 db_id = 1;
     string db_name = 2;
     int64 collection_id = 3;
@@ -377,8 +377,8 @@ message PutAliasMessageHeader {
     string alias = 5;
 }
 
-// PutAliasMessageBody is the body of put alias message.
-message PutAliasMessageBody {
+// AlterAliasMessageBody is the body of alter alias message.
+message AlterAliasMessageBody {
 }
 
 // DropAliasMessageHeader is the header of drop alias message.
@@ -400,13 +400,13 @@ message CreateUserMessageBody {
     internal.CredentialInfo credential_info = 1;
 }
 
-// PutUserMessageHeader is the header of put user message.
-message PutUserMessageHeader {
+// AlterUserMessageHeader is the header of alter user message.
+message AlterUserMessageHeader {
     milvus.UserEntity user_entity = 1;
 }
 
-// PutUserMessageBody is the body of put user message.
-message PutUserMessageBody {
+// AlterUserMessageBody is the body of alter user message.
+message AlterUserMessageBody {
     internal.CredentialInfo credential_info = 1;
 }
 
@@ -418,13 +418,13 @@ message DropUserMessageHeader {
 // DropUserMessageBody is the body of drop user message.
 message DropUserMessageBody {}
 
-// PutRoleMessageHeader is the header of put role message.
-message PutRoleMessageHeader {
+// AlterRoleMessageHeader is the header of alter role message.
+message AlterRoleMessageHeader {
     milvus.RoleEntity role_entity = 1;
 }
 
-// PutRoleMessageBody is the body of put role message.
-message PutRoleMessageBody {
+// AlterRoleMessageBody is the body of alter role message.
+message AlterRoleMessageBody {
 }
 
 // DropRoleMessageHeader is the header of drop role message.
@@ -442,13 +442,13 @@ message RoleBinding {
     milvus.RoleEntity role_entity = 2;
 }
 
-// PutUserRoleMessageHeader is the header of put user role message.
-message PutUserRoleMessageHeader {
+// AlterUserRoleMessageHeader is the header of alter user role message.
+message AlterUserRoleMessageHeader {
     RoleBinding role_binding = 1; // TODO: support multiple role and user bindings in future.
 }
 
-// PutUserRoleMessageBody is the body of put user role message.
-message PutUserRoleMessageBody {}
+// AlterUserRoleMessageBody is the body of alter user role message.
+message AlterUserRoleMessageBody {}
 
 // DropUserRoleMessageHeader is the header of drop user role message.
 message DropUserRoleMessageHeader {
@@ -467,30 +467,30 @@ message RestoreRBACMessageBody {
     milvus.RBACMeta rbac_meta = 1;
 }
 
-// GrantPrivilegeMessageHeader is the header of grant privilege message.
-message GrantPrivilegeMessageHeader {
+// AlterPrivilegeMessageHeader is the header of grant privilege message.
+message AlterPrivilegeMessageHeader {
     milvus.GrantEntity entity = 1;
 }
 
-// GrantPrivilegeMessageBody is the body of grant privilege message.
-message GrantPrivilegeMessageBody {
+// AlterPrivilegeMessageBody is the body of grant privilege message.
+message AlterPrivilegeMessageBody {
 }
 
-// RevokePrivilegeMessageHeader is the header of revoke privilege message.
-message RevokePrivilegeMessageHeader {
+// DropPrivilegeMessageHeader is the header of revoke privilege message.
+message DropPrivilegeMessageHeader {
     milvus.GrantEntity entity = 1;
 }
 
-// RevokePrivilegeMessageBody is the body of revoke privilege message.
-message RevokePrivilegeMessageBody {} 
+// DropPrivilegeMessageBody is the body of revoke privilege message.
+message DropPrivilegeMessageBody {} 
 
-// PutPrivilegeGroupMessageHeader is the header of put privilege group message.
-message PutPrivilegeGroupMessageHeader {
+// AlterPrivilegeGroupMessageHeader is the header of alter privilege group message.
+message AlterPrivilegeGroupMessageHeader {
     milvus.PrivilegeGroupInfo privilege_group_info = 1; // if privileges is empty, new privilege group will be created.
 }
 
-// PutPrivilegeGroupMessageBody is the body of put privilege group message.
-message PutPrivilegeGroupMessageBody {}
+// AlterPrivilegeGroupMessageBody is the body of alter privilege group message.
+message AlterPrivilegeGroupMessageBody {}
 
 // DropPrivilegeGroupMessageHeader is the header of drop privilege group message.
 message DropPrivilegeGroupMessageHeader {
@@ -500,13 +500,13 @@ message DropPrivilegeGroupMessageHeader {
 // DropPrivilegeGroupMessageBody is the body of drop privilege group message.
 message DropPrivilegeGroupMessageBody {}
 
-// PutResourceGroupMessageHeader is the header of put resource group message.
-message PutResourceGroupMessageHeader {
+// AlterResourceGroupMessageHeader is the header of alter resource group message.
+message AlterResourceGroupMessageHeader {
     map<string, rg.ResourceGroupConfig> resource_group_configs = 3;
 }
 
-// PutResourceGroupMessageBody is the body of put resource group message.
-message PutResourceGroupMessageBody {}
+// AlterResourceGroupMessageBody is the body of alter resource group message.
+message AlterResourceGroupMessageBody {}
 
 // DropResourceGroupMessageHeader is the header of drop resource group message.
 message DropResourceGroupMessageHeader {

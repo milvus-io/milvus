@@ -380,7 +380,7 @@ func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb WatchCha
 }
 
 // UpdateReplicateConfiguration updates the in-memory replicate configuration.
-func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
+func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
 	config := replicateutil.MustNewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), msgs[0].Header().ReplicateConfiguration)
 	pchannels := make([]types.AckedCheckpoint, 0, len(msgs))
 

@@ -125,21 +125,82 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddInt64("segmentID", header.GetSegmentId())
 	case *ManualFlushMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeSegmentIDs(header.GetSegmentIds(), enc)
+		encodeIDs(header.GetSegmentIds(), enc)
 	case *SchemaChangeMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeSegmentIDs(header.GetFlushedSegmentIds(), enc)
+		encodeIDs(header.GetFlushedSegmentIds(), enc)
+	case *AlterCollectionMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		enc.AddString("udpateMasks", strings.Join(header.UpdateMask.GetPaths(), "|"))
+		encodeIDs(header.GetFlushedSegmentIds(), enc)
+	case *AlterLoadConfigMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		enc.AddInt64("replicaNumber", int64(len(header.GetReplicas())))
+	case *DropLoadConfigMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+	case *CreateDatabaseMessageHeader:
+		enc.AddString("dbName", header.GetDbName())
+		enc.AddInt64("dbID", header.GetDbId())
+	case *AlterDatabaseMessageHeader:
+		enc.AddString("dbName", header.GetDbName())
+		enc.AddInt64("dbID", header.GetDbId())
+	case *DropDatabaseMessageHeader:
+		enc.AddString("dbName", header.GetDbName())
+		enc.AddInt64("dbID", header.GetDbId())
+	case *AlterAliasMessageHeader:
+		enc.AddString("dbName", header.GetDbName())
+		enc.AddInt64("dbID", header.GetDbId())
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		enc.AddString("collectionName", header.GetCollectionName())
+		enc.AddString("alias", header.GetAlias())
+	case *DropAliasMessageHeader:
+		enc.AddString("dbName", header.GetDbName())
+		enc.AddInt64("dbID", header.GetDbId())
+		enc.AddString("alias", header.GetAlias())
+	case *AlterUserMessageHeader:
+		enc.AddString("user", header.GetUserEntity().GetName())
+	case *DropUserMessageHeader:
+		enc.AddString("user", header.GetUserName())
+	case *AlterRoleMessageHeader:
+		enc.AddString("role", header.GetRoleEntity().GetName())
+	case *DropRoleMessageHeader:
+		enc.AddString("role", header.GetRoleName())
+	case *AlterUserRoleMessageHeader:
+		enc.AddString("user", header.GetRoleBinding().GetUserEntity().GetName())
+		enc.AddString("role", header.GetRoleBinding().GetRoleEntity().GetName())
+	case *DropUserRoleMessageHeader:
+		enc.AddString("user", header.GetRoleBinding().GetUserEntity().GetName())
+		enc.AddString("role", header.GetRoleBinding().GetRoleEntity().GetName())
+	case *AlterPrivilegeMessageHeader:
+	case *DropPrivilegeMessageHeader:
+	case *AlterPrivilegeGroupMessageHeader:
+	case *DropPrivilegeGroupMessageHeader:
+	case *CreateIndexMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		enc.AddInt64("fieldID", header.GetFieldId())
+		enc.AddInt64("indexID", header.GetIndexId())
+		enc.AddString("indexName", header.GetIndexName())
+	case *AlterIndexMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		encodeIDs(header.GetIndexIds(), enc)
+	case *DropIndexMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		encodeIDs(header.GetIndexIds(), enc)
 	case *ImportMessageHeader:
-	case *PutResourceGroupMessageHeader:
+	case *AlterResourceGroupMessageHeader:
 		encodeResourceGroupConfigs(header.GetResourceGroupConfigs(), enc)
 	case *DropResourceGroupMessageHeader:
 		enc.AddString("rg", header.GetResourceGroupName())
+	case *AlterReplicateConfigMessageHeader:
+		for idx, topology := range header.GetReplicateConfiguration().GetCrossClusterTopology() {
+			enc.AddString(fmt.Sprintf("topo_%d", idx), fmt.Sprintf("%s->%s", topology.GetSourceClusterId(), topology.GetTargetClusterId()))
+		}
 	}
 }
 
-func encodeSegmentIDs(segmentIDs []int64, enc zapcore.ObjectEncoder) {
-	ids := make([]string, 0, len(segmentIDs))
-	for _, id := range segmentIDs {
+func encodeIDs(targetIDs []int64, enc zapcore.ObjectEncoder) {
+	ids := make([]string, 0, len(targetIDs))
+	for _, id := range targetIDs {
 		ids = append(ids, strconv.FormatInt(id, 10))
 	}
 	enc.AddString("segmentIDs", strings.Join(ids, "|"))

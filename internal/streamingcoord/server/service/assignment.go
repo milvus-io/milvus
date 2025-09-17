@@ -75,10 +75,10 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	// TODO: After recovering from wal, we can get the immutable message from wal system.
 	// Now, we just mock the immutable message here.
 	mutableMsg := msg.SplitIntoMutableMessage()
-	mockMessages := make([]message.ImmutablePutReplicateConfigMessageV2, 0)
+	mockMessages := make([]message.ImmutableAlterReplicateConfigMessageV2, 0)
 	for _, msg := range mutableMsg {
 		mockMessages = append(mockMessages,
-			message.MustAsImmutablePutReplicateConfigMessageV2(msg.WithTimeTick(0).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(1))),
+			message.MustAsImmutableAlterReplicateConfigMessageV2(msg.WithTimeTick(0).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(1))),
 		)
 	}
 
@@ -117,11 +117,11 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	if _, err := replicateutil.NewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config); err != nil {
 		return nil, err
 	}
-	b := message.NewPutReplicateConfigMessageBuilderV2().
-		WithHeader(&message.PutReplicateConfigMessageHeader{
+	b := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: config,
 		}).
-		WithBody(&message.PutReplicateConfigMessageBody{}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
 		WithBroadcast(pchannels).
 		MustBuildBroadcast()
 
@@ -132,7 +132,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 
 // putReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.
-func (s *assignmentServiceImpl) putReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
+func (s *assignmentServiceImpl) putReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
 	balancer, err := s.balancer.GetWithContext(ctx)
 	if err != nil {
 		return err
