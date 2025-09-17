@@ -18,7 +18,8 @@
 
 #include <atomic>
 #include <iostream>
-#include <utility> #include <variant>
+#include <utility>
+#include <variant>
 #include "common/Consts.h"
 #include "storage/ThreadPool.h"
 
