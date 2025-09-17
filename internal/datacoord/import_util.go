@@ -343,7 +343,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		ids, ide, e := alloc.AllocN(int64(n))
 		return int64(ids), int64(ide), e
 	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
-
 	if err != nil {
 		return nil, err
 	}
