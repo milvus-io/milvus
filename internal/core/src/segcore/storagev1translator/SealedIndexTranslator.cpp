@@ -39,9 +39,17 @@ SealedIndexTranslator::SealedIndexTranslator(
           milvus::segcore::getCellDataType(
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          milvus::segcore::getCacheWarmupPolicy(
-              /* is_vector */ IsVectorDataType(load_index_info->field_type),
-              /* is_index */ true),
+          // if index data supports lazy load internally, we always use sync
+          // currently only vector index is possible to support lazy load
+          // at this time only index metadata will be loaded
+          (IsVectorDataType(load_index_info->field_type) &&
+           knowhere::IndexFactory::Instance().FeatureCheck(
+               index_info_.index_type, knowhere::feature::LAZY_LOAD))
+              ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
+              : milvus::segcore::getCacheWarmupPolicy(
+                    /* is_vector */ IsVectorDataType(
+                        load_index_info->field_type),
+                    /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load
