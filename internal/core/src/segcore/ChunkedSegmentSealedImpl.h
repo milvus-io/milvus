@@ -284,6 +284,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return insert_record_.timestamps_;
     }
 
+    // Load Geometry cache for a field
+    void
+    LoadGeometryCache(FieldId field_id,
+                      const ChunkedVariableColumn<std::string>& var_column);
+
  private:
     template <typename S, typename T = S>
     static void

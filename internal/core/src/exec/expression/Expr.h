@@ -352,11 +352,17 @@ class SegmentExpr : public Expr {
         auto views_info = segment_->get_batch_views<T>(
             field_id_, 0, current_data_chunk_pos_, need_size);
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+            // Construct actual offsets array instead of passing nullptr
+            std::vector<int32_t> offsets_array(need_size);
+            for (int64_t j = 0; j < need_size; ++j) {
+                offsets_array[j] =
+                    static_cast<int32_t>(current_data_chunk_pos_ + j);
+            }
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
             func(views_info.first.data(),
                  views_info.second.data(),
-                 nullptr,
+                 offsets_array.data(),
                  need_size,
                  res,
                  valid_res,
@@ -707,6 +713,14 @@ class SegmentExpr : public Expr {
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
 
+            // Construct actual offsets array instead of passing nullptr
+            std::vector<int32_t> offsets_array(size);
+            auto start_offset =
+                segment_->num_rows_until_chunk(field_id_, i) + data_pos;
+            for (int64_t j = 0; j < size; ++j) {
+                int64_t offset = start_offset + j;
+                offsets_array[j] = static_cast<int32_t>(offset);
+            }
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
@@ -721,7 +735,7 @@ class SegmentExpr : public Expr {
                                 field_id_, i, data_pos, size);
                         func(data_vec.data(),
                              valid_data.data(),
-                             nullptr,
+                             offsets_array.data(),
                              size,
                              res + processed_size,
                              valid_res + processed_size,
@@ -738,7 +752,7 @@ class SegmentExpr : public Expr {
                     }
                     func(data,
                          valid_data,
-                         nullptr,
+                         offsets_array.data(),
                          size,
                          res + processed_size,
                          valid_res + processed_size,

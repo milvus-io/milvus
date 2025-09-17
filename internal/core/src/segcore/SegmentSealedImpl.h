@@ -339,6 +339,11 @@ class SegmentSealedImpl : public SegmentSealed {
         deleted_record_.set_sealed_row_count(row_count);
     }
 
+    // Load Geometry cache for a field
+    void
+    LoadGeometryCache(FieldId field_id,
+                      const SingleChunkVariableColumn<std::string>& var_column);
+
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
                          Timestamp timestamp,

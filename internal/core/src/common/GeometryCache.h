@@ -14,10 +14,10 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <string>
-#include <string_view>
 #include <unordered_map>
+#include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "common/Types.h"
 
@@ -33,62 +33,66 @@ struct SegmentFieldHash {
     }
 };
 
-// Simple WKB-based Geometry cache for avoiding repeated WKB->Geometry conversions
+// Vector-based Geometry cache that maintains original field data order
 class SimpleGeometryCache {
  public:
-    // Get or create Geometry from WKB data
-    std::shared_ptr<const Geometry>
-    GetOrCreate(const std::string_view& wkb_data) {
-        // Use WKB data content as key (could be optimized with hash later)
-        std::string key(wkb_data);
-
-        // Try read-only access first (most common case)
-        {
-            std::shared_lock<std::shared_mutex> lock(mutex_);
-            auto it = cache_.find(key);
-            if (it != cache_.end()) {
-                return it->second;
-            }
-        }
-
-        // Cache miss: create new Geometry with write lock
+    // Append WKB data during field loading
+    void
+    AppendData(const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
 
-        // Double-check after acquiring write lock
-        auto it = cache_.find(key);
-        if (it != cache_.end()) {
-            return it->second;
+        if (size == 0 || wkb_data == nullptr) {
+            // Handle null/empty geometry - add invalid geometry
+            geometries_.emplace_back();
+        } else {
+            try {
+                // Create geometry directly in the vector
+                geometries_.emplace_back(wkb_data, size);
+            } catch (const std::exception& e) {
+                PanicInfo(UnexpectedError,
+                          "Failed to construct geometry from WKB data: {}",
+                          e.what());
+            }
         }
+    }
 
-        // Construct new Geometry
-        try {
-            auto geometry = std::make_shared<const Geometry>(wkb_data.data(),
-                                                             wkb_data.size());
-            cache_.emplace(key, geometry);
-            return geometry;
-        } catch (...) {
-            // Return nullptr on construction failure
+    // Get Geometry by offset (thread-safe read for filtering)
+    const Geometry*
+    GetByOffset(size_t offset) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+
+        if (offset >= geometries_.size()) {
             return nullptr;
         }
+
+        const auto& geometry = geometries_[offset];
+        return geometry.IsValid() ? &geometry : nullptr;
+    }
+
+    // Get total number of loaded geometries
+    size_t
+    Size() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return geometries_.size();
     }
 
     // Clear all cached geometries
     void
     Clear() {
         std::lock_guard<std::shared_mutex> lock(mutex_);
-        cache_.clear();
+        geometries_.clear();
     }
 
-    // Get cache statistics
-    size_t
-    Size() const {
+    // Check if cache is loaded
+    bool
+    IsLoaded() const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
-        return cache_.size();
+        return !geometries_.empty();
     }
 
  private:
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, std::shared_ptr<const Geometry>> cache_;
+    mutable std::shared_mutex mutex_;   // For read/write operations
+    std::vector<Geometry> geometries_;  // Direct storage of Geometry objects
 };
 
 // Global cache instance per segment+field
@@ -141,6 +145,7 @@ class SimpleGeometryCacheManager {
     // Get cache statistics for monitoring
     struct CacheStats {
         size_t total_caches = 0;
+        size_t loaded_caches = 0;
         size_t total_geometries = 0;
     };
 
@@ -150,7 +155,10 @@ class SimpleGeometryCacheManager {
         CacheStats stats;
         stats.total_caches = caches_.size();
         for (const auto& [key, cache] : caches_) {
-            stats.total_geometries += cache->Size();
+            if (cache->IsLoaded()) {
+                stats.loaded_caches++;
+                stats.total_geometries += cache->Size();
+            }
         }
         return stats;
     }
@@ -168,4 +176,25 @@ class SimpleGeometryCacheManager {
 };
 
 }  // namespace exec
+
+// Convenient global functions for direct access to geometry cache
+inline const Geometry*
+GetGeometryByOffset(int64_t segment_id, FieldId field_id, size_t offset) {
+    auto& cache = exec::SimpleGeometryCacheManager::Instance().GetCache(
+        segment_id, field_id);
+    return cache.GetByOffset(offset);
+}
+
+inline void
+RemoveGeometryCache(int64_t segment_id, FieldId field_id) {
+    exec::SimpleGeometryCacheManager::Instance().RemoveCache(segment_id,
+                                                             field_id);
+}
+
+inline void
+RemoveSegmentGeometryCaches(int64_t segment_id) {
+    exec::SimpleGeometryCacheManager::Instance().RemoveSegmentCaches(
+        segment_id);
+}
+
 }  // namespace milvus

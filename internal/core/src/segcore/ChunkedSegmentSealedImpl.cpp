@@ -383,6 +383,10 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     // var_column->Seal();
                     stats_.mem_size += var_column->DataByteSize();
                     field_data_size = var_column->DataByteSize();
+
+                    // Construct GeometryCache for the entire field
+                    LoadGeometryCache(field_id, *var_column);
+
                     column = std::move(var_column);
                     break;
                 }
@@ -1310,9 +1314,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
-    // Clean up geometry cache for all fields in this segment
-    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(get_segment_id());
+    // Clean up geometry cache for all fields in this segment using global function
+    milvus::RemoveSegmentGeometryCaches(get_segment_id());
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
@@ -2216,6 +2219,50 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
             }
             return;
         }
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadGeometryCache(
+    FieldId field_id, const ChunkedVariableColumn<std::string>& var_column) {
+    try {
+        // Get geometry cache for this segment+field
+        auto& geometry_cache =
+            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+                get_segment_id(), field_id);
+
+        // Iterate through all chunks and collect WKB data
+        auto num_chunks = var_column.num_chunks();
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            // Get all string views from this chunk
+            auto [string_views, valid_data] = var_column.StringViews(chunk_id);
+
+            // Add each string view to the geometry cache
+            for (size_t i = 0; i < string_views.size(); ++i) {
+                if (valid_data.empty() || valid_data[i]) {
+                    // Valid geometry data
+                    const auto& wkb_data = string_views[i];
+                    geometry_cache.AppendData(wkb_data.data(), wkb_data.size());
+                } else {
+                    // Null/invalid geometry
+                    geometry_cache.AppendData(nullptr, 0);
+                }
+            }
+        }
+
+        LOG_INFO(
+            "Successfully loaded geometry cache for segment {} field {} with "
+            "{} geometries",
+            get_segment_id(),
+            field_id.get(),
+            geometry_cache.Size());
+
+    } catch (const std::exception& e) {
+        PanicInfo(UnexpectedError,
+                  "Failed to load geometry cache for segment {} field {}: {}",
+                  get_segment_id(),
+                  field_id.get(),
+                  e.what());
     }
 }
 
