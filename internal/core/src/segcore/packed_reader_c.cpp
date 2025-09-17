@@ -62,9 +62,8 @@ NewPackedReaderWithStorageConfig(char** paths,
         conf.gcp_credential_json =
             std::string(c_storage_config.gcp_credential_json);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+
+        auto trueFs = milvus_storage::CreateArrowFileSystem(conf).value();
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,

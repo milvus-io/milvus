@@ -999,12 +999,11 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+    milvus_storage::ArrowFileSystemConfig conf;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
-        milvus_storage::ArrowFileSystemConfig conf;
         conf.root_path = path;
         conf.storage_type = "local";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
     } else {
         milvus_storage::ArrowFileSystemConfig conf;
         conf.address = std::string(storage_config.address);
@@ -1025,10 +1024,8 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.gcp_credential_json =
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
     }
-    return milvus_storage::ArrowFileSystemSingleton::GetInstance()
-        .GetArrowFileSystem();
+    auto trueFs = milvus_storage::CreateArrowFileSystem(conf).value();
 }
 
 FieldDataPtr
