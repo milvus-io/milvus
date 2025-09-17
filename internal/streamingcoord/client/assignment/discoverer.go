@@ -8,6 +8,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -22,6 +24,7 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 		exitCh:                make(chan struct{}),
 		wg:                    sync.WaitGroup{},
 		lastErrorReportedTerm: make(map[string]int64),
+		clusterID:             paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 	}
 	c.executeBackgroundTask()
 	return c
@@ -37,6 +40,7 @@ type assignmentDiscoverClient struct {
 	wg                    sync.WaitGroup
 	streamClient          streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
 	lastErrorReportedTerm map[string]int64
+	clusterID             string
 }
 
 // ReportAssignmentError reports the assignment error to server.
@@ -162,6 +166,9 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				Version:     newIncomingVersion,
 				Assignments: newIncomingAssignments,
 				CChannel:    resp.FullAssignment.Cchannel,
+				ReplicateConfigHelper: replicateutil.MustNewConfigHelper(
+					c.clusterID,
+					resp.FullAssignment.ReplicateConfiguration),
 			})
 		case *streamingpb.AssignmentDiscoverResponse_Close:
 			// nothing to do now, just wait io.EOF.

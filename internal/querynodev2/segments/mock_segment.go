@@ -492,12 +492,12 @@ func (_c *MockSegment_GetFieldJSONIndexStats_Call) Run(run func()) *MockSegment_
 	return _c
 }
 
-func (_c *MockSegment_GetFieldJSONIndexStats_Call) Return(_a0 []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) Return(_a0 map[int64]*querypb.JsonStatsInfo) *MockSegment_GetFieldJSONIndexStats_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_GetFieldJSONIndexStats_Call) RunAndReturn(run func() []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) RunAndReturn(run func() map[int64]*querypb.JsonStatsInfo) *MockSegment_GetFieldJSONIndexStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1149,3 +1149,18 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.proxy.ListFileResources(ctx, req)
 }
+
+// UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
+func (s *Server) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateReplicateConfiguration(ctx, req)
+}
+
+// GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
+func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
+	return s.proxy.GetReplicateInfo(ctx, req)
+}
+
+// CreateReplicateStream establishes a replication stream on the target Milvus cluster.
+func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
+	return s.proxy.CreateReplicateStream(stream)
+}

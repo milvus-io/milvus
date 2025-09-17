@@ -32,6 +32,7 @@ struct FieldBinlogInfo {
     std::vector<int64_t> memory_sizes;
     bool enable_mmap{false};
     std::vector<std::string> insert_files;
+    std::vector<int64_t> child_field_ids;
 };
 
 struct LoadFieldDataInfo {
@@ -41,6 +42,7 @@ struct LoadFieldDataInfo {
         milvus::proto::common::LoadPriority::HIGH;
     CacheWarmupPolicy warmup_policy =
         CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    std::vector<int64_t> child_field_ids;
 };
 
 struct LoadDeletedRecordInfo {

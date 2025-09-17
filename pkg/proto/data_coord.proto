@@ -1027,6 +1027,14 @@ message GcControlRequest {
   repeated common.KeyValuePair params = 3;
 }
 
+// The response message for GetGcStatus.
+message GetGcStatusResponse {
+  // is_paused is true if the garbage collector is currently paused.
+  bool is_paused = 1;
+  // time_remaining_seconds is the remaining duration in seconds until the GC resumes.
+  int32 time_remaining_seconds = 2;
+}
+
 message QuerySlotRequest {}
 
 message QuerySlotResponse {

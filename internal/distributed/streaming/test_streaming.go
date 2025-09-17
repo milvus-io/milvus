@@ -24,12 +24,15 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 var expectErr = make(chan error, 10)
@@ -52,6 +55,24 @@ func SetupNoopWALForTest() {
 	singleton = &noopWALAccesser{}
 }
 
+type noopReplicateService struct{}
+
+func (n *noopReplicateService) Append(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error) {
+	return nil, nil
+}
+
+func (n *noopReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+	return nil
+}
+
+func (n *noopReplicateService) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
+	return nil, nil
+}
+
+func (n *noopReplicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+	return nil, nil
+}
+
 type noopBalancer struct{}
 
 func (n *noopBalancer) ListStreamingNode(ctx context.Context) ([]types.StreamingNodeInfo, error) {
@@ -59,6 +80,10 @@ func (n *noopBalancer) ListStreamingNode(ctx context.Context) ([]types.Streaming
 }
 
 func (n *noopBalancer) GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error) {
+	return nil, nil
+}
+
+func (n *noopBalancer) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
@@ -139,6 +164,10 @@ func (n *noopTxn) Rollback(ctx context.Context) error {
 
 type noopWALAccesser struct{}
 
+func (n *noopWALAccesser) Replicate() ReplicateService {
+	return &noopReplicateService{}
+}
+
 func (n *noopWALAccesser) ControlChannel() string {
 	return funcutil.GetControlChannel("noop")
 }
@@ -200,6 +229,18 @@ func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.Mu
 
 func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
 	return AppendResponses{}
+}
+
+func (n *noopWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	return nil, nil
+}
+
+func (n *noopWALAccesser) GetReplicateCheckpoint(ctx context.Context, channelName string) (*commonpb.ReplicateCheckpoint, error) {
+	return nil, nil
+}
+
+func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+	return nil
 }
 
 type noopScanner struct{}

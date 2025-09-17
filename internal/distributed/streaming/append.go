@@ -39,6 +39,9 @@ func assertValidMessage(msgs ...message.MutableMessage) {
 		if msg.MessageType().IsSystem() {
 			panic("system message is not allowed to append from client")
 		}
+		if msg.MessageType().IsSelfControlled() {
+			panic("self controlled message is not allowed to append from client")
+		}
 		if msg.VChannel() == "" {
 			panic("we don't support sent all vchannel message at client now")
 		}
@@ -49,6 +52,9 @@ func assertValidMessage(msgs ...message.MutableMessage) {
 func assertValidBroadcastMessage(msg message.BroadcastMutableMessage) {
 	if msg.MessageType().IsSystem() {
 		panic("system message is not allowed to broadcast append from client")
+	}
+	if msg.MessageType().IsSelfControlled() {
+		panic("self controlled message is not allowed to broadcast append from client")
 	}
 }
 

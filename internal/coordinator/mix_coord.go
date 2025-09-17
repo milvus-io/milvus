@@ -231,9 +231,8 @@ func (s *mixCoordImpl) initKVCreator() {
 func (s *mixCoordImpl) Start() error {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	s.startPosixCleanupTask()
-
-	var startErr error
-	return startErr
+	RegisterMgrRoute(s)
+	return nil
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {

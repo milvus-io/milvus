@@ -9,6 +9,7 @@ packages:
   github.com/milvus-io/milvus/internal/distributed/streaming:
     interfaces:
       WALAccesser:
+      ReplicateService:
       Utility:
       Broadcast:
       Local:
@@ -18,6 +19,7 @@ packages:
       Balancer:
   github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
+      Broadcaster:
       AppendOperator:
       Watcher:
   github.com/milvus-io/milvus/internal/streamingcoord/client:
@@ -78,6 +80,7 @@ packages:
       Manager:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
+      ReplicationCatalog:
       StreamingCoordCataLog:
       StreamingNodeCataLog:
   github.com/milvus-io/milvus/internal/util/segcore:

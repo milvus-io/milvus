@@ -150,6 +150,10 @@ type mockMixCoord struct {
 	cnt   atomic.Int64
 }
 
+func (m *mockMixCoord) GetGcStatus(context.Context) (*datapb.GetGcStatusResponse, error) {
+	return &datapb.GetGcStatusResponse{}, nil
+}
+
 func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{
 		Status:           merr.Success(),

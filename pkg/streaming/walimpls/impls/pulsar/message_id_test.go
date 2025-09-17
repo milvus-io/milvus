@@ -12,7 +12,7 @@ import (
 
 func TestMessageID(t *testing.T) {
 	pid := message.MessageID(newMessageIDOfPulsar(1, 2, 3)).(interface{ PulsarID() pulsar.MessageID }).PulsarID()
-	assert.Equal(t, walName, newMessageIDOfPulsar(1, 2, 3).WALName())
+	assert.Equal(t, message.WALNamePulsar, newMessageIDOfPulsar(1, 2, 3).WALName())
 
 	assert.Equal(t, int64(1), pid.LedgerID())
 	assert.Equal(t, int64(2), pid.EntryID())

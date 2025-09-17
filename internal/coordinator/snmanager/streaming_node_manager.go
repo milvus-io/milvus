@@ -71,6 +71,11 @@ type StreamingNodeManager struct {
 	nodeChangedNotifier *syncutil.VersionedNotifier           // used to notify that node in streaming node manager has been changed.
 }
 
+// GetBalancer returns the balancer of the streaming node manager.
+func (s *StreamingNodeManager) GetBalancer() balancer.Balancer {
+	return s.balancer.Get()
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 // Return -1 and error if the vchannel is not found or context is canceled.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {

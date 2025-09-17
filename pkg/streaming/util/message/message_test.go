@@ -41,6 +41,22 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeDropCollection.IsSystem())
 	assert.False(t, MessageTypeCreatePartition.IsSystem())
 	assert.False(t, MessageTypeDropPartition.IsSystem())
+
+	assert.True(t, MessageTypeTimeTick.IsSelfControlled())
+	assert.False(t, MessageTypeTxn.IsSelfControlled())
+	assert.False(t, MessageTypeBeginTxn.IsSelfControlled())
+	assert.False(t, MessageTypeCommitTxn.IsSelfControlled())
+	assert.False(t, MessageTypeRollbackTxn.IsSelfControlled())
+	assert.False(t, MessageTypeImport.IsSelfControlled())
+	assert.False(t, MessageTypeInsert.IsSelfControlled())
+	assert.False(t, MessageTypeDelete.IsSelfControlled())
+	assert.True(t, MessageTypeCreateSegment.IsSelfControlled())
+	assert.True(t, MessageTypeFlush.IsSelfControlled())
+	assert.False(t, MessageTypeManualFlush.IsSelfControlled())
+	assert.False(t, MessageTypeCreateCollection.IsSelfControlled())
+	assert.False(t, MessageTypeDropCollection.IsSelfControlled())
+	assert.False(t, MessageTypeCreatePartition.IsSelfControlled())
+	assert.False(t, MessageTypeDropPartition.IsSelfControlled())
 }
 
 func TestVersion(t *testing.T) {
@@ -125,4 +141,7 @@ func TestCheckIfMessageFromStreaming(t *testing.T) {
 	assert.True(t, CheckIfMessageFromStreaming(map[string]string{
 		messageVersion: "1",
 	}))
+}
+
+func TestReplicateHeader(t *testing.T) {
 }

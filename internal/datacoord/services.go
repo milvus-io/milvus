@@ -1854,6 +1854,21 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	return status, nil
 }
 
+func (s *Server) GetGcStatus(ctx context.Context) (*datapb.GetGcStatusResponse, error) {
+	status := s.garbageCollector.GetStatus()
+	var remainingSeconds int32
+	if status.IsPaused {
+		// Convert time.Duration to seconds, rounding to the nearest second.
+		// Using Round() ensures accuracy when converting to an integer.
+		remainingSeconds = int32(status.TimeRemaining.Round(time.Second).Seconds())
+	}
+
+	return &datapb.GetGcStatusResponse{
+		IsPaused:             status.IsPaused,
+		TimeRemainingSeconds: remainingSeconds,
+	}, nil
+}
+
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{

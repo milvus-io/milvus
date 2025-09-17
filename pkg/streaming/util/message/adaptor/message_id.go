@@ -7,6 +7,7 @@ import (
 	rawKafka "github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/zilliztech/woodpecker/woodpecker/log"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	mqkafka "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
@@ -53,19 +54,19 @@ func MustGetMessageIDFromMQWrapperID(commonMessageID common.MessageID) message.M
 // TODO: should be removed in future after common.MessageID is removed
 func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, error) {
 	switch walName {
-	case "pulsar":
+	case "pulsar", commonpb.WALName_Pulsar.String():
 		pulsarID, err := mqpulsar.DeserializePulsarMsgID(msgID)
 		if err != nil {
 			return nil, err
 		}
 		return mqpulsar.NewPulsarID(pulsarID), nil
-	case "rocksmq":
+	case "rocksmq", commonpb.WALName_RocksMQ.String():
 		rID := server.DeserializeRmqID(msgID)
 		return &server.RmqID{MessageID: rID}, nil
-	case "kafka":
+	case "kafka", commonpb.WALName_Kafka.String():
 		kID := mqkafka.DeserializeKafkaID(msgID)
 		return mqkafka.NewKafkaID(kID), nil
-	case "woodpecker":
+	case "woodpecker", commonpb.WALName_WoodPecker.String():
 		wID, err := mqwoodpecker.DeserializeWoodpeckerMsgID(msgID)
 		if err != nil {
 			return nil, err
@@ -76,22 +77,23 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 	}
 }
 
-func MustGetMessageIDFromMQWrapperIDBytes(walName string, msgIDBytes []byte) message.MessageID {
+func MustGetMessageIDFromMQWrapperIDBytes(msgIDBytes []byte) message.MessageID {
+	walName := message.MustGetDefaultWALName()
 	var commonMsgID common.MessageID
 	switch walName {
-	case "rocksmq":
+	case message.WALNameRocksmq:
 		id := server.DeserializeRmqID(msgIDBytes)
 		commonMsgID = &server.RmqID{MessageID: id}
-	case "pulsar":
+	case message.WALNamePulsar:
 		msgID, err := mqpulsar.DeserializePulsarMsgID(msgIDBytes)
 		if err != nil {
 			panic(err)
 		}
 		commonMsgID = mqpulsar.NewPulsarID(msgID)
-	case "kafka":
+	case message.WALNameKafka:
 		id := mqkafka.DeserializeKafkaID(msgIDBytes)
 		commonMsgID = mqkafka.NewKafkaID(id)
-	case "woodpecker":
+	case message.WALNameWoodpecker:
 		msgID, err := mqwoodpecker.DeserializeWoodpeckerMsgID(msgIDBytes)
 		if err != nil {
 			panic(err)
