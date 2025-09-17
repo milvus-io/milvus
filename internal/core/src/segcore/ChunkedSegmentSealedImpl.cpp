@@ -692,7 +692,7 @@ ChunkedSegmentSealedImpl::GetNgramIndex(milvus::OpContext* op_ctx,
     auto slot = iter->second.get();
     lck.unlock();
 
-    auto ca = SemiInlineGet(slot->PinCells(op_ctx, {0}));
+    auto ca = slot->PinOneCellDirect(op_ctx, 0);
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
@@ -716,7 +716,7 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
         auto slot = iter->second.at(nested_path).get();
 
         milvus::OpContext ctx;
-        auto ca = SemiInlineGet(slot->PinCells(&ctx, {0}));
+        auto ca = slot->PinOneCellDirect(&ctx, 0);
         auto index =
             dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
         AssertInfo(index != nullptr,
@@ -852,7 +852,7 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
-    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    auto ca = cache_index->PinOneCellDirect(op_ctx, 0);
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
@@ -1650,7 +1650,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                     return iter;
                 });
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells(nullptr, {0}));
+                field_index_iter->second->PinOneCellDirect(nullptr, 0);
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
