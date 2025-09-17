@@ -135,7 +135,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<const char*>(ca, chunk->Data());
     }
@@ -146,8 +146,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
             return true;
         }
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
-        auto ca = SemiInlineGet(
-            slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, static_cast<cid_t>(chunk_id));
         auto chunk = ca->get_cell_of(chunk_id);
         return chunk->isValid(offset_in_chunk);
     }
@@ -179,7 +178,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
             }
         } else {
             auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+            auto ca = slot_->PinCellsDirect(op_ctx, cids);
             for (int64_t i = 0; i < count; i++) {
                 auto chunk = ca->get_cell_of(cids[i]);
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
@@ -332,7 +331,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<Chunk*>(ca, chunk);
     }
@@ -384,7 +383,7 @@ class ChunkedColumn : public ChunkedColumnBase {
                 const int64_t* offsets,
                 int64_t count) override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             fn(ca->get_cell_of(cids[i])->ValueAt(offsets_in_chunk[i]), i);
         }
@@ -398,7 +397,7 @@ class ChunkedColumn : public ChunkedColumnBase {
                              int64_t count) {
         static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         auto typed_dst = static_cast<T*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
@@ -466,7 +465,7 @@ class ChunkedColumn : public ChunkedColumnBase {
                       int64_t element_sizeof,
                       int64_t count) override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
@@ -477,7 +476,7 @@ class ChunkedColumn : public ChunkedColumnBase {
 
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<SpanBase>(
             ca, static_cast<FixedWidthChunk*>(chunk)->Span());
@@ -503,7 +502,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
@@ -514,7 +513,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     StringViewsByOffsets(milvus::OpContext* op_ctx,
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
@@ -544,7 +543,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             }
         } else {
             auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+            auto ca = slot_->PinCellsDirect(op_ctx, cids);
             for (int64_t i = 0; i < count; i++) {
                 auto chunk = ca->get_cell_of(cids[i]);
                 auto valid =
@@ -571,7 +570,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             return;
         }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
             auto valid = nullable_ ? chunk->isValid(offsets_in_chunk[i]) : true;
@@ -594,7 +593,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                    "row_offsets and value_offsets must be provided");
 
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
             auto str_view = static_cast<StringChunk*>(chunk)->operator[](
@@ -621,7 +620,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                 const int64_t* offsets,
                 int64_t count) const override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto array = static_cast<ArrayChunk*>(ca->get_cell_of(cids[i]))
                              ->View(offsets_in_chunk[i])
@@ -635,8 +634,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
-        auto ca = SemiInlineGet(
-            slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, static_cast<cid_t>(chunk_id));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             ca, static_cast<ArrayChunk*>(chunk)->Views(offset_len));
@@ -646,7 +644,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             ca, static_cast<ArrayChunk*>(chunk)->ViewsByOffsets(offsets));
@@ -667,7 +665,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
                       const int64_t* offsets,
                       int64_t count) const override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        auto ca = slot_->PinCellsDirect(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto array =
                 static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]))
