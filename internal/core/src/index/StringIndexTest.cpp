@@ -748,74 +748,89 @@ TEST_F(StringIndexSortTest, MmapLoadAfterSerialize) {
     // Step 1: Build index in memory and serialize
     Config build_config;
     auto index = milvus::index::CreateStringIndexSort({});
-    
+
     std::vector<std::string> test_strs = {
-        "apple", "banana", "cherry", "date", "elderberry",
-        "fig", "grape", "honeydew", "kiwi", "lemon",
-        "apple", "banana", "apple"  // Include duplicates
+        "apple",
+        "banana",
+        "cherry",
+        "date",
+        "elderberry",
+        "fig",
+        "grape",
+        "honeydew",
+        "kiwi",
+        "lemon",
+        "apple",
+        "banana",
+        "apple"  // Include duplicates
     };
     index->Build(test_strs.size(), test_strs.data());
-    
+
     // Serialize the index
     auto binary_set = index->Serialize(build_config);
-    
+
     // Step 2: Load with mmap configuration
     Config mmap_config;
     mmap_config[MMAP_FILE_PATH] = "/tmp/test_string_index_sort_mmap.idx";
-    
+
     auto mmap_index = milvus::index::CreateStringIndexSort({});
     mmap_index->Load(binary_set, mmap_config);
-    
+
     // Step 3: Verify functionality with mmap loaded index
     // Test Count
     ASSERT_EQ(mmap_index->Count(), test_strs.size());
-    
+
     // Test In operation
     std::vector<std::string> search_vals = {"apple", "grape", "lemon"};
     auto bitset = mmap_index->In(search_vals.size(), search_vals.data());
-    ASSERT_EQ(bitset.count(), 5);  // apple appears 3 times, grape once, lemon once
-    ASSERT_TRUE(bitset[0]);  // apple
-    ASSERT_TRUE(bitset[6]);  // grape
-    ASSERT_TRUE(bitset[9]);  // lemon
-    ASSERT_TRUE(bitset[10]); // apple (duplicate)
-    ASSERT_TRUE(bitset[12]); // apple (duplicate)
-    
+    ASSERT_EQ(bitset.count(),
+              5);             // apple appears 3 times, grape once, lemon once
+    ASSERT_TRUE(bitset[0]);   // apple
+    ASSERT_TRUE(bitset[6]);   // grape
+    ASSERT_TRUE(bitset[9]);   // lemon
+    ASSERT_TRUE(bitset[10]);  // apple (duplicate)
+    ASSERT_TRUE(bitset[12]);  // apple (duplicate)
+
     // Test NotIn operation
     std::vector<std::string> not_in_vals = {"orange", "pear"};
     auto not_bitset = mmap_index->NotIn(not_in_vals.size(), not_in_vals.data());
-    ASSERT_EQ(not_bitset.count(), test_strs.size());  // All strings should be in result
-    
+    ASSERT_EQ(not_bitset.count(),
+              test_strs.size());  // All strings should be in result
+
     // Test Range operation
-    auto range_bitset = mmap_index->Range("cherry", milvus::OpType::GreaterEqual);
-    ASSERT_EQ(range_bitset.count(), 8);  // cherry, date, elderberry, fig, grape, honeydew, kiwi, lemon
-    
+    auto range_bitset =
+        mmap_index->Range("cherry", milvus::OpType::GreaterEqual);
+    ASSERT_EQ(
+        range_bitset.count(),
+        8);  // cherry, date, elderberry, fig, grape, honeydew, kiwi, lemon
+
     // Test Range between
     auto range_between = mmap_index->Range("banana", true, "grape", true);
-    ASSERT_EQ(range_between.count(), 7);  // banana(2), cherry, date, elderberry, fig, grape
-    
+    ASSERT_EQ(range_between.count(),
+              7);  // banana(2), cherry, date, elderberry, fig, grape
+
     // Test PrefixMatch
     std::vector<std::string> prefix_test_strs = {
-        "app", "apple", "application", "banana", "band"
-    };
+        "app", "apple", "application", "banana", "band"};
     auto prefix_index = milvus::index::CreateStringIndexSort({});
     prefix_index->Build(prefix_test_strs.size(), prefix_test_strs.data());
     auto prefix_binary = prefix_index->Serialize(build_config);
-    
+
     Config prefix_mmap_config;
     prefix_mmap_config[MMAP_FILE_PATH] = "/tmp/test_prefix_mmap.idx";
     auto prefix_mmap_index = milvus::index::CreateStringIndexSort({});
     prefix_mmap_index->Load(prefix_binary, prefix_mmap_config);
-    
+
     auto prefix_bitset = prefix_mmap_index->PrefixMatch("app");
     ASSERT_EQ(prefix_bitset.count(), 3);  // app, apple, application
-    
+
     // Test Reverse_Lookup
     for (size_t i = 0; i < test_strs.size(); ++i) {
         auto result = mmap_index->Reverse_Lookup(i);
         ASSERT_TRUE(result.has_value());
         ASSERT_EQ(result.value(), test_strs[i]);
     }
-    
+
     // Clean up temp files
     std::remove("/tmp/test_string_index_sort_mmap.idx");
     std::remove("/tmp/test_prefix_mmap.idx");
@@ -825,27 +840,28 @@ TEST_F(StringIndexSortTest, LoadWithoutAssembleMmap) {
     // Build and serialize index
     Config config;
     auto index = milvus::index::CreateStringIndexSort({});
-    
-    std::vector<std::string> test_strs = {"zebra", "apple", "monkey", "dog", "cat"};
+
+    std::vector<std::string> test_strs = {
+        "zebra", "apple", "monkey", "dog", "cat"};
     index->Build(test_strs.size(), test_strs.data());
-    
+
     auto binary_set = index->Serialize(config);
-    
+
     // Load without assemble using mmap
     Config mmap_config;
     mmap_config[MMAP_FILE_PATH] = "/tmp/test_load_without_assemble.idx";
-    
+
     auto mmap_index = milvus::index::CreateStringIndexSort({});
     mmap_index->LoadWithoutAssemble(binary_set, mmap_config);
-    
+
     // Verify the index works correctly
     auto bitset = mmap_index->In(test_strs.size(), test_strs.data());
     ASSERT_EQ(bitset.count(), test_strs.size());
-    
+
     // Test that all operations work
     auto range_bitset = mmap_index->Range("dog", milvus::OpType::LessEqual);
     ASSERT_EQ(range_bitset.count(), 3);  // apple, cat, dog
-    
+
     // Clean up
     std::remove("/tmp/test_load_without_assemble.idx");
 }
