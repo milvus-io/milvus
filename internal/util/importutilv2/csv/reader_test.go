@@ -369,3 +369,57 @@ func (suite *ReaderSuite) TestReadLoop() {
 func TestCsvReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
+
+func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
+		},
+	}
+
+	// prepare csv content with header including pk
+	content := "pk,vec\n"
+	// one row is enough; vec must be a quoted JSON array to avoid CSV splitting
+	content += "1,\"[0,1,2,3,4,5,6,7]\"\n"
+
+	// allow_insert_autoid=false, providing PK in header should error
+	{
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			reader := strings.NewReader(content)
+			r := &mockReader{Reader: reader, Closer: io.NopCloser(reader)}
+			return r, nil
+		})
+		_, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+		suite.Error(err)
+		suite.Contains(err.Error(), "is auto-generated, no need to provide")
+	}
+
+	// allow_insert_autoid=true, providing PK in header should be allowed
+	{
+		schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			reader := strings.NewReader(content)
+			r := &mockReader{Reader: reader, Closer: io.NopCloser(reader)}
+			return r, nil
+		})
+		reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+		suite.NoError(err)
+		// call Read once to ensure parsing proceeds
+		_, err = reader.Read()
+		suite.NoError(err)
+	}
+}

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -44,6 +45,7 @@ type rowParser struct {
 	functionOutputFields map[string]int64
 
 	structArrays map[string]interface{}
+	allowInsertAutoID    bool
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
@@ -82,6 +84,7 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 			return field.GetName(), field.GetFieldID()
 		},
 	)
+	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
 
 	sturctArrays := lo.SliceToMap(
 		schema.GetStructArrayFields(),
@@ -98,6 +101,7 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		dynamicField:         dynamicField,
 		functionOutputFields: functionOutputFields,
 		structArrays:         sturctArrays,
+		allowInsertAutoID:    allowInsertAutoID,
 	}, nil
 }
 
@@ -163,7 +167,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("invalid JSON format, each row should be a key-value map, but got type %T", raw))
 	}
-	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() {
+	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() && !r.allowInsertAutoID {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", r.pkField.GetName()))
 	}

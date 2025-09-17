@@ -823,6 +823,13 @@ func TestParquetReaderError(t *testing.T) {
 	schema.Fields[0].AutoID = true
 	checkFunc(schema, filePath, false)
 
+	// allow_insert_autoid=true should allow providing PK even if AutoID
+	schema.Fields[0].AutoID = true
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
+	checkFunc(schema, filePath, true)
+	// reset properties
+	schema.Properties = nil
+
 	// now set the vec to be FunctionOutput
 	// NewReader will return error "the field is output by function, no need to provide"
 	schema.Fields[0].AutoID = false

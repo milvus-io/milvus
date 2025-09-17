@@ -426,3 +426,68 @@ func (suite *ReaderSuite) TestReadCount() {
 func TestJsonReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
+
+func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+				},
+			},
+		},
+	}
+
+	// build rows that explicitly include pk and a valid vec of dim 8
+	rows := make([]any, 0, suite.numRows)
+	for i := 0; i < suite.numRows; i++ {
+		row := make(map[string]any)
+		row["pk"] = int64(i + 1)
+		vec := make([]float64, 8)
+		for j := 0; j < 8; j++ {
+			vec[j] = float64(j)
+		}
+		row["vec"] = vec
+		rows = append(rows, row)
+	}
+	jsonBytes, err := json.Marshal(rows)
+	suite.NoError(err)
+
+	// allow_insert_autoid=false, providing PK should error
+	{
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			return r, nil
+		})
+		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+		suite.NoError(err)
+		_, err = reader.Read()
+		suite.Error(err)
+		suite.Contains(err.Error(), "is auto-generated, no need to provide")
+	}
+
+	// allow_insert_autoid=true, providing PK should be allowed
+	{
+		schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			return r, nil
+		})
+		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+		suite.NoError(err)
+		_, err = reader.Read()
+		suite.NoError(err)
+	}
+}

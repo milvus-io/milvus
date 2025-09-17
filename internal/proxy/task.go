@@ -1339,6 +1339,7 @@ var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
+	common.AllowInsertAutoIDKey,
 }
 
 var allowedDropProps = []string{
@@ -1467,6 +1468,18 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+			}
+		case common.AllowInsertAutoIDKey:
+			allowInsertAutoID, err := strconv.ParseBool(prop.Value)
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("the value for %s must be a boolean", common.AllowInsertAutoIDKey)
+			}
+			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
+			if err != nil {
+				return err
+			}
+			if allowInsertAutoID && !primaryFieldSchema.AutoID {
+				return merr.WrapErrParameterInvalidMsg("the value for %s must be false when autoID is false", common.AllowInsertAutoIDKey)
 			}
 		}
 	}

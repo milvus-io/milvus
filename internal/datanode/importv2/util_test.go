@@ -95,6 +95,54 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Equal(t, count, insertData.Data[common.TimeStampField].RowNum())
 }
 
+func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
+	const count = 10
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
+
+	task := &ImportTask{
+		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
+		allocator: allocator.NewLocalAllocator(0, count*2),
+	}
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	userPK := make([]int64, count)
+	for i := 0; i < count; i++ {
+		userPK[i] = 1000 + int64(i)
+	}
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
+
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = AppendSystemFieldsData(task, insertData, rowNum)
+	assert.NoError(t, err)
+
+	got := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
+	assert.Equal(t, count, got.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], got.Data[i])
+	}
+}
+
 func Test_UnsetAutoID(t *testing.T) {
 	pkField := &schemapb.FieldSchema{
 		FieldID:      100,
