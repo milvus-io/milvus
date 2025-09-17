@@ -131,7 +131,7 @@ IndexFactory::VecIndexLoadResource(
         mmaped = true;
     }
 
-    knowhere::expected<knowhere::Resource> resource;
+    knowhere::expected<knowhere::Resource> resource_res;
     float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
     float download_buffer_size_gb =
         DEFAULT_FIELD_MAX_MEMORY_LIMIT * 1.0 / 1024.0 / 1024.0 / 1024.0;
@@ -139,7 +139,7 @@ IndexFactory::VecIndexLoadResource(
     bool has_raw_data = false;
     switch (field_type) {
         case milvus::DataType::VECTOR_BINARY:
-            resource = knowhere::IndexStaticFaced<
+            resource_res = knowhere::IndexStaticFaced<
                 knowhere::bin1>::EstimateLoadResource(index_type,
                                                       index_version,
                                                       index_size_gb,
@@ -149,7 +149,7 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_FLOAT:
-            resource = knowhere::IndexStaticFaced<
+            resource_res = knowhere::IndexStaticFaced<
                 knowhere::fp32>::EstimateLoadResource(index_type,
                                                       index_version,
                                                       index_size_gb,
@@ -159,7 +159,7 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_FLOAT16:
-            resource = knowhere::IndexStaticFaced<
+            resource_res = knowhere::IndexStaticFaced<
                 knowhere::fp16>::EstimateLoadResource(index_type,
                                                       index_version,
                                                       index_size_gb,
@@ -169,7 +169,7 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_BFLOAT16:
-            resource = knowhere::IndexStaticFaced<
+            resource_res = knowhere::IndexStaticFaced<
                 knowhere::bf16>::EstimateLoadResource(index_type,
                                                       index_version,
                                                       index_size_gb,
@@ -179,7 +179,7 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_SPARSE_FLOAT:
-            resource = knowhere::IndexStaticFaced<
+            resource_res = knowhere::IndexStaticFaced<
                 knowhere::fp32>::EstimateLoadResource(index_type,
                                                       index_version,
                                                       index_size_gb,
@@ -197,15 +197,31 @@ IndexFactory::VecIndexLoadResource(
     LoadResourceRequest request{};
 
     request.has_raw_data = has_raw_data;
-    request.final_disk_cost = resource.value().diskCost;
-    request.final_memory_cost = resource.value().memoryCost;
+    knowhere::Resource resource;
+    if (resource_res.has_value()) {
+        resource = resource_res.value();
+    } else {
+        // fail to estimate resource, use default value
+        LOG_WARNING(
+            "fail to estimate index load resource by config, use index size to "
+            "estimate.");
+        if (mmaped) {
+            resource.diskCost = index_size_gb;
+            resource.memoryCost = 0.0f;
+        } else {
+            resource.diskCost = 0;
+            resource.memoryCost = 1.0f * index_size_gb;
+        }
+    }
+    request.final_disk_cost = resource.diskCost;
+    request.final_memory_cost = resource.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
-        request.max_disk_cost = resource.value().diskCost;
+        request.max_disk_cost = resource.diskCost;
         request.max_memory_cost =
-            std::max(resource.value().memoryCost, download_buffer_size_gb);
+            std::max(resource.memoryCost, download_buffer_size_gb);
     } else {
         request.max_disk_cost = 0;
-        request.max_memory_cost = 2 * resource.value().memoryCost;
+        request.max_memory_cost = 2 * resource.memoryCost;
     }
     return request;
 }
