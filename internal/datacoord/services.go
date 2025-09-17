@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -87,18 +88,40 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
-	coll, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
+	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
-		log.Warn("fail to get collection", zap.Error(err))
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return nil, err
+	}
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), ts, req.GetSegmentIDs())
+	if err != nil {
 		return &datapb.FlushResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	return &datapb.FlushResponse{
+		Status:          merr.Success(),
+		DbID:            req.GetDbID(),
+		CollectionID:    req.GetCollectionID(),
+		SegmentIDs:      flushResult.GetSegmentIDs(),
+		TimeOfSeal:      flushResult.GetTimeOfSeal(),
+		FlushSegmentIDs: flushResult.GetFlushSegmentIDs(),
+		FlushTs:         flushResult.GetFlushTs(),
+		ChannelCps:      flushResult.GetChannelCps(),
+	}, nil
+}
+
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flushTs uint64, toFlushSegments []UniqueID) (*datapb.FlushResult, error) {
+	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
+	coll, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		log.Warn("fail to get collection", zap.Error(err))
+		return nil, err
+	}
 	if coll == nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())),
-		}, nil
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	// channel checkpoints must be gotten before sealSegment, make sure checkpoints is earlier than segment's endts
 	for _, vchannel := range coll.VChannelNames {
@@ -106,26 +129,14 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		channelCPs[vchannel] = cp
 	}
 
-	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.AllocTimestamp(ctx)
-	if err != nil {
-		log.Warn("unable to alloc timestamp", zap.Error(err))
-		return &datapb.FlushResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	timeOfSeal, _ := tsoutil.ParseTS(ts)
-
+	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
 	if !streamingutil.IsStreamingServiceEnabled() {
 		for _, channel := range coll.VChannelNames {
-			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs())
+			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
-				return &datapb.FlushResponse{
-					Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
-						req.GetCollectionID())),
-				}, nil
+				return nil, errors.Wrapf(err, "failed to flush collection %d", collectionID)
 			}
 			for _, sealedSegmentID := range sealedSegmentIDs {
 				sealedSegmentsIDDict[sealedSegmentID] = true
@@ -133,7 +144,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}
 	}
 
-	segments := s.meta.GetSegmentsOfCollection(ctx, req.GetCollectionID())
+	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		if segment != nil &&
@@ -147,10 +158,10 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	if !streamingutil.IsStreamingServiceEnabled() {
 		var isUnimplemented bool
 		err = retry.Do(ctx, func() error {
-			nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(req.GetCollectionID())
+			nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(collectionID)
 
 			for nodeID, channelNames := range nodeChannels {
-				err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
+				err = s.cluster.FlushChannels(ctx, nodeID, flushTs, channelNames)
 				if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 					isUnimplemented = true
 					return nil
@@ -162,36 +173,133 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 			return nil
 		}, retry.Attempts(60)) // about 3min
 		if err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(err),
-			}, nil
+			return nil, err
 		}
 
 		if isUnimplemented {
 			// For compatible with rolling upgrade from version 2.2.x,
 			// fall back to the flush logic of version 2.2.x;
 			log.Warn("DataNode FlushChannels unimplemented", zap.Error(err))
-			ts = 0
+			flushTs = 0
 		}
 	}
 
 	log.Info("flush response with segments",
-		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("collectionID", collectionID),
 		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
-		zap.Uint64("flushTs", ts),
-		zap.Time("flushTs in time", tsoutil.PhysicalTime(ts)))
+		zap.Uint64("flushTs", flushTs),
+		zap.Time("flushTs in time", tsoutil.PhysicalTime(flushTs)))
 
-	return &datapb.FlushResponse{
-		Status:          merr.Success(),
-		DbID:            req.GetDbID(),
-		CollectionID:    req.GetCollectionID(),
+	return &datapb.FlushResult{
+		CollectionID:    collectionID,
 		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
-		FlushTs:         ts,
+		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
+		DbName:          coll.DatabaseName,
+		CollectionName:  coll.Schema.GetName(),
+	}, nil
+}
+
+func resolveCollectionsToFlush(ctx context.Context, s *Server, req *datapb.FlushAllRequest) ([]int64, error) {
+	collectionsToFlush := make([]int64, 0)
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			collectionsToFlush = append(collectionsToFlush, target.GetCollectionIds()...)
+		}
+	} else if req.GetDbName() != "" {
+		// Backward compatibility: use deprecated db_name field
+		showColRsp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
+		if err != nil {
+			log.Warn("failed to ShowCollectionIDs", zap.String("db", req.GetDbName()), zap.Error(err))
+			return nil, err
+		}
+		for _, dbCollection := range showColRsp.GetDbCollections() {
+			collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
+		}
+	} else {
+		// Flush all databases
+		dbsResp, err := s.broker.ListDatabases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, dbName := range dbsResp.GetDbNames() {
+			showColRsp, err := s.broker.ShowCollectionIDs(ctx, dbName)
+			if err != nil {
+				log.Warn("failed to ShowCollectionIDs", zap.String("db", dbName), zap.Error(err))
+				return nil, err
+			}
+			for _, dbCollection := range showColRsp.GetDbCollections() {
+				collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
+			}
+		}
+	}
+
+	return collectionsToFlush, nil
+}
+
+func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("receive flushAll request")
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Info("server is not healthy", zap.Error(err), zap.Any("stateCode", s.GetStateCode()))
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
+	ts, err := s.allocator.AllocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return nil, err
+	}
+
+	// resolve collections to flush
+	collectionsToFlush, err := resolveCollectionsToFlush(ctx, s, req)
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	var mu sync.Mutex
+	flushInfos := make([]*datapb.FlushResult, 0)
+	wg := errgroup.Group{}
+	// limit goroutine number to 100
+	wg.SetLimit(100)
+	for _, cid := range collectionsToFlush {
+		wg.Go(func() error {
+			flushResult, err := s.flushCollection(ctx, cid, ts, nil)
+			if err != nil {
+				log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
+				return err
+			}
+			mu.Lock()
+			flushInfos = append(flushInfos, flushResult)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	err = wg.Wait()
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.FlushAllResponse{
+		Status:       merr.Success(),
+		FlushTs:      ts,
+		FlushResults: flushInfos,
 	}, nil
 }
 
@@ -1410,7 +1518,10 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		}, nil
 	}
 
-	resp := &milvuspb.GetFlushAllStateResponse{Status: merr.Success()}
+	resp := &milvuspb.GetFlushAllStateResponse{
+		Status:      merr.Success(),
+		FlushStates: make([]*milvuspb.FlushAllState, 0),
+	}
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
@@ -1418,43 +1529,96 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	dbNames := dbsRsp.DbNames
-	if req.GetDbName() != "" {
-		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
-			return dbName == req.GetDbName()
-		})
-		if len(dbNames) == 0 {
+
+	// Determine which databases to check
+	var targetDbs []string
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			if target.GetDbName() != "" {
+				if !lo.Contains(dbsRsp.DbNames, target.GetDbName()) {
+					resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(target.GetDbName()))
+					return resp, nil
+				}
+				targetDbs = append(targetDbs, target.GetDbName())
+			}
+		}
+	} else if req.GetDbName() != "" {
+		if !lo.Contains(dbsRsp.DbNames, req.GetDbName()) {
 			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
 			return resp, nil
 		}
+		// Backward compatibility: use deprecated db_name field
+		targetDbs = []string{req.GetDbName()}
+	} else {
+		// Check all databases
+		targetDbs = dbsRsp.DbNames
 	}
 
-	for _, dbName := range dbsRsp.DbNames {
+	// Remove duplicates
+	targetDbs = lo.Uniq(targetDbs)
+	allFlushed := true
+
+	for _, dbName := range targetDbs {
+		flushState := &milvuspb.FlushAllState{
+			DbName:                dbName,
+			CollectionFlushStates: make(map[string]bool),
+		}
+
+		// Get collections to check for this database
+		var targetCollections []string
+		if len(req.GetFlushTargets()) > 0 {
+			// Check if specific collections are requested for this db
+			for _, target := range req.GetFlushTargets() {
+				if target.GetDbName() == dbName && len(target.GetCollectionNames()) > 0 {
+					targetCollections = target.GetCollectionNames()
+					break
+				}
+			}
+		}
+
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
 		if err != nil {
-			log.Warn("failed to ShowCollections", zap.Error(err))
+			log.Warn("failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
 
-		for _, collection := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collection)
+		for idx, collectionID := range showColRsp.GetCollectionIds() {
+			collectionName := ""
+			if idx < len(showColRsp.GetCollectionNames()) {
+				collectionName = showColRsp.GetCollectionNames()[idx]
+			}
+
+			// If specific collections are requested, skip others
+			if len(targetCollections) > 0 && !lo.Contains(targetCollections, collectionName) {
+				continue
+			}
+
+			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
-				log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+				log.Warn("failed to DescribeCollectionInternal",
+					zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
+
+			collectionFlushed := true
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
 				channelCP := s.meta.GetChannelCheckpoint(channel)
 				if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
-					resp.Flushed = false
-
-					return resp, nil
+					collectionFlushed = false
+					allFlushed = false
+					break
 				}
 			}
+			flushState.CollectionFlushStates[collectionName] = collectionFlushed
 		}
+
+		resp.FlushStates = append(resp.FlushStates, flushState)
 	}
-	resp.Flushed = true
+
+	resp.Flushed = allFlushed
 	return resp, nil
 }
 

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type flushTaskByStreamingService struct {
@@ -63,7 +64,7 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 
 		// Ask the streamingnode to flush segments.
 		for _, vchannel := range vchannels {
-			segmentIDs, err := t.sendManualFlushToWAL(ctx, collID, vchannel, flushTs)
+			segmentIDs, err := sendManualFlushToWAL(ctx, collID, vchannel, flushTs)
 			if err != nil {
 				return err
 			}
@@ -84,14 +85,14 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs
-		for _, segID := range resp.GetFlushSegmentIDs() {
-			for i, id := range onFlushSegmentIDs {
-				if id == segID {
-					onFlushSegmentIDs = append(onFlushSegmentIDs[:i], onFlushSegmentIDs[i+1:]...)
-					break
-				}
+		flushedSegmentSet := typeutil.NewUniqueSet(resp.GetFlushSegmentIDs()...)
+		filteredSegments := make([]int64, 0, len(onFlushSegmentIDs))
+		for _, id := range onFlushSegmentIDs {
+			if !flushedSegmentSet.Contain(id) {
+				filteredSegments = append(filteredSegments, id)
 			}
 		}
+		onFlushSegmentIDs = filteredSegments
 
 		coll2Segments[collName] = &schemapb.LongArray{Data: onFlushSegmentIDs}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
@@ -99,8 +100,6 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 		coll2FlushTs[collName] = flushTs
 		channelCps = resp.GetChannelCps()
 	}
-	// TODO: refactor to use streaming service
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
 		Status:          merr.Success(),
 		DbName:          t.GetDbName(),
@@ -114,7 +113,7 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 }
 
 // sendManualFlushToWAL sends a manual flush message to WAL.
-func (t *flushTaskByStreamingService) sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
+func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
 	logger := log.Ctx(ctx).With(zap.Int64("collectionID", collID), zap.String("vchannel", vchannel))
 	flushMsg, err := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(vchannel).

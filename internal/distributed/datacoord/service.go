@@ -305,6 +305,11 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	return s.dataCoord.Flush(ctx, req)
 }
 
+// FlushAll flushes all collections' data
+func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	return s.dataCoord.FlushAll(ctx, req)
+}
+
 // AssignSegmentID requests to allocate segment space for insert
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	return s.dataCoord.AssignSegmentID(ctx, req)
