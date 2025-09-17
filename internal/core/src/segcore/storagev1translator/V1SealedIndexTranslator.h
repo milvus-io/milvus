@@ -40,6 +40,13 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
     Meta*
     meta() override;
 
+    // TODO: implement this
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        return 0;
+    }
+
  private:
     struct IndexLoadInfo {
         bool enable_mmap;

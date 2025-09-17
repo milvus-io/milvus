@@ -48,6 +48,8 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
 
 CStatus
 GetSearchResultDataBlob(CProto* searchResultDataBlob,
+                        int64_t* scanned_remote_bytes,
+                        int64_t* scanned_total_bytes,
                         CSearchResultDataBlobs cSearchResultDataBlobs,
                         int32_t blob_index);
 

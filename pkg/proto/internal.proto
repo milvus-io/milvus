@@ -171,6 +171,8 @@ message SearchResults {
   int64 all_search_count = 17;
   bool is_topk_reduce = 18;
   bool is_recall_evaluation = 19;
+  int64 scanned_remote_bytes = 20;
+  int64 scanned_total_bytes = 21;
 }
 
 message CostAggregation {
@@ -218,6 +220,8 @@ message RetrieveResults {
   CostAggregation costAggregation = 13;
   int64 all_retrieve_count = 14;
   bool has_more_result = 15;
+  int64 scanned_remote_bytes = 16;
+  int64 scanned_total_bytes = 17;
 }
 
 message LoadIndex {

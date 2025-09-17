@@ -29,7 +29,8 @@ namespace milvus::segcore {
 
 // SearchResultDataBlobs contains the marshal blobs of many `milvus::proto::schema::SearchResultData`
 struct SearchResultDataBlobs {
-    std::vector<std::vector<char>> blobs;
+    std::vector<std::vector<char>> blobs;  // the marshal blobs of each slice
+    std::vector<StorageCost> costs;        // the cost of each slice
 };
 
 class ReduceHelper {
@@ -96,8 +97,12 @@ class ReduceHelper {
     void
     FillEntryData();
 
-    std::vector<char>
-    GetSearchResultDataSlice(int slice_index_);
+    std::pair<std::vector<char>, StorageCost>
+    GetSearchResultDataSlice(const int slice_index,
+                             const StorageCost& total_cost);
+
+    void
+    GetTotalStorageCost();
 
  protected:
     std::vector<SearchResult*>& search_results_;
@@ -117,6 +122,8 @@ class ReduceHelper {
     // output
     std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
     tracer::TraceContext* trace_ctx_;
+    milvus::OpContext op_context_;
+    StorageCost total_search_storage_cost_;
 };
 
 }  // namespace milvus::segcore

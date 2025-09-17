@@ -1092,7 +1092,7 @@ func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, 
 	}
 
 	for i := 0; i < len(sInfo.SliceNQs); i++ {
-		blob, err := segcore.GetSearchResultDataBlob(ctx, res, i)
+		blob, _, err := segcore.GetSearchResultDataBlob(ctx, res, i)
 		if err != nil {
 			return err
 		}

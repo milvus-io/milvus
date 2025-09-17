@@ -84,6 +84,13 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
         return &meta_;
     }
 
+    // TODO: implement this
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        return 0;
+    }
+
  private:
     std::vector<FileInfo> file_infos_;
     int64_t segment_id_;

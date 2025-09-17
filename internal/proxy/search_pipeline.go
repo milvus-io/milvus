@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -243,7 +244,6 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		if err != nil {
 			return nil, err
 		}
-
 		searchMetrics = append(searchMetrics, subMetricType)
 		multipleMilvusResults[index] = result
 	}
@@ -357,18 +357,21 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 
 func (op *requeryOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	allIDs := inputs[0].(*schemapb.IDs)
+	storageCostFromLastOp := inputs[1].(segcore.StorageCost)
 	if typeutil.GetSizeOfIDs(allIDs) == 0 {
-		return []any{[]*schemapb.FieldData{}}, nil
+		return []any{[]*schemapb.FieldData{}, storageCostFromLastOp}, nil
 	}
 
-	queryResult, err := op.requery(ctx, span, allIDs, op.outputFieldNames)
+	queryResult, storageCost, err := op.requery(ctx, span, allIDs, op.outputFieldNames)
 	if err != nil {
 		return nil, err
 	}
-	return []any{queryResult.GetFieldsData()}, nil
+	storageCost.ScannedRemoteBytes += storageCostFromLastOp.ScannedRemoteBytes
+	storageCost.ScannedTotalBytes += storageCostFromLastOp.ScannedTotalBytes
+	return []any{queryResult.GetFieldsData(), storageCost}, nil
 }
 
-func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
+func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Retrieve,
@@ -409,15 +412,15 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		fastSkip:     true,
 		reQuery:      true,
 	}
-	queryResult, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
+	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
 	if err != nil {
-		return nil, err
+		return nil, segcore.StorageCost{}, err
 	}
 
 	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, merr.Error(queryResult.GetStatus())
+		return nil, segcore.StorageCost{}, merr.Error(queryResult.GetStatus())
 	}
-	return queryResult, nil
+	return queryResult, storageCost, nil
 }
 
 type organizeOperator struct {
@@ -632,20 +635,21 @@ func newPipeline(pipeDef *pipelineDef, t *searchTask) (*pipeline, error) {
 	return &pipeline{name: pipeDef.name, nodes: nodes}, nil
 }
 
-func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults) (*milvuspb.SearchResults, error) {
+func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.String()))
 	msg := opMsg{}
 	msg["input"] = toReduceResults
+	msg["storage_cost"] = storageCost
 	for _, node := range p.nodes {
 		var err error
 		log.Ctx(ctx).Debug("SearchPipeline run node", zap.String("node", node.name))
 		msg, err = node.Run(ctx, span, msg)
 		if err != nil {
 			log.Ctx(ctx).Error("Run node failed: ", zap.String("err", err.Error()))
-			return nil, err
+			return nil, storageCost, err
 		}
 	}
-	return msg["output"].(*milvuspb.SearchResults), nil
+	return msg["output"].(*milvuspb.SearchResults), msg["storage_cost"].(segcore.StorageCost), nil
 }
 
 func (p *pipeline) String() string {
@@ -666,7 +670,7 @@ var searchPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -696,7 +700,7 @@ var searchWithRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -711,8 +715,8 @@ var searchWithRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"unique_ids"},
-			outputs: []string{"fields"},
+			inputs:  []string{"unique_ids", "storage_cost"},
+			outputs: []string{"fields", "storage_cost"},
 			opName:  requeryOp,
 		},
 		{
@@ -760,7 +764,7 @@ var searchWithRerankPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -818,7 +822,7 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -843,8 +847,8 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"ids"},
-			outputs: []string{"fields"},
+			inputs:  []string{"ids", "storage_cost"},
+			outputs: []string{"fields", "storage_cost"},
 			opName:  requeryOp,
 		},
 		{
@@ -892,7 +896,7 @@ var hybridSearchPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  hybridSearchReduceOp,
 		},
@@ -910,7 +914,7 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input"},
+			inputs:  []string{"input", "storage_cost"},
 			outputs: []string{"reduced", "metrics"},
 			opName:  hybridSearchReduceOp,
 		},
@@ -925,8 +929,8 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"ids"},
-			outputs: []string{"fields"},
+			inputs:  []string{"ids", "storage_cost"},
+			outputs: []string{"fields", "storage_cost"},
 			opName:  requeryOp,
 		},
 		{
