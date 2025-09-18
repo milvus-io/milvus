@@ -178,6 +178,9 @@ service QueryNode {
     
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
     rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+    
+    // file resource
+    rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------

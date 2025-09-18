@@ -448,3 +448,15 @@ message GetQuotaMetricsResponse {
   common.Status status = 1;
   string metrics_info = 2;
 }
+
+message FileResourceInfo {
+  string name = 1;
+  string path = 2;
+  int64 id = 3;
+  string storage_name = 5;
+}
+
+message SyncFileResourceRequest{
+  repeated FileResourceInfo resources = 1;
+  uint64 version = 2;
+}

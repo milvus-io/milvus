@@ -36,13 +36,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -102,8 +102,9 @@ type meta struct {
 	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
-	resourceMeta map[string]*model.FileResource
-	resourceLock lock.RWMutex
+	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
+	resourceVersion uint64
+	resourceLock    lock.RWMutex
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -204,7 +205,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta: make(map[string]*model.FileResource),
+		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -2417,20 +2418,21 @@ func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
-	resources, err := m.catalog.ListFileResource(ctx)
+	resources, version, err := m.catalog.ListFileResource(ctx)
 	if err != nil {
 		return err
 	}
 
-	m.resourceMeta = make(map[string]*model.FileResource)
+	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
 		m.resourceMeta[resource.Name] = resource
 	}
+	m.resourceVersion = version
 	return nil
 }
 
 // AddFileResource add file resource to meta
-func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource) error {
+func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
@@ -2438,12 +2440,13 @@ func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource
 		return merr.WrapErrAsInputError(fmt.Errorf("create resource failed: resource name exist"))
 	}
 
-	err := m.catalog.SaveFileResource(ctx, resource)
+	err := m.catalog.SaveFileResource(ctx, resource, m.resourceVersion+1)
 	if err != nil {
 		return err
 	}
 
 	m.resourceMeta[resource.Name] = resource
+	m.resourceVersion += 1
 	return nil
 }
 
@@ -2453,21 +2456,22 @@ func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
 	defer m.resourceLock.Unlock()
 
 	if resource, ok := m.resourceMeta[name]; ok {
-		err := m.catalog.RemoveFileResource(ctx, resource.ID)
+		err := m.catalog.RemoveFileResource(ctx, resource.Id, m.resourceVersion+1)
 		if err != nil {
 			return err
 		}
 
 		delete(m.resourceMeta, name)
+		m.resourceVersion += 1
 	}
 
 	return nil
 }
 
 // ListFileResource list file resources from meta
-func (m *meta) ListFileResource(ctx context.Context) []*model.FileResource {
+func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	m.resourceLock.RLock()
 	defer m.resourceLock.RUnlock()
 
-	return lo.Values(m.resourceMeta)
+	return lo.Values(m.resourceMeta), m.resourceVersion
 }
