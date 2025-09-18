@@ -4,7 +4,8 @@ use tantivy::tokenizer::*;
 use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
-    GrpcTokenizer,CharGroupTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer, LinderaTokenizer,
+    CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
+    LinderaTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
@@ -67,7 +68,7 @@ pub fn grpc_builder(
     let tokenizer = GrpcTokenizer::from_json(params.unwrap())?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
-  
+
 pub fn char_group_builder(
     params: Option<&json::Map<String, json::Value>>,
 ) -> Result<TextAnalyzerBuilder> {
@@ -103,7 +104,7 @@ pub fn get_builder_with_tokenizer(
             _ => {
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "customized tokenizer must set type"
-                )))
+                )));
             }
         }
         params_map = Some(m);

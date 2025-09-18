@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, path::Path};
+use std::{env, path::Path, path::PathBuf};
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -18,11 +18,12 @@ fn main() {
         if !path.exists() {
             return;
         }
-        let include_path = path.parent()
-            .map(|p| p.to_str().unwrap_or("").to_string()).unwrap();
+        let include_path = path
+            .parent()
+            .map(|p| p.to_str().unwrap_or("").to_string())
+            .unwrap();
         let iface_files = &[path];
-        let output_dir = PathBuf::from(&crate_dir)
-            .join("src/analyzer/gen");
+        let output_dir = PathBuf::from(&crate_dir).join("src/analyzer/gen");
 
         // create if outdir is not exist
         if !output_dir.exists() {

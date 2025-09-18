@@ -1,24 +1,25 @@
 use std::vec::Vec;
-use serde_json as json;
-use once_cell::sync::Lazy;
-use tokio::runtime::{Runtime};
-use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
-use tonic::transport::Channel;
-use tonic::transport::{ClientTlsConfig, Certificate, Identity};
+
 use log::warn;
+use once_cell::sync::Lazy;
+use serde_json as json;
+use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
+use tokio::runtime::Runtime;
+use tonic::transport::{Certificate, ClientTlsConfig, Identity};
+use tonic::transport::Channel;
+
+use tokenizer::tokenization_request::Parameter;
+use tokenizer::TokenizationRequest;
+use tokenizer::tokenizer_client::TokenizerClient;
+
 use crate::error::TantivyBindingError;
 
 pub mod tokenizer {
     include!("../gen/milvus.proto.tokenizer.rs");
 }
 
-use tokenizer::tokenizer_client::TokenizerClient;
-use tokenizer::tokenization_request::Parameter;
-use tokenizer::TokenizationRequest;
-
-static TOKIO_RT: Lazy<Runtime> = Lazy::new(|| {
-    Runtime::new().expect("Failed to create Tokio runtime")
-});
+static TOKIO_RT: Lazy<Runtime> =
+    Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
 
 #[derive(Clone)]
 pub struct GrpcTokenizer {
@@ -59,8 +60,11 @@ impl TokenStream for GrpcTokenStream {
 }
 
 impl GrpcTokenizer {
-    pub fn from_json(params: &json::Map<String, json::Value>) -> crate::error::Result<GrpcTokenizer> {
-        let endpoint = params.get(ENDPOINTKEY)
+    pub fn from_json(
+        params: &json::Map<String, json::Value>,
+    ) -> crate::error::Result<GrpcTokenizer> {
+        let endpoint = params
+            .get(ENDPOINTKEY)
             .ok_or(TantivyBindingError::InvalidArgument(
                 "grpc tokenizer must set endpoint".to_string(),
             ))?
@@ -99,7 +103,8 @@ impl GrpcTokenizer {
                         };
                         position += 1;
                         token
-                    }).collect()
+                    })
+                    .collect()
             } else {
                 warn!("grpc tokenizer default_tokens must be an array. ignoring.");
                 vec![]
@@ -288,7 +293,6 @@ impl GrpcTokenizer {
     }
 }
 
-
 impl Tokenizer for GrpcTokenizer {
     type TokenStream<'a> = GrpcTokenStream;
 
@@ -302,7 +306,6 @@ impl Tokenizer for GrpcTokenizer {
 mod tests {
     use super::*;
     use serde_json::json;
-    use tantivy::tokenizer::{Tokenizer, TokenStream};
 
     #[test]
     fn test_grpc_tokenizer_from_json_success() {
