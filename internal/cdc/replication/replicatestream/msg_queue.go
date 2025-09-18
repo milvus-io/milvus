@@ -31,11 +31,11 @@ type MsgQueue interface {
 	// (via CleanupConfirmedMessages) or ctx is canceled.
 	Enqueue(ctx context.Context, msg message.ImmutableMessage) error
 
-	// Dequeue returns the next message from the current read cursor and advances
+	// ReadNext returns the next message from the current read cursor and advances
 	// the cursor by one. It does NOT delete the message from the queue storage.
 	// Blocks when there are no readable messages (i.e., cursor is at tail) until
 	// a new message is Enqueued or ctx is canceled.
-	Dequeue(ctx context.Context) (message.ImmutableMessage, error)
+	ReadNext(ctx context.Context) (message.ImmutableMessage, error)
 
 	// SeekToHead moves the read cursor to the first not-yet-deleted message.
 	SeekToHead()
@@ -116,8 +116,8 @@ func (q *msgQueue) Enqueue(ctx context.Context, msg message.ImmutableMessage) er
 	return nil
 }
 
-// Dequeue returns the next message at the read cursor. Does not delete it.
-func (q *msgQueue) Dequeue(ctx context.Context) (message.ImmutableMessage, error) {
+// ReadNext returns the next message at the read cursor. Does not delete it.
+func (q *msgQueue) ReadNext(ctx context.Context) (message.ImmutableMessage, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 

@@ -100,10 +100,22 @@ func TestNewReplicateConfigValidator(t *testing.T) {
 	config := createValidValidatorConfig()
 	currentPChannels := []string{"cluster-1-channel-1", "cluster-1-channel-2"}
 
-	t.Run("success - create validator", func(t *testing.T) {
-		validator := NewReplicateConfigValidator(config, "cluster-1", currentPChannels)
+	t.Run("success - create validator without current config", func(t *testing.T) {
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", currentPChannels)
 		assert.NotNil(t, validator)
-		assert.Equal(t, config, validator.config)
+		assert.Equal(t, config, validator.incomingConfig)
+		assert.Equal(t, currentPChannels, validator.currentPChannels)
+		assert.NotNil(t, validator.clusterMap)
+		assert.Equal(t, 0, len(validator.clusterMap)) // clusterMap is built during validation
+		assert.Nil(t, validator.currentConfig)
+	})
+
+	t.Run("success - create validator with current config", func(t *testing.T) {
+		currentConfig := createValidValidatorConfig()
+		validator := NewReplicateConfigValidator(config, currentConfig, "cluster-1", currentPChannels)
+		assert.NotNil(t, validator)
+		assert.Equal(t, config, validator.incomingConfig)
+		assert.Equal(t, currentConfig, validator.currentConfig)
 		assert.Equal(t, currentPChannels, validator.currentPChannels)
 		assert.NotNil(t, validator.clusterMap)
 		assert.Equal(t, 0, len(validator.clusterMap)) // clusterMap is built during validation
@@ -111,17 +123,27 @@ func TestNewReplicateConfigValidator(t *testing.T) {
 }
 
 func TestReplicateConfigValidator_Validate(t *testing.T) {
-	t.Run("success - valid configuration", func(t *testing.T) {
+	t.Run("success - valid configuration without current config", func(t *testing.T) {
 		config := createValidValidatorConfig()
 		currentPChannels := []string{"cluster-1-channel-1", "cluster-1-channel-2"}
-		validator := NewReplicateConfigValidator(config, "cluster-1", currentPChannels)
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", currentPChannels)
 
 		err := validator.Validate()
 		assert.NoError(t, err)
 	})
 
-	t.Run("error - nil config", func(t *testing.T) {
-		validator := NewReplicateConfigValidator(nil, "cluster-1", []string{})
+	t.Run("success - valid configuration with current config", func(t *testing.T) {
+		config := createValidValidatorConfig()
+		currentConfig := createValidValidatorConfig()
+		currentPChannels := []string{"cluster-1-channel-1", "cluster-1-channel-2"}
+		validator := NewReplicateConfigValidator(config, currentConfig, "cluster-1", currentPChannels)
+
+		err := validator.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("error - nil incoming config", func(t *testing.T) {
+		validator := NewReplicateConfigValidator(nil, nil, "cluster-1", []string{})
 		err := validator.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "config cannot be nil")
@@ -132,7 +154,7 @@ func TestReplicateConfigValidator_Validate(t *testing.T) {
 			Clusters:             []*commonpb.MilvusCluster{},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
-		validator := NewReplicateConfigValidator(config, "cluster-1", []string{})
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", []string{})
 		err := validator.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "clusters list cannot be empty")
@@ -713,5 +735,191 @@ func TestEqualIgnoreOrder(t *testing.T) {
 		b := []string{"a", "b", "b"}
 		result := equalIgnoreOrder(a, b)
 		assert.False(t, result)
+	})
+}
+
+func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
+	// Helper function to create a config with specific clusters
+	createConfigWithClusters := func(clusters []*commonpb.MilvusCluster) *commonpb.ReplicateConfiguration {
+		return &commonpb.ReplicateConfiguration{
+			Clusters:             clusters,
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
+		}
+	}
+
+	t.Run("success - no current config", func(t *testing.T) {
+		config := createValidValidatorConfig()
+		currentPChannels := []string{"cluster-1-channel-1", "cluster-1-channel-2"}
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", currentPChannels)
+
+		err := validator.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("success - new cluster added", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+			{
+				ClusterId: "cluster-2", // New cluster
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19531",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-2-channel-1", "cluster-2-channel-2"},
+			},
+		})
+
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", []string{"cluster-1-channel-1", "cluster-1-channel-2"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("error - ConnectionParam changed", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "old-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "new-token", // Token changed - should fail
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		// Test the config comparison validation directly
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connection_param.token cannot be changed")
+	})
+
+	t.Run("error - pchannels changed", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-3"}, // Different pchannels
+			},
+		})
+
+		// Test the config comparison validation directly
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "pchannels cannot be changed")
+	})
+
+	t.Run("error - ConnectionParam URI changed", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19531", // URI changed - should fail
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		// Test the config comparison validation directly
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connection_param.uri cannot be changed")
+	})
+
+	t.Run("success - same cluster with no changes", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1", // Same cluster ID
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"cluster-1-channel-1", "cluster-1-channel-2"},
+			},
+		})
+
+		// Test the config comparison validation directly
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.NoError(t, err) // This should pass since it's the same cluster
 	})
 }
