@@ -23,28 +23,28 @@ message FieldIndexInfo{
 enum DatabaseState {
   DatabaseUnknown = 0;
   DatabaseCreated = 1;
-  DatabaseCreating = 2;
+  DatabaseCreating = 2 [deprecated = true];
   DatabaseDropping = 3;
   DatabaseDropped = 4;
 }
 
 enum CollectionState {
   CollectionCreated = 0;
-  CollectionCreating = 1;
+  CollectionCreating = 1 [deprecated = true];
   CollectionDropping = 2;
   CollectionDropped = 3;
 }
 
 enum PartitionState {
   PartitionCreated = 0;
-  PartitionCreating = 1;
+  PartitionCreating = 1 [deprecated = true];
   PartitionDropping = 2;
   PartitionDropped = 3;
 }
 
 enum AliasState {
   AliasCreated = 0;
-  AliasCreating = 1;
+  AliasCreating = 1 [deprecated = true];
   AliasDropping = 2;
   AliasDropped = 3;
 }

@@ -56,7 +56,7 @@ type Balancer interface {
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
 
 	// UpdateReplicateConfiguration updates the replicate configuration.
-	UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error
+	UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error
 
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error

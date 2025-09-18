@@ -26,6 +26,8 @@
 #include "common/jsmn.h"
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
+#include <simdjson.h>
+#include <cstring>
 
 namespace milvus::index {
 
@@ -48,6 +50,47 @@ enum class JSONType {
     ARRAY,
     OBJECT
 };
+
+inline bool
+JsonStringHasEscape(std::string_view s) {
+    // Any JSON escape must start with a backslash
+    return std::memchr(s.data(), '\\', s.size()) != nullptr;
+}
+
+// Unescape a JSON-escaped string slice (without surrounding quotes)
+// Returns a decoded UTF-8 std::string or throws on error
+inline std::string
+UnescapeJsonString(const std::string& escaped) {
+    if (!JsonStringHasEscape(escaped)) {
+        return escaped;
+    }
+    try {
+        simdjson::dom::parser parser;
+        std::string quoted;
+        quoted.resize(escaped.size() + 2);
+        quoted[0] = '"';
+        std::memcpy(&quoted[1], escaped.data(), escaped.size());
+        quoted[quoted.size() - 1] = '"';
+        simdjson::dom::element elem = parser.parse(quoted);
+        if (elem.type() != simdjson::dom::element_type::STRING) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "input is not a JSON string: {}",
+                      escaped);
+        }
+        return std::string(std::string_view(elem.get_string()));
+    } catch (const simdjson::simdjson_error& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to unescape json string (simdjson): {}, {}",
+                  escaped,
+                  e.what());
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to unescape json string: {}, {}",
+                  escaped,
+                  e.what());
+    }
+    return {};
+}
 
 inline std::string
 ToString(JSONType type) {

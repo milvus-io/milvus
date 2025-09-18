@@ -19,7 +19,7 @@ type replicateConfigHelper struct {
 }
 
 // newReplicateConfigHelperFromMessage creates a new replicate config helper from message.
-func newReplicateConfigHelperFromMessage(replicateConfig message.ImmutablePutReplicateConfigMessageV2) *replicateConfigHelper {
+func newReplicateConfigHelperFromMessage(replicateConfig message.ImmutableAlterReplicateConfigMessageV2) *replicateConfigHelper {
 	return newReplicateConfigHelper(&streamingpb.ReplicateConfigurationMeta{
 		ReplicateConfiguration: nil,
 		AckedResult:            types.NewAckedPendings(replicateConfig.BroadcastHeader().VChannels).AckedResult,

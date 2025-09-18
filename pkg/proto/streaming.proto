@@ -90,14 +90,17 @@ enum BroadcastTaskState {
     BROADCAST_TASK_STATE_UNKNOWN = 0;          // should never used.
     BROADCAST_TASK_STATE_PENDING = 1;          // task is pending.
     BROADCAST_TASK_STATE_DONE = 2;             // task has been broadcasted and acknowledged, the resource lock is released, and the persisted task can be cleared.
-    BROADCAST_TASK_STATE_WAIT_ACK = 3;         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
+    BROADCAST_TASK_STATE_WAIT_ACK = 3 [deprecated = true];         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
+    BROADCAST_TASK_STATE_REPLICATED = 4;       // task is replicated from the source cluster, the resource lock isn't acquired, so the execution order should be protected by the order of broadcastID.
+    BROADCAST_TASK_STATE_TOMBSTONE = 5;        // task is tombstone, it's used to mark the task is already acked, but for idempotency and deduplication, it will be kept in recovery stroage for a while.
 }
 
 // BroadcastTask is the task to broadcast the messake.
 message BroadcastTask {
     messages.Message message = 1;    // message to be broadcast.
     BroadcastTaskState state = 2;    // state of the task.
-    bytes acked_vchannel_bitmap = 3; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
+    bytes acked_vchannel_bitmap = 3 [deprecated = true]; // deprecated, use acked_checkpoints instead.
+    repeated AckedCheckpoint acked_checkpoints = 4; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
 }
 
 // AckedResult is the result of the ack.
@@ -442,6 +445,7 @@ message ProduceMessageResponseResult {
     uint64 timetick       = 2;  // the timetick of that message sent.
     messages.TxnContext txnContext = 3;  // the txn context of the message.
     google.protobuf.Any extra      = 4;  // the extra message.
+    common.MessageID last_confirmed_id = 5;  // the last confirmed message id.
 }
 
 // CloseProducerResponse is the result of the CloseProducer RPC.
