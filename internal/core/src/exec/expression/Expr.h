@@ -388,47 +388,6 @@ class SegmentExpr : public Expr {
         return need_size;
     }
 
-    // Version for GIS functions that need segment offsets
-    template <typename T, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessChunkForSealedSegWithOffsets(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        ValTypes... values) {
-        // For sealed segment, only single chunk
-        Assert(num_data_chunk_ == 1);
-        auto need_size =
-            std::min(active_count_ - current_data_chunk_pos_, batch_size_);
-
-        auto& skip_index = segment_->GetSkipIndex();
-        auto views_info = segment_->get_batch_views<T>(
-            field_id_, 0, current_data_chunk_pos_, need_size);
-        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
-            // Construct actual offsets array for GIS functions
-            std::vector<int32_t> segment_offsets_array(need_size);
-            for (int64_t j = 0; j < need_size; ++j) {
-                segment_offsets_array[j] =
-                    static_cast<int32_t>(current_data_chunk_pos_ + j);
-            }
-            // first is the raw data, second is valid_data
-            // use valid_data to see if raw data is null
-            func(views_info.first.data(),
-                 views_info.second.data(),
-                 nullptr,
-                 need_size,
-                 res,
-                 valid_res,
-                 values...,
-                 segment_offsets_array.data());
-        } else {
-            ApplyValidData(views_info.second.data(), res, valid_res, need_size);
-        }
-        current_data_chunk_pos_ += need_size;
-        return need_size;
-    }
-
     // accept offsets array and process on the scalar data by offsets
     // stateless! Just check and set bitset as result, does not need to move cursor
     // used for processing raw data expr for sealed segments.
