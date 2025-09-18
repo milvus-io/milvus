@@ -1,0 +1,131 @@
+import time
+
+import pytest
+from time import sleep
+import pymilvus
+from pymilvus import connections, utility
+from chaos.checker import (CollectionCreateChecker,
+                           InsertChecker,
+                           BulkInsertChecker,
+                           UpsertChecker,
+                           PartialUpdateChecker,
+                           FlushChecker,
+                           SearchChecker,
+                           FullTextSearchChecker,
+                           HybridSearchChecker,
+                           QueryChecker,
+                           TextMatchChecker,
+                           PhraseMatchChecker,
+                           JsonQueryChecker,
+                           GeoQueryChecker,
+                           IndexCreateChecker,
+                           DeleteChecker,
+                           CollectionDropChecker,
+                           AlterCollectionChecker,
+                           AddFieldChecker,
+                           CollectionRenameChecker,
+                           Op,
+                           EventRecords,
+                           ResultAnalyzer
+                           )
+from utils.util_log import test_log as log
+from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
+from chaos import chaos_commons as cc
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from chaos.chaos_commons import assert_statistic
+from chaos import constants
+from delayed_assert import assert_expectations
+
+
+class TestBase:
+    expect_create = constants.SUCC
+    expect_insert = constants.SUCC
+    expect_flush = constants.SUCC
+    expect_index = constants.SUCC
+    expect_search = constants.SUCC
+    expect_query = constants.SUCC
+    host = '127.0.0.1'
+    port = 19530
+    _chaos_config = None
+    health_checkers = {}
+
+
+class TestOperations(TestBase):
+
+    @pytest.fixture(scope="function", autouse=True)
+    def connection(self, upstream_uri, upstream_token, milvus_ns):
+        connections.connect('default', uri=upstream_uri, token=upstream_token)
+        if connections.has_connection("default") is False:
+            raise Exception("no connections")
+        log.info("connect to milvus successfully")
+        pymilvus_version = pymilvus.__version__
+        server_version = utility.get_server_version()
+        log.info(f"server version: {server_version}")
+        log.info(f"pymilvus version: {pymilvus_version}")
+        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_ns = milvus_ns
+        self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
+
+    def init_health_checkers(self, collection_name=None):
+        c_name = collection_name
+        checkers = {
+            Op.create: CollectionCreateChecker(collection_name=c_name),
+            Op.insert: InsertChecker(collection_name=c_name),
+            Op.upsert: UpsertChecker(collection_name=c_name),
+            Op.partial_update: PartialUpdateChecker(collection_name=c_name),
+            Op.flush: FlushChecker(collection_name=c_name),
+            Op.index: IndexCreateChecker(collection_name=c_name),
+            Op.search: SearchChecker(collection_name=c_name),
+            Op.full_text_search: FullTextSearchChecker(collection_name=c_name),
+            Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
+            Op.query: QueryChecker(collection_name=c_name),
+            Op.text_match: TextMatchChecker(collection_name=c_name),
+            Op.phrase_match: PhraseMatchChecker(collection_name=c_name),
+            Op.json_query: JsonQueryChecker(collection_name=c_name),
+            Op.geo_query: GeoQueryChecker(collection_name=c_name),
+            Op.delete: DeleteChecker(collection_name=c_name),
+            Op.drop: CollectionDropChecker(collection_name=c_name),
+            Op.alter_collection: AlterCollectionChecker(collection_name=c_name),
+            Op.add_field: AddFieldChecker(collection_name=c_name),
+            Op.rename_collection: CollectionRenameChecker(collection_name=c_name)
+        }
+        self.health_checkers = checkers
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_operations(self, request_duration, is_check):
+        # start the monitor threads to check the milvus ops
+        log.info("*********************Test Start**********************")
+        log.info(connections.get_connection_addr('default'))
+        event_records = EventRecords()
+        c_name = None
+        event_records.insert("init_health_checkers", "start")
+        self.init_health_checkers(collection_name=c_name)
+        event_records.insert("init_health_checkers", "finished")
+        tasks = cc.start_monitor_threads(self.health_checkers)
+        log.info("*********************Load Start**********************")
+        # wait request_duration
+        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+        if request_duration[-1] == "+":
+            request_duration = request_duration[:-1]
+        request_duration = eval(request_duration)
+        for i in range(10):
+            sleep(request_duration // 10)
+            # add an event so that the chaos can start to apply
+            if i == 3:
+                event_records.insert("init_chaos", "ready")
+            for k, v in self.health_checkers.items():
+                v.check_result()
+        if is_check:
+            assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
+            assert_expectations()
+        # wait all pod ready
+        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+        time.sleep(60)
+        cc.check_thread_status(tasks)
+        for k, v in self.health_checkers.items():
+            v.pause()
+        ra = ResultAnalyzer()
+        ra.get_stage_success_rate()
+        ra.show_result_table()
+        log.info("*********************Chaos Test Completed**********************")
