@@ -2384,6 +2384,7 @@ type queryCoordConfig struct {
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 
 	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
+	FileResourceMode               ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -4473,6 +4474,7 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	FileResourceMode      ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {

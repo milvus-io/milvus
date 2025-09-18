@@ -45,6 +45,14 @@ func InitManager(storage storage.ChunkManager, mode Mode) {
 	})
 }
 
+func Sync(resource_list []*internalpb.FileResourceInfo) error {
+	if GlobalFileManager == nil {
+		return nil
+	}
+
+	return GlobalFileManager.Sync(resource_list)
+}
+
 // Manager manage file resource
 type Manager interface {
 	// sync resource to local

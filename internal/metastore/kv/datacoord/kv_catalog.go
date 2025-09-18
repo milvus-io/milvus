@@ -966,8 +966,8 @@ func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) 
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
 	kvs := make(map[string]string)
 
-	k := BuildFileResourceKey(resource.ID)
-	v, err := proto.Marshal(resource.Marshal())
+	k := BuildFileResourceKey(resource.Id)
+	v, err := proto.Marshal(resource)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
 		return err
