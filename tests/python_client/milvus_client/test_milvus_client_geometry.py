@@ -511,6 +511,155 @@ def generate_diverse_base_data(
     return base_data
 
 
+def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.7128, center_lon: float = -74.0060):
+    """
+    Generate latitude/longitude based geometry data for ST_DWITHIN testing
+
+    Args:
+        count: Number of geometries to generate
+        center_lat: Center latitude (default: NYC latitude)
+        center_lon: Center longitude (default: NYC longitude)
+
+    Returns:
+        List of WKT POINT strings with latitude/longitude coordinates
+    """
+    points = []
+
+    # Add center point
+    points.append(f"POINT ({center_lon:.6f} {center_lat:.6f})")
+
+    # Add points at various distances from center
+    # Using approximate degree-to-meter conversions at NYC latitude
+    # 1 degree latitude ≈ 111,320 meters
+    # 1 degree longitude ≈ 111,320 * cos(latitude) meters
+    lat_degree_per_meter = 1.0 / 111320.0
+    lon_degree_per_meter = 1.0 / (111320.0 * np.cos(np.radians(center_lat)))
+
+    distances_meters = [500, 1000, 2000, 5000, 10000, 20000, 50000]
+    directions = [0, 45, 90, 135, 180, 225, 270, 315]  # degrees
+
+    point_id = 1
+    for distance in distances_meters:
+        if point_id >= count:
+            break
+        for direction in directions:
+            if point_id >= count:
+                break
+
+            # Convert direction to radians
+            direction_rad = np.radians(direction)
+
+            # Calculate lat/lon offset
+            lat_offset = distance * lat_degree_per_meter * np.cos(direction_rad)
+            lon_offset = distance * lon_degree_per_meter * np.sin(direction_rad)
+
+            new_lat = center_lat + lat_offset
+            new_lon = center_lon + lon_offset
+
+            points.append(f"POINT ({new_lon:.6f} {new_lat:.6f})")
+            point_id += 1
+
+    # Fill remaining slots with random points in nearby area
+    while len(points) < count:
+        # Random points within 100km radius with varied distribution
+        angle = random.uniform(0, 2 * np.pi)
+
+        # Use exponential distribution to have more points closer to center
+        # but still cover the full range
+        if random.random() < 0.7:  # 70% within 20km
+            distance = random.uniform(100, 20000)
+        else:  # 30% between 20-100km
+            distance = random.uniform(20000, 100000)
+
+        lat_offset = distance * lat_degree_per_meter * np.cos(angle)
+        lon_offset = distance * lon_degree_per_meter * np.sin(angle)
+
+        new_lat = center_lat + lat_offset
+        new_lon = center_lon + lon_offset
+
+        points.append(f"POINT ({new_lon:.6f} {new_lat:.6f})")
+
+    return points[:count]
+
+
+def generate_dwithin_query_point(center_lat: float = 40.7128, center_lon: float = -74.0060):
+    """
+    Generate a query point for ST_DWITHIN testing
+
+    Args:
+        center_lat: Center latitude (default: NYC latitude)
+        center_lon: Center longitude (default: NYC longitude)
+
+    Returns:
+        WKT POINT string for query
+    """
+    return f"POINT ({center_lon:.6f} {center_lat:.6f})"
+
+
+def calculate_expected_ids_for_dwithin(base_data, query_point, distance_meters, geo_field_name="geo", pk_field_name="id"):
+    """
+    Calculate expected IDs for ST_DWITHIN using Haversine distance formula
+
+    Args:
+        base_data: List of base geometry data
+        query_point: WKT POINT string for query
+        distance_meters: Distance threshold in meters
+        geo_field_name: Name of geometry field
+        pk_field_name: Name of primary key field
+
+    Returns:
+        Set of expected IDs within the distance
+    """
+    import re
+
+    def parse_point(wkt):
+        """Extract lon, lat from POINT WKT"""
+        match = re.search(r"POINT \(([0-9.-]+) ([0-9.-]+)\)", wkt)
+        if match:
+            return float(match.group(1)), float(match.group(2))  # lon, lat
+        return None, None
+
+    def haversine_distance(lat1, lon1, lat2, lon2):
+        """Calculate great-circle distance between two points on Earth using Haversine formula"""
+        R = 6371000  # Earth's radius in meters
+
+        lat1_rad = np.radians(lat1)
+        lon1_rad = np.radians(lon1)
+        lat2_rad = np.radians(lat2)
+        lon2_rad = np.radians(lon2)
+
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+
+        a = (np.sin(dlat / 2) ** 2 +
+             np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2) ** 2)
+        c = 2 * np.arcsin(np.sqrt(a))
+
+        return R * c
+
+    # Parse query point
+    query_lon, query_lat = parse_point(query_point)
+    if query_lon is None:
+        return set()
+
+    expected_ids = set()
+
+    for item in base_data:
+        # Parse base point
+        base_lon, base_lat = parse_point(item[geo_field_name])
+        if base_lon is None:
+            continue
+
+        # Calculate distance
+        actual_distance = haversine_distance(query_lat, query_lon, base_lat, base_lon)
+
+        # Check if within threshold
+        if actual_distance <= distance_meters:
+            expected_ids.add(item[pk_field_name])
+
+    return expected_ids
+
+
 def generate_gt(
     spatial_func, base_data, query_geom, geo_field_name="geo", pk_field_name="id"
 ):
@@ -2656,6 +2805,208 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             len(spatial_query_results) == 10
         )  # All remaining points should be in this region
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("distance_meters", [1000, 2000, 20000])
+    @pytest.mark.parametrize("with_geo_index", [True, False])
+    def test_st_dwithin_functionality_and_index(self, distance_meters, with_geo_index):
+        """
+        target: test ST_DWITHIN operator with various distances and index configurations using latitude/longitude coordinates
+        method: insert thousands of POINT geometries, test with/without RTREE index, verify results using ground truth
+        expected: correct results matching Haversine distance calculations, consistent with and without index
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection with geometry field
+        schema, _ = self.create_schema(client, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("geo", DataType.GEOMETRY)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Generate latitude/longitude based test data with thousands of points
+        center_lat, center_lon = 40.7128, -74.0060  # NYC coordinates
+        geo_points = generate_latlon_data_for_dwithin(count=3000, center_lat=center_lat, center_lon=center_lon)
+
+        # Create test data with generated points
+        data = []
+        base_data = []
+        for i, geo_point in enumerate(geo_points):
+            item = {
+                "id": i,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": geo_point
+            }
+            data.append(item)
+            base_data.append({"id": i, "geo": geo_point})
+
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create indexes based on parameter
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(
+            field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
+        )
+        if with_geo_index:
+            index_params.add_index(field_name="geo", index_type="RTREE")
+
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # Load collection
+        self.load_collection(client, collection_name)
+
+        # Generate query point and calculate ground truth using Haversine distance
+        query_point = generate_dwithin_query_point(center_lat=center_lat, center_lon=center_lon)
+        expected_within = calculate_expected_ids_for_dwithin(
+            base_data, query_point, distance_meters, geo_field_name="geo", pk_field_name="id"
+        )
+
+        # Query using ST_DWITHIN
+        results, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{query_point}', {distance_meters})",
+            output_fields=["id", "geo"],
+        )
+
+        # Verify results match ground truth
+        result_ids = {result["id"] for result in results}
+        assert result_ids == expected_within, (
+            f"ST_DWITHIN({distance_meters}m, index={with_geo_index}) should return expected IDs "
+            f"(count: {len(expected_within)}), but got different IDs (count: {len(result_ids)})"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_geo_index", [True, False])
+    def test_st_dwithin_edge_cases(self, with_geo_index):
+        """
+        target: test ST_DWITHIN with edge cases and boundary conditions, with/without RTREE index
+        method: test with zero distance, small distances, and boundary points using ground truth verification
+        expected: correct behavior for edge cases, consistent results with and without index
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection with geometry field
+        schema, _ = self.create_schema(client, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("geo", DataType.GEOMETRY)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Generate test data using lat/lon coordinates for edge case testing
+        center_lat, center_lon = 40.7128, -74.0060  # NYC coordinates
+
+        # Generate edge case test points using the data generation function
+        geo_points = [
+            generate_dwithin_query_point(center_lat=center_lat, center_lon=center_lon),  # Exact match point
+            f"POINT ({center_lon + 0.0001:.6f} {center_lat:.6f})",  # Very close point (~10m)
+            f"POINT ({center_lon + 0.001:.6f} {center_lat:.6f})",   # ~100m away
+            f"POINT ({center_lon + 0.1:.6f} {center_lat:.6f})",     # Far point (~10km)
+        ]
+
+        data = []
+        for i, geo_point in enumerate(geo_points):
+            data.append({
+                "id": i + 1,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": geo_point
+            })
+
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create indexes based on parameter
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(
+            field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
+        )
+        if with_geo_index:
+            index_params.add_index(field_name="geo", index_type="RTREE")
+
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # Load collection
+        self.load_collection(client, collection_name)
+
+        # Generate query point and base data for ground truth calculation
+        query_point = generate_dwithin_query_point(center_lat=center_lat, center_lon=center_lon)
+        base_data = [{"id": i + 1, "geo": geo_point} for i, geo_point in enumerate(geo_points)]
+
+        # Test zero distance using ground truth
+        expected_zero = calculate_expected_ids_for_dwithin(
+            base_data, query_point, 0, geo_field_name="geo", pk_field_name="id"
+        )
+        results_zero, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{query_point}', 0)",
+            output_fields=["id", "geo"],
+        )
+
+        result_ids_zero = {result["id"] for result in results_zero}
+        assert result_ids_zero == expected_zero, (
+            f"Zero distance (index={with_geo_index}) should return expected IDs {expected_zero}, got {result_ids_zero}"
+        )
+
+        # Test small distance (50m) using ground truth
+        expected_50m = calculate_expected_ids_for_dwithin(
+            base_data, query_point, 50, geo_field_name="geo", pk_field_name="id"
+        )
+        results_small, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{query_point}', 50)",
+            output_fields=["id", "geo"],
+        )
+
+        result_ids_small = {result["id"] for result in results_small}
+        assert result_ids_small == expected_50m, (
+            f"50m distance (index={with_geo_index}) should return expected IDs {expected_50m}, got {result_ids_small}"
+        )
+
+        # Test medium distance (200m) using ground truth
+        expected_200m = calculate_expected_ids_for_dwithin(
+            base_data, query_point, 200, geo_field_name="geo", pk_field_name="id"
+        )
+        results_medium, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{query_point}', 200)",
+            output_fields=["id", "geo"],
+        )
+
+        result_ids_medium = {result["id"] for result in results_medium}
+        assert result_ids_medium == expected_200m, (
+            f"200m distance (index={with_geo_index}) should return expected IDs {expected_200m}, got {result_ids_medium}"
+        )
+
+        # Test large distance (20km) using ground truth
+        expected_20km = calculate_expected_ids_for_dwithin(
+            base_data, query_point, 20000, geo_field_name="geo", pk_field_name="id"
+        )
+        results_large, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{query_point}', 20000)",
+            output_fields=["id", "geo"],
+        )
+
+        result_ids_large = {result["id"] for result in results_large}
+        assert result_ids_large == expected_20km, (
+            f"20km distance (index={with_geo_index}) should return expected IDs {expected_20km}, got {result_ids_large}"
+        )
+
+        # Verify distance ordering: larger distances should return same or more results
+        assert len(result_ids_zero) <= len(result_ids_small) <= len(result_ids_medium) <= len(result_ids_large), (
+            "Larger distances should return same or more results"
+        )
+
+
+
 
 class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
     """Test case of geometry operations - negative cases"""
@@ -3031,3 +3382,246 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_geo_index", [True, False])
+    def test_st_dwithin_with_invalid_filters(self, with_geo_index):
+        """
+        target: test ST_DWITHIN error handling for invalid parameters with/without RTREE index
+        method: test with invalid geometries, negative distances, and wrong parameter types
+        expected: appropriate error messages for invalid inputs, consistent behavior with and without index
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection with geometry field
+        schema, _ = self.create_schema(client, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("geo", DataType.GEOMETRY)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Generate test data using lat/lon coordinates
+        center_lat, center_lon = 40.7128, -74.0060  # NYC coordinates
+        test_point = generate_dwithin_query_point(center_lat=center_lat, center_lon=center_lon)
+
+        data = [
+            {
+                "id": 1,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": test_point
+            }
+        ]
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create indexes based on parameter
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(
+            field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
+        )
+        if with_geo_index:
+            index_params.add_index(field_name="geo", index_type="RTREE")
+
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # Load collection
+        self.load_collection(client, collection_name)
+
+        # Test invalid WKT geometry
+        error_invalid_wkt = {
+            ct.err_code: 1100,
+            ct.err_msg: "failed to create query plan: cannot parse expression",
+        }
+        self.query(
+            client,
+            collection_name=collection_name,
+            filter="ST_DWITHIN(geo, 'INVALID_WKT', 1000)",
+            output_fields=["id", "geo"],
+            check_task=CheckTasks.err_res,
+            check_items=error_invalid_wkt,
+        )
+
+        # Test negative distance
+        error_negative_distance = {
+            ct.err_code: 1100,
+            ct.err_msg: "failed to create query plan: cannot parse expression",
+        }
+        self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{test_point}', -100)",
+            output_fields=["id", "geo"],
+            check_task=CheckTasks.err_res,
+            check_items=error_negative_distance,
+        )
+
+        # Test missing parameters
+        error_missing_params = {
+            ct.err_code: 1100,
+            ct.err_msg: "failed to create query plan: cannot parse expression",
+        }
+        self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{test_point}')",  # Missing distance
+            output_fields=["id", "geo"],
+            check_task=CheckTasks.err_res,
+            check_items=error_missing_params,
+        )
+
+        # Test too many parameters
+        self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, '{test_point}', 1000, 'extra')",
+            output_fields=["id", "geo"],
+            check_task=CheckTasks.err_res,
+            check_items=error_missing_params,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_geo_index", [True, False])
+    @pytest.mark.skip(reason="not implemented for verifcation")
+    def test_st_dwithin_invalid_query_coordinates(self, with_geo_index):
+        """
+        target: test ST_DWITHIN with invalid query latitude/longitude coordinates
+        method: test with coordinates outside valid ranges (lat: -90 to 90, lon: -180 to 180)
+        expected: appropriate error handling for invalid coordinate values
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection with geometry field
+        schema, _ = self.create_schema(client, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("geo", DataType.GEOMETRY)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert valid test data first
+        center_lat, center_lon = 40.7128, -74.0060  # NYC coordinates
+        valid_point = generate_dwithin_query_point(center_lat=center_lat, center_lon=center_lon)
+
+        data = [
+            {
+                "id": 1,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": valid_point
+            }
+        ]
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create indexes based on parameter
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(
+            field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128
+        )
+        if with_geo_index:
+            index_params.add_index(field_name="geo", index_type="RTREE")
+
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # Load collection
+        self.load_collection(client, collection_name)
+
+        # Test cases with invalid coordinates
+        invalid_coordinate_cases = [
+            # Invalid latitude (> 90)
+            ("POINT (-74.0060 95.0)", "latitude > 90"),
+            # Invalid latitude (< -90)
+            ("POINT (-74.0060 -95.0)", "latitude < -90"),
+            # Invalid longitude (> 180)
+            ("POINT (185.0 40.7128)", "longitude > 180"),
+            # Invalid longitude (< -180)
+            ("POINT (-185.0 40.7128)", "longitude < -180"),
+            # Both coordinates invalid
+            ("POINT (200.0 100.0)", "both coordinates invalid"),
+            # Edge case: exactly at boundary but invalid
+            ("POINT (180.1 90.1)", "slightly over boundary"),
+        ]
+
+        error_invalid_coords = {
+            ct.err_code: 1,
+            ct.err_msg: "invalid coordinate",  # May need to adjust based on actual error message
+        }
+
+        for invalid_point, description in invalid_coordinate_cases:
+            # Test query with invalid coordinates
+            self.query(
+                client,
+                collection_name=collection_name,
+                filter=f"ST_DWITHIN(geo, '{invalid_point}', 1000)",
+                output_fields=["id", "geo"],
+                check_task=CheckTasks.err_res,
+                check_items=error_invalid_coords,
+            )
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="not implemented for verifcation")
+    def test_st_dwithin_invalid_base_data_coordinates(self):
+        """
+        target: test ST_DWITHIN with invalid coordinates in base data
+        method: attempt to insert POINT data with coordinates outside valid lat/lon ranges
+        expected: appropriate error handling during data insertion or querying
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection with geometry field
+        schema, _ = self.create_schema(client, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("geo", DataType.GEOMETRY)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Test cases with invalid base data coordinates
+        invalid_base_data_cases = [
+            {
+                "id": 1,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": "POINT (-74.0060 95.0)"  # Invalid latitude > 90
+            },
+            {
+                "id": 2,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": "POINT (-74.0060 -95.0)"  # Invalid latitude < -90
+            },
+            {
+                "id": 3,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": "POINT (185.0 40.7128)"  # Invalid longitude > 180
+            },
+            {
+                "id": 4,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": "POINT (-185.0 40.7128)"  # Invalid longitude < -180
+            }
+        ]
+
+        # Test each invalid coordinate case individually
+        for invalid_data in invalid_base_data_cases:
+            # Create a new collection for each test to avoid state pollution
+            test_collection_name = f"{collection_name}_{invalid_data['id']}"
+
+            # Create collection
+            self.create_collection(client, test_collection_name, schema=schema)
+
+            # Try to insert invalid coordinate data
+            error_invalid_insert = {
+                ct.err_code: 1100,
+                ct.err_msg: "failed to insert invalid geometry",
+            }
+            self.insert(
+                client,
+                test_collection_name,
+                [invalid_data],
+                check_task=CheckTasks.err_res,
+                check_items=error_invalid_insert,
+            )
+
