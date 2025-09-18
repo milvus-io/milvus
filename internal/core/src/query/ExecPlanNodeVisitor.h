@@ -23,28 +23,12 @@ namespace milvus::query {
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
     void
-    visit(FloatVectorANNS& node) override;
-
-    void
-    visit(BinaryVectorANNS& node) override;
-
-    void
-    visit(Float16VectorANNS& node) override;
-
-    void
-    visit(BFloat16VectorANNS& node) override;
-
-    void
-    visit(SparseFloatVectorANNS& node) override;
-
-    void
-    visit(Int8VectorANNS& node) override;
+    visit(VectorPlanNode& node) override;
 
     void
     visit(RetrievePlanNode& node) override;
 
-    void
-    visit(EmbListFloatVectorANNS& node) override;
+    // no extra visit for vector types
 
  public:
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
@@ -108,7 +92,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
-    template <typename VectorType>
     void
     VectorVisitorImpl(VectorPlanNode& node);
 
