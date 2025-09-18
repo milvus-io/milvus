@@ -238,6 +238,12 @@ func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.Re
 	return infos, nil
 }
 
+func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) string {
+	targetClusterID := meta.GetTargetCluster().GetClusterId()
+	sourceChannelName := meta.GetSourceChannelName()
+	return buildReplicatePChannelPath(targetClusterID, sourceChannelName)
+}
+
 func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {
 	return fmt.Sprintf("%s%s-%s", ReplicatePChannelMetaPrefix, targetClusterID, sourceChannelName)
 }

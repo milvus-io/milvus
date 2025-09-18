@@ -19,6 +19,7 @@ package replicateutil
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,26 +30,28 @@ type ReplicateConfigValidator struct {
 	currentClusterID string
 	currentPChannels []string
 	clusterMap       map[string]*commonpb.MilvusCluster
-	config           *commonpb.ReplicateConfiguration
+	incomingConfig   *commonpb.ReplicateConfiguration
+	currentConfig    *commonpb.ReplicateConfiguration
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
-func NewReplicateConfigValidator(config *commonpb.ReplicateConfiguration, currentClusterID string, currentPChannels []string) *ReplicateConfigValidator {
+func NewReplicateConfigValidator(incomingConfig, currentConfig *commonpb.ReplicateConfiguration, currentClusterID string, currentPChannels []string) *ReplicateConfigValidator {
 	validator := &ReplicateConfigValidator{
 		currentClusterID: currentClusterID,
 		currentPChannels: currentPChannels,
 		clusterMap:       make(map[string]*commonpb.MilvusCluster),
-		config:           config,
+		incomingConfig:   incomingConfig,
+		currentConfig:    currentConfig,
 	}
 	return validator
 }
 
 // Validate performs all validation checks on the configuration
 func (v *ReplicateConfigValidator) Validate() error {
-	if v.config == nil {
+	if v.incomingConfig == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
-	clusters := v.config.GetClusters()
+	clusters := v.incomingConfig.GetClusters()
 	if len(clusters) == 0 {
 		return fmt.Errorf("clusters list cannot be empty")
 	}
@@ -59,12 +62,18 @@ func (v *ReplicateConfigValidator) Validate() error {
 	if err := v.validateRelevance(); err != nil {
 		return err
 	}
-	topologies := v.config.GetCrossClusterTopology()
+	topologies := v.incomingConfig.GetCrossClusterTopology()
 	if err := v.validateTopologyEdgeUniqueness(topologies); err != nil {
 		return err
 	}
 	if err := v.validateTopologyTypeConstraint(topologies); err != nil {
 		return err
+	}
+	// If currentConfig is provided, perform comparison validation
+	if v.currentConfig != nil {
+		if err := v.validateConfigComparison(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -222,6 +231,59 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 				clusterID, inDegree[clusterID], outDegree[clusterID])
 		}
 	}
+	return nil
+}
+
+// validateConfigComparison validates that for clusters with the same ClusterID,
+// no cluster attributes can be changed
+func (v *ReplicateConfigValidator) validateConfigComparison() error {
+	currentClusters := v.currentConfig.GetClusters()
+	currentClusterMap := make(map[string]*commonpb.MilvusCluster)
+
+	// Build current cluster map
+	for _, cluster := range currentClusters {
+		if cluster != nil {
+			currentClusterMap[cluster.GetClusterId()] = cluster
+		}
+	}
+
+	// Compare each incoming cluster with current cluster
+	for _, incomingCluster := range v.incomingConfig.GetClusters() {
+		clusterID := incomingCluster.GetClusterId()
+		currentCluster, exists := currentClusterMap[clusterID]
+		if exists {
+			// Cluster exists in current config, validate that only ConnectionParam can change
+			if err := v.validateClusterConsistency(currentCluster, incomingCluster); err != nil {
+				return err
+			}
+		}
+		// If cluster doesn't exist in current config, it's a new cluster, which is allowed
+	}
+
+	return nil
+}
+
+// validateClusterConsistency validates that no cluster attributes can be changed between current and incoming cluster
+func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming *commonpb.MilvusCluster) error {
+	// Check Pchannels consistency
+	if !slices.Equal(current.GetPchannels(), incoming.GetPchannels()) {
+		return fmt.Errorf("cluster '%s' pchannels cannot be changed: current=%v, incoming=%v",
+			current.GetClusterId(), current.GetPchannels(), incoming.GetPchannels())
+	}
+
+	// Check ConnectionParam consistency
+	currentConn := current.GetConnectionParam()
+	incomingConn := incoming.GetConnectionParam()
+
+	if currentConn.GetUri() != incomingConn.GetUri() {
+		return fmt.Errorf("cluster '%s' connection_param.uri cannot be changed: current=%s, incoming=%s",
+			current.GetClusterId(), currentConn.GetUri(), incomingConn.GetUri())
+	}
+	if currentConn.GetToken() != incomingConn.GetToken() {
+		return fmt.Errorf("cluster '%s' connection_param.token cannot be changed",
+			current.GetClusterId())
+	}
+
 	return nil
 }
 

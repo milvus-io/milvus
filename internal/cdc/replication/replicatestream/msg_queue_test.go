@@ -43,7 +43,7 @@ func TestMsgQueue_BasicOperations(t *testing.T) {
 	assert.Equal(t, 1, queue.Len())
 
 	// Test dequeue
-	dequeuedMsg, err := queue.Dequeue(ctx)
+	dequeuedMsg, err := queue.ReadNext(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msg1, dequeuedMsg)
 	assert.Equal(t, 1, queue.Len()) // Length doesn't change after dequeue
@@ -89,7 +89,7 @@ func TestMsgQueue_DequeueBlocking(t *testing.T) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 
-	_, err := queue.Dequeue(ctxWithTimeout)
+	_, err := queue.ReadNext(ctxWithTimeout)
 	assert.Error(t, err)
 	// Context timeout will cause context.Canceled error, not DeadlineExceeded
 	assert.Equal(t, context.Canceled, err)
@@ -112,7 +112,7 @@ func TestMsgQueue_SeekToHead(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Dequeue first message
-	dequeuedMsg, err := queue.Dequeue(ctx)
+	dequeuedMsg, err := queue.ReadNext(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msg1, dequeuedMsg)
 
@@ -120,7 +120,7 @@ func TestMsgQueue_SeekToHead(t *testing.T) {
 	queue.SeekToHead()
 
 	// Should be able to dequeue first message again
-	dequeuedMsg, err = queue.Dequeue(ctx)
+	dequeuedMsg, err = queue.ReadNext(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msg1, dequeuedMsg)
 }
@@ -155,7 +155,7 @@ func TestMsgQueue_CleanupConfirmedMessages(t *testing.T) {
 	assert.Equal(t, msg2, cleanedMessages[1])
 
 	// First two messages should be removed
-	dequeuedMsg, err := queue.Dequeue(ctx)
+	dequeuedMsg, err := queue.ReadNext(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msg3, dequeuedMsg) // Only msg3 remains
 }
@@ -181,7 +181,7 @@ func TestMsgQueue_CleanupWithReadCursor(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Dequeue first message (advance read cursor)
-	dequeuedMsg, err := queue.Dequeue(ctx)
+	dequeuedMsg, err := queue.ReadNext(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msg1, dequeuedMsg)
 	assert.Equal(t, 1, queue.readIdx)
@@ -256,7 +256,7 @@ func TestMsgQueue_ConcurrentOperations(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < numMessages; i++ {
-			dequeuedMsg, err := queue.Dequeue(ctx)
+			dequeuedMsg, err := queue.ReadNext(ctx)
 			assert.NoError(t, err)
 			cleanedMessages := queue.CleanupConfirmedMessages(dequeuedMsg.TimeTick())
 			assert.Equal(t, 1, len(cleanedMessages))

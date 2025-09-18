@@ -107,7 +107,9 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 
 	// validate the configuration itself
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	validator := replicateutil.NewReplicateConfigValidator(config, currentClusterID, pchannels)
+	currentConfig := latestAssignment.ReplicateConfiguration
+	incomingConfig := config
+	validator := replicateutil.NewReplicateConfigValidator(incomingConfig, currentConfig, currentClusterID, pchannels)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err
