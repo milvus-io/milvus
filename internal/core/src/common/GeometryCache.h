@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -24,14 +25,11 @@
 namespace milvus {
 namespace exec {
 
-// Custom hash function for segment id + field id pair
-struct SegmentFieldHash {
-    std::size_t
-    operator()(const std::pair<int64_t, int64_t>& p) const {
-        return std::hash<int64_t>{}(p.first) ^
-               (std::hash<int64_t>{}(p.second) << 1);
-    }
-};
+// Helper function to create cache key from segment_id and field_id
+inline std::string
+MakeCacheKey(int64_t segment_id, FieldId field_id) {
+    return std::to_string(segment_id) + "_" + std::to_string(field_id.get());
+}
 
 // Vector-based Geometry cache that maintains original field data order
 class SimpleGeometryCache {
@@ -56,17 +54,27 @@ class SimpleGeometryCache {
         }
     }
 
-    // Get Geometry by offset (thread-safe read for filtering)
-    const Geometry*
-    GetByOffset(size_t offset) const {
+    void
+    RLockCache() {
         std::shared_lock<std::shared_mutex> lock(mutex_);
+    }
 
+    const Geometry*
+    GetByOffsetUnsafe(size_t offset) const {
         if (offset >= geometries_.size()) {
             return nullptr;
         }
 
         const auto& geometry = geometries_[offset];
         return geometry.IsValid() ? &geometry : nullptr;
+    }
+
+    // Get Geometry by offset (thread-safe read for filtering)
+    const Geometry*
+    GetByOffset(size_t offset) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+
+        return GetByOffsetUnsafe(offset);
     }
 
     // Get total number of loaded geometries
@@ -109,7 +117,7 @@ class SimpleGeometryCacheManager {
     SimpleGeometryCache&
     GetCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto key = std::make_pair(segment_id, field_id.get());
+        auto key = MakeCacheKey(segment_id, field_id);
         auto it = caches_.find(key);
         if (it != caches_.end()) {
             return *(it->second);
@@ -124,7 +132,7 @@ class SimpleGeometryCacheManager {
     void
     RemoveCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto key = std::make_pair(segment_id, field_id.get());
+        auto key = MakeCacheKey(segment_id, field_id);
         caches_.erase(key);
     }
 
@@ -132,9 +140,11 @@ class SimpleGeometryCacheManager {
     void
     RemoveSegmentCaches(int64_t segment_id) {
         std::lock_guard<std::mutex> lock(mutex_);
+        auto segment_prefix = std::to_string(segment_id) + "_";
         auto it = caches_.begin();
         while (it != caches_.end()) {
-            if (it->first.first == segment_id) {
+            if (it->first.substr(0, segment_prefix.length()) ==
+                segment_prefix) {
                 it = caches_.erase(it);
             } else {
                 ++it;
@@ -169,9 +179,7 @@ class SimpleGeometryCacheManager {
     operator=(const SimpleGeometryCacheManager&) = delete;
 
     mutable std::mutex mutex_;
-    std::unordered_map<std::pair<int64_t, int64_t>,
-                       std::unique_ptr<SimpleGeometryCache>,
-                       SegmentFieldHash>
+    std::unordered_map<std::string, std::unique_ptr<SimpleGeometryCache>>
         caches_;
 };
 
