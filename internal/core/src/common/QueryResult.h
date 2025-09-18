@@ -186,6 +186,15 @@ struct SearchResult {
     }
 
  public:
+    template <typename SegmentInternalInterface>
+    PkType
+    get_pk(int64_t offset) {
+        auto segment = static_cast<SegmentInternalInterface*>(segment_);
+
+        auto res = segment->get_pk(offset);
+        primary_keys_[offset] = res;
+        return res;
+    }
     int64_t total_nq_;
     int64_t unity_topK_;
     int64_t total_data_cnt_;

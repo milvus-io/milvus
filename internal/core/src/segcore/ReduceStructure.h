@@ -17,6 +17,7 @@
 #include "common/Consts.h"
 #include "common/Types.h"
 #include "common/QueryResult.h"
+#include "segcore/SegmentInterface.h"
 
 using milvus::SearchResult;
 
@@ -67,7 +68,10 @@ struct SearchResultPair {
     advance() {
         offset_++;
         if (offset_ < offset_rb_) {
-            primary_key_ = search_result_->primary_keys_.at(offset_);
+            primary_key_ =
+                search_result_
+                    ->get_pk<milvus::segcore::SegmentInternalInterface>(
+                        offset_);
             distance_ = search_result_->distances_.at(offset_);
             if (search_result_->group_by_values_.has_value() &&
                 offset_ < search_result_->group_by_values_.value().size()) {

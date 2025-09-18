@@ -117,7 +117,9 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (offset_beg == offset_end) {
             continue;
         }
-        auto primary_key = search_result->primary_keys_[offset_beg];
+        auto primary_key =
+            search_result->get_pk<segcore::SegmentInternalInterface>(
+                offset_beg);
         auto distance = search_result->distances_[offset_beg];
         AssertInfo(search_result->group_by_values_.has_value(),
                    "Wrong state, search_result has no group_by_vales for "
