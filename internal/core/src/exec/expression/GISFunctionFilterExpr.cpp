@@ -35,7 +35,7 @@ namespace exec {
         auto& geometry_cache =                                                                        \
             SimpleGeometryCacheManager::Instance().GetCache(                                          \
                 this->segment_->get_segment_id(), field_id_);                                         \
-        geometry_cache.RLockCache();                                                                  \
+        auto cache_lock = geometry_cache.AcquireReadLock();                                           \
         for (int i = 0; i < size; ++i) {                                                              \
             if (valid_data != nullptr && !valid_data[i]) {                                            \
                 res[i] = valid_res[i] = false;                                                        \
@@ -73,7 +73,7 @@ namespace exec {
         auto& geometry_cache =                                                 \
             SimpleGeometryCacheManager::Instance().GetCache(                   \
                 this->segment_->get_segment_id(), field_id_);                  \
-        geometry_cache.RLockCache();                                           \
+        auto cache_lock = geometry_cache.AcquireReadLock();                    \
         for (int i = 0; i < size; ++i) {                                       \
             if (valid_data != nullptr && !valid_data[i]) {                     \
                 res[i] = valid_res[i] = false;                                 \
@@ -357,7 +357,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 auto& geometry_cache =
                     SimpleGeometryCacheManager::Instance().GetCache(
                         segment_->get_segment_id(), field_id_);
-                geometry_cache.RLockCache();
+                auto cache_lock = geometry_cache.AcquireReadLock();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {
                     const auto pos = hit_offsets[i];
 

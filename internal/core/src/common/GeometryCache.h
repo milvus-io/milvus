@@ -54,11 +54,13 @@ class SimpleGeometryCache {
         }
     }
 
-    void
-    RLockCache() {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
+    // Get shared lock for batch operations (RAII)
+    std::shared_lock<std::shared_mutex>
+    AcquireReadLock() const {
+        return std::shared_lock<std::shared_mutex>(mutex_);
     }
 
+    // Get Geometry by offset without locking (use with AcquireReadLock)
     const Geometry*
     GetByOffsetUnsafe(size_t offset) const {
         if (offset >= geometries_.size()) {
@@ -73,7 +75,6 @@ class SimpleGeometryCache {
     const Geometry*
     GetByOffset(size_t offset) const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
-
         return GetByOffsetUnsafe(offset);
     }
 
