@@ -17,6 +17,7 @@
 #pragma once
 
 #include <future>
+#include <shared_mutex>
 
 #include "milvus-storage/filesystem/fs.h"
 #include <tbb/concurrent_unordered_map.h>
