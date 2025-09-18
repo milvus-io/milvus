@@ -353,11 +353,11 @@ func (s *Server) initDataCoord() error {
 // initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
 func (s *Server) initMessageCallback() {
-	registry.RegisterDropPartitionMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
+	registry.RegisterDropPartitionV1AckCallback(func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
 		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{msg.Header().PartitionId})
 	})
 
-	registry.RegisterImportMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableImportMessageV1) error {
+	registry.RegisterImportV1AckCallback(func(ctx context.Context, msg message.ImmutableImportMessageV1) error {
 		body := msg.MustBody()
 		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			CollectionID:   body.GetCollectionID(),
@@ -388,7 +388,7 @@ func (s *Server) initMessageCallback() {
 		return nil
 	})
 
-	registry.RegisterImportMessageV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
+	registry.RegisterImportV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
 		b := msg.MustBody()
 		options := funcutil.Map2KeyValuePair(b.GetOptions())
 		_, err := importutilv2.GetTimeoutTs(options)

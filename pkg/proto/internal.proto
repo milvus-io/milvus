@@ -262,6 +262,7 @@ message CredentialInfo {
   bool is_super = 4;
   // encrypted by sha256 (for good performance in cache mapping)
   string sha256_password = 5;
+  uint64 time_tick = 6; // the timetick in wal which the credential updates
 }
 
 message ListPolicyRequest {

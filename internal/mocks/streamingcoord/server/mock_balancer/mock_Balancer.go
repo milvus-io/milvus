@@ -421,7 +421,7 @@ func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.C
 }
 
 // UpdateReplicateConfiguration provides a mock function with given fields: ctx, msgs
-func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2) error {
+func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
 	_va := make([]interface{}, len(msgs))
 	for _i := range msgs {
 		_va[_i] = msgs[_i]
@@ -436,7 +436,7 @@ func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, msgs .
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, ...message.ImmutablePutReplicateConfigMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error); ok {
 		r0 = rf(ctx, msgs...)
 	} else {
 		r0 = ret.Error(0)
@@ -452,18 +452,18 @@ type MockBalancer_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - msgs ...message.ImmutablePutReplicateConfigMessageV2
+//   - msgs ...message.ImmutableAlterReplicateConfigMessageV2
 func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, msgs ...interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
 	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration",
 		append([]interface{}{ctx}, msgs...)...)}
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, msgs ...message.ImmutablePutReplicateConfigMessageV2)) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2)) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]message.ImmutablePutReplicateConfigMessageV2, len(args)-1)
+		variadicArgs := make([]message.ImmutableAlterReplicateConfigMessageV2, len(args)-1)
 		for i, a := range args[1:] {
 			if a != nil {
-				variadicArgs[i] = a.(message.ImmutablePutReplicateConfigMessageV2)
+				variadicArgs[i] = a.(message.ImmutableAlterReplicateConfigMessageV2)
 			}
 		}
 		run(args[0].(context.Context), variadicArgs...)
@@ -476,7 +476,7 @@ func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, ...message.ImmutablePutReplicateConfigMessageV2) error) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }
