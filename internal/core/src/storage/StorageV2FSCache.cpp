@@ -23,7 +23,6 @@ StorageV2FSCache::Instance() {
 
 milvus_storage::ArrowFileSystemPtr
 StorageV2FSCache::Get(const Key& key) {
-    // concurrent_map_.
     auto it = concurrent_map_.find(key);
     if (it != concurrent_map_.end()) {
         return it->second.second.get();
@@ -58,8 +57,9 @@ StorageV2FSCache::Get(const Key& key) {
     conf.use_custom_part_upload = key.use_custom_part_upload;
     auto result = milvus_storage::CreateArrowFileSystem(conf);
 
-    // do not store failure output, could be transient error
     if (!result.ok()) {
+        iter.first->second.first.set_value(nullptr);
+        concurrent_map_.unsafe_erase(iter.first);
         return nullptr;
     }
     auto fs = result.value();
