@@ -134,11 +134,15 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 			"db1",
 			"old_collection",
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			"db1",
 			"old_collection",
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         "old_collection",
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -148,11 +152,12 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 			"db2",
 			"new_collection",
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			"db2",
 			"new_collection",
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("RenameCollection",
 			mock.Anything,
 			"db1",
@@ -195,11 +200,12 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("collection not found"))
 
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
@@ -230,11 +236,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -244,11 +254,12 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			newName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("RenameCollection",
 			mock.Anything,
 			mock.Anything,
@@ -287,11 +298,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -301,11 +316,12 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			newName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("RenameCollection",
 			mock.Anything,
 			mock.Anything,
@@ -345,21 +361,26 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			newName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			mock.Anything,
@@ -425,11 +446,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			"db1",
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			"db1",
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -497,11 +522,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -542,11 +571,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			collectionID,
@@ -556,11 +589,15 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			newName,
-		).Return(existingCollID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: existingCollID,
+			Name:         newName,
+		}, nil)
 
 		core := newTestCore(withMeta(meta))
 		task := &renameCollectionTask{
@@ -612,21 +649,26 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			oldDB,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			oldDB,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("IsAlias",
 			mock.Anything,
 			newDB,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			newDB,
 			newName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			mock.Anything,
@@ -668,21 +710,26 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			oldName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			oldName,
-		).Return(collectionID)
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: collectionID,
+			Name:         oldName,
+		}, nil)
 		meta.On("IsAlias",
 			mock.Anything,
 			mock.Anything,
 			newName,
 		).Return(false)
-		meta.On("GetCollectionID",
+		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			newName,
-		).Return(int64(0))
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("not found"))
 		meta.On("ListAliasesByID",
 			mock.Anything,
 			mock.Anything,
