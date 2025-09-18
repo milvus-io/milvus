@@ -134,7 +134,7 @@ ChunkTranslator::estimated_byte_size_of_cell(
     int64_t memory_size = file_infos_[cid].memory_size;
     if (use_mmap_) {
         // For mmap, the memory is counted as disk usage
-        return {{0, memory_size}, {memory_size * 2, memory_size}};
+        return {{0, memory_size}, {memory_size * 2, memory_size * 2}};
     } else {
         // For non-mmap, the memory is counted as memory usage
         return {{memory_size, 0}, {memory_size * 2, 0}};
