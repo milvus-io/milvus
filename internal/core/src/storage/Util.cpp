@@ -31,6 +31,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
+#include "storage/StorageV2FSCache.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/azure/AzureChunkManager.h"
 #endif
@@ -999,7 +1000,7 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
-    milvus_storage::ArrowFileSystemConfig conf;
+    StorageV2FSCache::Key conf;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
         conf.root_path = path;
@@ -1024,7 +1025,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
     }
-    return milvus_storage::CreateArrowFileSystem(conf).value();
+    return StorageV2FSCache::Instance().Get(conf);
 }
 
 FieldDataPtr
