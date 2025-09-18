@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -2064,9 +2063,9 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		return merr.Status(err), nil
 	}
 
-	// Convert to model.FileResource
-	resource := &model.FileResource{
-		ID:   id,
+	// Convert to internalpb.FileResourceInfo
+	resource := &internalpb.FileResourceInfo{
+		Id:   id,
 		Name: req.GetName(),
 		Path: req.GetPath(),
 		Type: req.GetType(),
@@ -2111,9 +2110,9 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 
 	log.Ctx(ctx).Info("receive ListFileResources request")
 
-	resources := s.meta.ListFileResource(ctx)
+	resources, _ := s.meta.ListFileResource(ctx)
 
-	// Convert model.FileResource to milvuspb.FileResourceInfo
+	// Convert internal.FileResourceInfo to milvuspb.FileResourceInfo
 	fileResources := make([]*milvuspb.FileResourceInfo, 0, len(resources))
 	for _, resource := range resources {
 		fileResources = append(fileResources, &milvuspb.FileResourceInfo{
@@ -2128,3 +2127,9 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 		Resources: fileResources,
 	}, nil
 }
+
+// func (s *Server) syncFileResources(ctx context.Context) (*commonpb.Status, error) {
+// 	resources := s.meta.ListFileResource(ctx)
+// 	nodes := s.nodeManager.GetClientIDs()
+
+// }
