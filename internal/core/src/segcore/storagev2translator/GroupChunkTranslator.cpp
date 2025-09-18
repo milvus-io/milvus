@@ -234,6 +234,8 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
     auto load_future = pool.Submit([&]() {
         return LoadWithStrategy(insert_files_,
@@ -241,6 +243,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                 std::move(strategy),
                                 row_group_lists,
+                                fs,
                                 nullptr,
                                 load_priority_);
     });

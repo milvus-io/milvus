@@ -219,7 +219,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
                                           channel,
                                           memory_limit,
                                           std::move(strategy),
-                                          row_group_lists);
+                                          row_group_lists,
+                                          fs_);
 
         // Verify each batch matches row group metadata
         std::shared_ptr<milvus::ArrowDataWrapper> wrapper;
@@ -253,7 +254,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
                                           channel,
                                           memory_limit,
                                           std::move(strategy),
-                                          row_group_lists);
+                                          row_group_lists,
+                                          fs_);
 
         std::shared_ptr<milvus::ArrowDataWrapper> wrapper;
         int64_t total_rows = 0;
@@ -284,7 +286,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
                                           channel,
                                           memory_limit,
                                           std::move(strategy),
-                                          row_group_lists);
+                                          row_group_lists,
+                                          fs_);
 
         total_rows = 0;
         std::vector<int64_t> selected_row_groups = {0, 2};
