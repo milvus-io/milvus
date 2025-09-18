@@ -967,8 +967,8 @@ func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) 
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
 	kvs := make(map[string]string)
 
-	k := BuildFileResourceKey(resource.ID)
-	v, err := proto.Marshal(resource.Marshal())
+	k := BuildFileResourceKey(resource.Id)
+	v, err := proto.Marshal(resource)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
 		return err
@@ -993,22 +993,31 @@ func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, ver
 }
 
 func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	var version uint64 = 0
-	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
-	for i, v := range values {
-		if keys[i] == FileResourceVersionKey {
-			v, err := strconv.ParseUint(v, 10, 64)
-			if err != nil {
-				return nil, 0, err
-			}
-			version = v
-			continue
+	exist, err := kc.MetaKv.Has(ctx, FileResourceVersionKey)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if exist {
+		strVersion, err := kc.MetaKv.Load(ctx, FileResourceVersionKey)
+		if err != nil {
+			return nil, 0, err
 		}
+		v, err := strconv.ParseUint(strVersion, 10, 64)
+		if err != nil {
+			return nil, 0, err
+		}
+		version = v
+	}
+
+	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
+	for _, v := range values {
 		info := &internalpb.FileResourceInfo{}
 		err := proto.Unmarshal([]byte(v), info)
 		if err != nil {

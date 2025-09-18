@@ -1778,6 +1778,7 @@ func TestServer_AddFileResource(t *testing.T) {
 
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			mixCoord:    newMockMixCoord(),
 			meta: &meta{
 				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
@@ -1915,6 +1916,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 				},
 				catalog: mockCatalog,
 			},
+			mixCoord: newMockMixCoord(),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -1923,7 +1925,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			Name: "test_resource",
 		}
 
-		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, int64(1)).Return(nil)
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		resp, err := server.RemoveFileResource(context.Background(), req)
 		assert.NoError(t, err)
@@ -1951,6 +1953,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
+			mixCoord: newMockMixCoord(),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 

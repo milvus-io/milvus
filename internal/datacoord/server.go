@@ -166,6 +166,9 @@ type Server struct {
 	broker broker.Broker
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// file resource
+	fileManager *FileResourceManager
 }
 
 type CollectionNameInfo struct {
@@ -333,6 +336,8 @@ func (s *Server) initDataCoord() error {
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
+	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
 	RegisterDDLCallbacks(s)
@@ -428,7 +433,8 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
-
+	s.fileManager.Start()
+	s.fileManager.Notify()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -855,7 +861,14 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 					zap.String("event type", event.EventType.String()))
 				return nil
 			}
-			return s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+			err := s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+			if err != nil {
+				return err
+			}
+
+			// notify file manager sync file resource to new node
+			s.fileManager.Notify()
+			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -1038,6 +1051,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
+	s.fileManager.Close()
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
