@@ -1306,6 +1306,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
+                                    fs,
                                     nullptr,
                                     milvus::proto::common::LoadPriority::HIGH);
         });
