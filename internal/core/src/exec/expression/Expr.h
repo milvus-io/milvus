@@ -659,11 +659,18 @@ class SegmentExpr : public Expr {
             if (valid_data != nullptr) {
                 valid_data += data_pos;
             }
+            // Construct actual offsets array instead of passing nullptr
+            std::vector<int32_t> offsets_array(size);
+            int64_t start_offset = size_per_chunk_ * i + data_pos;
+            for (int64_t j = 0; j < size; ++j) {
+                int64_t offset = start_offset + j;
+                offsets_array[j] = static_cast<int32_t>(offset);
+            }
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 const T* data = chunk.data() + data_pos;
                 func(data,
                      valid_data,
-                     nullptr,
+                     offsets_array.data(),
                      size,
                      res + processed_size,
                      valid_res + processed_size,
