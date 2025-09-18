@@ -7,6 +7,8 @@ import (
 
 	balancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -115,6 +117,63 @@ func (_c *MockBalancer_GetAllStreamingNodes_Call) Return(_a0 map[int64]*types.St
 }
 
 func (_c *MockBalancer_GetAllStreamingNodes_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeInfo, error)) *MockBalancer_GetAllStreamingNodes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetLatestChannelAssignment provides a mock function with no fields
+func (_m *MockBalancer) GetLatestChannelAssignment() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestChannelAssignment")
+	}
+
+	var r0 *balancer.WatchChannelAssignmentsCallbackParam
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (*balancer.WatchChannelAssignmentsCallbackParam, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() *balancer.WatchChannelAssignmentsCallbackParam); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*balancer.WatchChannelAssignmentsCallbackParam)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBalancer_GetLatestChannelAssignment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestChannelAssignment'
+type MockBalancer_GetLatestChannelAssignment_Call struct {
+	*mock.Call
+}
+
+// GetLatestChannelAssignment is a helper method to define mock.On call
+func (_e *MockBalancer_Expecter) GetLatestChannelAssignment() *MockBalancer_GetLatestChannelAssignment_Call {
+	return &MockBalancer_GetLatestChannelAssignment_Call{Call: _e.mock.On("GetLatestChannelAssignment")}
+}
+
+func (_c *MockBalancer_GetLatestChannelAssignment_Call) Run(run func()) *MockBalancer_GetLatestChannelAssignment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBalancer_GetLatestChannelAssignment_Call) Return(_a0 *balancer.WatchChannelAssignmentsCallbackParam, _a1 error) *MockBalancer_GetLatestChannelAssignment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBalancer_GetLatestChannelAssignment_Call) RunAndReturn(run func() (*balancer.WatchChannelAssignmentsCallbackParam, error)) *MockBalancer_GetLatestChannelAssignment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -357,6 +416,67 @@ func (_c *MockBalancer_UpdateBalancePolicy_Call) Return(_a0 *streamingpb.UpdateW
 }
 
 func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.Context, *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)) *MockBalancer_UpdateBalancePolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, msgs
+func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
+	_va := make([]interface{}, len(msgs))
+	for _i := range msgs {
+		_va[_i] = msgs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReplicateConfiguration")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error); ok {
+		r0 = rf(ctx, msgs...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_UpdateReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateReplicateConfiguration'
+type MockBalancer_UpdateReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// UpdateReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+//   - msgs ...message.ImmutableAlterReplicateConfigMessageV2
+func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, msgs ...interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
+	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration",
+		append([]interface{}{ctx}, msgs...)...)}
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2)) *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ImmutableAlterReplicateConfigMessageV2, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ImmutableAlterReplicateConfigMessageV2)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Return(_a0 error) *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

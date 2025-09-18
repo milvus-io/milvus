@@ -235,6 +235,17 @@ type segmentLoader struct {
 
 var _ Loader = (*segmentLoader)(nil)
 
+func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
+	if segmentInfo.GetStorageVersion() == 2 && paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
+		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
+			}
+		}
+	}
+}
+
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,
 	segmentType SegmentType,
@@ -249,6 +260,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	if len(segments) == 0 {
 		log.Info("no segment to load")
 		return nil, nil
+	}
+	for _, segmentInfo := range segments {
+		addBucketNameStorageV2(segmentInfo)
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)
@@ -1737,40 +1751,72 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 2: calculate logical resource usage of binlogs
 	for fieldID, fieldBinlog := range id2Binlogs {
+		fieldIDs := fieldBinlog.GetChildFields()
+		// legacy default split
+		if len(fieldIDs) == 0 {
+			fieldIDs = []int64{fieldID}
+		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 
-		// get field schema from fieldID
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
+		var supportInterimIndexDataType bool
+		var containsTimestampField bool
+		var doubleMemoryDataField bool
+		var legacyNilSchema bool
+		mmapEnabled := true
+		isVectorType := true
+
+		for _, fieldID := range fieldIDs {
+			// get field schema from fieldID
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
+			}
+
+			// missing mapping, shall be "0" group for storage v2
+			if fieldSchema == nil {
+				legacyNilSchema = true
+				break
+			}
+
+			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
+			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			// constainSystemField = constainSystemField || common.IsSystemField(fieldSchema.GetFieldID())
+			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
+			doubleMemoryDataField = doubleMemoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
 
 		// TODO: add default-value column's resource usage to inevictable part
 		// TODO: add interim index's resource usage to inevictable part
 
-		if fieldSchema == nil {
-			// nil field schema means missing mapping, shall be "0" group for storage v2
+		if legacyNilSchema {
 			segmentEvictableMemorySize += binlogSize
-		} else if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			continue
+		}
+
+		// timestamp field double in InsertRecord & TimestampIndex
+		if containsTimestampField {
+			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetEntriesNum() * 4
+			})
+			segmentInevictableMemorySize += 2 * uint64(timestampSize)
+		}
+
+		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				segmentEvictableDiskSize += binlogSize
 			} else {
 				segmentEvictableMemorySize += binlogSize
 			}
-		} else if common.IsSystemField(fieldSchema.GetFieldID()) {
-			segmentInevictableMemorySize += binlogSize
-			if DoubleMemorySystemField(fieldSchema.GetFieldID()) {
-				segmentInevictableMemorySize += binlogSize
-			}
-		} else if !isDataMmapEnable(fieldSchema) {
+		} else if !mmapEnabled {
 			segmentEvictableMemorySize += binlogSize
-			if DoubleMemoryDataType(fieldSchema.GetDataType()) {
+			if doubleMemoryDataField {
 				segmentEvictableMemorySize += binlogSize
 			}
 		} else {
-			segmentEvictableDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			segmentEvictableDiskSize += binlogSize
 		}
 	}
 
@@ -1794,6 +1840,14 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
+
+	log.Debug("estimate logical resoure usage result",
+		zap.Int64("segmentID", loadInfo.GetSegmentID()),
+		zap.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
+		zap.Uint64("segmentEvictableMemorySize", segmentEvictableMemorySize),
+		zap.Uint64("segmentInevictableDiskSize", segmentInevictableDiskSize),
+		zap.Uint64("segmentEvictableDiskSize", segmentEvictableDiskSize),
+	)
 
 	return &ResourceUsage{
 		MemorySize: segmentInevictableMemorySize + uint64(float64(segmentEvictableMemorySize)*multiplyFactor.TieredEvictableMemoryCacheRatio),
@@ -1888,31 +1942,56 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 2: calculate size of binlogs
 	for fieldID, fieldBinlog := range id2Binlogs {
+		fieldIDs := fieldBinlog.GetChildFields()
+		// legacy default split
+		if len(fieldIDs) == 0 {
+			fieldIDs = []int64{fieldID}
+		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 
-		// get field schema from fieldID
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
-		}
+		var supportInterimIndexDataType bool
+		var containsTimestampField bool
+		var doubleMomoryDataField bool
+		var legacyNilSchema bool
+		mmapEnabled := true
+		isVectorType := true
 
-		// missing mapping, shall be "0" group for storage v2
-		if fieldSchema == nil {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += binlogSize
+		for _, fieldID := range fieldIDs {
+			// get field schema from fieldID
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
 			}
+
+			// missing mapping, shall be "0" group for storage v2
+			if fieldSchema == nil {
+				if !multiplyFactor.TieredEvictionEnabled {
+					segMemoryLoadingSize += binlogSize
+				}
+				legacyNilSchema = true
+				break
+			}
+
+			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
+			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
+			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
+		}
+		// legacy v2 segment without children
+		if legacyNilSchema {
 			continue
 		}
 
 		if !multiplyFactor.TieredEvictionEnabled {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 			if interimIndexEnable {
 				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 
-		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				if !multiplyFactor.TieredEvictionEnabled {
@@ -1926,22 +2005,18 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		// system field does not support mmap, skip mmap check
-		if common.IsSystemField(fieldSchema.GetFieldID()) {
-			// system field isn't managed by the caching layer, so its size should always be included,
-			// regardless of the tiered eviction value
-			segMemoryLoadingSize += binlogSize
-			if DoubleMemorySystemField(fieldSchema.GetFieldID()) {
-				segMemoryLoadingSize += binlogSize
-			}
-			continue
+		// timestamp field double in InsertRecord & TimestampIndex
+		if containsTimestampField {
+			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetEntriesNum() * 4
+			})
+			segMemoryLoadingSize += 2 * uint64(timestampSize)
 		}
 
-		mmapEnabled := isDataMmapEnable(fieldSchema)
 		if !mmapEnabled {
 			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
-				if DoubleMemoryDataType(fieldSchema.GetDataType()) {
+				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}

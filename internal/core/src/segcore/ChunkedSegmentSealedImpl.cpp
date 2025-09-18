@@ -236,34 +236,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
         case 2: {
             load_column_group_data_internal(load_info);
-            auto timestamp_proxy_column = get_column(TimestampFieldID);
-            // TODO check timestamp_index ready instead of check system_ready_count_
-            if (timestamp_proxy_column && system_ready_count_ == 0) {
-                int64_t num_rows;
-                for (auto& [_, info] : load_info.field_infos) {
-                    num_rows = info.row_count;
-                }
-                std::vector<Timestamp> timestamps(num_rows);
-                int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(i);
-                    auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
-                    auto span = fixed_chunk->Span();
-                    for (size_t j = 0; j < span.row_count(); j++) {
-                        auto ts = *(int64_t*)((char*)span.data() +
-                                              j * span.element_sizeof());
-                        timestamps[offset++] = ts;
-                    }
-                }
-                init_timestamp_index(timestamps, num_rows);
-                system_ready_count_++;
-                AssertInfo(offset == num_rows,
-                           "[StorageV2] timestamp total row count {} not equal "
-                           "to expected {}",
-                           offset,
-                           num_rows);
-            }
             break;
         }
         default:
@@ -288,8 +260,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
-        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-            column_group_id, insert_files[0], arrow_schema, fs);
+        milvus_storage::FieldIDList field_id_list;
+        if (info.child_field_ids.size() == 0) {
+            // legacy binlog meta, parse from reader
+            field_id_list = storage::GetFieldIDList(
+                column_group_id, insert_files[0], arrow_schema, fs);
+        } else {
+            field_id_list = milvus_storage::FieldIDList(info.child_field_ids);
+        }
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
@@ -346,6 +324,36 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
             load_field_data_common(
                 field_id, column, num_rows, data_type, info.enable_mmap, true);
+            if (field_id == TimestampFieldID) {
+                auto timestamp_proxy_column = get_column(TimestampFieldID);
+                AssertInfo(timestamp_proxy_column != nullptr,
+                           "timestamp proxy column is nullptr");
+                // TODO check timestamp_index ready instead of check system_ready_count_
+                int64_t num_rows;
+                for (auto& [_, info] : load_info.field_infos) {
+                    num_rows = info.row_count;
+                }
+                std::vector<Timestamp> timestamps(num_rows);
+                int64_t offset = 0;
+                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
+                    auto chunk = timestamp_proxy_column->GetChunk(i);
+                    auto fixed_chunk =
+                        static_cast<FixedWidthChunk*>(chunk.get());
+                    auto span = fixed_chunk->Span();
+                    for (size_t j = 0; j < span.row_count(); j++) {
+                        auto ts = *(int64_t*)((char*)span.data() +
+                                              j * span.element_sizeof());
+                        timestamps[offset++] = ts;
+                    }
+                }
+                init_timestamp_index(timestamps, num_rows);
+                system_ready_count_++;
+                AssertInfo(offset == num_rows,
+                           "[StorageV2] timestamp total row count {} not equal "
+                           "to expected {}",
+                           offset,
+                           num_rows);
+            }
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
@@ -1137,16 +1145,13 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
 void
 ChunkedSegmentSealedImpl::pk_range(proto::plan::OpType op,
                                    const PkType& pk,
-                                   Timestamp timestamp,
                                    BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
-        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        insert_record_.search_pk_range(pk, op, bitset);
         return;
     }
 
-    search_sorted_pk_range(op, pk, bitset, [this, timestamp](int64_t offset) {
-        return insert_record_.timestamps_[offset] <= timestamp;
-    });
+    search_sorted_pk_range(op, pk, bitset, [](int64_t offset) { return true; });
 }
 
 template <typename Condition>

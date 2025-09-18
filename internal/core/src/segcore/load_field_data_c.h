@@ -38,6 +38,12 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
                     int64_t row_count);
 
 CStatus
+SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
+                            int64_t field_id,
+                            const int64_t* child_field_ids,
+                            const int64_t child_field_num);
+
+CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
                         int64_t entries_num,

@@ -72,7 +72,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -336,9 +336,11 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	err = initcore.InitStorageV2FileSystem(paramtable.Get())
-	if err != nil {
-		return err
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		err = initcore.InitStorageV2FileSystem(paramtable.Get())
+		if err != nil {
+			return err
+		}
 	}
 
 	err = initcore.InitMmapManager(paramtable.Get(), node.GetNodeID())
@@ -537,7 +539,7 @@ func (node *QueryNode) Stop() error {
 		err := node.session.GoingStop()
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))
-		} else if util.MustSelectWALName() != rmq.WALName { // rocksmq cannot support querynode graceful stop because of using local storage.
+		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.

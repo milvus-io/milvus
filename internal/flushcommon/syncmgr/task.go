@@ -220,8 +220,10 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 	if currentSplit := segmentInfo.GetCurrentSplit(); currentSplit != nil {
 		for _, cg := range currentSplit {
 			// legacy split found, use legacy policy
-			if cg.Fields == nil {
-				return storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+			if len(cg.Fields) == 0 {
+				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+				log.Info("use legacy split policy", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
+				return result
 			}
 		}
 		field2idx := make(map[int64]int)
@@ -237,9 +239,31 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 		return currentSplit
 	}
 
-	// TODO calculate field stats
 	policies := storagecommon.DefaultPolicies()
-	return storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, policies...)
+	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	log.Info("sync new split columns", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
+	return result
+}
+
+func (t *SyncTask) calcColumnStats() map[int64]storagecommon.ColumnStats {
+	result := make(map[int64]storagecommon.ColumnStats)
+
+	memorySizes := make(map[int64]int64)
+	rowNums := make(map[int64]int64)
+	for _, data := range t.pack.insertData {
+		for fieldID, fieldData := range data.Data {
+			memorySizes[fieldID] += int64(fieldData.GetMemorySize())
+			rowNums[fieldID] += int64(fieldData.RowNum())
+		}
+	}
+	for fieldID, rowNum := range rowNums {
+		if rowNum > 0 {
+			result[fieldID] = storagecommon.ColumnStats{
+				AvgSize: memorySizes[fieldID] / rowNum,
+			}
+		}
+	}
+	return result
 }
 
 // writeMeta updates segments via meta writer in option.

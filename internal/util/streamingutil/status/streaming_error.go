@@ -41,16 +41,23 @@ func (e *StreamingError) IsFenced() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED
 }
 
+// IsIgnoredOperation returns true if the operation is ignored.
+func (e *StreamingError) IsIgnoredOperation() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION
+}
+
 // IsSkippedOperation returns true if the operation is ignored or skipped.
 func (e *StreamingError) IsSkippedOperation() bool {
-	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION ||
+	return e.IsIgnoredOperation() ||
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM
 }
 
 // IsUnrecoverable returns true if the error is unrecoverable.
 // Stop resuming retry and report to user.
 func (e *StreamingError) IsUnrecoverable() bool {
-	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE || e.IsTxnUnavilable()
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
+		e.Code == streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION ||
+		e.IsTxnUnavilable()
 }
 
 // IsTxnUnavilable returns true if the transaction is unavailable.
@@ -127,6 +134,11 @@ func NewInvalidTransactionState(operation string, expectState message.TxnState, 
 // NewUnrecoverableError creates a new StreamingError with code STREAMING_CODE_UNRECOVERABLE.
 func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, format, args...)
+}
+
+// NewReplicateViolation creates a new StreamingError with code STREAMING_CODE_REPLICATE_VIOLATION.
+func NewReplicateViolation(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION, format, args...)
 }
 
 // NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.

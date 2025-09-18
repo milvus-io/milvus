@@ -97,7 +97,10 @@ PhyFilterBitsNode::GetOutput() {
         }
     }
     bitset.flip();
-    Assert(bitset.size() == need_process_rows_);
+    AssertInfo(bitset.size() == need_process_rows_,
+               "bitset size: {}, need_process_rows_: {}",
+               bitset.size(),
+               need_process_rows_);
     Assert(valid_bitset.size() == need_process_rows_);
     auto filter_ratio =
         bitset.size() != 0 ? 1 - float(bitset.count()) / bitset.size() : 0;

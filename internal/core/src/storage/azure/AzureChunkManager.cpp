@@ -21,7 +21,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
-#include "storage/azure/AzureChunkManager.h"
+#include "AzureChunkManager.h"
 
 namespace milvus {
 namespace storage {

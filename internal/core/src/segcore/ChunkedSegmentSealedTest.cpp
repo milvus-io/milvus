@@ -444,16 +444,12 @@ TEST_P(TestChunkSegment, TestPkRange) {
 
     // Test Equal operation
     if (pk_is_string) {
-        segment_impl->pk_range(proto::plan::OpType::Equal,
-                               PkType("test1"),
-                               Timestamp(99999),
-                               bitset_sorted_view);
+        segment_impl->pk_range(
+            proto::plan::OpType::Equal, PkType("test1"), bitset_sorted_view);
         EXPECT_EQ(1, bitset_sorted_view.count());
     } else {
-        segment_impl->pk_range(proto::plan::OpType::Equal,
-                               PkType(1),
-                               Timestamp(99999),
-                               bitset_sorted_view);
+        segment_impl->pk_range(
+            proto::plan::OpType::Equal, PkType(1), bitset_sorted_view);
         EXPECT_EQ(1, bitset_sorted_view.count());
     }
 
@@ -462,15 +458,12 @@ TEST_P(TestChunkSegment, TestPkRange) {
     if (pk_is_string) {
         segment_impl->pk_range(proto::plan::OpType::LessEqual,
                                PkType("test100"),
-                               Timestamp(99999),
                                bitset_sorted_view);
         // only 'test0', 'test1', 'test10' are less than 'test100'
         EXPECT_EQ(bitset_sorted_view.count(), 4);
     } else {
-        segment_impl->pk_range(proto::plan::OpType::LessEqual,
-                               PkType(100),
-                               Timestamp(99999),
-                               bitset_sorted_view);
+        segment_impl->pk_range(
+            proto::plan::OpType::LessEqual, PkType(100), bitset_sorted_view);
         EXPECT_EQ(bitset_sorted_view.count(), 101);
     }
 
@@ -478,13 +471,11 @@ TEST_P(TestChunkSegment, TestPkRange) {
     if (pk_is_string) {
         segment_impl->pk_range(proto::plan::OpType::Equal,
                                PkType(std::string("non_existent_pk")),
-                               Timestamp(99999),
                                bitset_sorted_view);
         EXPECT_EQ(0, bitset_sorted_view.count());
     } else {
         segment_impl->pk_range(proto::plan::OpType::Equal,
                                PkType(int64_t(999999)),
-                               Timestamp(99999),
                                bitset_sorted_view);
         EXPECT_EQ(0, bitset_sorted_view.count());
     }

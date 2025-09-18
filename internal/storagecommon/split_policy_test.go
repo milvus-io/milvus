@@ -139,10 +139,12 @@ func TestWideDataTypePolicy(t *testing.T) {
 
 func TestSystemColumnPolicy(t *testing.T) {
 	type testCase struct {
-		tag       string
-		includePK bool
-		input     *currentSplit
-		expect    *currentSplit
+		tag                  string
+		includePK            bool
+		includePartKey       bool
+		includeClusteringKey bool
+		input                *currentSplit
+		expect               *currentSplit
 	}
 
 	cases := []testCase{
@@ -175,6 +177,84 @@ func TestSystemColumnPolicy(t *testing.T) {
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
 						Fields:  []int64{0, 1, 100},
+					},
+				},
+			},
+		},
+		{
+			tag: "normal_include_partition_key",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  0,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					DataType: schemapb.DataType_FloatVector,
+				},
+				{
+					FieldID:        102,
+					DataType:       schemapb.DataType_Int64,
+					IsPartitionKey: true,
+				},
+			}, nil),
+			includePK:      true,
+			includePartKey: true,
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](0, 1, 100, 102),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 0,
+						Columns: []int{0, 1, 2, 4},
+						Fields:  []int64{0, 1, 100, 102},
+					},
+				},
+			},
+		},
+		{
+			tag: "normal_include_clustering_key",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  0,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					DataType: schemapb.DataType_FloatVector,
+				},
+				{
+					FieldID:         102,
+					DataType:        schemapb.DataType_Int64,
+					IsClusteringKey: true,
+				},
+			}, nil),
+			includePK:            true,
+			includeClusteringKey: true,
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](0, 1, 100, 102),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 0,
+						Columns: []int{0, 1, 2, 4},
+						Fields:  []int64{0, 1, 100, 102},
 					},
 				},
 			},
@@ -230,7 +310,11 @@ func TestSystemColumnPolicy(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.tag, func(t *testing.T) {
-			policy := &systemColumnPolicy{includePK: tc.includePK}
+			policy := &systemColumnPolicy{
+				includePrimaryKey:    tc.includePK,
+				includePartitionKey:  tc.includePartKey,
+				includeClusteringKey: tc.includeClusteringKey,
+			}
 			result := policy.Split(tc.input)
 
 			AssertSplitEqual(t, tc.expect, result)

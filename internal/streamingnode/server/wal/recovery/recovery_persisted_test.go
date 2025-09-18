@@ -19,7 +19,6 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -48,20 +47,17 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 
 	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
 		&streamingpb.WALCheckpoint{
-			MessageId: &messagespb.MessageID{
-				Id: rmq.NewRmqID(1).Marshal(),
-			},
+			MessageId:     rmq.NewRmqID(1).IntoProto(),
 			TimeTick:      1,
 			RecoveryMagic: RecoveryMagicStreamingInitialized,
 		}, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
-	walName := "rocksmq"
 	channel := types.PChannelInfo{Name: "test_channel"}
 
 	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
 	rs := newRecoveryStorage(channel)
 
-	err := rs.recoverRecoveryInfoFromMeta(context.Background(), walName, channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
+	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 	assert.NotNil(t, rs.checkpoint)
 	assert.Equal(t, RecoveryMagicStreamingInitialized, rs.checkpoint.Magic)
@@ -136,12 +132,11 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 	fc.Set(c)
 
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(fc))
-	walName := "rocksmq"
 	channel := types.PChannelInfo{Name: "test_channel"}
 	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
 	rs := newRecoveryStorage(channel)
 
-	err := rs.recoverRecoveryInfoFromMeta(context.Background(), walName, channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
+	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 	assert.NotNil(t, rs.checkpoint)
 	assert.Len(t, rs.vchannels, 2)

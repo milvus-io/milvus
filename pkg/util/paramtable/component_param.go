@@ -279,7 +279,15 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
-	EnableStorageV2           ParamItem `refreshable:"false"`
+	// storage v2
+	EnableStorageV2                      ParamItem `refreshable:"false"`
+	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludeClusteringKey ParamItem `refreshable:"true"`
+	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
+	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
+
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
@@ -925,6 +933,60 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
+
+	p.Stv2SplitSystemColumn = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "enable split system column policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitSystemColumn.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludePK = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includePK",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include pk field",
+		Export:       true,
+	}
+	p.Stv2SystemColumnIncludePK.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludePartitionKey = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includePartitionKey",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include partition key field",
+		Export:       false,
+	}
+	p.Stv2SystemColumnIncludePartitionKey.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludeClusteringKey = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includeClusteringKey",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include clustering key field",
+		Export:       false,
+	}
+	p.Stv2SystemColumnIncludeClusteringKey.Init(base.mgr)
+
+	p.Stv2SplitByAvgSize = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.enabled",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          "enable split by average size policy in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitByAvgSize.Init(base.mgr)
+
+	p.Stv2SplitAvgSizeThreshold = ParamItem{
+		Key:          "common.storage.stv2.splitByAvgSize.threshold",
+		Version:      "2.6.2",
+		DefaultValue: "1024",
+		Doc:          "split by average size policy threshold(in bytes) in storage v2",
+		Export:       true,
+	}
+	p.Stv2SplitAvgSizeThreshold.Init(base.mgr)
 
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",
@@ -4228,6 +4290,7 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
+	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
@@ -4244,7 +4307,7 @@ type dataCoordConfig struct {
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
@@ -4275,7 +4338,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
@@ -4524,6 +4587,15 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
 	}
 	p.BlockingL0SizeInMB.Init(base.mgr)
+
+	p.DVForceAllIndexReady = ParamItem{
+		Key:          "dataCoord.dataview.forceAllIndexReady",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
+		Export:       false,
+	}
+	p.DVForceAllIndexReady.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",

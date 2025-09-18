@@ -24,16 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 RUN pip3 install conan==1.64.1
 
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-
-RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
-
-RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest
-
 # Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
 #    tar zxvf v0.3.21.tar.gz && cd OpenBLAS-0.3.21 && \
@@ -87,7 +77,7 @@ RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini
     chmod +x /tini
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.83 -y
+    sh -s -- --default-toolchain=1.89 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

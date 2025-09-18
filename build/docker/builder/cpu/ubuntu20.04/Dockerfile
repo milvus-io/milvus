@@ -25,16 +25,6 @@ RUN pip3 install conan==1.64.1
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-
-RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
-
-RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest
-
 # Install Go
 ENV GOPATH /go
 ENV GOROOT /usr/local/go
@@ -53,7 +43,7 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.83 -y
+    sh -s -- --default-toolchain=1.89 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

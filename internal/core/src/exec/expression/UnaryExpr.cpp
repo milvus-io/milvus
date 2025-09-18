@@ -1301,31 +1301,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
         auto op_type = expr_->op_type_;
         PkType pk = value_arg_.GetValue<IndexInnerType>();
-        auto query_timestamp = context.get_exec_context()
-                                   ->get_query_context()
-                                   ->get_query_timestamp();
-
-        switch (op_type) {
-            case proto::plan::GreaterThan:
-            case proto::plan::GreaterEqual:
-            case proto::plan::LessThan:
-            case proto::plan::LessEqual:
-            case proto::plan::Equal:
-                segment_->pk_range(op_type, pk, query_timestamp, cache_view);
-                break;
-            case proto::plan::NotEqual: {
-                segment_->pk_range(
-                    proto::plan::Equal, pk, query_timestamp, cache_view);
-                cache_view.flip();
-                break;
-            }
-            default:
-                ThrowInfo(
-                    OpTypeInvalid,
-                    fmt::format("unsupported operator type for unary expr: {}",
-                                op_type));
+        if (op_type == proto::plan::NotEqual) {
+            segment_->pk_range(proto::plan::Equal, pk, cache_view);
+            cache_view.flip();
+        } else {
+            segment_->pk_range(op_type, pk, cache_view);
         }
     }
+
     TargetBitmap result;
     result.append(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);

@@ -181,6 +181,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err = w.Write(rec); err != nil {
 		return nil, err
 	}
+	// close first to get compressed size
+	if err = w.Close(); err != nil {
+		return nil, err
+	}
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
@@ -188,7 +192,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			ChildFields: columnGroup.Fields,
 			Binlogs: []*datapb.Binlog{
 				{
-					LogSize:       int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+					LogSize:       int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
 					MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
 					LogPath:       w.GetWrittenPaths(columnGroupID),
 					EntriesNum:    w.GetWrittenRowNum(),
@@ -197,9 +201,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				},
 			},
 		}
-	}
-	if err = w.Close(); err != nil {
-		return nil, err
 	}
 	return logs, nil
 }
