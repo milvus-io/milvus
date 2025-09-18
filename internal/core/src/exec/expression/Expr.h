@@ -335,7 +335,10 @@ class SegmentExpr : public Expr {
     // used for processing raw data expr for sealed segments.
     // now only used for std::string_view && json
     // TODO: support more types
-    template <typename T, typename FUNC, typename... ValTypes>
+    template <typename T,
+              bool NeedSegmentOffsets = false,
+              typename FUNC,
+              typename... ValTypes>
     int64_t
     ProcessChunkForSealedSeg(
         FUNC func,
@@ -354,13 +357,30 @@ class SegmentExpr : public Expr {
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
-            func(views_info.first.data(),
-                 views_info.second.data(),
-                 nullptr,
-                 need_size,
-                 res,
-                 valid_res,
-                 values...);
+            if constexpr (NeedSegmentOffsets) {
+                // For GIS functions: construct segment offsets array
+                std::vector<int32_t> segment_offsets_array(need_size);
+                for (int64_t j = 0; j < need_size; ++j) {
+                    segment_offsets_array[j] =
+                        static_cast<int32_t>(current_data_chunk_pos_ + j);
+                }
+                func(views_info.first.data(),
+                     views_info.second.data(),
+                     nullptr,
+                     segment_offsets_array.data(),
+                     need_size,
+                     res,
+                     valid_res,
+                     values...);
+            } else {
+                func(views_info.first.data(),
+                     views_info.second.data(),
+                     nullptr,
+                     need_size,
+                     res,
+                     valid_res,
+                     values...);
+            }
         } else {
             ApplyValidData(views_info.second.data(), res, valid_res, need_size);
         }
@@ -616,7 +636,11 @@ class SegmentExpr : public Expr {
         return input->size();
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
+    // Template parameter to control whether segment offsets are needed (for GIS functions)
+    template <typename T,
+              bool NeedSegmentOffsets = false,
+              typename FUNC,
+              typename... ValTypes>
     int64_t
     ProcessDataChunksForSingleChunk(
         FUNC func,
@@ -628,7 +652,7 @@ class SegmentExpr : public Expr {
         if constexpr (std::is_same_v<T, std::string_view> ||
                       std::is_same_v<T, Json>) {
             if (segment_->type() == SegmentType::Sealed) {
-                return ProcessChunkForSealedSeg<T>(
+                return ProcessChunkForSealedSeg<T, NeedSegmentOffsets>(
                     func, skip_func, res, valid_res, values...);
             }
         }
@@ -653,15 +677,34 @@ class SegmentExpr : public Expr {
             if (valid_data != nullptr) {
                 valid_data += data_pos;
             }
+
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 const T* data = chunk.data() + data_pos;
-                func(data,
-                     valid_data,
-                     nullptr,
-                     size,
-                     res + processed_size,
-                     valid_res + processed_size,
-                     values...);
+
+                if constexpr (NeedSegmentOffsets) {
+                    // For GIS functions: construct segment offsets array
+                    std::vector<int32_t> segment_offsets_array(size);
+                    for (int64_t j = 0; j < size; ++j) {
+                        segment_offsets_array[j] = static_cast<int32_t>(
+                            size_per_chunk_ * i + data_pos + j);
+                    }
+                    func(data,
+                         valid_data,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(data,
+                         valid_data,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
             } else {
                 ApplyValidData(valid_data,
                                res + processed_size,
@@ -679,7 +722,11 @@ class SegmentExpr : public Expr {
 
         return processed_size;
     }
-    template <typename T, typename FUNC, typename... ValTypes>
+
+    template <typename T,
+              bool NeedSegmentOffsets = false,
+              typename FUNC,
+              typename... ValTypes>
     int64_t
     ProcessDataChunksForMultipleChunk(
         FUNC func,
@@ -706,7 +753,13 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
-
+            std::vector<int32_t> segment_offsets_array(size);
+            auto start_offset =
+                segment_->num_rows_until_chunk(field_id_, i) + data_pos;
+            for (int64_t j = 0; j < size; ++j) {
+                int64_t offset = start_offset + j;
+                segment_offsets_array[j] = static_cast<int32_t>(offset);
+            }
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
@@ -719,13 +772,26 @@ class SegmentExpr : public Expr {
                         auto [data_vec, valid_data] =
                             segment_->get_batch_views<T>(
                                 field_id_, i, data_pos, size);
-                        func(data_vec.data(),
-                             valid_data.data(),
-                             nullptr,
-                             size,
-                             res + processed_size,
-                             valid_res + processed_size,
-                             values...);
+                        if constexpr (NeedSegmentOffsets) {
+                            // For GIS functions: construct segment offsets array
+                            func(data_vec.data(),
+                                 valid_data.data(),
+                                 nullptr,
+                                 segment_offsets_array.data(),
+                                 size,
+                                 res + processed_size,
+                                 valid_res + processed_size,
+                                 values...);
+                        } else {
+                            // For regular functions: no segment offsets
+                            func(data_vec.data(),
+                                 valid_data.data(),
+                                 nullptr,
+                                 size,
+                                 res + processed_size,
+                                 valid_res + processed_size,
+                                 values...);
+                        }
                         is_seal = true;
                     }
                 }
@@ -736,13 +802,26 @@ class SegmentExpr : public Expr {
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
                     }
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
+
+                    if constexpr (NeedSegmentOffsets) {
+                        // For GIS functions: construct segment offsets array
+                        func(data,
+                             valid_data,
+                             nullptr,
+                             segment_offsets_array.data(),
+                             size,
+                             res + processed_size,
+                             valid_res + processed_size,
+                             values...);
+                    } else {
+                        func(data,
+                             valid_data,
+                             nullptr,
+                             size,
+                             res + processed_size,
+                             valid_res + processed_size,
+                             values...);
+                    }
                 }
             } else {
                 const bool* valid_data;
@@ -782,7 +861,10 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
+    template <typename T,
+              bool NeedSegmentOffsets = false,
+              typename FUNC,
+              typename... ValTypes>
     int64_t
     ProcessDataChunks(
         FUNC func,
@@ -791,10 +873,10 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         ValTypes... values) {
         if (segment_->is_chunked()) {
-            return ProcessDataChunksForMultipleChunk<T>(
+            return ProcessDataChunksForMultipleChunk<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, values...);
         } else {
-            return ProcessDataChunksForSingleChunk<T>(
+            return ProcessDataChunksForSingleChunk<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, values...);
         }
     }

@@ -85,6 +85,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     CreateTextIndex(FieldId field_id) override;
 
+ private:
+    // Build geometry cache for inserted data
+    void
+    BuildGeometryCacheForInsert(FieldId field_id,
+                                const DataArray* data_array,
+                                int64_t num_rows);
+
+    // Build geometry cache for loaded field data
+    void
+    BuildGeometryCacheForLoad(FieldId field_id,
+                              const std::vector<FieldDataPtr>& field_data);
+
  public:
     const InsertRecord<>&
     get_insert_record() const {

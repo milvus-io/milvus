@@ -15,7 +15,6 @@
 #include "common/Geometry.h"
 #include "common/Types.h"
 #include "pb/plan.pb.h"
-#include "pb/schema.pb.h"
 #include <cmath>
 #include <fmt/core.h>
 namespace milvus {
@@ -25,36 +24,32 @@ namespace exec {
     auto execute_sub_batch = [this](const _DataType* data,                                            \
                                     const bool* valid_data,                                           \
                                     const int32_t* offsets,                                           \
+                                    const int32_t* segment_offsets,                                   \
                                     const int size,                                                   \
                                     TargetBitmapView res,                                             \
                                     TargetBitmapView valid_res,                                       \
                                     const Geometry& right_source) {                                   \
+        AssertInfo(segment_offsets != nullptr,                                                        \
+                   "segment_offsets should not be nullptr");                                          \
         /* Unified path using simple WKB-content-based cache for both sealed and growing segments. */ \
         auto& geometry_cache =                                                                        \
             SimpleGeometryCacheManager::Instance().GetCache(                                          \
                 this->segment_->get_segment_id(), field_id_);                                         \
+        auto cache_lock = geometry_cache.AcquireReadLock();                                           \
         for (int i = 0; i < size; ++i) {                                                              \
             if (valid_data != nullptr && !valid_data[i]) {                                            \
                 res[i] = valid_res[i] = false;                                                        \
                 continue;                                                                             \
             }                                                                                         \
-            /* Create string_view from WKB data for cache lookup */                                   \
-            std::string_view wkb_view(data[i].data(), data[i].size());                                \
-            auto cached_geometry = geometry_cache.GetOrCreate(wkb_view);                              \
-                                                                                                      \
-            bool result = false;                                                                      \
-            if (cached_geometry != nullptr) {                                                         \
-                /* Use cached geometry for operation */                                               \
-                result = cached_geometry->method(right_source);                                       \
-            } else {                                                                                  \
-                /* Fallback: construct temporary geometry (cache construction failed) */              \
-                Geometry tmp(data[i].data(), data[i].size());                                         \
-                result = tmp.method(right_source);                                                    \
-            }                                                                                         \
-            res[i] = result;                                                                          \
+            auto absolute_offset = segment_offsets[i];                                                \
+            auto cached_geometry =                                                                    \
+                geometry_cache.GetByOffsetUnsafe(absolute_offset);                                    \
+            AssertInfo(cached_geometry != nullptr,                                                    \
+                       "cached geometry is nullptr");                                                 \
+            res[i] = cached_geometry->method(right_source);                                           \
         }                                                                                             \
     };                                                                                                \
-    int64_t processed_size = ProcessDataChunks<_DataType>(                                            \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(                                      \
         execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);                           \
     AssertInfo(processed_size == real_batch_size,                                                     \
                "internal error: expr processed rows {} not equal "                                    \
@@ -68,20 +63,31 @@ namespace exec {
     auto execute_sub_batch = [this](const _DataType* data,                     \
                                     const bool* valid_data,                    \
                                     const int32_t* offsets,                    \
+                                    const int32_t* segment_offsets,            \
                                     const int size,                            \
                                     TargetBitmapView res,                      \
                                     TargetBitmapView valid_res,                \
                                     const Geometry& right_source) {            \
+        AssertInfo(segment_offsets != nullptr,                                 \
+                   "segment_offsets should not be nullptr");                   \
+        auto& geometry_cache =                                                 \
+            SimpleGeometryCacheManager::Instance().GetCache(                   \
+                this->segment_->get_segment_id(), field_id_);                  \
+        auto cache_lock = geometry_cache.AcquireReadLock();                    \
         for (int i = 0; i < size; ++i) {                                       \
             if (valid_data != nullptr && !valid_data[i]) {                     \
                 res[i] = valid_res[i] = false;                                 \
                 continue;                                                      \
             }                                                                  \
-            res[i] = Geometry(data[i].data(), data[i].size())                  \
-                         .method(right_source, expr_->distance_);              \
+            auto absolute_offset = segment_offsets[i];                         \
+            auto cached_geometry =                                             \
+                geometry_cache.GetByOffsetUnsafe(absolute_offset);             \
+            AssertInfo(cached_geometry != nullptr,                             \
+                       "cached geometry is nullptr");                          \
+            res[i] = cached_geometry->method(right_source, expr_->distance_);  \
         }                                                                      \
     };                                                                         \
-    int64_t processed_size = ProcessDataChunks<_DataType>(                     \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
         execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);    \
     AssertInfo(processed_size == real_batch_size,                              \
                "internal error: expr processed rows {} not equal "             \
@@ -89,7 +95,6 @@ namespace exec {
                processed_size,                                                 \
                real_batch_size);                                               \
     return res_vec;
-
 void
 PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::GEOMETRY,
@@ -352,39 +357,17 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 auto& geometry_cache =
                     SimpleGeometryCacheManager::Instance().GetCache(
                         segment_->get_segment_id(), field_id_);
-
-                auto data_array = segment_->bulk_subscript(
-                    field_id_, hit_offsets.data(), hit_offsets.size());
-
-                auto geometry_array =
-                    static_cast<const milvus::proto::schema::GeometryArray*>(
-                        &data_array->scalars().geometry_data());
-                const auto& valid_data = data_array->valid_data();
-
+                auto cache_lock = geometry_cache.AcquireReadLock();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {
                     const auto pos = hit_offsets[i];
 
-                    // Skip invalid data
-                    if (!valid_data.empty() && !valid_data[i]) {
+                    auto cached_geometry =
+                        geometry_cache.GetByOffsetUnsafe(pos);
+                    // skip invalid geometry
+                    if (cached_geometry == nullptr) {
                         continue;
                     }
-
-                    const auto& wkb_data = geometry_array->data(i);
-
-                    // Get or create cached Geometry from simple cache
-                    std::string_view wkb_view(wkb_data.data(), wkb_data.size());
-                    auto cached_geometry = geometry_cache.GetOrCreate(wkb_view);
-
-                    // Evaluate geometry: use cached if available, otherwise construct temporarily
-                    bool result = false;
-                    if (cached_geometry != nullptr) {
-                        result = evaluate_geometry(*cached_geometry);
-                    } else {
-                        // Fallback: construct temporary geometry (cache construction failed)
-                        Geometry temp_geometry(wkb_data.data(),
-                                               wkb_data.size());
-                        result = evaluate_geometry(temp_geometry);
-                    }
+                    bool result = evaluate_geometry(*cached_geometry);
 
                     if (result) {
                         refined.set(pos);
