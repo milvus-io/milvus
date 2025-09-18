@@ -141,6 +141,9 @@ service DataNode {
   rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 
   rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
+
+  // file resource
+  rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -1099,11 +1102,4 @@ message PartitionStatsInfo {
 
 message DropCompactionPlanRequest {
   int64 planID = 1;
-}
-
-message FileResourceInfo {
-  string name = 1;
-  string path = 2;
-  int64 resource_id = 3;
-  common.FileResourceType type = 4;
 }
