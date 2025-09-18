@@ -41,11 +41,16 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
+    milvus::OpContext op_ctx;
     auto field_data =
-        bulk_subscript(nullptr, pk_field_id, results.seg_offsets_.data(), size);
+        bulk_subscript(&op_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
     ParsePksFromFieldData(results.primary_keys_, *field_data.get());
+    results.search_storage_cost_.scanned_remote_bytes +=
+        op_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_total_bytes +=
+        op_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 void
@@ -58,6 +63,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                "Size of result distances is not equal to size of ids");
 
     std::unique_ptr<DataArray> field_data;
+    milvus::OpContext op_ctx;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = plan->schema_->operator[](field_id);
@@ -65,7 +71,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(nullptr,
+            field_data = bulk_subscript(&op_ctx,
                                         field_id,
                                         results.seg_offsets_.data(),
                                         size,
@@ -74,10 +80,14 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             field_data = bulk_subscript(
-                nullptr, field_id, results.seg_offsets_.data(), size);
+                &op_ctx, field_id, results.seg_offsets_.data(), size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
+    results.search_storage_cost_.scanned_remote_bytes +=
+        op_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_total_bytes +=
+        op_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 std::unique_ptr<SearchResult>
@@ -114,6 +124,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
+    results->set_scanned_remote_bytes(
+        retrieve_results.retrieve_storage_cost_.scanned_remote_bytes);
+    results->set_scanned_total_bytes(
+        retrieve_results.retrieve_storage_cost_.scanned_total_bytes);
 
     auto result_rows = retrieve_results.result_offsets_.size();
     int64_t output_data_size = 0;
@@ -175,13 +189,14 @@ SegmentInternalInterface::FillTargetEntry(
         return pk_field_id.has_value() && pk_field_id.value() == field_id;
     };
 
+    milvus::OpContext op_ctx;
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
 
             FixedVector<int64_t> output(size);
-            bulk_subscript(nullptr, system_type, offsets, size, output.data());
+            bulk_subscript(&op_ctx, system_type, offsets, size, output.data());
 
             auto data_array = std::make_unique<DataArray>();
             data_array->set_field_id(field_id.get());
@@ -204,7 +219,7 @@ SegmentInternalInterface::FillTargetEntry(
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             auto col = bulk_subscript(
-                nullptr, field_id, offsets, size, target_dynamic_fields);
+                &op_ctx, field_id, offsets, size, target_dynamic_fields);
             fields_data->AddAllocated(col.release());
             continue;
         }
@@ -213,7 +228,7 @@ SegmentInternalInterface::FillTargetEntry(
         if (!is_field_exist(field_id)) {
             col = std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
-            col = bulk_subscript(nullptr, field_id, offsets, size);
+            col = bulk_subscript(&op_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -257,6 +272,13 @@ SegmentInternalInterface::FillTargetEntry(
             fields_data->AddAllocated(col.release());
         }
     }
+    // Add retrieve_storage_cost to results
+    results->set_scanned_remote_bytes(
+        results->scanned_remote_bytes() +
+        op_ctx.storage_usage.scanned_cold_bytes.load());
+    results->set_scanned_total_bytes(
+        results->scanned_total_bytes() +
+        op_ctx.storage_usage.scanned_total_bytes.load());
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
