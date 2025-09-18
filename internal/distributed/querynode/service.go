@@ -410,3 +410,7 @@ func (s *Server) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (
 func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
 	return s.querynode.ValidateAnalyzer(ctx, req)
 }
+
+func (s *Server) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return s.querynode.SyncFileResource(ctx, req)
+}

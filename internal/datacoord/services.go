@@ -2046,6 +2046,10 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("AddFileResource success")
 	return merr.Success(), nil
@@ -2065,6 +2069,10 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("RemoveFileResource success")
 	return merr.Success(), nil
@@ -2098,8 +2106,9 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 	}, nil
 }
 
-// func (s *Server) syncFileResources(ctx context.Context) (*commonpb.Status, error) {
-// 	resources := s.meta.ListFileResource(ctx)
-// 	nodes := s.nodeManager.GetClientIDs()
-
-// }
+// first sync file resource data to qc when all coord init finished
+func (s *Server) SyncFileResources(ctx context.Context) error {
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
+	return nil
+}

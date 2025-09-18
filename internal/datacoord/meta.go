@@ -101,7 +101,7 @@ type meta struct {
 	statsTaskMeta      *statsTaskMeta
 
 	// File Resource Meta
-	resourceMeta    map[string]*internalpb.FileResourceInfo
+	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
 }
@@ -2433,18 +2433,3 @@ func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResource
 
 	return lo.Values(m.resourceMeta), m.resourceVersion
 }
-
-// func (m *meta) GetFileResourceInfos(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
-// 	m.resourceLock.RLock()
-// 	defer m.resourceLock.RUnlock()
-
-// 	result := []*internalpb.FileResourceInfo{}
-// 	for _, name := range names {
-// 		info, ok := m.resourceMeta[name]
-// 		if !ok {
-// 			return nil, errors.Errorf("file resource with name: \"%s\" not found", name)
-// 		}
-// 		result = append(result, info)
-// 	}
-// 	return result, nil
-// }
