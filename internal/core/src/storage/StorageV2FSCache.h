@@ -117,6 +117,7 @@ class StorageV2FSCache {
     virtual ~StorageV2FSCache() = default;
 
  private:
+    std::shared_mutex mutex_;
     tbb::concurrent_unordered_map<Key, Value, KeyHasher> concurrent_map_;
 };
 }  // namespace milvus::storage

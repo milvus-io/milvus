@@ -11,6 +11,8 @@
 
 #include "storage/StorageV2FSCache.h"
 #include <future>
+#include <mutex>
+#include <shared_mutex>
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
@@ -59,6 +61,7 @@ StorageV2FSCache::Get(const Key& key) {
 
     if (!result.ok()) {
         iter.first->second.first.set_value(nullptr);
+        std::unique_lock lck(mutex_);
         concurrent_map_.unsafe_erase(iter.first);
         return nullptr;
     }
