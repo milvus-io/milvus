@@ -699,23 +699,34 @@ func rankSearchResultDataByPk(ctx context.Context,
 		return ret, nil
 	}
 
+	// init FieldsData
+	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
 		return ret, nil
 	}
 
 	// []map[id]score
 	accumulatedScores := make([]map[interface{}]float32, nq)
+	type dataLoc struct {
+		resultIdx int
+		offset    int64
+	}
+	pk2DataOffset := make([]map[any]dataLoc, nq)
 	for i := int64(0); i < nq; i++ {
 		accumulatedScores[i] = make(map[interface{}]float32)
+		pk2DataOffset[i] = make(map[any]dataLoc)
 	}
 
-	for _, result := range searchResults {
+	for ri, result := range searchResults {
 		scores := result.GetResults().GetScores()
 		start := int64(0)
 		for i := int64(0); i < nq; i++ {
 			realTopk := result.GetResults().Topks[i]
 			for j := start; j < start+realTopk; j++ {
 				id := typeutil.GetPK(result.GetResults().GetIds(), j)
+
+				pk2DataOffset[i][id] = dataLoc{resultIdx: ri, offset: j}
 				accumulatedScores[i][id] += scores[j]
 			}
 			start += realTopk
@@ -758,6 +769,8 @@ func rankSearchResultDataByPk(ctx context.Context,
 				score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
 			}
 			ret.Results.Scores = append(ret.Results.Scores, score)
+			loc := pk2DataOffset[i][keys[index]]
+			typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), loc.offset)
 		}
 	}
 
