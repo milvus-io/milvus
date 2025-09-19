@@ -269,6 +269,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillPrimaryKeys(const query::Plan* plan,
                     SearchResult& results) const override;
 
+    PkType
+    get_pk(int64_t offset) const;
     void
     FillTargetEntry(const query::Plan* plan,
                     SearchResult& results) const override;

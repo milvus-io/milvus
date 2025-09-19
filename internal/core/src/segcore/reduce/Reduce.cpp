@@ -137,7 +137,9 @@ ReduceHelper::FillPrimaryKey() {
                   search_result->seg_offsets_.size());
         auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
-            segment->FillPrimaryKeys(plan_, *search_result);
+            // segment->FillPrimaryKeys(plan_, *search_result);
+            search_result->primary_keys_.resize(
+                search_result->distances_.size());
             search_results_[valid_index++] = search_result;
         }
     }
@@ -222,7 +224,9 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (offset_beg == offset_end) {
             continue;
         }
-        auto primary_key = search_result->primary_keys_[offset_beg];
+        auto primary_key =
+            search_result->get_pk<segcore::SegmentInternalInterface>(
+                offset_beg);
         auto distance = search_result->distances_[offset_beg];
         pairs_.emplace_back(
             primary_key, distance, search_result, i, offset_beg, offset_end);
