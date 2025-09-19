@@ -21,6 +21,7 @@
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "log/Log.h"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
@@ -237,7 +238,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         }
 
         plannode = std::make_shared<milvus::plan::RescoresNode>(
-            milvus::plan::GetNextPlanNodeId(), std::move(scorers), sources);
+            milvus::plan::GetNextPlanNodeId(),
+            std::move(scorers),
+            plan_node_proto.score_option(),
+            sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
@@ -631,12 +635,21 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
 
 std::shared_ptr<rescores::Scorer>
 ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
+    expr::TypedExprPtr expr = nullptr;
     if (function.has_filter()) {
-        auto expr = ParseExprs(function.filter());
-        return std::make_shared<rescores::WeightScorer>(expr,
-                                                        function.weight());
+        expr = ParseExprs(function.filter());
     }
-    return std::make_shared<rescores::WeightScorer>(nullptr, function.weight());
+
+    switch (function.type()) {
+        case proto::plan::FunctionTypeWeight:
+            return std::make_shared<rescores::WeightScorer>(expr,
+                                                            function.weight());
+        case proto::plan::FunctionTypeRandom:
+            return std::make_shared<rescores::RandomScorer>(
+                expr, function.weight(), function.params());
+        default:
+            ThrowInfo(UnexpectedError, "unknown function type");
+    }
 }
 
 }  // namespace milvus::query
