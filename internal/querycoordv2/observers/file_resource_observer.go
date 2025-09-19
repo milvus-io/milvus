@@ -14,8 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package datacoord contains core functions in datacoord
-package datacoord
+package observers
 
 import (
 	"context"
@@ -24,34 +23,40 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type FileResourceManager struct {
+type FileResourceObserver struct {
+	lock.RWMutex
+	resources []*internalpb.FileResourceInfo
+	version   uint64
+
 	// currnet resource
-	ctx  context.Context
-	meta *meta
+	ctx context.Context
+
+	distribution map[int64]uint64
 
 	// version distribution
-	nodeManager  session.NodeManager
-	distribution map[int64]uint64
+	nodeManager *session.NodeManager
+	cluster     session.Cluster
 
 	notifyCh chan struct{}
 	sf       conc.Singleflight[any]
 	once     sync.Once
 }
 
-func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session.NodeManager) *FileResourceManager {
-	return &FileResourceManager{
+func NewFileResourceObserver(ctx context.Context, nodeManager *session.NodeManager, cluster session.Cluster) *FileResourceObserver {
+	return &FileResourceObserver{
 		ctx:          ctx,
-		meta:         meta,
 		nodeManager:  nodeManager,
+		cluster:      cluster,
 		distribution: map[int64]uint64{},
 
 		notifyCh: make(chan struct{}, 1),
@@ -59,9 +64,16 @@ func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session
 	}
 }
 
-func (m *FileResourceManager) syncLoop() {
+func (m *FileResourceObserver) getResources() ([]*internalpb.FileResourceInfo, uint64) {
+	m.RLock()
+	defer m.RUnlock()
+	return m.resources, m.version
+}
+
+func (m *FileResourceObserver) syncLoop() {
 	for range m.notifyCh {
-		err := m.sync()
+		resources, version := m.getResources()
+		err := m.sync(resources, version)
 		if err != nil {
 			// retry if error exist
 			m.sf.Do("retry", func() (any, error) {
@@ -73,8 +85,8 @@ func (m *FileResourceManager) syncLoop() {
 	}
 }
 
-func (m *FileResourceManager) Start() {
-	if fileresource.IsSyncMode(paramtable.Get().DataCoordCfg.FileResourceMode.GetValue()) {
+func (m *FileResourceObserver) Start() {
+	if fileresource.IsSyncMode(paramtable.Get().QueryCoordCfg.FileResourceMode.GetValue()) {
 		m.once.Do(func() {
 			go m.syncLoop()
 			m.Notify()
@@ -82,45 +94,39 @@ func (m *FileResourceManager) Start() {
 	}
 }
 
-func (m *FileResourceManager) Notify() {
+func (m *FileResourceObserver) Notify() {
 	select {
 	case m.notifyCh <- struct{}{}:
 	default:
 	}
 }
 
-func (m *FileResourceManager) sync() error {
-	nodes := m.nodeManager.GetClientIDs()
-
+func (m *FileResourceObserver) sync(resources []*internalpb.FileResourceInfo, version uint64) error {
+	nodes := m.nodeManager.GetAll()
 	var syncErr error
-
-	resources, version := m.meta.ListFileResource(m.ctx)
 
 	newDistribution := make(map[int64]uint64)
 	for _, node := range nodes {
-		newDistribution[node] = m.distribution[node]
-		if m.distribution[node] < version {
-			c, err := m.nodeManager.GetClient(node)
-			if err != nil {
-				log.Warn("sync file resource failed, fetch client failed", zap.Error(err))
-				syncErr = err
-				continue
-			}
-			status, err := c.SyncFileResource(m.ctx, &internalpb.SyncFileResourceRequest{
+		newDistribution[node.ID()] = m.distribution[node.ID()]
+		if m.distribution[node.ID()] < version {
+			status, err := m.cluster.SyncFileResource(m.ctx, node.ID(), &internalpb.SyncFileResourceRequest{
 				Resources: resources,
 				Version:   version,
 			})
 			if err != nil {
-				log.Info("sync file resource failed", zap.Int64("nodeID", node), zap.Error(err))
+				log.Info("sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
+				syncErr = err
 				continue
 			}
 
 			if err = merr.Error(status); err != nil {
-				log.Info("sync file resource failed", zap.Int64("nodeID", node), zap.Error(err))
+				log.Info("sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
+				syncErr = err
 				continue
 			}
-			newDistribution[node] = version
-			log.Info("finish sync file resource to data node", zap.Int64("node", node), zap.Uint64("version", version))
+
+			newDistribution[node.ID()] = version
+			log.Info("finish sync file resource to query node", zap.Int64("node", node.ID()), zap.Uint64("version", version))
 		}
 	}
 	m.distribution = newDistribution
@@ -129,4 +135,12 @@ func (m *FileResourceManager) sync() error {
 		return syncErr
 	}
 	return nil
+}
+
+func (m *FileResourceObserver) UpdateResources(resources []*internalpb.FileResourceInfo, version uint64) {
+	m.Lock()
+	defer m.Unlock()
+	m.resources = resources
+	m.version = version
+	m.Notify()
 }
