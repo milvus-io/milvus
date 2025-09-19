@@ -89,6 +89,16 @@ func (s *BloomFilterSet) Type() commonpb.SegmentState {
 	return s.segType
 }
 
+// Get stats
+func (s *BloomFilterSet) Stats() *storage.PkStatistics {
+	return s.currentStat
+}
+
+// Have BloomFilter exist
+func (s *BloomFilterSet) BloomFilterExist() bool {
+	return s.currentStat != nil || s.historyStats != nil
+}
+
 // UpdateBloomFilter updates currentStats with provided pks.
 func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	s.statsMutex.Lock()
