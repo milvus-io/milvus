@@ -989,7 +989,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1087,7 +1088,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     pointer, milvus::index::JSONType::ARRAY);
                 if (!target_field.empty()) {
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
-                    index->ExecutorForShreddingData<std::string_view>(
+                    index->template ExecutorForShreddingData<std::string_view>(
                         target_field,
                         executor,
                         nullptr,

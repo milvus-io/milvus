@@ -129,12 +129,6 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override = 0;
-    virtual void
-    LoadJsonStats(FieldId field_id,
-                  std::shared_ptr<index::JsonKeyStats> stats) = 0;
-
-    virtual void
-    RemoveJsonStats(FieldId field_id) = 0;
 
     SegmentType
     type() const override {

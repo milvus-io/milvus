@@ -402,6 +402,16 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return JSONType::UNKNOWN;
     }
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return cell_size_;
+    }
+
+    void
+    SetCellSize(cachinglayer::ResourceUsage cell_size) {
+        cell_size_ = cell_size;
+    }
+
  private:
     void
     CollectSingleJsonStatsInfo(const char* json_str,
@@ -670,9 +680,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string shared_column_field_name_;
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
+    cachinglayer::ResourceUsage cell_size_ = {0, 0};
 
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
 };
+
+using CacheJsonKeyStatsPtr =
+    std::shared_ptr<milvus::cachinglayer::CacheSlot<JsonKeyStats>>;
 
 }  // namespace milvus::index

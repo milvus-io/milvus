@@ -324,6 +324,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

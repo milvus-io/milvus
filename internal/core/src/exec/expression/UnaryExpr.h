@@ -892,6 +892,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

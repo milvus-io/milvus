@@ -20,7 +20,6 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "index/JsonInvertedIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus {
 namespace exec {
@@ -194,7 +193,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         cached_index_chunk_id_ = 0;
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);

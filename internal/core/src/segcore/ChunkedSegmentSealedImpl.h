@@ -37,6 +37,7 @@
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
 #include "folly/concurrency/ConcurrentHashMap.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -128,26 +129,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   std::unique_ptr<index::TextMatchIndex> index) override;
 
     void
-    RemoveJsonStats(FieldId field_id) override {
-        std::unique_lock lck(mutex_);
-        json_stats_.erase(field_id);
+    LoadJsonStats(FieldId field_id,
+                  index::CacheJsonKeyStatsPtr cache_slot) override {
+        json_stats_.wlock()->insert({field_id, std::move(cache_slot)});
+    }
+
+    PinWrapper<index::JsonKeyStats*>
+    GetJsonStats(FieldId field_id) const override {
+        auto r = json_stats_.rlock();
+        auto it = r->find(field_id);
+        if (it == r->end()) {
+            return PinWrapper<index::JsonKeyStats*>(nullptr);
+        }
+        auto ca = SemiInlineGet(it->second->PinCells({0}));
+        auto* stats = ca->get_cell_of(0);
+        AssertInfo(stats != nullptr,
+                   "json stats cache is corrupted, field_id: {}",
+                   field_id.get());
+        return PinWrapper<index::JsonKeyStats*>(ca, stats);
     }
 
     void
-    LoadJsonStats(FieldId field_id,
-                  std::shared_ptr<index::JsonKeyStats> stats) override {
+    RemoveJsonStats(FieldId field_id) override {
         std::unique_lock lck(mutex_);
-        json_stats_[field_id] = stats;
-    }
-
-    index::JsonKeyStats*
-    GetJsonStats(FieldId field_id) const override {
-        std::shared_lock lck(mutex_);
-        auto iter = json_stats_.find(field_id);
-        if (iter == json_stats_.end()) {
-            return nullptr;
-        }
-        return iter->second.get();
+        json_stats_.wlock()->erase(field_id);
     }
 
     PinWrapper<index::NgramInvertedIndex*>

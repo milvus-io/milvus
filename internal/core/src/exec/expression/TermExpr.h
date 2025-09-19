@@ -24,6 +24,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus {
 namespace exec {
@@ -153,6 +154,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     int32_t consistency_level_ = 0;
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

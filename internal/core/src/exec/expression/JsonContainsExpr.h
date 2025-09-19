@@ -552,6 +552,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

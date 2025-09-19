@@ -172,8 +172,14 @@ class SegmentInterface {
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const = 0;
 
-    virtual index::JsonKeyStats*
+    virtual PinWrapper<index::JsonKeyStats*>
     GetJsonStats(FieldId field_id) const = 0;
+
+    virtual void
+    LoadJsonStats(FieldId field_id, index::CacheJsonKeyStatsPtr cache_slot) = 0;
+
+    virtual void
+    RemoveJsonStats(FieldId field_id) = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -348,9 +354,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndexForJson(FieldId field_id,
                          const std::string& nested_path) const override;
-
-    virtual index::JsonKeyStats*
-    GetJsonStats(FieldId field_id) const override;
 
  public:
     // `query_lims` is not null only for vector array (embedding list) search
@@ -560,7 +563,9 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
 
-    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+    // json stats cache (field_id -> CacheSlot of JsonKeyStats)
+    mutable folly::Synchronized<
+        std::unordered_map<FieldId, index::CacheJsonKeyStatsPtr>>
         json_stats_;
 };
 
