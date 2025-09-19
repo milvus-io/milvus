@@ -23,6 +23,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -363,6 +364,7 @@ class SegmentInternalInterface : public SegmentInterface {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
+                  milvus::OpContext* op_context,
                   SearchResult& output) const = 0;
 
     virtual void

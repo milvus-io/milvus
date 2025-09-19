@@ -171,6 +171,7 @@ StreamReducerHelper::AssembleMergedResult() {
 
 void
 StreamReducerHelper::MergeReduce() {
+    GetTotalStorageCost();
     FilterSearchResults();
     FillPrimaryKeys();
     InitializeReduceRecords();
@@ -189,9 +190,12 @@ StreamReducerHelper::SerializeMergedResult() {
                "Wrong state for num_slice in streamReducer, num_slice:{}",
                num_slice_);
     search_result_blobs->blobs.resize(num_slice_);
+    search_result_blobs->costs.resize(num_slice_);
     for (int i = 0; i < num_slice_; i++) {
-        auto proto = GetSearchResultDataSlice(i);
-        search_result_blobs->blobs[i] = proto;
+        auto [proto, cost] =
+            GetSearchResultDataSlice(i, total_search_storage_cost_);
+        search_result_blobs->blobs[i] = std::move(proto);
+        search_result_blobs->costs[i] = cost;
     }
     return search_result_blobs.release();
 }
@@ -527,8 +531,9 @@ StreamReducerHelper::RefreshSearchResult() {
     }
 }
 
-std::vector<char>
-StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
+std::pair<std::vector<char>, StorageCost>
+StreamReducerHelper::GetSearchResultDataSlice(int slice_index,
+                                              const StorageCost& total_cost) {
     auto nq_begin = slice_nqs_prefix_sum_[slice_index];
     auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
 
@@ -555,6 +560,7 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
         result_count = merged_search_result->topk_per_nq_prefix_sum_[nq_end] -
                        merged_search_result->topk_per_nq_prefix_sum_[nq_begin];
     }
+    StorageCost cost = total_cost * (1.0 * (nq_end - nq_begin) / total_nq_);
 
     // `result_pairs` contains the SearchResult and result_offset info, used for filling output fields
     std::vector<MergeBase> result_pairs(result_count);
@@ -690,7 +696,14 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
     auto size = search_result_data->ByteSizeLong();
     auto buffer = std::vector<char>(size);
     search_result_data->SerializePartialToArray(buffer.data(), size);
-    return buffer;
+    return {std::move(buffer), cost};
+}
+
+void
+StreamReducerHelper::GetTotalStorageCost() {
+    for (auto search_result : search_results_to_merge_) {
+        total_search_storage_cost_ += search_result->search_storage_cost_;
+    }
 }
 
 void

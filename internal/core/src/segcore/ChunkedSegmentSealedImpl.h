@@ -92,7 +92,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (iter == scalar_indexings->end()) {
             return {};
         }
-        auto ca = SemiInlineGet(iter->second->PinCells({0}));
+        auto ca = SemiInlineGet(iter->second->PinCells(nullptr, {0}));
         auto index = ca->get_cell_of(0);
         return {PinWrapper<const index::IndexBase*>(ca, index)};
     }
@@ -425,6 +425,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
+                  milvus::OpContext* op_context,
                   SearchResult& output) const override;
 
     void

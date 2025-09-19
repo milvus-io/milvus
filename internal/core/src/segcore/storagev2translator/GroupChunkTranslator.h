@@ -75,6 +75,12 @@ class GroupChunkTranslator
         return &meta_;
     }
 
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        return 0;
+    }
+
  private:
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::shared_ptr<arrow::Table>& table,

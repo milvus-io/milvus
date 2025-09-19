@@ -464,6 +464,22 @@ var (
 			Help:      "latency of function call",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName, functionTypeName, functionProvider, functionName})
+
+	ProxyScannedRemoteBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "scanned_remote_bytes",
+			Help:      "the scanned remote bytes",
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
+	ProxyScannedTotalBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "scanned_total_bytes",
+			Help:      "the scanned total bytes",
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -534,6 +550,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyFunctionlatency)
 
+	registry.MustRegister(ProxyScannedRemoteBytes)
+	registry.MustRegister(ProxyScannedTotalBytes)
 	RegisterStreamingServiceClient(registry)
 }
 
@@ -693,6 +711,30 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	ProxyRecallSearchCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
+	ProxyScannedRemoteBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
+	ProxyScannedRemoteBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
+	ProxyScannedTotalBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
+	ProxyScannedTotalBytes.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel,
 		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})

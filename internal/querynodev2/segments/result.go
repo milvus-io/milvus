@@ -125,10 +125,17 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	relatedDataSize := lo.Reduce(results, func(acc int64, result *internalpb.SearchResults, _ int) int64 {
 		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
 	}, 0)
+	storageCost := lo.Reduce(results, func(acc segcore.StorageCost, result *internalpb.SearchResults, _ int) segcore.StorageCost {
+		acc.ScannedRemoteBytes += result.GetScannedRemoteBytes()
+		acc.ScannedTotalBytes += result.GetScannedTotalBytes()
+		return acc
+	}, segcore.StorageCost{})
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	searchResults.IsTopkReduce = isTopkReduce
 	searchResults.IsRecallEvaluation = isRecallEvaluation
+	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
+	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
 	return searchResults, nil
 }
 
@@ -142,12 +149,14 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	searchResults := &internalpb.SearchResults{
 		IsAdvanced: true,
 	}
-
+	storageCost := segcore.StorageCost{}
 	for index, result := range results {
 		if result.GetIsTopkReduce() {
 			isTopkReduce = true
 		}
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
+		storageCost.ScannedRemoteBytes += result.GetScannedRemoteBytes()
+		storageCost.ScannedTotalBytes += result.GetScannedTotalBytes()
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
@@ -178,6 +187,8 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	}
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.IsTopkReduce = isTopkReduce
+	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
+	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
 	return searchResults, nil
 }
 
@@ -231,7 +242,6 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		if err != nil {
 			return nil, err
 		}
-
 		results = append(results, &partialResultData)
 	}
 	return results, nil
@@ -286,6 +296,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	hasMoreResult := false
 	for _, r := range retrieveResults {
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
+		ret.ScannedRemoteBytes += r.GetScannedRemoteBytes()
+		ret.ScannedTotalBytes += r.GetScannedTotalBytes()
 		relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
@@ -402,6 +414,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	for i, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
+		ret.ScannedRemoteBytes += r.GetScannedRemoteBytes()
+		ret.ScannedTotalBytes += r.GetScannedTotalBytes()
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
 			log.Debug("filter out invalid retrieve result")
 			continue
