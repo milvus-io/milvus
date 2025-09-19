@@ -117,7 +117,7 @@ class RandomScorer : public Scorer {
         if (auto it = param_map.find("seed"); it != param_map.end()) {
             try {
                 seed_ = std::stoll(it->second);
-            } catch (std::exception e) {
+            } catch (const std::exception& e) {
                 ThrowInfo(ErrorCode::InvalidParameter,
                           "parse boost random seed params failed: {}",
                           e.what());
@@ -127,7 +127,7 @@ class RandomScorer : public Scorer {
         if (auto it = param_map.find("field_id"); it != param_map.end()) {
             try {
                 field_ = FieldId(std::stoll(it->second));
-            } catch (std::exception e) {
+            } catch (const std::exception& e) {
                 ThrowInfo(ErrorCode::InvalidParameter,
                           "parse boost random seed field ID failed: {}",
                           e.what());
