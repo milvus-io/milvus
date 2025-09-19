@@ -21,6 +21,8 @@ namespace exec {
 
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span("PhyLogicalBinaryExpr::Eval", tracer::GetRootSpan());
+
     AssertInfo(
         inputs_.size() == 2,
         "logical binary expr must have 2 inputs, but {} inputs are provided",

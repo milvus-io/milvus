@@ -15,10 +15,11 @@
 // limitations under the License.
 
 #include "RescoresNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 #include <cstddef>
 #include "exec/operator/Utils.h"
 #include "monitor/Monitor.h"
-
 namespace milvus::exec {
 
 PhyRescoresNode::PhyRescoresNode(
@@ -48,6 +49,9 @@ PhyRescoresNode::GetOutput() {
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
+
+    tracer::AutoSpan span(
+        "PhyRescoresNode::Execute", tracer::GetRootSpan(), true);
 
     DeferLambda([&]() { is_finished_ = true; });
 
@@ -154,6 +158,8 @@ PhyRescoresNode::GetOutput() {
             .count();
     milvus::monitor::internal_core_search_latency_rescore.Observe(scalar_cost /
                                                                   1000);
+
+    tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
     return input_;
 };
 
