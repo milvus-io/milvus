@@ -368,6 +368,16 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 				return err
 			}
 		}
+	case schemapb.DataType_Geometry:
+		for i, singleGeometry := range singleData.(*GeometryFieldData).Data {
+			isValid := true
+			if len(singleData.(*GeometryFieldData).ValidData) != 0 {
+				isValid = singleData.(*GeometryFieldData).ValidData[i]
+			}
+			if err = eventWriter.AddOneGeometryToPayload(singleGeometry, isValid); err != nil {
+				return err
+			}
+		}
 	case schemapb.DataType_BinaryVector:
 		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim); err != nil {
 			return err
@@ -600,6 +610,17 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		jsonFieldData.Data = append(jsonFieldData.Data, singleData...)
 		jsonFieldData.ValidData = append(jsonFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = jsonFieldData
+		return len(singleData), nil
+	case schemapb.DataType_Geometry:
+		singleData := data.([][]byte)
+		if fieldData == nil {
+			fieldData = &GeometryFieldData{Data: make([][]byte, 0, rowNum)}
+		}
+		geometryFieldData := fieldData.(*GeometryFieldData)
+
+		geometryFieldData.Data = append(geometryFieldData.Data, singleData...)
+		geometryFieldData.ValidData = append(geometryFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = geometryFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_BinaryVector:

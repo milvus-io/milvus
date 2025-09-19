@@ -1670,3 +1670,338 @@ func Test_JSONPathNullExpr(t *testing.T) {
 		assert.Equal(t, planStr, plan2Str)
 	}
 }
+
+// ============================================================================
+// GIS Functions Tests
+// ============================================================================
+
+func TestExpr_GISFunctions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test valid GIS function expressions
+	validExprs := []string{
+		// ST_EQUALS tests
+		`st_equals(GeometryField, "POINT(0 0)")`,
+		`ST_EQUALS(GeometryField, "POINT(1.5 2.3)")`,
+		`st_equals(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
+		`st_equals(GeometryField, "LINESTRING(0 0, 1 1, 2 2)")`,
+		`st_equals(GeometryField, "MULTIPOINT((0 0), (1 1))")`,
+
+		// ST_INTERSECTS tests
+		`st_intersects(GeometryField, "POINT(0 0)")`,
+		`ST_INTERSECTS(GeometryField, "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")`,
+		`st_intersects(GeometryField, "LINESTRING(-1 -1, 1 1)")`,
+
+		// ST_CONTAINS tests
+		`st_contains(GeometryField, "POINT(0.5 0.5)")`,
+		`ST_CONTAINS(GeometryField, "POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))")`,
+
+		// ST_WITHIN tests
+		`st_within(GeometryField, "POLYGON((-2 -2, 2 -2, 2 2, -2 2, -2 -2))")`,
+		`ST_WITHIN(GeometryField, "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")`,
+
+		// ST_TOUCHES tests
+		`st_touches(GeometryField, "POINT(1 1)")`,
+		`ST_TOUCHES(GeometryField, "LINESTRING(0 0, 1 0)")`,
+
+		// ST_OVERLAPS tests
+		`st_overlaps(GeometryField, "POLYGON((0.5 0.5, 1.5 0.5, 1.5 1.5, 0.5 1.5, 0.5 0.5))")`,
+		`ST_OVERLAPS(GeometryField, "POLYGON((-0.5 -0.5, 0.5 -0.5, 0.5 0.5, -0.5 0.5, -0.5 -0.5))")`,
+
+		// ST_CROSSES tests
+		`st_crosses(GeometryField, "LINESTRING(-1 0, 1 0)")`,
+		`ST_CROSSES(GeometryField, "LINESTRING(0 -1, 0 1)")`,
+
+		// ST_DWITHIN tests
+		`st_dwithin(GeometryField, "POINT(0 0)", 1.0)`,
+		`ST_DWITHIN(GeometryField, "POINT(1 1)", 5)`,
+		`st_dwithin(GeometryField, "POINT(2.5 3.7)", 10.5)`,
+		`ST_DWITHIN(GeometryField, "POINT(0.5 0.5)", 2.0)`,
+		`st_dwithin(GeometryField, "POINT(1.0 1.0)", 1)`,
+
+		// Case insensitive tests
+		`St_Equals(GeometryField, "POINT(0 0)")`,
+		`sT_iNtErSeCts(GeometryField, "POINT(1 1)")`,
+		`St_DWithin(GeometryField, "POINT(0 0)", 5.0)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test invalid GIS function expressions
+	invalidExprs := []string{
+		// Invalid field type
+		`st_equals(Int64Field, "POINT(0 0)")`,
+		`st_intersects(StringField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
+		`st_dwithin(BoolField, "POINT(0 0)", 1.0)`,
+
+		// Invalid WKT strings
+		`st_equals(GeometryField, "INVALID WKT")`,
+		`st_intersects(GeometryField, "POINT()")`,
+		`st_contains(GeometryField, "POLYGON((0 0, 1 0))")`, // Unclosed polygon
+		`st_within(GeometryField, "LINESTRING(0)")`,         // Incomplete linestring
+
+		// Missing parameters
+		`st_equals(GeometryField)`,
+		`st_intersects()`,
+		`st_dwithin(GeometryField, "POINT(0 0)")`,       // Missing distance parameter
+		`st_contains(GeometryField, "POINT(0 0)", 1.0)`, // Extra parameter
+
+		// Invalid distance parameter for ST_DWITHIN
+		`st_dwithin(GeometryField, "POINT(0 0)", "abc")`, // String parameter
+		`st_dwithin(GeometryField, "POINT(0 0)", "invalid")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", -1.0)`, // Negative distance
+		`st_dwithin(GeometryField, "POINT(0 0)", true)`, // Boolean instead of number
+
+		// Non-existent fields
+		`st_equals(NonExistentField, "POINT(0 0)")`,
+		`st_dwithin(UnknownGeometryField, "POINT(0 0)", 5.0)`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_GISFunctionsComplexExpressions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test complex GIS expressions with logical operators
+	complexExprs := []string{
+		// AND combinations
+		`st_equals(GeometryField, "POINT(0 0)") and st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
+		`st_contains(GeometryField, "POINT(0.5 0.5)") AND st_within(GeometryField, "POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) and Int64Field > 100`,
+
+		// OR combinations
+		`st_equals(GeometryField, "POINT(0 0)") or st_equals(GeometryField, "POINT(1 1)")`,
+		`st_intersects(GeometryField, "POINT(0 0)") OR st_touches(GeometryField, "POINT(1 1)")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", 1.0) or st_dwithin(GeometryField, "POINT(5 5)", 2.0)`,
+
+		// NOT combinations
+		`not st_equals(GeometryField, "POINT(0 0)")`,
+		`!(st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"))`,
+		`not (st_dwithin(GeometryField, "POINT(0 0)", 1.0))`,
+
+		// Mixed with other field types
+		`st_contains(GeometryField, "POINT(0 0)") and StringField == "test"`,
+		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) or Int32Field in [1, 2, 3]`,
+		`st_within(GeometryField, "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))") and FloatField > 0.5`,
+
+		// Nested expressions
+		`(st_equals(GeometryField, "POINT(0 0)") and Int64Field > 0) or (st_intersects(GeometryField, "POINT(1 1)") and StringField != "")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) and (Int32Field > 10 or BoolField == true)`,
+	}
+
+	for _, expr := range complexExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_GISFunctionsWithDifferentGeometryTypes(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test different WKT geometry types
+	geometryTests := []struct {
+		gisFunc     string
+		geometryWKT string
+		description string
+	}{
+		// Point geometries
+		{"st_equals", "POINT(0 0)", "Simple point"},
+		{"st_intersects", "POINT(1.5 2.3)", "Point with decimals"},
+		{"st_dwithin", "POINT(-1 -1)", "Point with negative coordinates"},
+
+		// LineString geometries
+		{"st_intersects", "LINESTRING(0 0, 1 1)", "Simple linestring"},
+		{"st_crosses", "LINESTRING(-1 0, 1 0)", "Horizontal linestring"},
+		{"st_contains", "LINESTRING(0 0, 1 1, 2 2)", "Multi-segment linestring"},
+
+		// Polygon geometries
+		{"st_within", "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", "Simple polygon"},
+		{"st_overlaps", "POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))", "Centered polygon"},
+		{"st_contains", "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0), (0.5 0.5, 1.5 0.5, 1.5 1.5, 0.5 1.5, 0.5 0.5))", "Polygon with hole"},
+
+		// Multi geometries
+		{"st_intersects", "MULTIPOINT((0 0), (1 1), (2 2))", "Multiple points"},
+		{"st_crosses", "MULTILINESTRING((0 0, 1 0), (1 1, 2 1))", "Multiple linestrings"},
+		{"st_overlaps", "MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))", "Multiple polygons"},
+
+		// Collection geometries
+		{"st_intersects", "GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 1, 2 2))", "Mixed geometry collection"},
+	}
+
+	for _, test := range geometryTests {
+		exprStr := fmt.Sprintf(`%s(GeometryField, "%s")`, test.gisFunc, test.geometryWKT)
+		if test.gisFunc == "st_dwithin" {
+			exprStr = fmt.Sprintf(`%s(GeometryField, "%s", 5.0)`, test.gisFunc, test.geometryWKT)
+		}
+
+		assertValidExpr(t, schema, exprStr)
+	}
+}
+
+func TestExpr_GISFunctionsWithVariousDistances(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test ST_DWITHIN with various distance values
+	distanceTests := []struct {
+		distance    interface{}
+		shouldPass  bool
+		description string
+	}{
+		// Valid distances (including zero)
+		{0, true, "Zero distance (integer)"},
+		{0.0, true, "Zero distance (float)"},
+		{1, true, "Integer distance"},
+		{1.0, true, "Float distance"},
+		{0.5, true, "Small decimal distance"},
+		{1000.0, true, "Large distance"},
+		{99999999.999, true, "Very large distance"},
+		{0.000001, true, "Very small distance"},
+
+		// Valid distance expressions as strings that should be parsed
+		{"0", true, "String zero integer"},
+		{"0.0", true, "String zero float"},
+		{"1", true, "String integer"},
+		{"1.5", true, "String float"},
+	}
+
+	for _, test := range distanceTests {
+		var exprStr string
+		switch v := test.distance.(type) {
+		case int:
+			exprStr = fmt.Sprintf(`st_dwithin(GeometryField, "POINT(0 0)", %d)`, v)
+		case float64:
+			exprStr = fmt.Sprintf(`st_dwithin(GeometryField, "POINT(0 0)", %g)`, v)
+		case string:
+			exprStr = fmt.Sprintf(`st_dwithin(GeometryField, "POINT(0 0)", %s)`, v)
+		}
+
+		if test.shouldPass {
+			assertValidExpr(t, schema, exprStr)
+		} else {
+			assertInvalidExpr(t, schema, exprStr)
+		}
+	}
+}
+
+func TestExpr_GISFunctionsPlanGeneration(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test that GIS expressions can be used in search plans
+	gisExprs := []string{
+		`st_equals(GeometryField, "POINT(0 0)")`,
+		`st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", 5.0)`,
+		`st_contains(GeometryField, "POINT(0.5 0.5)") and Int64Field > 100`,
+		`st_within(GeometryField, "POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))") or StringField == "test"`,
+	}
+
+	for _, expr := range gisExprs {
+		plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err, "Failed to create plan for expression: %s", expr)
+		assert.NotNil(t, plan, "Plan should not be nil for expression: %s", expr)
+		assert.NotNil(t, plan.GetVectorAnns(), "Vector annotations should not be nil for expression: %s", expr)
+
+		if plan.GetVectorAnns().GetPredicates() != nil {
+			// Verify that the plan contains GIS function filter expressions
+			// This ensures that the GIS expressions are properly parsed and converted to plan nodes
+			predicates := plan.GetVectorAnns().GetPredicates()
+			assert.NotNil(t, predicates, "Predicates should not be nil for GIS expression: %s", expr)
+		}
+	}
+}
+
+func TestExpr_GISFunctionsWithJSONFields(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test invalid usage with JSON fields - GIS functions should only work with geometry fields
+	invalidJSONGISExprs := []string{
+		`st_equals(JSONField, "POINT(0 0)")`,
+		`st_intersects($meta["geometry"], "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
+		`st_dwithin(A, "POINT(0 0)", 5.0)`, // Dynamic field
+		`st_contains(JSONField["geom"], "POINT(0.5 0.5)")`,
+	}
+
+	for _, expr := range invalidJSONGISExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_GISFunctionsZeroDistance(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test zero distance specifically for ST_DWITHIN
+	zeroDistanceExprs := []string{
+		// Integer zero
+		`st_dwithin(GeometryField, "POINT(0 0)", 0)`,
+		// Float zero
+		`st_dwithin(GeometryField, "POINT(1 1)", 0.0)`,
+		// Zero in complex expressions
+		`st_dwithin(GeometryField, "POINT(0 0)", 0) and Int64Field > 10`,
+	}
+
+	for _, expr := range zeroDistanceExprs {
+		assertValidExpr(t, schema, expr)
+	}
+
+	// Test that zero distance expressions can generate valid search plans
+	for _, expr := range zeroDistanceExprs {
+		plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err, "Failed to create plan for zero distance expression: %s", expr)
+		assert.NotNil(t, plan, "Plan should not be nil for zero distance expression: %s", expr)
+	}
+
+	// Test that negative distances are still invalid
+	invalidNegativeExprs := []string{
+		`st_dwithin(GeometryField, "POINT(0 0)", -1)`,
+		`st_dwithin(GeometryField, "POINT(0 0)", -0.1)`,
+		`st_dwithin(GeometryField, "POINT(0 0)", -100.5)`,
+	}
+
+	for _, expr := range invalidNegativeExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_GISFunctionsInvalidParameterTypes(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test various invalid parameter types for ST_DWITHIN distance parameter
+	invalidTypeExprs := []string{
+		// String parameters (should be rejected)
+		`st_dwithin(GeometryField, "POINT(0 0)", "abc")`,
+		`st_dwithin(GeometryField, "POINT(0 0)", "123")`,    // Numeric string
+		`st_dwithin(GeometryField, "POINT(0 0)", "123.45")`, // Float string
+		`st_dwithin(GeometryField, "POINT(0 0)", "0")`,      // Zero string
+		`st_dwithin(GeometryField, "POINT(0 0)", "-5")`,     // Negative string
+
+		// Boolean parameters (should be rejected)
+		`st_dwithin(GeometryField, "POINT(0 0)", true)`,
+		`st_dwithin(GeometryField, "POINT(0 0)", false)`,
+
+		// Array/complex parameters (should be rejected)
+		`st_dwithin(GeometryField, "POINT(0 0)", [1, 2, 3])`,
+		`st_dwithin(GeometryField, "POINT(0 0)", GeometryField)`, // Field reference instead of literal
+	}
+
+	for _, expr := range invalidTypeExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}

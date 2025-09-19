@@ -5,7 +5,9 @@ use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
 
 pub fn index_exist(path: &str) -> bool {
-    let dir = MmapDirectory::open(path).unwrap();
+    let Ok(dir) = MmapDirectory::open(path) else {
+        return false;
+    };
     Index::exists(&dir).unwrap()
 }
 

@@ -26,6 +26,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/File.h"
+#include "common/Geometry.h"
 #include "common/Types.h"
 #include "storage/Event.h"
 #include "storage/Util.h"
@@ -126,7 +127,8 @@ TEST(chunk, test_json_field) {
     auto ser_data = event_data.Serialize();
 
     auto get_record_batch_reader =
-        [&]() -> std::shared_ptr<::arrow::RecordBatchReader> {
+        [&]() -> std::pair<std::shared_ptr<::arrow::RecordBatchReader>,
+                           std::unique_ptr<parquet::arrow::FileReader>> {
         auto buffer = std::make_shared<arrow::io::BufferReader>(
             ser_data.data() + 2 * sizeof(milvus::Timestamp),
             ser_data.size() - 2 * sizeof(milvus::Timestamp));
@@ -141,11 +143,11 @@ TEST(chunk, test_json_field) {
         std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
         s = arrow_reader->GetRecordBatchReader(&rb_reader);
         EXPECT_TRUE(s.ok());
-        return rb_reader;
+        return {rb_reader, std::move(arrow_reader)};
     };
 
     {
-        auto rb_reader = get_record_batch_reader();
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
         // nullable=false
         FieldMeta field_meta(
             FieldName("a"), milvus::FieldId(1), DataType::JSON, false);
@@ -173,7 +175,7 @@ TEST(chunk, test_json_field) {
         }
     }
     {
-        auto rb_reader = get_record_batch_reader();
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
         // nullable=true
         FieldMeta field_meta(
             FieldName("a"), milvus::FieldId(1), DataType::JSON, true);
@@ -456,4 +458,204 @@ TEST(chunk, test_sparse_float) {
             EXPECT_EQ(v1[j].val, v2[j].val);
         }
     }
+}
+
+class TempDir {
+ public:
+    TempDir() {
+        auto path = boost::filesystem::unique_path("%%%%_%%%%");
+        auto abs_path = boost::filesystem::temp_directory_path() / path;
+        boost::filesystem::create_directory(abs_path);
+        dir_ = abs_path;
+    }
+
+    ~TempDir() {
+        boost::filesystem::remove_all(dir_);
+    }
+
+    std::string
+    dir() {
+        return dir_.string();
+    }
+
+ private:
+    boost::filesystem::path dir_;
+};
+
+TEST(chunk, test_geometry_field) {
+    // Create simple geometry data - just a few points
+    FixedVector<std::string> data;
+    data.reserve(3);
+
+    // Create simple point geometries using WKT format
+    std::string point1_wkt = "POINT(0 0)";
+    std::string point2_wkt = "POINT(1 1)";
+    std::string point3_wkt = "POINT(2 2)";
+
+    // Convert WKT to WKB format
+    data.push_back(Geometry(point1_wkt.data()).to_wkb_string());
+    data.push_back(Geometry(point2_wkt.data()).to_wkb_string());
+    data.push_back(Geometry(point3_wkt.data()).to_wkb_string());
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::GEOMETRY);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(
+        FieldName("a"), milvus::FieldId(1), DataType::GEOMETRY, false);
+    auto chunk = create_chunk(field_meta, rb_reader);
+
+    // Since GeometryChunk is an alias for StringChunk, we can use StringViews
+    auto views = std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(
+        std::nullopt);
+    EXPECT_EQ(views.first.size(), data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        EXPECT_EQ(views.first[i], data[i]);
+    }
+}
+
+TEST(chunk, test_geometry_field_nullable_all_valid) {
+    // Prepare geometry data (WKB strings) – all rows valid but nullable flag enabled
+    FixedVector<std::string> data;
+    data.reserve(3);
+    data.push_back(Geometry("POINT(0 0)").to_wkb_string());
+    data.push_back(Geometry("POINT(1 1)").to_wkb_string());
+    data.push_back(Geometry("POINT(2 2)").to_wkb_string());
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::GEOMETRY, true);
+    // All rows are valid – need explicit valid bitmap when nullable=true
+    uint8_t* valid_bitmap_all =
+        new uint8_t[1]{0x07};  // 0b00000111 (3 rows valid)
+    field_data->FillFieldData(data.data(), valid_bitmap_all, data.size());
+
+    storage::InsertEventData event_data;
+    event_data.payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    ASSERT_TRUE(reader_builder.Open(buffer).ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
+
+    FieldMeta field_meta(
+        FieldName("geo"), milvus::FieldId(1), DataType::GEOMETRY, true);
+    auto chunk = create_chunk(field_meta, rb_reader);
+
+    auto [views, valid] =
+        std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(
+            std::nullopt);
+    ASSERT_EQ(views.size(), data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        EXPECT_EQ(views[i], data[i]);
+        EXPECT_TRUE(valid[i]);
+    }
+
+    delete[] valid_bitmap_all;
+}
+
+TEST(chunk, test_geometry_field_mmap_with_nulls) {
+    // Prepare geometry data with one NULL row (middle)
+    FixedVector<std::string> data;
+    data.reserve(3);
+    data.push_back(Geometry("POINT(0 0)").to_wkb_string());
+    data.push_back(
+        Geometry("POINT(1 1)").to_wkb_string());  // will be marked NULL
+    data.push_back(Geometry("POINT(2 2)").to_wkb_string());
+
+    // Validity bitmap: 0b00000101 -> rows 0 and 2 valid, row 1 invalid
+    uint8_t* valid_bitmap = new uint8_t[1]{0x05};
+
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::GEOMETRY, true);
+    field_data->FillFieldData(data.data(), valid_bitmap, data.size());
+
+    storage::InsertEventData event_data;
+    event_data.payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    ASSERT_TRUE(reader_builder.Open(buffer).ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
+
+    // Prepare mmap file
+    TempDir temp;
+    std::string temp_dir = temp.dir();
+    auto file = File::Open(temp_dir + "/geo_mmap", O_CREAT | O_RDWR);
+    int file_offset = 0;
+
+    FieldMeta field_meta(
+        FieldName("geo"), milvus::FieldId(1), DataType::GEOMETRY, true);
+    auto chunk = create_chunk(field_meta, rb_reader);
+
+    auto [views, valid] =
+        std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(
+            std::nullopt);
+    ASSERT_EQ(views.size(), data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (valid[i]) {
+            EXPECT_EQ(views[i], data[i]);
+        } else {
+            EXPECT_FALSE(valid[i]);
+        }
+    }
+    file.Close();
+    delete[] valid_bitmap;
+}
+
+TEST(array, test_geometry_array_output_data) {
+    // Prepare two simple geometries (WKB strings)
+    std::string wkb1 = Geometry("POINT(10 10)").to_wkb_string();
+    std::string wkb2 = Geometry("POINT(20 20)").to_wkb_string();
+
+    // Build raw buffer and offsets for two variable-length geometry elements
+    // Need to support kGeometry in construct Array(const ScalarArray& field_data)
+    uint32_t offsets_raw[2] = {0, static_cast<uint32_t>(wkb1.size())};
+    size_t total_size = wkb1.size() + wkb2.size();
+    std::vector<char> buf(total_size);
+    std::copy(wkb1.begin(), wkb1.end(), buf.begin());
+    std::copy(wkb2.begin(), wkb2.end(), buf.begin() + wkb1.size());
+
+    // Construct Array with element_type = GEOMETRY
+    Array geo_array(
+        buf.data(), /*len=*/2, total_size, DataType::GEOMETRY, offsets_raw);
+
+    auto serialized = geo_array.output_data();
+
+    ASSERT_EQ(serialized.geometry_data().data_size(), 2);
+    EXPECT_EQ(serialized.geometry_data().data(0), wkb1);
+    EXPECT_EQ(serialized.geometry_data().data(1), wkb2);
 }

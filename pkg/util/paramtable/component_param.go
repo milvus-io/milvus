@@ -246,6 +246,13 @@ type commonConfig struct {
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
 	DiskWriteNumThreads   ParamItem `refreshable:"true"`
 
+	DiskWriteRateLimiterRefillPeriodUs      ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterAvgKBps             ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMaxBurstKBps        ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterHighPriorityRatio   ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
+	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -695,6 +702,62 @@ In this case, the maximum concurrency of disk write operations is determined by 
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
+
+	p.DiskWriteRateLimiterRefillPeriodUs = ParamItem{
+		Key:          "common.diskWriteRateLimiter.refillPeriodUs",
+		Version:      "2.5.17",
+		DefaultValue: "100000",
+		Doc:          "refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterRefillPeriodUs.Init(base.mgr)
+
+	p.DiskWriteRateLimiterAvgKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.avgKBps",
+		Version:      "2.5.17",
+		DefaultValue: "262144",
+		Doc:          "average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterAvgKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMaxBurstKBps = ParamItem{
+		Key:          "common.diskWriteRateLimiter.maxBurstKBps",
+		Version:      "2.5.17",
+		DefaultValue: "524288",
+		Doc:          "max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMaxBurstKBps.Init(base.mgr)
+
+	p.DiskWriteRateLimiterHighPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.highPriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc: `amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+The ratio is the multiplication factor of the configured bandwidth.
+For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.`,
+		Export: true,
+	}
+	p.DiskWriteRateLimiterHighPriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterMiddlePriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.middlePriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterMiddlePriorityRatio.Init(base.mgr)
+
+	p.DiskWriteRateLimiterLowPriorityRatio = ParamItem{
+		Key:          "common.diskWriteRateLimiter.lowPriorityRatio",
+		Version:      "2.5.17",
+		DefaultValue: "-1",
+		Doc:          "amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled",
+		Export:       true,
+	}
+	p.DiskWriteRateLimiterLowPriorityRatio.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
@@ -1438,6 +1501,9 @@ type proxyConfig struct {
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
+	MaxTextLength                ParamItem `refreshable:"false"`
+	MaxResultEntries             ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1851,6 +1917,33 @@ please adjust in embedded Milvus: false`,
 	}
 	p.MaxVarCharLength.Init(base.mgr)
 
+	p.MaxTextLength = ParamItem{
+		Key:          "proxy.maxTextLength",
+		Version:      "2.6.0",
+		DefaultValue: strconv.Itoa(2 * 1024 * 1024), // 2M
+		Doc:          "maximum number of characters for a row of the text field",
+	}
+	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxResultEntries = ParamItem{
+		Key:          "proxy.maxResultEntries",
+		Version:      "2.6.0",
+		DefaultValue: "-1",
+		Doc: `maximum number of result entries, typically Nq * TopK * GroupSize. 
+It costs additional memory and time to process a large number of result entries. 
+If the number of result entries exceeds this limit, the search will be rejected.
+Disabled if the value is less or equal to 0.`,
+		Export: true,
+	}
+	p.MaxResultEntries.Init(base.mgr)
+
+	p.EnableCachedServiceProvider = ParamItem{
+		Key:          "proxy.enableCachedServiceProvider",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable cached service provider",
+	}
+	p.EnableCachedServiceProvider.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -2646,12 +2739,16 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexSubDim            ParamItem `refreshable:"false"`
 	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio        ParamItem `refreshable:"false"`
 	InterimIndexRefineQuantType   ParamItem `refreshable:"false"`
 	InterimIndexRefineWithQuant   ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"`
+
+	// delete snapshot dump
+	DeleteDumpBatchSize ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2700,8 +2797,11 @@ type queryNodeConfig struct {
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
-	MaxTimestampLag       ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	// tsafe
+	MaxTimestampLag ParamItem `refreshable:"true"`
+	DowngradeTsafe  ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -2729,6 +2829,9 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+	// expr cache
+	ExprResCacheEnabled       ParamItem `refreshable:"false"`
+	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -2969,6 +3072,21 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexRefineRatio.Init(base.mgr)
+
+	p.InterimIndexBuildRatio = ParamItem{
+		Key:     "queryNode.segcore.interimIndex.indexBuildRatio",
+		Version: "2.5.18",
+		Formatter: func(v string) string {
+			if getAsFloat(v) > 1.0 {
+				return "0.1"
+			}
+			return v
+		},
+		DefaultValue: "0.1",
+		Doc:          "the ratio of building interim index rows count with max row count of a flush segment, should set to be < 1.0",
+		Export:       true,
+	}
+	p.InterimIndexBuildRatio.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",
@@ -3354,6 +3472,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxTimestampLag.Init(base.mgr)
 
+	p.DowngradeTsafe = ParamItem{
+		Key:          "queryNode.downgradeTsafe",
+		Version:      "2.5.17",
+		Doc:          "ops maintenance switch for downgrade tsafe in case of mq failure",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.DowngradeTsafe.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
 		Version:      "2.2.1",
@@ -3491,6 +3618,27 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	// expr cache
+	p.ExprResCacheEnabled = ParamItem{
+		Key:          "queryNode.exprCache.enabled",
+		FallbackKeys: []string{"enable_expr_cache"},
+		Version:      "2.5.17",
+		DefaultValue: "false",
+		Doc:          "enable expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheEnabled.Init(base.mgr)
+
+	p.ExprResCacheCapacityBytes = ParamItem{
+		Key:          "queryNode.exprCache.capacityBytes",
+		FallbackKeys: []string{"max_expr_cache_size"},
+		Version:      "2.5.17",
+		DefaultValue: "268435456", // 256MB
+		Doc:          "max capacity in bytes for expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheCapacityBytes.Init(base.mgr)
+
 	p.JSONKeyStatsCommitInterval = ParamItem{
 		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
 		Version:      "2.5.0",
@@ -3584,6 +3732,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.WorkerPoolingSize.Init(base.mgr)
+
+	p.DeleteDumpBatchSize = ParamItem{
+		Key:          "queryNode.segcore.deleteDumpBatchSize",
+		Version:      "2.5.18",
+		DefaultValue: "10000",
+		Doc:          "Batch size for delete snapshot dump in segcore.",
+		Export:       true,
+	}
+	p.DeleteDumpBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3615,6 +3772,7 @@ type dataCoordConfig struct {
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
+	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
@@ -3631,7 +3789,7 @@ type dataCoordConfig struct {
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
@@ -3662,7 +3820,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
@@ -3907,6 +4065,15 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
 	}
 	p.BlockingL0SizeInMB.Init(base.mgr)
+
+	p.DVForceAllIndexReady = ParamItem{
+		Key:          "dataCoord.dataview.forceAllIndexReady",
+		Version:      "2.6.2",
+		DefaultValue: "false",
+		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
+		Export:       false,
+	}
+	p.DVForceAllIndexReady.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
@@ -4817,10 +4984,10 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ImportInsertBufferSize     ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
+	ImportInsertBufferSize      ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5100,15 +5267,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
-	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "dataNode.import.maxConcurrentTaskNum",
+	p.ImportConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.import.concurrencyPerCPUCore",
 		Version:      "2.4.0",
-		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "16",
+		Doc:          "The execution concurrency unit for import/pre-import tasks per CPU core.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+	p.ImportConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
 		Key:          "dataNode.import.maxImportFileSizeInGB",

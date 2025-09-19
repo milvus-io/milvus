@@ -516,6 +516,61 @@ func (s *DelegatorSuite) TestSearch() {
 		s.Error(err)
 	})
 
+	s.Run("downgrade_tsafe", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		pt := paramtable.Get()
+		pt.Save(pt.QueryNodeCfg.DowngradeTsafe.Key, "true")
+		defer pt.Reset(pt.QueryNodeCfg.DowngradeTsafe.Key)
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.EqualValues(1, req.Req.GetBase().GetTargetID())
+
+				if req.GetScope() == querypb.DataScope_Streaming {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
+				}
+				if req.GetScope() == querypb.DataScope_Historical {
+					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
+				}
+			}).Return(&internalpb.SearchResults{}, nil)
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.EqualValues(2, req.Req.GetBase().GetTargetID())
+
+				s.Equal(querypb.DataScope_Historical, req.GetScope())
+				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
+			}).Return(&internalpb.SearchResults{}, nil)
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		results, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:               commonpbutil.NewMsgBase(),
+				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		s.NoError(err)
+		s.Equal(3, len(results))
+	})
+
 	s.Run("distribution_not_serviceable", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

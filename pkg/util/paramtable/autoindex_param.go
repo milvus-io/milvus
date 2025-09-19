@@ -35,25 +35,28 @@ type AutoIndexConfig struct {
 	EnableOptimize         ParamItem `refreshable:"true"`
 	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
-	IndexParams           ParamItem  `refreshable:"true"`
-	SparseIndexParams     ParamItem  `refreshable:"true"`
-	BinaryIndexParams     ParamItem  `refreshable:"true"`
-	PrepareParams         ParamItem  `refreshable:"true"`
-	LoadAdaptParams       ParamItem  `refreshable:"true"`
-	ExtraParams           ParamItem  `refreshable:"true"`
-	IndexType             ParamItem  `refreshable:"true"`
-	AutoIndexTypeName     ParamItem  `refreshable:"true"`
-	AutoIndexSearchConfig ParamItem  `refreshable:"true"`
-	AutoIndexTuningConfig ParamGroup `refreshable:"true"`
+	IndexParams            ParamItem  `refreshable:"true"`
+	SparseIndexParams      ParamItem  `refreshable:"true"`
+	BinaryIndexParams      ParamItem  `refreshable:"true"`
+	DeduplicateIndexParams ParamItem  `refreshable:"true"`
+	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
+	PrepareParams          ParamItem  `refreshable:"true"`
+	LoadAdaptParams        ParamItem  `refreshable:"true"`
+	ExtraParams            ParamItem  `refreshable:"true"`
+	IndexType              ParamItem  `refreshable:"true"`
+	AutoIndexTypeName      ParamItem  `refreshable:"true"`
+	AutoIndexSearchConfig  ParamItem  `refreshable:"true"`
+	AutoIndexTuningConfig  ParamGroup `refreshable:"true"`
 
-	ScalarAutoIndexEnable  ParamItem `refreshable:"true"`
-	ScalarAutoIndexParams  ParamItem `refreshable:"true"`
-	ScalarNumericIndexType ParamItem `refreshable:"true"`
-	ScalarIntIndexType     ParamItem `refreshable:"true"`
-	ScalarVarcharIndexType ParamItem `refreshable:"true"`
-	ScalarBoolIndexType    ParamItem `refreshable:"true"`
-	ScalarFloatIndexType   ParamItem `refreshable:"true"`
-	ScalarJSONIndexType    ParamItem `refreshable:"true"`
+	ScalarAutoIndexEnable   ParamItem `refreshable:"true"`
+	ScalarAutoIndexParams   ParamItem `refreshable:"true"`
+	ScalarNumericIndexType  ParamItem `refreshable:"true"`
+	ScalarIntIndexType      ParamItem `refreshable:"true"`
+	ScalarVarcharIndexType  ParamItem `refreshable:"true"`
+	ScalarBoolIndexType     ParamItem `refreshable:"true"`
+	ScalarFloatIndexType    ParamItem `refreshable:"true"`
+	ScalarJSONIndexType     ParamItem `refreshable:"true"`
+	ScalarGeometryIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 }
@@ -107,6 +110,23 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BinaryIndexParams.Init(base.mgr)
+
+	p.DeduplicateIndexParams = ParamItem{
+		Key:          "autoIndex.params.deduplicate.build",
+		Version:      "2.5.18",
+		DefaultValue: `{"index_type": "MINHASH_LSH", "metric_type": "MHJACCARD"}`,
+		Formatter:    GetBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.deduplicate.build"),
+		Export:       true,
+	}
+	p.DeduplicateIndexParams.Init(base.mgr)
+
+	p.EnableDeduplicateIndex = ParamItem{
+		Key:          "autoIndex.params.deduplicate.enable",
+		Version:      "2.5.18",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+	}
+	p.EnableDeduplicateIndex.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
@@ -167,7 +187,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED", "geometry": "RTREE"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
@@ -219,6 +239,18 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarJSONIndexType.Init(base.mgr)
+
+	p.ScalarGeometryIndexType = ParamItem{
+		Version: "2.5.16",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["geometry"]
+		},
+	}
+	p.ScalarGeometryIndexType.Init(base.mgr)
 
 	p.BitmapCardinalityLimit = ParamItem{
 		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",

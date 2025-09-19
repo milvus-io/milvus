@@ -117,7 +117,8 @@ func values2FieldData[T any](values []T, fieldType entity.FieldType, dim int) *s
 		entity.FieldTypeInt64,
 		entity.FieldTypeVarChar,
 		entity.FieldTypeString,
-		entity.FieldTypeJSON:
+		entity.FieldTypeJSON,
+		entity.FieldTypeGeometry:
 		fd.Field = &schemapb.FieldData_Scalars{
 			Scalars: values2Scalars(values, fieldType), // scalars,
 		}
@@ -197,6 +198,12 @@ func values2Scalars[T any](values []T, fieldType entity.FieldType) *schemapb.Sca
 			JsonData: &schemapb.JSONArray{
 				Data: data,
 			},
+		}
+	case entity.FieldTypeGeometry:
+		var strVals []string
+		strVals, ok = any(values).([]string)
+		scalars.Data = &schemapb.ScalarField_GeometryWktData{
+			GeometryWktData: &schemapb.GeometryWktArray{Data: strVals},
 		}
 	}
 	// shall not be accessed

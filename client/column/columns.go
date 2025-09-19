@@ -209,6 +209,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 	case schemapb.DataType_JSON:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetJsonData().GetData(), begin, end, validData, NewColumnJSONBytes, NewNullableColumnJSONBytes)
 
+	case schemapb.DataType_Geometry:
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetGeometryWktData().GetData(), begin, end, validData, NewColumnGeometryWKT, NewNullableColumnGeometryWKT)
+
 	case schemapb.DataType_FloatVector:
 		vectors := fd.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_FloatVector)

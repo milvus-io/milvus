@@ -106,6 +106,13 @@ SegcoreSetRefineRatio(const float value) {
 }
 
 extern "C" void
+SegcoreSetIndexBuildRatio(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_build_ratio(value);
+}
+
+extern "C" void
 SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
     milvus::config::KnowhereInitBuildThreadPool(num_threads);
 }

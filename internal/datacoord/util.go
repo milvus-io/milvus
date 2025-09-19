@@ -103,10 +103,19 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		}
 
 		// get vector field id
-		vecFieldIDs := make([]int64, 0)
+		var targetFieldIds []int64
+		// wait all vector datatype fields only
 		for _, field := range coll.Schema.GetFields() {
 			if typeutil.IsVectorType(field.GetDataType()) {
-				vecFieldIDs = append(vecFieldIDs, field.GetFieldID())
+				targetFieldIds = append(targetFieldIds, field.GetFieldID())
+			}
+		}
+
+		// include all scalar fields with index
+		if paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
+			indices := mt.indexMeta.GetIndexesForCollection(collection, "")
+			for _, index := range indices {
+				targetFieldIds = append(targetFieldIds, index.FieldID)
 			}
 		}
 		segmentIDs := lo.Map(segmentList, func(seg *SegmentInfo, _ int) UniqueID {
@@ -114,7 +123,7 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		})
 
 		// get indexed segments which finish build index on all vector field
-		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, vecFieldIDs)
+		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, targetFieldIds)
 		if len(indexed) > 0 {
 			indexedSet := typeutil.NewUniqueSet(indexed...)
 			for _, segment := range segmentList {

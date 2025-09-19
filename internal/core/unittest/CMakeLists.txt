@@ -12,10 +12,10 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(
-    ${KNOWHERE_INCLUDE_DIR}
-    ${SIMDJSON_INCLUDE_DIR}
-    ${TANTIVY_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
+        ${KNOWHERE_INCLUDE_DIR}
+        ${SIMDJSON_INCLUDE_DIR}
+        ${TANTIVY_INCLUDE_DIR}
+        ${CONAN_INCLUDE_DIRS}
 )
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
@@ -94,86 +94,92 @@ set(MILVUS_TEST_FILES
         test_build_inverted_index_with_single_segment.cpp
         test_json_index.cpp
         test_json_key_stats_index.cpp
+        test_expr_cache.cpp
         test_thread_pool.cpp
+        test_rtree_index_wrapper.cpp
+        test_rtree_index.cpp
+)
+
+if(INDEX_ENGINE STREQUAL "cardinal")
+        set(MILVUS_TEST_FILES
+                ${MILVUS_TEST_FILES}
+                test_kmeans_clustering.cpp)
+endif()
+
+if(BUILD_DISK_ANN STREQUAL "ON")
+        set(MILVUS_TEST_FILES
+                ${MILVUS_TEST_FILES}
+
+                # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757
+                # test_minio_chunk_manager.cpp
         )
-
-if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set(MILVUS_TEST_FILES
-        ${MILVUS_TEST_FILES}
-        test_kmeans_clustering.cpp)
 endif()
 
-if ( BUILD_DISK_ANN STREQUAL "ON" )
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757
-            #test_minio_chunk_manager.cpp
-            )
+if(LINUX OR APPLE)
+        set(MILVUS_TEST_FILES
+                ${MILVUS_TEST_FILES}
+                test_scalar_index_creator.cpp
+                test_string_index.cpp
+                test_array.cpp test_array_expr.cpp)
 endif()
 
-if (LINUX OR APPLE)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_scalar_index_creator.cpp
-            test_string_index.cpp
-            test_array.cpp test_array_expr.cpp)
-endif()
-
-if (DEFINED AZURE_BUILD_DIR)
-    set(MILVUS_TEST_FILES
+if(DEFINED AZURE_BUILD_DIR)
+        set(MILVUS_TEST_FILES
                 ${MILVUS_TEST_FILES}
                 test_azure_chunk_manager.cpp
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
-                #test_remote_chunk_manager.cpp
-                )
-    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+
+                # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
+                # test_remote_chunk_manager.cpp
+        )
+        include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
 endif()
 
-if (ENABLE_GCP_NATIVE)
-    add_definitions(-DENABLE_GCP_NATIVE)
-    set(MILVUS_TEST_FILES
+if(ENABLE_GCP_NATIVE)
+        add_definitions(-DENABLE_GCP_NATIVE)
+        set(MILVUS_TEST_FILES
                 ${MILVUS_TEST_FILES}
                 test_gcp_native_chunk_manager.cpp
-                )
+        )
 endif()
 
-if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
+if(LINUX)
+        message(STATUS "Building Milvus Unit Test on Linux")
+        option(USE_ASAN "Whether to use AddressSanitizer" OFF)
 
-    # check if memory leak exists in index builder
-    set(INDEX_BUILDER_TEST_FILES
-            test_index_wrapper.cpp
-            test_scalar_index_creator.cpp
-            test_index_c_api.cpp
-            )
+        if(USE_ASAN)
+                message(STATUS "Building Milvus using AddressSanitizer")
+                add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+                add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+        endif()
 
-    add_executable(index_builder_test
-            ${INDEX_BUILDER_TEST_FILES}
-            )
+        # check if memory leak exists in index builder
+        set(INDEX_BUILDER_TEST_FILES
+                test_index_wrapper.cpp
+                test_scalar_index_creator.cpp
+                test_index_c_api.cpp
+        )
 
-    target_link_libraries(index_builder_test
-            gtest
-            milvus_core
-            knowhere
-            )
-    install(TARGETS index_builder_test DESTINATION unittest)
+        add_executable(index_builder_test
+                ${INDEX_BUILDER_TEST_FILES}
+        )
+
+        target_link_libraries(index_builder_test
+                gtest
+                milvus_core
+                knowhere
+        )
+        install(TARGETS index_builder_test DESTINATION unittest)
 endif()
 
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
-        )
+)
 
 target_link_libraries(all_tests
         gtest
         milvus_core
         knowhere
-        )
+)
 
 install(TARGETS all_tests DESTINATION unittest)
 
@@ -181,23 +187,40 @@ add_subdirectory(bench)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test
-#                test_simd.cpp)
-# 
+# test_simd.cpp)
+#
 # target_link_libraries(dynamic_simd_test
-#                 milvus_simd
-#                 milvus_log
-#                 gtest
-#                 ${CONAN_LIBS})
-# 
+# milvus_simd
+# milvus_log
+# gtest
+# ${CONAN_LIBS})
+#
 # install(TARGETS dynamic_simd_test DESTINATION unittest)
 # endif()
 
-add_executable(bitset_test 
+# bitset unit test
+include(CheckCXXCompilerFlag)
+include(CheckIncludeFileCXX)
+
+check_cxx_compiler_flag("-march=armv8-a+sve" COMPILER_SUPPORTS_SVE)
+check_include_file_cxx("arm_sve.h" COMPILER_HAS_ARM_SVE_HEADER)
+
+add_executable(bitset_test
         test_bitset.cpp
 )
-target_link_libraries(bitset_test 
-        milvus_bitset 
-        gtest 
+
+if(COMPILER_SUPPORTS_SVE AND COMPILER_HAS_ARM_SVE_HEADER)
+        message(STATUS "SVE support for the bitset library UT is enabled")
+        target_compile_definitions(bitset_test PRIVATE BITSET_ENABLE_SVE_SUPPORT=1)
+
+        set_source_files_properties(test_bitset.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+else()
+        message(STATUS "SVE support for the bitset library UT is disabled")
+endif()
+
+target_link_libraries(bitset_test
+        milvus_bitset
+        gtest
         ${CONAN_LIBS}
 )
 install(TARGETS bitset_test DESTINATION unittest)

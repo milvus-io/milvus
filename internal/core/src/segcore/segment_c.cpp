@@ -34,6 +34,8 @@
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
+#include "exec/expression/ExprCache.h"
+#include "common/GeometryCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -89,6 +91,11 @@ NewSegment(CCollection collection,
 void
 DeleteSegment(CSegmentInterface c_segment) {
     auto s = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+
+    // Clean up geometry cache for all fields in this segment
+    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
+    cache_manager.RemoveSegmentCaches(s->get_segment_id());
+
     delete s;
 }
 
@@ -645,6 +652,16 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         segment_interface->CreateTextIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+CStatus
+ExprResCacheEraseSegment(int64_t segment_id) {
+    try {
+        milvus::exec::ExprResCacheManager::Instance().EraseSegment(segment_id);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

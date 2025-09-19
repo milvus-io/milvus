@@ -775,6 +775,11 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	if latestTSafe >= ts {
 		return latestTSafe, nil
 	}
+	// check whethertsafe downgraded
+	if paramtable.Get().QueryNodeCfg.DowngradeTsafe.GetAsBool() {
+		log.WithRateGroup("downgradeTsafe", 1, 60).RatedWarn(10, "downgrade tsafe", zap.Uint64("latestTSafe", latestTSafe), zap.Uint64("ts", ts))
+		return latestTSafe, nil
+	}
 	// check lag duration too large
 	st, _ := tsoutil.ParseTS(latestTSafe)
 	gt, _ := tsoutil.ParseTS(ts)

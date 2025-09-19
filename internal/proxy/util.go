@@ -710,7 +710,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 		if typeutil.IsFloatVectorType(dataType) {
 			return nil
 		}
-	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE:
+	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD:
 		if dataType == schemapb.DataType_BinaryVector {
 			return nil
 		}
@@ -811,6 +811,11 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	})
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
+
+	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
+	for _, field := range coll.Fields {
+		field.IsFunctionOutput = false
+	}
 
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
@@ -1115,7 +1120,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 			// Set the ElementType because it may not be set in the insert request.
 			if fieldData.Type == schemapb.DataType_Array {
 				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok {
+				if !ok || fd.Scalars.GetArrayData() == nil {
 					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}

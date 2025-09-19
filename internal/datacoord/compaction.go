@@ -334,13 +334,14 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			}
 		}
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
+
 		if len(c.executingTasks) >= parallelism {
 			c.executingGuard.Unlock()
 			break // 2. the parallelism of running tasks is reached
 		}
 		c.executingGuard.Unlock()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 	}
 	return selected
 }

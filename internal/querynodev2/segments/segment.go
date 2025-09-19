@@ -293,6 +293,7 @@ type LocalSegment struct {
 	rowNum      *atomic.Int64
 	insertCount *atomic.Int64
 
+	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
@@ -716,6 +717,16 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 	defer s.ptrLock.Unpin()
 
+	s.deltaMut.Lock()
+	defer s.deltaMut.Unlock()
+
+	if s.lastDeltaTimestamp.Load() >= timestamps[len(timestamps)-1] {
+		log.Info("skip delete due to delete record before lastDeltaTimestamp",
+			zap.Int64("segmentID", s.ID()),
+			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
+		return nil
+	}
+
 	var err error
 	GetDynamicPool().Submit(func() (any, error) {
 		start := time.Now()
@@ -898,6 +909,15 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 	)
+
+	s.deltaMut.Lock()
+	defer s.deltaMut.Unlock()
+
+	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] {
+		log.Info("skip load delta data due to delete record before lastDeltaTimestamp",
+			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
+		return nil
+	}
 
 	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
 	if err != nil {
@@ -1126,6 +1146,11 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {
 	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()), zap.Any("text logs", textLogs))
 
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
 	f, err := schemaHelper.GetFieldFromID(textLogs.GetFieldID())
 	if err != nil {
 		return err
@@ -1156,6 +1181,11 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 }
 
 func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
@@ -1385,6 +1415,11 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		s.ReleaseSegmentData()
 		log.Info("release segment data done and the field indexes info has been set lazy load=true")
 		return
+	}
+
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// erase expr-cache for this segment before deleting C segment
+		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
 	}
 
 	GetDynamicPool().Submit(func() (any, error) {

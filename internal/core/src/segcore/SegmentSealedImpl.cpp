@@ -28,6 +28,7 @@
 
 #include "Utils.h"
 #include "Types.h"
+#include "common/GeometryCache.h"
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -35,6 +36,7 @@
 #include "common/FieldMeta.h"
 #include "common/File.h"
 #include "common/Json.h"
+#include "common/Geometry.h"
 #include "common/LoadInfo.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -432,6 +434,24 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     column = std::move(var_column);
                     break;
                 }
+                case milvus::DataType::GEOMETRY: {
+                    auto var_column = std::make_shared<
+                        SingleChunkVariableColumn<std::string>>(
+                        num_rows, field_meta, get_block_size());
+                    FieldDataPtr field_data;
+                    while (data.channel->pop(field_data)) {
+                        var_column->Append(std::move(field_data));
+                    }
+                    var_column->Seal();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
+                    field_data_size = var_column->DataByteSize();
+
+                    // Construct GeometryCache for the entire field
+                    LoadGeometryCache(field_id, *var_column);
+
+                    column = std::move(var_column);
+                    break;
+                }
                 case milvus::DataType::ARRAY: {
                     auto var_column = std::make_shared<SingleChunkArrayColumn>(
                         num_rows, field_meta);
@@ -590,6 +610,21 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                         field_meta,
                         DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
+                column = std::move(var_column);
+                break;
+            }
+            case milvus::DataType::GEOMETRY: {
+                auto var_column =
+                    std::make_shared<SingleChunkVariableColumn<std::string>>(
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
+                var_column->Seal(std::move(indices));
+
+                // Construct GeometryCache for the entire field (mmap mode)
+                LoadGeometryCache(field_id, *var_column);
+
                 column = std::move(var_column);
                 break;
             }
@@ -1253,6 +1288,9 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
+    // Clean up geometry cache for all fields in this segment using global function
+    milvus::RemoveSegmentGeometryCaches(get_segment_id());
+
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
@@ -1444,6 +1482,15 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
 
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(column.get(),
+                                                 seg_offsets,
+                                                 count,
+                                                 ret->mutable_scalars()
+                                                     ->mutable_geometry_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             bulk_subscript_array_impl(
                 column.get(),
@@ -2213,6 +2260,47 @@ SegmentSealedImpl::GetJsonData(FieldId field_id, size_t offset) const {
     auto column = fields_.at(field_id);
     bool is_valid = column->IsValid(offset);
     return std::make_pair(std::move(column->RawAt(offset)), is_valid);
+}
+
+void
+SegmentSealedImpl::LoadGeometryCache(
+    FieldId field_id,
+    const SingleChunkVariableColumn<std::string>& var_column) {
+    try {
+        // Get geometry cache for this segment+field
+        auto& geometry_cache =
+            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+                get_segment_id(), field_id);
+
+        // Get all string views from the single chunk
+        auto [string_views, valid_data] = var_column.StringViews();
+
+        // Add each string view to the geometry cache
+        for (size_t i = 0; i < string_views.size(); ++i) {
+            if (valid_data.empty() || valid_data[i]) {
+                // Valid geometry data
+                const auto& wkb_data = string_views[i];
+                geometry_cache.AppendData(wkb_data.data(), wkb_data.size());
+            } else {
+                // Null/invalid geometry
+                geometry_cache.AppendData(nullptr, 0);
+            }
+        }
+
+        LOG_INFO(
+            "Successfully loaded geometry cache for segment {} field {} with "
+            "{} geometries",
+            get_segment_id(),
+            field_id.get(),
+            geometry_cache.Size());
+
+    } catch (const std::exception& e) {
+        PanicInfo(UnexpectedError,
+                  "Failed to load geometry cache for segment {} field {}: {}",
+                  get_segment_id(),
+                  field_id.get(),
+                  e.what());
+    }
 }
 
 }  // namespace milvus::segcore

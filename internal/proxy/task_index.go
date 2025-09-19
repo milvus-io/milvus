@@ -242,6 +242,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
 				} else if typeutil.IsJSONType(dataType) {
 					return Params.AutoIndexConfig.ScalarJSONIndexType.GetValue(), nil
+				} else if typeutil.IsGeometryType(dataType) {
+					return Params.AutoIndexConfig.ScalarGeometryIndexType.GetValue(), nil
 				}
 				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()
@@ -272,9 +274,20 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					indexParamsMap[k] = v
 				}
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
-				// override binary vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
-					indexParamsMap[k] = v
+				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {
+					if !Params.AutoIndexConfig.EnableDeduplicateIndex.GetAsBool() {
+						log.Ctx(ctx).Warn("Deduplicate index is not enabled, but metric type is deduplicate.")
+						return merr.WrapErrParameterInvalidMsg("Deduplicate index is not enabled, but metric type is deduplicate.")
+					}
+					// override binary vector index params by autoindex deduplicate params
+					for k, v := range Params.AutoIndexConfig.DeduplicateIndexParams.GetAsJSONMap() {
+						indexParamsMap[k] = v
+					}
+				} else {
+					// override binary vector index params by autoindex
+					for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
+						indexParamsMap[k] = v
+					}
 				}
 			}
 
@@ -292,6 +305,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 				log.Ctx(ctx).Info("AutoIndex triggered", fields...)
 			}
+			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 			handle := func(numberParams int, autoIndexConfig map[string]string) error {
 				// empty case.
@@ -302,8 +316,6 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					useAutoIndex(autoIndexConfig)
 					return nil
 				}
-
-				metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 				if len(indexParamsMap) > numberParams+1 {
 					return errors.New("only metric type can be passed when use AutoIndex")
@@ -333,8 +345,16 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				// override sparse float vector index params by autoindex
 				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
-				// override binary vector index params by autoindex
-				config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {
+					if !Params.AutoIndexConfig.EnableDeduplicateIndex.GetAsBool() {
+						log.Ctx(ctx).Warn("Deduplicate index is not enabled, but metric type is deduplicate.")
+						return merr.WrapErrParameterInvalidMsg("Deduplicate index is not enabled, but metric type is deduplicate.")
+					}
+					config = Params.AutoIndexConfig.DeduplicateIndexParams.GetAsJSONMap()
+				} else {
+					// override binary vector index params by autoindex
+					config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+				}
 			}
 			if !exist {
 				if err := handle(0, config); err != nil {
@@ -486,6 +506,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().AutoIndexConfig.BitmapCardinalityLimit.GetValue()
 		}
 	}
+
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Ctx(ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
@@ -665,10 +686,6 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 	if len(t.req.GetIndexName()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("index name is empty")
-	}
-
-	if err = validateIndexName(t.req.GetIndexName()); err != nil {
-		return err
 	}
 
 	// TODO fubang should implement it when the alter index is reconstructed

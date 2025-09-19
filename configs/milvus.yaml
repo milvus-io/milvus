@@ -289,6 +289,11 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
+  # maximum number of result entries, typically Nq * TopK * GroupSize. 
+  # It costs additional memory and time to process a large number of result entries. 
+  # If the number of result entries exceeds this limit, the search will be rejected.
+  # Disabled if the value is less or equal to 0.
+  maxResultEntries: -1
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -413,12 +418,14 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
+      indexBuildRatio: 0.1 # the ratio of building interim index rows count with max row count of a flush segment, should set to be < 1.0
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
       refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Enable multiple chunked search
+    deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -484,6 +491,9 @@ queryNode:
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
+  exprCache:
+    enabled: false # enable expression result cache
+    capacityBytes: 268435456 # max capacity in bytes for expression result cache
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -709,7 +719,7 @@ dataNode:
     maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
     channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
-    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
@@ -869,6 +879,16 @@ common:
   # The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
   # In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.
   diskWriteNumThreads: 0
+  diskWriteRateLimiter:
+    refillPeriodUs: 100000 # refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)
+    avgKBps: 262144 # average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)
+    maxBurstKBps: 524288 # max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)
+    # amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+    # The ratio is the multiplication factor of the configured bandwidth.
+    # For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.
+    highPriorityRatio: -1
+    middlePriorityRatio: -1 # amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
+    lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,

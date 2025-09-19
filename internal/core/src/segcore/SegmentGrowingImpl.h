@@ -32,6 +32,7 @@
 #include "common/IndexMeta.h"
 #include "common/Types.h"
 #include "query/PlanNode.h"
+#include "common/GeometryCache.h"
 
 namespace milvus::segcore {
 
@@ -83,6 +84,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndex(FieldId field_id) override;
+
+ private:
+    // Build geometry cache for inserted data
+    void
+    BuildGeometryCacheForInsert(FieldId field_id,
+                                const DataArray* data_array,
+                                int64_t num_rows);
+
+    // Build geometry cache for loaded field data
+    void
+    BuildGeometryCacheForLoad(FieldId field_id,
+                              const std::vector<FieldDataPtr>& field_data);
 
  public:
     const InsertRecord<>&
@@ -259,6 +272,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     ~SegmentGrowingImpl() {
+        // Clean up geometry cache for all fields in this segment
+        auto& cache_manager =
+            milvus::exec::SimpleGeometryCacheManager::Instance();
+        cache_manager.RemoveSegmentCaches(get_segment_id());
+
+        // Original mmap cleanup logic
         if (mmap_descriptor_ != nullptr) {
             auto mcm =
                 storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -294,7 +313,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     HasIndex(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
-        if (IsVectorDataType(field_meta.get_data_type()) &&
+        if ((IsVectorDataType(field_meta.get_data_type()) ||
+             IsGeometryType(field_meta.get_data_type())) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
             return true;
         }

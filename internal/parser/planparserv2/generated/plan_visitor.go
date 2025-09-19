@@ -34,6 +34,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Identifier.
 	VisitIdentifier(ctx *IdentifierContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STIntersects.
+	VisitSTIntersects(ctx *STIntersectsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Like.
 	VisitLike(ctx *LikeContext) interface{}
 
@@ -49,11 +52,17 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Boolean.
 	VisitBoolean(ctx *BooleanContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STDWithin.
+	VisitSTDWithin(ctx *STDWithinContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Shift.
 	VisitShift(ctx *ShiftContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Call.
 	VisitCall(ctx *CallContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#STCrosses.
+	VisitSTCrosses(ctx *STCrossesContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#ReverseRange.
 	VisitReverseRange(ctx *ReverseRangeContext) interface{}
@@ -79,11 +88,20 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#TextMatch.
 	VisitTextMatch(ctx *TextMatchContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STTouches.
+	VisitSTTouches(ctx *STTouchesContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#STContains.
+	VisitSTContains(ctx *STContainsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Term.
 	VisitTerm(ctx *TermContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#JSONContains.
 	VisitJSONContains(ctx *JSONContainsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#STWithin.
+	VisitSTWithin(ctx *STWithinContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Range.
 	VisitRange(ctx *RangeContext) interface{}
@@ -109,9 +127,15 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STEuqals.
+	VisitSTEuqals(ctx *STEuqalsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#IsNull.
 	VisitIsNull(ctx *IsNullContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#STOverlaps.
+	VisitSTOverlaps(ctx *STOverlapsContext) interface{}
 }

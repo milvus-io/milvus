@@ -337,7 +337,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
-		TimeoutInSeconds:       taskProto.GetTimeoutInSeconds(),
 		Type:                   taskProto.GetType(),
 		Channel:                taskProto.GetChannel(),
 		CollectionTtl:          taskProto.GetCollectionTtl(),
