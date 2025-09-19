@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -215,7 +216,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	})
 
 	if t.SearchRequest.GetIsAdvanced() {
-		t.requery = len(t.translatedOutputFields) > 0
+		switch strings.ToLower(paramtable.Get().CommonCfg.HybridSearchRequeryPolicy.GetValue()) {
+		case "always":
+			t.requery = true
+		case "outputvector":
+			t.requery = len(vectorOutputFields) > 0
+		case "outputfields":
+			fallthrough
+		default:
+			t.requery = len(t.request.GetOutputFields()) > 0
+		}
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
 		t.requery = len(vectorOutputFields) > 0
