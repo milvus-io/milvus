@@ -123,7 +123,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.ReaderMaxFetchThreads.GetAsInt(), 32)
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
-		assert.Equal(t, wpCfg.RootPath.GetValue(), "/var/lib/milvus/woodpecker")
+		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
