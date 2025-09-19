@@ -4104,12 +4104,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}, nil
 }
 
-// FlushAll notifies Proxy to flush all collection's DML messages.
-func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-FlushAll")
-	defer sp.End()
-	log := log.With(zap.String("db", req.GetDbName()))
-
+// Flush notify data nodes to persist the data of collection.
+func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
 	resp := &milvuspb.FlushAllResponse{
 		Status: merr.Success(),
 	}
@@ -4117,83 +4113,69 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Info(rpcReceived("FlushAll"))
 
-	hasError := func(status *commonpb.Status, err error) bool {
-		if err != nil {
-			resp.Status = merr.Status(err)
-			log.Warn("FlushAll failed", zap.Error(err))
-			return true
-		}
-		if status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("FlushAll failed", zap.String("err", status.GetReason()))
-			resp.Status = status
-			return true
-		}
-		return false
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-FlushAll")
+	defer sp.End()
+
+	ft := &flushAllTask{
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		FlushAllRequest:    request,
+		rootCoord:          node.rootCoord,
+		dataCoord:          node.dataCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
-	dbsRsp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
-		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
-	})
-	if hasError(dbsRsp.GetStatus(), err) {
-		return resp, nil
-	}
-	dbNames := dbsRsp.DbNames
-	if req.GetDbName() != "" {
-		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
-			return dbName == req.GetDbName()
-		})
-		if len(dbNames) == 0 {
-			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
-			return resp, nil
-		}
-	}
+	method := "FlushAll"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), "").Inc()
 
-	for _, dbName := range dbNames {
-		// Flush all collections to accelerate the flushAll progress
-		showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
-			DbName: dbName,
-		})
-		if hasError(showColRsp.GetStatus(), err) {
-			return resp, nil
-		}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName))
 
-		group, ctx := errgroup.WithContext(ctx)
-		for _, collection := range showColRsp.GetCollectionNames() {
-			collection := collection
-			group.Go(func() error {
-				flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
-					Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
-					DbName:          dbName,
-					CollectionNames: []string{collection},
-				})
-				if err = merr.CheckRPCCall(flushRsp, err); err != nil {
-					return err
-				}
-				return nil
-			})
-		}
-		err = group.Wait()
-		if hasError(nil, err) {
-			return resp, nil
+	log.Debug(rpcReceived(method))
+
+	var enqueuedTask task = ft
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &flushAllTaskbyStreamingService{
+			flushAllTask: ft,
+			chMgr:        node.chMgr,
 		}
 	}
 
-	// allocate current ts as FlushAllTs
-	ts, err := node.tsoAllocator.AllocOne(ctx)
-	if err != nil {
-		log.Warn("FlushAll failed", zap.Error(err))
+	if err := node.sched.dcQueue.Enqueue(enqueuedTask); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), "").Inc()
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	resp.FlushAllTs = ts
+	log.Debug(rpcEnqueued(method),
+		zap.Uint64("BeginTs", ft.BeginTs()),
+		zap.Uint64("EndTs", ft.EndTs()))
 
-	log.Info(rpcDone("FlushAll"), zap.Uint64("FlushAllTs", ts),
-		zap.Time("FlushAllTime", tsoutil.PhysicalTime(ts)))
-	return resp, nil
+	if err := ft.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", ft.BeginTs()),
+			zap.Uint64("EndTs", ft.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), "").Inc()
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
+		zap.Uint64("BeginTs", ft.BeginTs()),
+		zap.Uint64("EndTs", ft.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), "").Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return ft.result, nil
 }
 
 // GetDdChannel returns the used channel for dd operations.

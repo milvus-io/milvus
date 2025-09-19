@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -39,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	grpcrootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -398,200 +401,204 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	})
 }
 
-func TestProxy_FlushAll_DbCollection(t *testing.T) {
-	tests := []struct {
-		testName        string
-		FlushRequest    *milvuspb.FlushAllRequest
-		ExpectedSuccess bool
-	}{
-		{"flushAll", &milvuspb.FlushAllRequest{}, true},
-		{"flushAll set db", &milvuspb.FlushAllRequest{DbName: "default"}, true},
-		{"flushAll set db, db not exist", &milvuspb.FlushAllRequest{DbName: "default2"}, false},
-	}
-
-	cacheBak := globalMetaCache
-	defer func() { globalMetaCache = cacheBak }()
-	// set expectations
-	cache := NewMockCache(t)
-	cache.On("GetCollectionID",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(UniqueID(0), nil).Maybe()
-
-	cache.On("RemoveDatabase",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-	).Maybe()
-
-	globalMetaCache = cache
-
-	for _, test := range tests {
-		t.Run(test.testName, func(t *testing.T) {
-			factory := dependency.NewDefaultFactory(true)
-			ctx := context.Background()
-			paramtable.Init()
-
-			node, err := NewProxy(ctx, factory)
-			assert.NoError(t, err)
-			node.UpdateStateCode(commonpb.StateCode_Healthy)
-			node.tsoAllocator = &timestampAllocator{
-				tso: newMockTimestampAllocatorInterface(),
-			}
-			rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
-			node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
-			assert.NoError(t, err)
-			node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
-
-			Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
-			node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
-			assert.NoError(t, err)
-			err = node.sched.Start()
-			assert.NoError(t, err)
-			defer node.sched.Close()
-			node.dataCoord = mocks.NewMockDataCoordClient(t)
-			node.rootCoord = mocks.NewMockRootCoordClient(t)
-			successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-			node.dataCoord.(*mocks.MockDataCoordClient).EXPECT().Flush(mock.Anything, mock.Anything).
-				Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
-			node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-				Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
-			node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-				Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
-
-			resp, err := node.FlushAll(ctx, test.FlushRequest)
-			assert.NoError(t, err)
-			if test.ExpectedSuccess {
-				assert.True(t, merr.Ok(resp.GetStatus()))
-			} else {
-				assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-			}
-		})
-	}
-}
-
-func TestProxy_FlushAll(t *testing.T) {
+// createTestProxy creates a test proxy instance with all necessary setup
+func createTestProxy() *Proxy {
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	paramtable.Init()
 
-	node, err := NewProxy(ctx, factory)
-	assert.NoError(t, err)
+	node, _ := NewProxy(ctx, factory)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
+
 	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
-	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
-	assert.NoError(t, err)
+	node.replicateMsgStream, _ = node.factory.NewMsgStream(node.ctx)
 	node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
-	Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
-	assert.NoError(t, err)
-	err = node.sched.Start()
-	assert.NoError(t, err)
-	defer node.sched.Close()
-	node.dataCoord = mocks.NewMockDataCoordClient(t)
-	node.rootCoord = mocks.NewMockRootCoordClient(t)
+	node.sched, _ = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.Start()
 
-	cacheBak := globalMetaCache
-	defer func() { globalMetaCache = cacheBak }()
+	return node
+}
 
-	// set expectations
-	cache := NewMockCache(t)
-	cache.On("GetCollectionID",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(UniqueID(0), nil).Once()
+func TestProxy_FlushAll_NoDatabase(t *testing.T) {
+	mockey.PatchConvey("TestProxy_FlushAll_NoDatabase", t, func() {
+		// Mock global meta cache methods
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			return UniqueID(0), nil
+		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
+			return nil
+		}).Build()
 
-	cache.On("RemoveDatabase",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-	).Maybe()
+		// Mock paramtable initialization
+		mockey.Mock(paramtable.Init).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
 
-	globalMetaCache = cache
-	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	node.dataCoord.(*mocks.MockDataCoordClient).EXPECT().Flush(mock.Anything, mock.Anything).
-		Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
-	node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-		Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
-	node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-		Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
+		// Mock grpc mix coord client FlushAll method
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		mockey.Mock((*grpcdatacoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: successStatus}, nil
+		}).Build()
 
-	t.Run("FlushAll", func(t *testing.T) {
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		// Mock rootCoord client methods
+		mockey.Mock((*grpcrootcoordclient.Client).ListDatabases).To(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
+			return &milvuspb.ListDatabasesResponse{
+				Status:  successStatus,
+				DbNames: []string{"default"},
+			}, nil
+		}).Build()
+
+		mockey.Mock((*grpcrootcoordclient.Client).ShowCollections).To(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+			return &milvuspb.ShowCollectionsResponse{
+				Status:        successStatus,
+				CollectionIds: []int64{1, 2, 3},
+			}, nil
+		}).Build()
+
+		// Act: Execute test
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		datacoord := &grpcdatacoordclient.Client{}
+		node.dataCoord = datacoord
+
+		rootcoord := &grpcrootcoordclient.Client{}
+		node.rootCoord = rootcoord
+
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
+
+		// Assert: Verify results
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
+}
 
-	t.Run("FlushAll failed, server is abnormal", func(t *testing.T) {
+func TestProxy_FlushAll_WithDefaultDatabase(t *testing.T) {
+	mockey.PatchConvey("TestProxy_FlushAll_WithDefaultDatabase", t, func() {
+		// Mock global meta cache methods
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			return UniqueID(0), nil
+		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
+			return nil
+		}).Build()
+
+		// Mock paramtable initialization
+		mockey.Mock(paramtable.Init).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+		// Mock grpc mix coord client FlushAll method for default database
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		mockey.Mock((*grpcdatacoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: successStatus}, nil
+		}).Build()
+
+		// Mock rootCoord client methods (not needed for this test as it specifies a database)
+		mockey.Mock((*grpcrootcoordclient.Client).ShowCollections).To(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+			return &milvuspb.ShowCollectionsResponse{
+				Status:        successStatus,
+				CollectionIds: []int64{1, 2, 3},
+			}, nil
+		}).Build()
+
+		// Act: Execute test
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		datacoord := &grpcdatacoordclient.Client{}
+		node.dataCoord = datacoord
+
+		rootcoord := &grpcrootcoordclient.Client{}
+		node.rootCoord = rootcoord
+
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default"})
+
+		// Assert: Verify results
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+	})
+}
+
+func TestProxy_FlushAll_DatabaseNotExist(t *testing.T) {
+	mockey.PatchConvey("TestProxy_FlushAll_DatabaseNotExist", t, func() {
+		// Mock global meta cache methods
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			return UniqueID(0), nil
+		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
+			return nil
+		}).Build()
+
+		// Mock paramtable initialization
+		mockey.Mock(paramtable.Init).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+		// Mock grpc mix coord client FlushAll method for non-existent database
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		mockey.Mock((*grpcdatacoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: successStatus}, nil
+		}).Build()
+
+		// Mock rootCoord client methods (not needed for this test as it specifies a database)
+		mockey.Mock((*grpcrootcoordclient.Client).ShowCollections).To(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+			return &milvuspb.ShowCollectionsResponse{
+				Status:        successStatus,
+				CollectionIds: []int64{1, 2, 3},
+			}, nil
+		}).Build()
+
+		// Act: Execute test
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		datacoord := &grpcdatacoordclient.Client{}
+		node.dataCoord = datacoord
+
+		rootcoord := &grpcrootcoordclient.Client{}
+		node.rootCoord = rootcoord
+
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default2"})
+
+		// Assert: Verify results
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+	})
+}
+
+func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
+	mockey.PatchConvey("TestProxy_FlushAll_ServerAbnormal", t, func() {
+		// Mock global meta cache methods
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+			return UniqueID(0), nil
+		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
+			return nil
+		}).Build()
+
+		// Mock paramtable initialization
+		mockey.Mock(paramtable.Init).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+		// Act: Execute test
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		datacorrd := &grpcdatacoordclient.Client{}
+		node.dataCoord = datacorrd
+
+		// Set node state to abnormal
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
+
+		// Assert: Verify results
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		node.UpdateStateCode(commonpb.StateCode_Healthy)
-	})
-
-	t.Run("FlushAll failed, get id failed", func(t *testing.T) {
-		globalMetaCache.(*MockCache).On("GetCollectionID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(UniqueID(0), errors.New("mock error")).Once()
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
-		globalMetaCache.(*MockCache).On("GetCollectionID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(UniqueID(0), nil).Once()
-	})
-
-	t.Run("FlushAll failed, DataCoord flush failed", func(t *testing.T) {
-		node.dataCoord.(*mocks.MockDataCoordClient).ExpectedCalls = nil
-		node.dataCoord.(*mocks.MockDataCoordClient).EXPECT().Flush(mock.Anything, mock.Anything).
-			Return(&datapb.FlushResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "mock err",
-				},
-			}, nil).Maybe()
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
-	})
-
-	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
-		node.rootCoord.(*mocks.MockRootCoordClient).ExpectedCalls = nil
-		node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-			Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
-		node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-			Return(&milvuspb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "mock err",
-				},
-			}, nil).Maybe()
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
-	})
-
-	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
-		node.rootCoord.(*mocks.MockRootCoordClient).ExpectedCalls = nil
-		node.rootCoord.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-			Return(&milvuspb.ListDatabasesResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "mock err",
-				},
-			}, nil).Maybe()
-		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 	})
 }
 

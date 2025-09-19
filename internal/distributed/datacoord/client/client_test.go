@@ -20,23 +20,19 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -44,18 +40,7 @@ import (
 var mockErr = errors.New("mock grpc err")
 
 func TestMain(m *testing.M) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		log.Fatal("failed to start embed etcd server", zap.Error(err))
-	}
-	defer os.RemoveAll(tempDir)
-	defer embedetcdServer.Close()
-
-	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-
 	paramtable.Init()
-	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
@@ -2367,5 +2352,57 @@ func Test_NotifyDroppartition(t *testing.T) {
 	defer cancel()
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.NotifyDropPartition(ctx, &datapb.NotifyDropPartitionRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_FlushAll(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().FlushAll(mock.Anything, mock.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Success(),
+	}, nil)
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().FlushAll(mock.Anything, mock.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().FlushAll(mock.Anything, mock.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
