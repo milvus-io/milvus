@@ -212,7 +212,7 @@ woodpecker:
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
-    rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
+    rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
