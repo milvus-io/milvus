@@ -515,6 +515,9 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		return ret, nil
 	}
 
+	// init FieldsData
+	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+
 	totalCount := limit * groupSize
 	if err := setupIdListForSearchResult(ret, pkType, totalCount); err != nil {
 		return ret, err
@@ -526,11 +529,18 @@ func rankSearchResultDataByGroup(ctx context.Context,
 	}
 
 	accumulatedScores := make([]map[interface{}]*accumulateIDGroupVal, nq)
+	type dataLoc struct {
+		resultIdx int
+		offset    int
+	}
+	pk2DataOffset := make([]map[any]dataLoc, nq)
 	for i := int64(0); i < nq; i++ {
 		accumulatedScores[i] = make(map[interface{}]*accumulateIDGroupVal)
+		pk2DataOffset[i] = make(map[any]dataLoc)
 	}
+
 	groupByDataType := searchResults[0].GetResults().GetGroupByFieldValue().GetType()
-	for _, result := range searchResults {
+	for ri, result := range searchResults {
 		scores := result.GetResults().GetScores()
 		start := 0
 		// milvus has limits for the value range of nq and limit
@@ -540,6 +550,7 @@ func rankSearchResultDataByGroup(ctx context.Context,
 			for j := start; j < start+realTopK; j++ {
 				id := typeutil.GetPK(result.GetResults().GetIds(), int64(j))
 				groupByVal := typeutil.GetData(result.GetResults().GetGroupByFieldValue(), j)
+				pk2DataOffset[i][id] = dataLoc{resultIdx: ri, offset: j}
 				if accumulatedScores[i][id] != nil {
 					accumulatedScores[i][id].accumulatedScore += scores[j]
 				} else {
@@ -631,6 +642,8 @@ func rankSearchResultDataByGroup(ctx context.Context,
 					score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				loc := pk2DataOffset[i][keys[index]]
+				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
 				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
 			}
 			returnedRowNum += len(group.idList)
