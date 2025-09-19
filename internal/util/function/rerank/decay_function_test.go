@@ -73,6 +73,31 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 		_, err := newDecayFunction(schema, functionSchema)
 		s.ErrorContains(err, "Rerank function output field names should be empty")
 	}
+	{
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_Rerank,
+			InputFieldNames:  []string{"ts"},
+			OutputFieldNames: []string{},
+			Params: []*commonpb.KeyValuePair{
+				{Key: originKey, Value: "4"},
+				{Key: scaleKey, Value: "4"},
+				{Key: offsetKey, Value: "4"},
+				{Key: decayKey, Value: "0.5"},
+				{Key: functionKey, Value: "gauss"},
+				{Key: normsScorekey, Value: "unknow"},
+				{Key: scoreMode, Value: "avg"},
+			},
+		}
+
+		_, err := newDecayFunction(schema, functionSchema)
+		s.ErrorContains(err, "must be true/false")
+
+		functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normsScorekey, Value: "true"}
+		functionSchema.Params[6] = &commonpb.KeyValuePair{Key: scoreMode, Value: "unknow"}
+		_, err = newDecayFunction(schema, functionSchema)
+		s.ErrorContains(err, "Unsupport score mode")
+	}
 
 	{
 		functionSchema.OutputFieldNames = []string{}
