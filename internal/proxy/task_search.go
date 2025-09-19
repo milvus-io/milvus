@@ -468,8 +468,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
 		}
 
-		plan.OutputFieldIds = nil
-		plan.DynamicFields = nil
+		if t.needRequery {
+			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+		} else {
+			primaryFieldSchema, err := t.schema.GetPkField()
+			if err != nil {
+				return err
+			}
+			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
+			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+			allFieldIDs.Insert(primaryFieldSchema.FieldID)
+			plan.OutputFieldIds = allFieldIDs.Collect()
+			plan.DynamicFields = t.userDynamicFields
+		}
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
