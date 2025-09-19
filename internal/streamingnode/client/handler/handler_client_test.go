@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
@@ -34,6 +35,14 @@ func TestHandlerClient(t *testing.T) {
 
 	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
 	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).Return(&streamingpb.GetReplicateCheckpointResponse{
+		Checkpoint: &commonpb.ReplicateCheckpoint{
+			ClusterId: "pchannel",
+			Pchannel:  "pchannel",
+			MessageId: nil,
+			TimeTick:  0,
+		},
+	}, nil)
 	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
 	rb := mock_resolver.NewMockBuilder(t)
 	rb.EXPECT().Close().Run(func() {})
@@ -90,6 +99,10 @@ func TestHandlerClient(t *testing.T) {
 	producer.Close()
 	producer2.Close()
 	producer3.Close()
+
+	rcp, err := handler.GetReplicateCheckpoint(ctx, "pchannel")
+	assert.NoError(t, err)
+	assert.NotNil(t, rcp)
 
 	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 	producer4, err := handler.CreateProducer(ctx, &ProducerOptions{PChannel: "pchannel"})

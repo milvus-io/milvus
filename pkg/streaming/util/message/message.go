@@ -78,7 +78,7 @@ type MutableMessage interface {
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
-	// Return "" if message is can be seen by all vchannels on the pchannel.
+	// Return "" or Pchannel if message is can be seen by all vchannels on the pchannel.
 	VChannel() string
 
 	// WithBarrierTimeTick sets the barrier time tick of current message.

@@ -34,7 +34,7 @@ func CreateReplicateServer(streamServer milvuspb.MilvusService_CreateReplicateSt
 type ReplicateStreamServer struct {
 	clusterID       string
 	streamServer    milvuspb.MilvusService_CreateReplicateStreamServer
-	replicateRespCh chan *milvuspb.ReplicateResponse // All processing messages result should sent from theses channel.
+	replicateRespCh chan *milvuspb.ReplicateResponse
 	wg              sync.WaitGroup
 }
 
@@ -111,7 +111,6 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 
 // handleReplicateMessage handles the replicate message request.
 func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRequest_ReplicateMessage) error {
-	// TODO: sheep, update metrics.
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()

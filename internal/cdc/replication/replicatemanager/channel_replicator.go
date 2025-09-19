@@ -27,13 +27,13 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -108,23 +108,15 @@ func (r *channelReplicator) replicateLoop() error {
 		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
 		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
 	)
-	startFrom, err := r.getReplicateStartMessageID()
+	cp, err := r.getReplicateCheckpoint()
 	if err != nil {
 		return err
 	}
 	ch := make(adaptor.ChanMessageHandler, scannerHandlerChanSize)
-	var deliverPolicy options.DeliverPolicy
-	if startFrom == nil {
-		// No checkpoint found, seek from the earliest position
-		deliverPolicy = options.DeliverPolicyAll()
-	} else {
-		// Seek from the checkpoint
-		deliverPolicy = options.DeliverPolicyStartFrom(startFrom)
-	}
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
 		PChannel:       r.replicateInfo.GetSourceChannelName(),
-		DeliverPolicy:  deliverPolicy,
-		DeliverFilters: []options.DeliverFilter{},
+		DeliverPolicy:  options.DeliverPolicyStartFrom(cp.MessageID),
+		DeliverFilters: []options.DeliverFilter{options.DeliverFilterTimeTickGT(cp.TimeTick)},
 		MessageHandler: ch,
 	})
 	defer scanner.Close()
@@ -132,7 +124,7 @@ func (r *channelReplicator) replicateLoop() error {
 	rsc := r.createRscFunc(r.ctx, r.replicateInfo)
 	defer rsc.Close()
 
-	logger.Info("start replicate channel loop", zap.Any("startFrom", startFrom))
+	logger.Info("start replicate channel loop", zap.Any("startFrom", cp))
 
 	for {
 		select {
@@ -142,7 +134,9 @@ func (r *channelReplicator) replicateLoop() error {
 		case msg := <-ch:
 			// TODO: Should be done at streamingnode.
 			if msg.MessageType().IsSelfControlled() {
-				logger.Debug("skip self-controlled message", log.FieldMessage(msg))
+				if msg.MessageType() != message.MessageTypeTimeTick {
+					logger.Debug("skip self-controlled message", log.FieldMessage(msg))
+				}
 				continue
 			}
 			err := rsc.Replicate(msg)
@@ -150,18 +144,11 @@ func (r *channelReplicator) replicateLoop() error {
 				panic(fmt.Sprintf("replicate message failed due to unrecoverable error: %v", err))
 			}
 			logger.Debug("replicate message success", log.FieldMessage(msg))
-			if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-				roleChanged := r.handlePutReplicateConfigMessage(msg)
-				if roleChanged {
-					// Role changed, return and stop replicate.
-					return nil
-				}
-			}
 		}
 	}
 }
 
-func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, error) {
+func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
 	logger := log.With(
 		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
 		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
@@ -189,41 +176,20 @@ func (r *channelReplicator) getReplicateStartMessageID() (message.MessageID, err
 		}
 	}
 	if checkpoint == nil || checkpoint.MessageId == nil {
-		logger.Info("channel not found in replicate info, will start from the beginning")
-		return nil, nil
+		initializedCheckpoint := utility.NewReplicateCheckpointFromProto(r.replicateInfo.InitializedCheckpoint)
+		logger.Info("channel not found in replicate info, will start from the beginning",
+			zap.Stringer("messageID", initializedCheckpoint.MessageID),
+			zap.Uint64("timeTick", initializedCheckpoint.TimeTick),
+		)
+		return initializedCheckpoint, nil
 	}
 
-	startFrom := message.MustUnmarshalMessageID(checkpoint.GetMessageId())
+	cp := utility.NewReplicateCheckpointFromProto(checkpoint)
 	logger.Info("replicate messages from position",
-		zap.Any("checkpoint", checkpoint),
-		zap.Any("startFromMessageID", startFrom),
+		zap.Stringer("messageID", cp.MessageID),
+		zap.Uint64("timeTick", cp.TimeTick),
 	)
-	return startFrom, nil
-}
-
-func (r *channelReplicator) handlePutReplicateConfigMessage(msg message.ImmutableMessage) (roleChanged bool) {
-	logger := log.With(
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-	)
-	logger.Info("handle PutReplicateConfigMessage", log.FieldMessage(msg))
-	prcMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
-	replicateConfig := prcMsg.Header().ReplicateConfiguration
-	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
-	if currentCluster.Role() == replicateutil.RolePrimary {
-		logger.Info("primary cluster, skip handle PutReplicateConfigMessage")
-		return false
-	}
-	// Current cluster role changed, not primary cluster,
-	// we need to remove the replicate pchannel.
-	err := resource.Resource().ReplicationCatalog().RemoveReplicatePChannel(r.ctx,
-		r.replicateInfo.GetSourceChannelName(), r.replicateInfo.GetTargetChannelName())
-	if err != nil {
-		panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
-	}
-	logger.Info("handle PutReplicateConfigMessage done, replicate pchannel removed")
-	return true
+	return cp, nil
 }
 
 func (r *channelReplicator) StopReplicate() {

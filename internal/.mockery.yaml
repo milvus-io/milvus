@@ -57,6 +57,10 @@ packages:
       InterceptorWithReady:
       InterceptorWithMetrics:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates:
+    interfaces:
+      ReplicatesManager:
+      ReplicateAcker:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards:
     interfaces:
       ShardManager:

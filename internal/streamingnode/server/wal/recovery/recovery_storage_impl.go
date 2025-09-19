@@ -11,12 +11,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -69,6 +71,7 @@ func newRecoveryStorage(channel types.PChannelInfo) *recoveryStorageImpl {
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		cfg:                    cfg,
 		mu:                     sync.Mutex{},
+		currentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		channel:                channel,
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
@@ -84,6 +87,7 @@ type recoveryStorageImpl struct {
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                    *config
 	mu                     sync.Mutex
+	currentClusterID       string
 	channel                types.PChannelInfo
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
@@ -225,8 +229,7 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	}
 	r.handleMessage(msg)
 
-	r.checkpoint.TimeTick = msg.TimeTick()
-	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
+	r.updateCheckpoint(msg)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
 	if !msg.IsPersisted() {
@@ -237,6 +240,52 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
 		r.notifyPersist()
 	}
+}
+
+// updateCheckpoint updates the checkpoint of the recovery storage.
+func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		cfg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
+		r.checkpoint.ReplicateConfig = cfg.Header().ReplicateConfiguration
+		clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, cfg.Header().ReplicateConfiguration).GetCurrentCluster()
+		switch clusterRole.Role() {
+		case replicateutil.RolePrimary:
+			r.checkpoint.ReplicateCheckpoint = nil
+		case replicateutil.RoleSecondary:
+			// Update the replicate checkpoint if the cluster role is secondary.
+			sourceClusterID := clusterRole.SourceCluster().GetClusterId()
+			sourcePChannel := clusterRole.MustGetSourceChannel(r.channel.Name)
+			if r.checkpoint.ReplicateCheckpoint == nil || r.checkpoint.ReplicateCheckpoint.ClusterID != sourceClusterID {
+				r.checkpoint.ReplicateCheckpoint = &utility.ReplicateCheckpoint{
+					ClusterID: sourceClusterID,
+					PChannel:  sourcePChannel,
+					MessageID: nil,
+					TimeTick:  0,
+				}
+			}
+		}
+	}
+	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
+	r.checkpoint.TimeTick = msg.TimeTick()
+
+	// update the replicate checkpoint.
+	replicateHeader := msg.ReplicateHeader()
+	if replicateHeader == nil {
+		return
+	}
+	if r.checkpoint.ReplicateCheckpoint == nil {
+		r.detectInconsistency(msg, "replicate checkpoint is nil when incoming replicate message")
+		return
+	}
+	if replicateHeader.ClusterID != r.checkpoint.ReplicateCheckpoint.ClusterID {
+		r.detectInconsistency(msg,
+			"replicate header cluster id mismatch",
+			zap.String("expected", r.checkpoint.ReplicateCheckpoint.ClusterID),
+			zap.String("actual", replicateHeader.ClusterID))
+		return
+	}
+	r.checkpoint.ReplicateCheckpoint.MessageID = replicateHeader.LastConfirmedMessageID
+	r.checkpoint.ReplicateCheckpoint.TimeTick = replicateHeader.TimeTick
 }
 
 // The incoming message id is always sorted with timetick.

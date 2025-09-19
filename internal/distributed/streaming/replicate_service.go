@@ -119,6 +119,16 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 			return nil, err
 		}
 	}
+
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		assignments, err := s.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(msg.VChannel(), assignments.PChannelOfCChannel()) {
+			return nil, status.NewReplicateViolation("invalid control channel %s, expected pchannel %s", msg.VChannel(), assignments.PChannelOfCChannel())
+		}
+	}
 	return msg, nil
 }
 

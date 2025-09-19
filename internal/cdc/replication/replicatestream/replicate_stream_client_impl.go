@@ -18,6 +18,7 @@ package replicatestream
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 const pendingMessageQueueLength = 128
@@ -86,13 +88,14 @@ func (r *replicateStreamClient) startInternal() {
 	backoff.MaxElapsedTime = 0
 	backoff.Reset()
 
-	disconnect := func(stopCh chan struct{}, err error) {
+	disconnect := func(stopCh chan struct{}, err error) (reconnect bool) {
 		r.metrics.OnDisconnect()
 		close(stopCh)
 		r.client.CloseSend()
 		r.wg.Wait()
 		time.Sleep(backoff.NextBackOff())
 		log.Warn("restart replicate stream client", zap.Error(err))
+		return err != nil
 	}
 
 	for {
@@ -131,9 +134,15 @@ func (r *replicateStreamClient) startInternal() {
 				r.wg.Wait()
 				return
 			case err := <-sendErrCh:
-				disconnect(stopCh, err)
+				reconnect := disconnect(stopCh, err)
+				if !reconnect {
+					return
+				}
 			case err := <-recvErrCh:
-				disconnect(stopCh, err)
+				reconnect := disconnect(stopCh, err)
+				if !reconnect {
+					return
+				}
 			}
 		}
 	}
@@ -280,11 +289,44 @@ func (r *replicateStreamClient) recvLoop(stopCh <-chan struct{}) error {
 			if lastConfirmedMessageInfo != nil {
 				messages := r.pendingMessages.CleanupConfirmedMessages(lastConfirmedMessageInfo.GetConfirmedTimeTick())
 				for _, msg := range messages {
+					if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+						roleChanged := r.handleAlterReplicateConfigMessage(msg)
+						if roleChanged {
+							// Role changed, return and stop replicate.
+							return nil
+						}
+					}
 					r.metrics.OnConfirmed(msg)
 				}
 			}
 		}
 	}
+}
+
+func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (roleChanged bool) {
+	logger := log.With(
+		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
+	)
+	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
+	prcMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
+	replicateConfig := prcMsg.Header().ReplicateConfiguration
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
+	_, err := currentCluster.GetTargetChannel(r.replicateInfo.GetSourceChannelName(),
+		r.replicateInfo.GetTargetCluster().GetClusterId())
+	if err != nil {
+		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
+		// so we need to remove the replicate pchannel and stop replicate.
+		err := resource.Resource().ReplicationCatalog().RemoveReplicatePChannel(r.ctx, r.replicateInfo)
+		if err != nil {
+			panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
+		}
+		logger.Info("handle AlterReplicateConfigMessage done, replicate pchannel removed")
+		return true
+	}
+	logger.Info("target channel found, skip handle AlterReplicateConfigMessage")
+	return false
 }
 
 func (r *replicateStreamClient) Close() {

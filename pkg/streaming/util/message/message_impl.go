@@ -177,6 +177,13 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 		panic("should not happen on broadcast header proto")
 	}
 	m.properties.Set(messageBroadcastHeader, bhVal)
+
+	// overwrite the txn keepalive to infinite if it's a replicated message,
+	// because replicated message is already committed, so it should never be expired.
+	if txnCtx := m.TxnContext(); txnCtx != nil {
+		txnCtx.Keepalive = TxnKeepaliveInfinite
+		m.WithTxnContext(*txnCtx)
+	}
 }
 
 // OverwriteBroadcastHeader overwrites the broadcast header of the message.

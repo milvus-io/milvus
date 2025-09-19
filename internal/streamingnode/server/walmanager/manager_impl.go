@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
@@ -28,6 +29,7 @@ func OpenManager() (Manager, error) {
 	opener, err := registry.MustGetBuilder(walName,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 	).Build()

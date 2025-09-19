@@ -16,6 +16,7 @@ type interceptorBuilder struct{}
 // Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &lockAppendInterceptor{
+		channel:        param.ChannelInfo,
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     param.TxnManager,
 	}

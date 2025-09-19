@@ -242,7 +242,11 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	assert.Equal(t, infos[1].GetTargetChannelName(), "target-channel-2")
 	assert.Equal(t, infos[1].GetTargetCluster().GetClusterId(), "target-cluster")
 
-	err = catalog.RemoveReplicatePChannel(context.Background(), "target-cluster", "source-channel-1")
+	err = catalog.RemoveReplicatePChannel(context.Background(), &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "source-channel-1",
+		TargetChannelName: "target-channel-1",
+		TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+	})
 	assert.NoError(t, err)
 
 	infos, err = catalog.ListReplicatePChannels(context.Background())

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
@@ -209,6 +210,32 @@ func TestWithContext(t *testing.T) {
 
 	session = GetTxnSessionFromContext(ctx)
 	assert.NotNil(t, session)
+}
+
+func TestManagerFromReplcateMessage(t *testing.T) {
+	resource.InitForTest(t)
+	manager := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	immutableMsg := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{
+			KeepaliveMilliseconds: 10 * time.Millisecond.Milliseconds(),
+		}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(1).
+		WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		WithTxnContext(message.TxnContext{
+			TxnID:     18,
+			Keepalive: 10 * time.Millisecond,
+		}).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	replicateMsg := message.NewReplicateMessage("test2", immutableMsg.IntoImmutableMessageProto()).WithTimeTick(2)
+
+	session, err := manager.BeginNewTxn(context.Background(), message.MustAsMutableBeginTxnMessageV2(replicateMsg))
+	assert.NoError(t, err)
+	assert.NotNil(t, session)
+	assert.Equal(t, message.TxnID(18), session.TxnContext().TxnID)
+	assert.Equal(t, message.TxnKeepaliveInfinite, session.TxnContext().Keepalive)
 }
 
 func newBeginTxnMessage(timetick uint64, keepalive time.Duration) message.MutableBeginTxnMessageV2 {

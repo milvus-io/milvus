@@ -79,16 +79,8 @@ func (m *TxnManager) RecoverDone() <-chan struct{} {
 func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTxnMessageV2) (*TxnSession, error) {
 	timetick := msg.TimeTick()
 	vchannel := msg.VChannel()
-	keepalive := time.Duration(msg.Header().KeepaliveMilliseconds) * time.Millisecond
 
-	if keepalive == 0 {
-		// If keepalive is 0, the txn set the keepalive with default keepalive.
-		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
-	}
-	if keepalive < 1*time.Millisecond {
-		return nil, status.NewInvaildArgument("keepalive must be greater than 1ms")
-	}
-	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	txnCtx, err := m.buildTxnContext(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -100,23 +92,49 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 	if m.closed != nil {
 		return nil, status.NewTransactionExpired("manager closed")
 	}
-	txnCtx := message.TxnContext{
-		TxnID:     message.TxnID(id),
-		Keepalive: keepalive,
-	}
-	session := newTxnSession(vchannel, txnCtx, timetick, m.metrics.BeginTxn())
+	session := newTxnSession(vchannel, *txnCtx, timetick, m.metrics.BeginTxn())
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
 }
 
+// buildTxnContext builds the txn context from the message.
+func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeginTxnMessageV2) (*message.TxnContext, error) {
+	if msg.ReplicateHeader() != nil {
+		// reuse the txn context if replicated.
+		// If the message is replicated, it should never be expired, so we set the keepalive to infinite.
+		return &message.TxnContext{
+			TxnID:     msg.TxnContext().TxnID,
+			Keepalive: message.TxnKeepaliveInfinite,
+		}, nil
+	}
+
+	keepalive := time.Duration(msg.Header().KeepaliveMilliseconds) * time.Millisecond
+	if keepalive == 0 {
+		// If keepalive is 0, the txn set the keepalive with default keepalive.
+		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
+	}
+	if keepalive < 1*time.Millisecond {
+		return nil, status.NewInvaildArgument("keepalive must be greater than 1ms")
+	}
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &message.TxnContext{
+		TxnID:     message.TxnID(id),
+		Keepalive: keepalive,
+	}, nil
+}
+
 // FailTxnAtVChannel fails all transactions at the specified vchannel.
+// If the vchannel is empty, it will fail all transactions.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
-		if session.VChannel() == vchannel {
+		if vchannel == "" || session.VChannel() == vchannel {
 			session.Cleanup()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)

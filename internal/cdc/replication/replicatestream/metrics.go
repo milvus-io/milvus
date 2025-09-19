@@ -17,10 +17,13 @@
 package replicatestream
 
 import (
+	"time"
+
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -83,6 +86,14 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 		m.replicateInfo.GetSourceChannelName(),
 		m.replicateInfo.GetTargetChannelName(),
 	).Observe(float64(replicateDuration.Milliseconds()))
+
+	now := time.Now()
+	confirmedTime := tsoutil.PhysicalTime(msg.TimeTick())
+	lag := now.Sub(confirmedTime)
+	metrics.CDCReplicateLag.WithLabelValues(
+		m.replicateInfo.GetSourceChannelName(),
+		m.replicateInfo.GetTargetChannelName(),
+	).Set(float64(lag.Milliseconds()))
 }
 
 func (m *replicateMetrics) OnConnect() {
@@ -93,29 +104,29 @@ func (m *replicateMetrics) OnConnect() {
 }
 
 func (m *replicateMetrics) OnDisconnect() {
-	clusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
+	targetClusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
 	metrics.CDCStreamRPCConnections.WithLabelValues(
-		clusterID,
+		targetClusterID,
 		metrics.CDCStatusConnected,
 	).Dec()
 	metrics.CDCStreamRPCConnections.WithLabelValues(
-		clusterID,
+		targetClusterID,
 		metrics.CDCStatusDisconnected,
 	).Inc()
 }
 
 func (m *replicateMetrics) OnReconnect() {
-	clusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
+	targetClusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
 	metrics.CDCStreamRPCConnections.WithLabelValues(
-		clusterID,
+		targetClusterID,
 		metrics.CDCStatusDisconnected,
 	).Dec()
 	metrics.CDCStreamRPCConnections.WithLabelValues(
-		clusterID,
+		targetClusterID,
 		metrics.CDCStatusConnected,
 	).Inc()
 
 	metrics.CDCStreamRPCReconnectTimes.WithLabelValues(
-		clusterID,
+		targetClusterID,
 	).Inc()
 }

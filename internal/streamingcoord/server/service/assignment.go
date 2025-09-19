@@ -32,7 +32,7 @@ func NewAssignmentService(
 		listenerTotal: metrics.StreamingCoordAssignmentListenerTotal.WithLabelValues(paramtable.GetStringNodeID()),
 	}
 	// TODO: after recovering from wal, add it to here.
-	// registry.RegisterPutReplicateConfigV2AckCallback(assignmentService.putReplicateConfiguration)
+	// registry.RegisterAlterReplicateConfigV2AckCallback(assignmentService.AlterReplicateConfiguration)
 	return assignmentService
 }
 
@@ -83,7 +83,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	}
 
 	// TODO: After recovering from wal, remove the operation here.
-	if err := s.putReplicateConfiguration(ctx, mockMessages...); err != nil {
+	if err := s.AlterReplicateConfiguration(ctx, mockMessages...); err != nil {
 		return nil, err
 	}
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
@@ -130,9 +130,9 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	return b, nil
 }
 
-// putReplicateConfiguration puts the replicate configuration into the balancer.
+// AlterReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.
-func (s *assignmentServiceImpl) putReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
+func (s *assignmentServiceImpl) AlterReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
 	balancer, err := s.balancer.GetWithContext(ctx)
 	if err != nil {
 		return err
