@@ -642,7 +642,7 @@ func rankSearchResultDataByGroup(ctx context.Context,
 					score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				loc := pk2DataOffset[i][keys[index]]
+				loc := pk2DataOffset[i][group.idList[i]]
 				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
 				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
 			}
