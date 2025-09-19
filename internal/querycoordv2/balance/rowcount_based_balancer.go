@@ -57,9 +57,9 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 	if len(nodeItems) == 0 {
 		return nil
 	}
-	queue := newPriorityQueue()
+	queue := NewPriorityQueue()
 	for _, item := range nodeItems {
-		queue.push(item)
+		queue.Push(item)
 	}
 
 	sort.Slice(segments, func(i, j int) bool {
@@ -70,7 +70,7 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// pick the node with the least row count and allocate to it.
-		ni := queue.pop().(*nodeItem)
+		ni := queue.Pop().(*nodeItem)
 		plan := SegmentAssignPlan{
 			From:    -1,
 			To:      ni.nodeID,
@@ -82,7 +82,7 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 		}
 		// change node's score and push back
 		ni.AddCurrentScoreDelta(float64(s.GetNumOfRows()))
-		queue.push(ni)
+		queue.Push(ni)
 	}
 	return plans
 }
@@ -108,9 +108,9 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 		return nil
 	}
 
-	queue := newPriorityQueue()
+	queue := NewPriorityQueue()
 	for _, item := range nodeItems {
-		queue.push(item)
+		queue.Push(item)
 	}
 
 	plans := make([]ChannelAssignPlan, 0)
@@ -125,7 +125,7 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 		}
 		if ni == nil {
 			// pick the node with the least channel num and allocate to it.
-			ni = queue.pop().(*nodeItem)
+			ni = queue.Pop().(*nodeItem)
 		}
 		plan := ChannelAssignPlan{
 			From:    -1,
@@ -135,7 +135,7 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 		plans = append(plans, plan)
 		// change node's score and push back
 		ni.AddCurrentScoreDelta(1)
-		queue.push(ni)
+		queue.Push(ni)
 	}
 	return plans
 }
@@ -408,7 +408,7 @@ func NewRowCountBasedBalancer(
 }
 
 type nodeItem struct {
-	baseItem
+	BaseItem
 	fmt.Stringer
 	nodeID        int64
 	assignedScore float64
@@ -417,7 +417,7 @@ type nodeItem struct {
 
 func newNodeItem(currentScore int, nodeID int64) nodeItem {
 	return nodeItem{
-		baseItem:     baseItem{},
+		BaseItem:     BaseItem{},
 		nodeID:       nodeID,
 		currentScore: float64(currentScore),
 	}
