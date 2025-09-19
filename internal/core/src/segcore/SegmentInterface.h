@@ -335,6 +335,15 @@ class SegmentInternalInterface : public SegmentInterface {
         skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
+    void
+    LoadSkipIndexFromStatistics(
+        FieldId field_id,
+        DataType data_type,
+        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+        skip_index_.LoadSkipFromStatistics(
+            get_segment_id(), field_id, data_type, statistics);
+    }
+
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
 

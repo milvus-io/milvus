@@ -76,6 +76,11 @@ SetDefaultConfigParamTypeCheck(bool val) {
 }
 
 void
+SetDefaultEnableParquetStatsSkipIndex(bool val) {
+    milvus::SetDefaultEnableParquetStatsSkipIndex(val);
+}
+
+void
 SetLogLevel(const char* level) {
     milvus::SetLogLevel(level);
 }

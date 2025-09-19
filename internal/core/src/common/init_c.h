@@ -54,6 +54,9 @@ SetDefaultGrowingJSONKeyStatsEnable(bool val);
 void
 SetDefaultConfigParamTypeCheck(bool val);
 
+void
+SetDefaultEnableParquetStatsSkipIndex(bool val);
+
 // dynamic update segcore params
 void
 SetLogLevel(const char* level);
