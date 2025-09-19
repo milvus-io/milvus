@@ -1047,6 +1047,9 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
         self.insert(client, collection_name, data)
+        import pandas as pd
+        df = pd.DataFrame(data)
+        df.to_csv("/tmp/ci_logs/data.csv", index=False)
 
         # Prepare index params
         index_params, _ = self.prepare_index_params(client)
