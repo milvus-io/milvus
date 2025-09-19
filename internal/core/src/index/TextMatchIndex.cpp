@@ -12,6 +12,7 @@
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
+#include <shared_mutex>
 
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
@@ -211,7 +212,7 @@ TextMatchIndex::AddTextsGrowing(size_t n,
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;
             if (!valids[i]) {
-                folly::SharedMutex::WriteHolder lock(mutex_);
+                std::unique_lock<folly::SharedMutex> lock(mutex_);
                 null_offset_.push_back(offset);
             }
         }
@@ -233,14 +234,14 @@ TextMatchIndex::BuildIndexFromFieldData(
             total += data->get_null_count();
         }
         {
-            folly::SharedMutex::WriteHolder lock(mutex_);
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
             null_offset_.reserve(total);
         }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
-                    folly::SharedMutex::WriteHolder lock(mutex_);
+                    std::unique_lock<folly::SharedMutex> lock(mutex_);
                     null_offset_.push_back(i);
                 }
                 wrapper_->add_data(
