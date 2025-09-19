@@ -67,20 +67,17 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
     result.string_data_start = ptr;
 
     // Calculate total string section size
-    result.total_string_size = 0;
-    if (result.unique_count > 0) {
-        const uint8_t* last_str_ptr =
-            result.string_data_start +
-            result.string_offsets[result.unique_count - 1];
-        uint32_t last_str_len;
-        memcpy(&last_str_len, last_str_ptr, sizeof(uint32_t));
-        result.total_string_size =
-            result.string_offsets[result.unique_count - 1] + sizeof(uint32_t) +
-            last_str_len;
-    }
+    auto total_string_size = 0;
+    const uint8_t* last_str_ptr =
+        result.string_data_start +
+        result.string_offsets[result.unique_count - 1];
+    uint32_t last_str_len;
+    memcpy(&last_str_len, last_str_ptr, sizeof(uint32_t));
+    total_string_size = result.string_offsets[result.unique_count - 1] +
+                        sizeof(uint32_t) + last_str_len;
 
     // Skip past string section to posting list offsets
-    ptr = result.string_data_start + result.total_string_size;
+    ptr = result.string_data_start + total_string_size;
     result.post_list_offsets = reinterpret_cast<const uint32_t*>(ptr);
     ptr += result.unique_count * sizeof(uint32_t);
 

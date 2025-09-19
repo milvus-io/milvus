@@ -158,7 +158,6 @@ class StringIndexSortImpl {
         const uint8_t* string_data_start;
         const uint32_t* post_list_offsets;
         const uint8_t* post_list_data_start;
-        size_t total_string_size;
     };
 
     static ParsedData
