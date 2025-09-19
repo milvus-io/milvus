@@ -2396,6 +2396,13 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.RetryNum.Init(base.mgr)
 
+	p.FileResourceMode = ParamItem{
+		Key:          "queryCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
+
 	p.RetryInterval = ParamItem{
 		Key:          "queryCoord.task.retryinterval",
 		Version:      "2.2.0",
@@ -4487,6 +4494,13 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
+
+	p.FileResourceMode = ParamItem{
+		Key:          "dataCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
