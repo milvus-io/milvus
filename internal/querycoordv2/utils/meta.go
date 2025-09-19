@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -107,15 +108,18 @@ func RecoverAllCollection(m *meta.Meta) {
 	}
 }
 
-func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
+func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool, nodeMgr *session.NodeManager) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
 		return nil, errors.Errorf(
 			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
+		sqnCount := lo.CountBy(nodeMgr.GetAll(), func(node *session.NodeInfo) bool {
+			return node.IsEmbeddedQueryNodeInStreamingNode()
+		})
 		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
-		if replicaNumber > int32(streamingNodeCount) {
+		if replicaNumber > int32(streamingNodeCount) && replicaNumber > int32(sqnCount) {
 			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
 		}
 	}
@@ -161,8 +165,9 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
 func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, resourceGroups []string,
 	replicaNumber int32, channels []string, loadPriority commonpb.LoadPriority,
+	nodeMgr *session.NodeManager,
 ) ([]*meta.Replica, error) {
-	replicaNumInRG, err := AssignReplica(ctx, m, resourceGroups, replicaNumber, true)
+	replicaNumInRG, err := AssignReplica(ctx, m, resourceGroups, replicaNumber, true, nodeMgr)
 	if err != nil {
 		return nil, err
 	}
@@ -185,9 +190,10 @@ func ReassignReplicaToRG(
 	collectionID int64,
 	newReplicaNumber int32,
 	newResourceGroups []string,
+	nodeMgr *session.NodeManager,
 ) (map[string]int, map[string][]*meta.Replica, []int64, error) {
 	// assign all replicas to newResourceGroups, got each rg's replica number
-	newAssignment, err := AssignReplica(ctx, m, newResourceGroups, newReplicaNumber, false)
+	newAssignment, err := AssignReplica(ctx, m, newResourceGroups, newReplicaNumber, false, nodeMgr)
 	if err != nil {
 		return nil, nil, nil, err
 	}

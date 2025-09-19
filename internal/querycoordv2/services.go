@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -225,33 +226,12 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
 	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	// to be compatible with old sdk, which set replica=1 if replica is not specified
-	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
-	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
-		// when replica number or resource groups is not set, use pre-defined load config
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
-		if err != nil {
-			log.Warn("failed to get pre-defined load info", zap.Error(err))
-		} else {
-			if req.GetReplicaNumber() <= 0 && replicas > 0 {
-				req.ReplicaNumber = int32(replicas)
-			}
 
-			if len(req.GetResourceGroups()) == 0 && len(rgs) > 0 {
-				req.ResourceGroups = rgs
-			}
-		}
-	}
-
-	if req.GetReplicaNumber() <= 0 {
-		log.Info("request doesn't indicate the number of replicas, set it to 1")
-		req.ReplicaNumber = 1
-	}
-
-	if len(req.GetResourceGroups()) == 0 {
-		log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
-		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
-	}
+	// resolve the load configuration
+	replicaNumber, resourceGroups, enableAutoReplica := s.ResolveLoadConfiguration(
+		ctx, req.GetCollectionID(), req.GetReplicaNumber(), req.GetResourceGroups(), req.GetEnableAutoReplica())
+	req.ReplicaNumber = replicaNumber
+	req.ResourceGroups = resourceGroups
 
 	var loadJob job.Job
 	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
@@ -278,6 +258,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 				s.targetMgr,
 				s.targetObserver,
 				s.collectionObserver,
+				s.nodeMgr,
 				userSpecifiedReplicaMode,
 			)
 		}
@@ -294,6 +275,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 			s.collectionObserver,
 			s.nodeMgr,
 			userSpecifiedReplicaMode,
+			enableAutoReplica,
 		)
 	}
 
@@ -308,6 +290,76 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+func (s *Server) ResolveLoadConfiguration(ctx context.Context,
+	collectionID int64,
+	replicaNumber int32,
+	resourceGroups []string,
+	enableAutoReplica bool,
+) (retReplicaNumber int32, retResourceGroups []string, retEnableAutoReplica bool) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collectionID),
+	)
+
+	// set the default value for replica number and resource groups if no valid value is provided
+	defer func() {
+		if retReplicaNumber <= 0 {
+			log.Info("request doesn't indicate the number of replicas, set it to 1")
+			retReplicaNumber = 1
+		}
+		if len(retResourceGroups) == 0 {
+			log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
+			retResourceGroups = []string{meta.DefaultResourceGroupName}
+		}
+	}()
+
+	numOfNodes := s.computeReplicaNumberWithNodeCount(ctx)
+	// 1. if user specified auto replica mode, set replica number to node count
+	if enableAutoReplica {
+		retReplicaNumber = numOfNodes
+		retResourceGroups = resourceGroups
+		retEnableAutoReplica = true
+		log.Info("auto replica mode is enabled, set replica number to node count", zap.Int32("replicaNumber", retReplicaNumber))
+		return
+	}
+
+	// 2. if user specified the replica number or resource groups, use the user specified value
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	if replicaNumber > 0 || len(resourceGroups) > 0 {
+		retReplicaNumber = replicaNumber
+		retResourceGroups = resourceGroups
+		return
+	}
+
+	// 3. if user didn't specify any load config, use the configured load info
+	loadConfig, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
+	if err != nil {
+		log.Warn("failed to get configured load info", zap.Error(err))
+		return
+	}
+
+	// 3.1 if auto replica is enabled, set replica number to node count
+	if loadConfig.AutoReplicaEnable {
+		retReplicaNumber = numOfNodes
+		retResourceGroups = loadConfig.ResourceGroups
+		retEnableAutoReplica = true
+		log.Info("auto replica mode is enabled, set replica number to node count", zap.Int32("replicaNumber", retReplicaNumber))
+		return
+	}
+
+	// 3.2 if auto replica is disabled, use the configured load info
+	retReplicaNumber = int32(loadConfig.ReplicaNumber)
+	retResourceGroups = loadConfig.ResourceGroups
+	return
+}
+
+func (s *Server) computeReplicaNumberWithNodeCount(ctx context.Context) int32 {
+	numOfNodes := lo.CountBy(s.nodeMgr.GetAll(),
+		func(node *session.NodeInfo) bool {
+			return node.GetState() == session.NodeStateNormal && node.IsEmbeddedQueryNodeInStreamingNode()
+		})
+	return int32(numOfNodes)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -382,26 +434,11 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
 	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-
-	// to be compatible with old sdk, which set replica=1 if replica is not specified
-	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
-	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
-		// when replica number or resource groups is not set, use database level config
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
-		if err != nil {
-			log.Warn("failed to get data base level load info", zap.Error(err))
-		}
-
-		if req.GetReplicaNumber() <= 0 {
-			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
-			req.ReplicaNumber = int32(replicas)
-		}
-
-		if len(req.GetResourceGroups()) == 0 {
-			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
-			req.ResourceGroups = rgs
-		}
-	}
+	// resolve the load configuration
+	replicaNumber, resourceGroups, enableAutoReplica := s.ResolveLoadConfiguration(ctx,
+		req.GetCollectionID(), req.GetReplicaNumber(), req.GetResourceGroups(), req.GetEnableAutoReplica())
+	req.ReplicaNumber = replicaNumber
+	req.ResourceGroups = resourceGroups
 
 	loadJob := job.NewLoadPartitionJob(ctx,
 		req,
@@ -413,6 +450,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.collectionObserver,
 		s.nodeMgr,
 		userSpecifiedReplicaMode,
+		enableAutoReplica,
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
@@ -1185,7 +1223,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
-	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups())
+	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups(), req.GetAutoReplicaEnable())
 	if err != nil {
 		msg := "failed to update load config"
 		log.Warn(msg, zap.Error(err))
@@ -1197,7 +1235,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	return merr.Success(), nil
 }
 
-func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newAutoReplicaEnable map[int64]bool) error {
 	jobs := make([]job.Job, 0, len(collectionIDs))
 	for _, collectionID := range collectionIDs {
 		collection := s.meta.GetCollection(ctx, collectionID)
@@ -1217,14 +1255,25 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			ReplicaNumber:  newReplicaNum,
 			ResourceGroups: newRGs,
 		}
+
+		if newAutoReplicaEnable[collectionID] {
+			subReq.AutoReplicaEnable = map[int64]bool{
+				collectionID: newAutoReplicaEnable[collectionID],
+			}
+			numOfNodes := s.computeReplicaNumberWithNodeCount(ctx)
+			replicaChanged = numOfNodes != collection.GetReplicaNumber()
+			log.Info("auto replica enable, set replica number to node count",
+				zap.Int32("oldReplicaNumber", collection.GetReplicaNumber()),
+				zap.Int32("newReplicaNumber", numOfNodes))
+			subReq.ReplicaNumber = numOfNodes
+		} else if subReq.GetReplicaNumber() == 0 {
+			subReq.ReplicaNumber = collection.GetReplicaNumber()
+			replicaChanged = false
+		}
+
 		if len(subReq.GetResourceGroups()) == 0 {
 			subReq.ResourceGroups = collectionUsedRG
 			rgChanged = false
-		}
-
-		if subReq.GetReplicaNumber() == 0 {
-			subReq.ReplicaNumber = collection.GetReplicaNumber()
-			replicaChanged = false
 		}
 
 		if !replicaChanged && !rgChanged {
@@ -1239,6 +1288,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			s.targetMgr,
 			s.targetObserver,
 			s.collectionObserver,
+			s.nodeMgr,
 			false,
 		)
 

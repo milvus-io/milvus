@@ -149,40 +149,33 @@ func (_c *MockBroker_DescribeDatabase_Call) RunAndReturn(run func(context.Contex
 }
 
 // GetCollectionLoadInfo provides a mock function with given fields: ctx, collectionID
-func (_m *MockBroker) GetCollectionLoadInfo(ctx context.Context, collectionID int64) ([]string, int64, error) {
+func (_m *MockBroker) GetCollectionLoadInfo(ctx context.Context, collectionID int64) (*CollectionLoadConfig, error) {
 	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollectionLoadInfo")
 	}
 
-	var r0 []string
-	var r1 int64
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]string, int64, error)); ok {
+	var r0 *CollectionLoadConfig
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*CollectionLoadConfig, error)); ok {
 		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) []string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *CollectionLoadConfig); ok {
 		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).(*CollectionLoadConfig)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64) int64); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
 		r1 = rf(ctx, collectionID)
 	} else {
-		r1 = ret.Get(1).(int64)
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, int64) error); ok {
-		r2 = rf(ctx, collectionID)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockBroker_GetCollectionLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionLoadInfo'
@@ -204,12 +197,12 @@ func (_c *MockBroker_GetCollectionLoadInfo_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockBroker_GetCollectionLoadInfo_Call) Return(_a0 []string, _a1 int64, _a2 error) *MockBroker_GetCollectionLoadInfo_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockBroker_GetCollectionLoadInfo_Call) Return(_a0 *CollectionLoadConfig, _a1 error) *MockBroker_GetCollectionLoadInfo_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockBroker_GetCollectionLoadInfo_Call) RunAndReturn(run func(context.Context, int64) ([]string, int64, error)) *MockBroker_GetCollectionLoadInfo_Call {
+func (_c *MockBroker_GetCollectionLoadInfo_Call) RunAndReturn(run func(context.Context, int64) (*CollectionLoadConfig, error)) *MockBroker_GetCollectionLoadInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -180,6 +180,7 @@ const (
 //  Collection properties key
 
 const (
+	// collection level load properties
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
@@ -199,6 +200,11 @@ const (
 	CollectionSearchRateMinKey   = "collection.searchRate.min.vps"
 	CollectionDiskQuotaKey       = "collection.diskProtection.diskQuota.mb"
 
+	// load properties
+	CollectionReplicaNumber        = "collection.replica.number"
+	CollectionResourceGroups       = "collection.resource_groups"
+	CollectionAutoReplicaEnableKey = "collection.auto.replica.enable"
+
 	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
 
 	// database level properties
@@ -215,10 +221,6 @@ const (
 	DatabaseForceDenyIndexDDLKey      = "database.force.deny.index"
 	DatabaseForceDenyFlushDDLKey      = "database.force.deny.flush"
 	DatabaseForceDenyCompactionDDLKey = "database.force.deny.compaction"
-
-	// collection level load properties
-	CollectionReplicaNumber  = "collection.replica.number"
-	CollectionResourceGroups = "collection.resource_groups"
 )
 
 // common properties
@@ -514,4 +516,17 @@ func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, 
 		}
 	}
 	return false, false, nil
+}
+
+func IsCollectionAutoReplicaEnable(kvs []*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.GetKey() == CollectionAutoReplicaEnableKey {
+			value, err := strconv.ParseBool(kv.GetValue())
+			if err != nil {
+				return false, err
+			}
+			return value, nil
+		}
+	}
+	return false, nil
 }
