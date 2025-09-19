@@ -758,7 +758,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 
 func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Uint64("version", req.GetVersion()))
-	log.Info("sync file resource")
+	log.Info("sync file resource", zap.Any("resources", req.Resources))
 
 	if !node.isHealthy() {
 		log.Warn("failed to sync file resource, DataNode is not healthy")
