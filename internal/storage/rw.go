@@ -363,8 +363,8 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
-			pluginContext,
 			rwOptions.enableSkipIndex,
+			pluginContext,
 		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))

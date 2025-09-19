@@ -196,7 +196,7 @@ class ChunkedColumnGroup {
                                      ->GetRowGroupMetadataVector()
                                      .size();
 
-            if (field_chunk_skipindex.size() != row_group_num) {
+            if (skip_index_metadata.size() != row_group_num) {
                 return {};
             }
             field_chunk_skipindex.insert(

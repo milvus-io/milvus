@@ -20,6 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "arrow/record_batch.h"
+#include "arrow/type_traits.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
@@ -1103,6 +1105,111 @@ class FieldChunkSkipIndex {
     DataType data_type_;
 };
 
+class MetricInfo {
+ public:
+    MetricInfo() = default;
+    ~MetricInfo() = default;
+    
+    template<typename T>
+    void ProcessArray(const std::shared_ptr<arrow::Array>& array) {
+        auto typed_array = std::static_pointer_cast<typename arrow::CTypeTraits<T>::ArrayType>(array);
+
+        bool has_valid_data = false;
+        T min_value;
+        T max_value;
+        for (int64_t i = 0; i < typed_array->length(); ++i) {
+            if (typed_array->IsNull(i)) {
+                null_count++;
+                continue;
+            }
+            T value = typed_array->Value(i);
+
+            if (!has_valid_data) {
+                min_value = max_value = value;
+                has_valid_data = true;
+            } else {
+                if (value < min_value) {
+                    min_value = value;
+                }
+                if (value > max_value) {
+                    max_value = value;
+                }
+            }
+            unique_values.insert(value);
+        }
+        total_rows += typed_array->length();
+    }
+
+    void ProcessBooleanArray(const std::shared_ptr<arrow::Array>& array) {
+        auto bool_array = std::static_pointer_cast<arrow::BooleanArray>(array);
+
+        for (int64_t i = 0; i < bool_array->length(); ++i) {
+            if (bool_array->IsNull(i)) {
+                null_count++;
+                continue;
+            }
+            bool value = bool_array->Value(i);
+            if (value) {
+                contains_true = true;
+            } else {
+                contains_false = true;
+            }
+        }
+        total_rows += bool_array->length();
+    }
+
+    void ProcessStringArray(const std::shared_ptr<arrow::Array>& array) {
+        auto string_array = std::static_pointer_cast<arrow::StringArray>(array);
+
+        bool has_first_valid = false;
+        std::string_view min_value;
+        std::string_view max_value;
+        for (int64_t i = 0; i < string_array->length(); ++i) {
+            if (string_array->IsNull(i)) {
+                null_count++;
+                continue;
+            }
+            std::string_view value = string_array->GetView(i);
+            size_t length = value.length();
+            if (!has_first_valid) {
+                min_value = value;
+                max_value = value;
+                has_first_valid = true;
+            } else {
+                if (value < min_value) {
+                    min_value = value;
+                }
+                if (value > max_value) {
+                    max_value = value;
+                }
+            }
+            unique_values.insert(std::string(value));
+            string_length += length;
+            max_string_length = std::max(max_string_length, length);
+            if (!has_spaces && value.find(' ') != std::string::npos) {
+                has_spaces = true;
+            }
+        }
+        total_rows += string_array->length();
+    }
+
+ public:
+    int64_t total_rows = 0;
+    int64_t null_count = 0;
+
+    MetricType min_value;
+    MetricType max_value;
+
+    ankerl::unordered_dense::set<MetricType> unique_values;
+
+    bool contains_true = false;
+    bool contains_false = false;
+
+    size_t string_length = 0;
+    size_t max_string_length = 0;
+    bool has_spaces = false;
+}
+
 class ChunkSkipIndex : public milvus_storage::Metadata {
  public:
     static constexpr const char* KEY = "SKIP_INDEX";
@@ -1144,6 +1251,68 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
 
             field_chunk_metrics_.emplace_back(
                 std::make_pair(fid, std::move(field_metrics)));
+        }
+    }
+
+    ChunkSkipIndex(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
+        if (batches.empty()) {
+            return;
+        }
+        auto schema = batches[0]->schema();
+        std::unordered_map<FieldId, std::unique_ptr<MetricInfo>> metrics;
+        for (int col_idx = 0; col_idx < schema->num_fields(); ++col_idx) {
+            auto field_id = std::stoll(schema->field(col_idx)
+                                       ->metadata()
+                                       ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                       ->data());
+            auto fid = milvus::FieldId(field_id);
+            if (fid == RowFieldID) {
+                continue;
+            }
+            metrics[fid] = std::make_unique<MetricInfo>();
+        }
+        for (const auto& batch : batches) {
+            for (int col_idx = 0; col_idx < batch->num_columns(); ++col_idx) {
+                auto field_id = std::stoll(schema->field(col_idx)
+                                           ->metadata()
+                                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                           ->data());
+                auto fid = milvus::FieldId(field_id);
+                if (fid == RowFieldID) {
+                    continue;
+                }
+                auto array = batch->column(col_idx);
+                auto data_type = schema->field(col_idx)->type()->id();
+                switch (data_type) {
+                    case arrow::Type::INT8:
+                        metrics[fid]->ProcessArray<int8_t>(array);
+                        break;
+                    case arrow::Type::INT16:
+                        metrics[fid]->ProcessArray<int16_t>(array);
+                        break;
+                    case arrow::Type::INT32:
+                        metrics[fid]->ProcessArray<int32_t>(array);
+                        break;
+                    case arrow::Type::INT64:
+                        metrics[fid]->ProcessArray<int64_t>(array);
+                        break;
+                    case arrow::Type::FLOAT:
+                        metrics[fid]->ProcessArray<float>(array);
+                        break;
+                    case arrow::Type::DOUBLE:
+                        metrics[fid]->ProcessArray<double>(array);
+                        break;
+                    case arrow::Type::BOOL:
+                        metrics[fid]->ProcessBooleanArray(array);
+                        break;
+                    case arrow::Type::STRING:
+                    case arrow::Type::LARGE_STRING:
+                        metrics[fid]->ProcessStringArray(array);
+                        break;
+                    default:
+                        break;
+                }
+            }
         }
     }
 
@@ -1222,7 +1391,7 @@ class ChunkSkipIndexAppender : public milvus_storage::MetadataAppender {
 
  protected:
     std::unique_ptr<milvus_storage::Metadata>
-    Create(const std::shared_ptr<arrow::Table>& table) override {
+    Create(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batch) override {
         return std::make_unique<ChunkSkipIndex>(table, field_metas_);
     }
 
@@ -1485,15 +1654,18 @@ class SkipIndex {
         if (chunk_skipindex.empty()) {
             return;
         }
-        size_t size = chunk_skipindex.size();
-        for (size_t i = 0; i < size; ++i) {
-            const auto& field_chunk_metrics = chunk_skipindex[i]->Take();
-            for (const auto& [field_id, metrics] : field_chunk_metrics) {
-                if (i == 0) {
-                    fieldChunkMetrics_[field_id] =
-                        std::vector<std::unique_ptr<FieldChunkSkipIndex>>{};
-                    fieldChunkMetrics_[field_id].reserve(size);
-                }
+        size_t num_chunks = chunk_skipindex.size();
+
+        if (!chunk_skipindex[0]->IsEmpty()) {
+            const auto& first_chunk_metrics = chunk_skipindex[0]->GetMetrics();
+            for (const auto& [field_id, _] : first_chunk_metrics) {
+                fieldChunkMetrics_[field_id].reserve(num_chunks);
+            }
+        }
+
+        for (size_t i = 0; i < num_chunks; ++i) {
+            auto field_chunk_metrics = chunk_skipindex[i]->Take();
+            for (auto& [field_id, metrics] : field_chunk_metrics) {
                 fieldChunkMetrics_[field_id].emplace_back(std::move(metrics));
             }
         }
