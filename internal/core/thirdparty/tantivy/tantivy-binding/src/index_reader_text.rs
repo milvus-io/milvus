@@ -6,8 +6,11 @@ use tantivy::{
     Term,
 };
 
-use crate::error::Result;
-use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
+use crate::{
+    analyzer::standard_analyzer, bitset_wrapper::BitsetWrapper, error::TantivyBindingError,
+    index_reader::IndexReaderWrapper,
+};
+use crate::{direct_bitset_collector::DirectBitsetCollector, error::Result};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,

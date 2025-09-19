@@ -2830,7 +2830,7 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 [[package]]
 name = "ownedbytes"
 version = "0.6.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -3609,7 +3609,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.21.1"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -3691,7 +3691,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.5.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "bitpacking",
 ]
@@ -3699,7 +3699,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.2.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "fastdivide",
  "fnv",
@@ -3714,7 +3714,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.6.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3738,7 +3738,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.21.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "nom",
 ]
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.2.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "tantivy-common",
  "tantivy-fst",
@@ -3756,7 +3756,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.2.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "murmurhash32",
  "tantivy-common",
@@ -3765,7 +3765,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.2.0"
-source = "git+https://github.com/zilliztech/tantivy?tag=0.21.2-fix4#b76b93dedc28c75c8ad5b350c541543cc969e579"
+source = "git+https://github.com/SpadeA-Tang/tantivy?branch=cp-user-doc-id#d2c32815e43c502bb3a44e89d2424dd2b3a3d655"
 dependencies = [
  "serde",
 ]

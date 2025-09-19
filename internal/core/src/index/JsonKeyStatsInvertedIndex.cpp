@@ -273,16 +273,12 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
         boost::filesystem::create_directories(path_);
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-        d_type_ = TantivyDataType::Keyword;
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             field_name.c_str(),
-            d_type_,
             path_.c_str(),
-            false,
-            false,
-            // To speed up index building process.
-            4,
-            4 * 64 * 1024 * 1024);
+            false, /* in_ram */
+            1,
+            json_stats_tantivy_memory_budget);
     }
 }
 
@@ -290,9 +286,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     int64_t commit_interval_in_ms, const char* unique_id)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
-    d_type_ = TantivyDataType::Keyword;
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, d_type_, "", false, true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(unique_id, "");
 }
 
 JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
