@@ -146,17 +146,6 @@ func packLoadSegmentRequest(
 	}
 
 	// todo(SpadeA): consider struct fields
-	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
-	for _, field := range schema.GetFields() {
-		if exist {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: strconv.FormatBool(collectionMmapEnabled),
-			})
-		}
-	}
-
 	schema = applyCollectionMmapSetting(schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
