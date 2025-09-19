@@ -317,6 +317,8 @@ type commonConfig struct {
 
 	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
 	ClusterID                  ParamItem `refreshable:"false"`
+
+	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1155,6 +1157,7 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnableConfigParamTypeCheck.Init(base.mgr)
+
 	p.ClusterID = ParamItem{
 		Key:          "common.clusterID",
 		Version:      "2.6.3",
@@ -1174,6 +1177,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		},
 	}
 	p.ClusterID.Init(base.mgr)
+
+	p.HybridSearchRequeryPolicy = ParamItem{
+		Key:          "common.requery.hybridSearchPolicy",
+		Version:      "2.5.18",
+		DefaultValue: "OutputVector",
+		Doc:          `the policy to decide when to do requery in hybrid search, support "always", "outputvector" and "outputfields"`,
+		Export:       false,
+	}
+	p.HybridSearchRequeryPolicy.Init(base.mgr)
 }
 
 type gpuConfig struct {
