@@ -130,29 +130,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         return search_info;
     };
 
-    auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        if (anns_proto.vector_type() ==
-            milvus::proto::plan::VectorType::BinaryVector) {
-            return std::make_unique<BinaryVectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::Float16Vector) {
-            return std::make_unique<Float16VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::BFloat16Vector) {
-            return std::make_unique<BFloat16VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::SparseFloatVector) {
-            return std::make_unique<SparseFloatVectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::Int8Vector) {
-            return std::make_unique<Int8VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::EmbListFloatVector) {
-            return std::make_unique<EmbListFloatVectorANNS>();
-        } else {
-            return std::make_unique<FloatVectorANNS>();
-        }
-    }();
+    auto plan_node = std::make_unique<VectorPlanNode>();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->search_info_ = std::move(search_info_parser());
 

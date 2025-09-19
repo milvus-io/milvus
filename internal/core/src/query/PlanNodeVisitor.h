@@ -20,27 +20,9 @@ class PlanNodeVisitor {
 
  public:
     virtual void
-    visit(FloatVectorANNS&) = 0;
-
-    virtual void
-    visit(BinaryVectorANNS&) = 0;
-
-    virtual void
-    visit(Float16VectorANNS&) = 0;
-
-    virtual void
-    visit(BFloat16VectorANNS&) = 0;
-
-    virtual void
-    visit(SparseFloatVectorANNS&) = 0;
-
-    virtual void
-    visit(Int8VectorANNS&) = 0;
+    visit(VectorPlanNode&) = 0;
 
     virtual void
     visit(RetrievePlanNode&) = 0;
-
-    virtual void
-    visit(EmbListFloatVectorANNS&) = 0;
 };
 }  // namespace milvus::query
