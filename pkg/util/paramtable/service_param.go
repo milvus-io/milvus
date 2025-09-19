@@ -1511,7 +1511,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,
-		Doc:          "Whether use virtual host mode for bucket",
+		Doc:          "Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default",
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)
