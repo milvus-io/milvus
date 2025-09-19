@@ -1,12 +1,14 @@
 import pytest
 import random
 import numpy as np
+from shapely import wkt
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
+from utils.util_log import test_log as log
 
 prefix = "client_geometry"
 default_nb = ct.default_nb
@@ -29,11 +31,25 @@ def generate_wkt_by_type(
         List of WKT strings
     """
 
+    def validate_and_log_wkt(wkt_string: str, geom_type: str) -> str:
+        """Validate WKT using shapely and log debug info"""
+        try:
+            geom = wkt.loads(wkt_string)
+            log.debug(f"Generated {geom_type} geometry: {wkt_string}")
+            log.debug(f"Shapely validation passed - Type: {geom.geom_type}, Valid: {geom.is_valid}")
+            if not geom.is_valid:
+                log.warning(f"Generated invalid geometry: {wkt_string}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
+            return wkt_string
+        except Exception as e:
+            log.error(f"Failed to parse WKT {geom_type}: {wkt_string}, Error: {e}")
+            raise ValueError(f"Invalid WKT generated for {geom_type}: {wkt_string}")
+
     if wkt_type == "POINT":
-        return [
-            f"POINT ({random.uniform(bounds[0], bounds[1]):.2f} {random.uniform(bounds[2], bounds[3]):.2f})"
-            for _ in range(count)
-        ]
+        points = []
+        for _ in range(count):
+            wkt_string = f"POINT ({random.uniform(bounds[0], bounds[1]):.2f} {random.uniform(bounds[2], bounds[3]):.2f})"
+            points.append(validate_and_log_wkt(wkt_string, "POINT"))
+        return points
 
     elif wkt_type == "LINESTRING":
         lines = []
@@ -44,7 +60,8 @@ def generate_wkt_by_type(
                 x = random.uniform(bounds[0], bounds[1])
                 y = random.uniform(bounds[2], bounds[3])
                 points.append(f"{x:.2f} {y:.2f}")
-            lines.append(f"LINESTRING ({', '.join(points)})")
+            wkt_string = f"LINESTRING ({', '.join(points)})"
+            lines.append(validate_and_log_wkt(wkt_string, "LINESTRING"))
         return lines
 
     elif wkt_type == "POLYGON":
@@ -71,7 +88,7 @@ def generate_wkt_by_type(
                     random.uniform(bounds[2], bounds[3]),
                 )
                 polygon_wkt = f"POLYGON (({x1:.2f} {y1:.2f}, {x2:.2f} {y2:.2f}, {x3:.2f} {y3:.2f}, {x1:.2f} {y1:.2f}))"
-            polygons.append(polygon_wkt)
+            polygons.append(validate_and_log_wkt(polygon_wkt, "POLYGON"))
         return polygons
 
     elif wkt_type == "MULTIPOINT":
@@ -83,7 +100,8 @@ def generate_wkt_by_type(
                 x = random.uniform(bounds[0], bounds[1])
                 y = random.uniform(bounds[2], bounds[3])
                 points.append(f"({x:.2f} {y:.2f})")
-            multipoints.append(f"MULTIPOINT ({', '.join(points)})")
+            wkt_string = f"MULTIPOINT ({', '.join(points)})"
+            multipoints.append(validate_and_log_wkt(wkt_string, "MULTIPOINT"))
         return multipoints
 
     elif wkt_type == "MULTILINESTRING":
@@ -99,7 +117,8 @@ def generate_wkt_by_type(
                     y = random.uniform(bounds[2], bounds[3])
                     line_points.append(f"{x:.2f} {y:.2f}")
                 lines.append(f"({', '.join(line_points)})")
-            multilines.append(f"MULTILINESTRING ({', '.join(lines)})")
+            wkt_string = f"MULTILINESTRING ({', '.join(lines)})"
+            multilines.append(validate_and_log_wkt(wkt_string, "MULTILINESTRING"))
         return multilines
 
     elif wkt_type == "MULTIPOLYGON":
@@ -113,7 +132,8 @@ def generate_wkt_by_type(
                 size = random.uniform(10, 30)
                 polygon_coords = f"(({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))"
                 polygons.append(polygon_coords)
-            multipolygons.append(f"MULTIPOLYGON ({', '.join(polygons)})")
+            wkt_string = f"MULTIPOLYGON ({', '.join(polygons)})"
+            multipolygons.append(validate_and_log_wkt(wkt_string, "MULTIPOLYGON"))
         return multipolygons
 
     elif wkt_type == "GEOMETRYCOLLECTION":
@@ -151,7 +171,8 @@ def generate_wkt_by_type(
                         f"POLYGON(({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))"
                     )
 
-            collections.append(f"GEOMETRYCOLLECTION({', '.join(geoms)})")
+            wkt_string = f"GEOMETRYCOLLECTION({', '.join(geoms)})"
+            collections.append(validate_and_log_wkt(wkt_string, "GEOMETRYCOLLECTION"))
         return collections
 
     else:
@@ -417,6 +438,16 @@ def generate_spatial_query_data_for_function(
         # Default case
         query_geom = "POLYGON ((0 0, 50 0, 50 50, 0 50, 0 0))"
 
+    # Validate and log the generated query geometry
+    try:
+        geom = wkt.loads(query_geom)
+        log.debug(f"Generated {spatial_func} query geometry: {query_geom}")
+        log.debug(f"Query geometry validation - Type: {geom.geom_type}, Valid: {geom.is_valid}")
+        if not geom.is_valid:
+            log.warning(f"Generated invalid query geometry for {spatial_func}: {query_geom}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
+    except Exception as e:
+        log.error(f"Failed to parse query WKT for {spatial_func}: {query_geom}, Error: {e}")
+
     return query_geom
 
 
@@ -440,13 +471,28 @@ def generate_diverse_base_data(
     base_data = []
     min_x, max_x, min_y, max_y = bounds
 
+    def validate_and_log_base_wkt(wkt_string: str, geom_type: str, index: int) -> str:
+        """Validate base data WKT using shapely and log debug info"""
+        try:
+            geom = wkt.loads(wkt_string)
+            log.debug(f"Generated base {geom_type} geometry [{index}]: {wkt_string}")
+            log.debug(f"Base geometry validation [{index}] - Type: {geom.geom_type}, Valid: {geom.is_valid}")
+            if not geom.is_valid:
+                log.warning(f"Generated invalid base geometry [{index}]: {wkt_string}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
+            return wkt_string
+        except Exception as e:
+            log.error(f"Failed to parse base WKT {geom_type} [{index}]: {wkt_string}, Error: {e}")
+            raise ValueError(f"Invalid WKT generated for base {geom_type} [{index}]: {wkt_string}")
+
     # Generate points (30% of data)
     point_count = int(count * 0.3)
     for _ in range(point_count):
         x = random.uniform(min_x, max_x)
         y = random.uniform(min_y, max_y)
+        wkt_string = f"POINT ({x:.2f} {y:.2f})"
+        validated_wkt = validate_and_log_base_wkt(wkt_string, "POINT", len(base_data))
         base_data.append(
-            {pk_field_name: len(base_data), geo_field_name: f"POINT ({x:.2f} {y:.2f})"}
+            {pk_field_name: len(base_data), geo_field_name: validated_wkt}
         )
 
     # Generate polygons (40% of data)
@@ -457,10 +503,12 @@ def generate_diverse_base_data(
         x = random.uniform(min_x, max_x - size)
         y = random.uniform(min_y, max_y - size)
 
+        wkt_string = f"POLYGON (({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))"
+        validated_wkt = validate_and_log_base_wkt(wkt_string, "POLYGON", len(base_data))
         base_data.append(
             {
                 pk_field_name: len(base_data),
-                geo_field_name: f"POLYGON (({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))",
+                geo_field_name: validated_wkt,
             }
         )
 
@@ -475,10 +523,12 @@ def generate_diverse_base_data(
             y = random.uniform(min_y, max_y)
             coords.append(f"{x:.2f} {y:.2f}")
 
+        wkt_string = f"LINESTRING ({', '.join(coords)})"
+        validated_wkt = validate_and_log_base_wkt(wkt_string, "LINESTRING", len(base_data))
         base_data.append(
             {
                 pk_field_name: len(base_data),
-                geo_field_name: f"LINESTRING ({', '.join(coords)})",
+                geo_field_name: validated_wkt,
             }
         )
 
@@ -501,10 +551,12 @@ def generate_diverse_base_data(
         for _ in range(remaining):
             x = random.uniform(min_x, max_x)
             y = random.uniform(min_y, max_y)
+            wkt_string = f"POINT ({x:.2f} {y:.2f})"
+            validated_wkt = validate_and_log_base_wkt(wkt_string, "POINT", len(base_data))
             base_data.append(
                 {
                     pk_field_name: len(base_data),
-                    geo_field_name: f"POINT ({x:.2f} {y:.2f})",
+                    geo_field_name: validated_wkt,
                 }
             )
 
@@ -523,10 +575,24 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
     Returns:
         List of WKT POINT strings with latitude/longitude coordinates
     """
+    def validate_and_log_latlon_wkt(wkt_string: str, point_type: str, index: int) -> str:
+        """Validate lat/lon WKT using shapely and log debug info"""
+        try:
+            geom = wkt.loads(wkt_string)
+            log.debug(f"Generated {point_type} lat/lon point [{index}]: {wkt_string}")
+            log.debug(f"Lat/lon point validation [{index}] - Type: {geom.geom_type}, Valid: {geom.is_valid}")
+            if not geom.is_valid:
+                log.warning(f"Generated invalid lat/lon point [{index}]: {wkt_string}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
+            return wkt_string
+        except Exception as e:
+            log.error(f"Failed to parse lat/lon WKT [{index}]: {wkt_string}, Error: {e}")
+            raise ValueError(f"Invalid lat/lon WKT generated [{index}]: {wkt_string}")
+
     points = []
 
     # Add center point
-    points.append(f"POINT ({center_lon:.6f} {center_lat:.6f})")
+    center_wkt = f"POINT ({center_lon:.6f} {center_lat:.6f})"
+    points.append(validate_and_log_latlon_wkt(center_wkt, "center", 0))
 
     # Add points at various distances from center
     # Using approximate degree-to-meter conversions at NYC latitude
@@ -556,7 +622,8 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
             new_lat = center_lat + lat_offset
             new_lon = center_lon + lon_offset
 
-            points.append(f"POINT ({new_lon:.6f} {new_lat:.6f})")
+            point_wkt = f"POINT ({new_lon:.6f} {new_lat:.6f})"
+            points.append(validate_and_log_latlon_wkt(point_wkt, f"distance_{distance}m", point_id))
             point_id += 1
 
     # Fill remaining slots with random points in nearby area
@@ -577,7 +644,8 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
         new_lat = center_lat + lat_offset
         new_lon = center_lon + lon_offset
 
-        points.append(f"POINT ({new_lon:.6f} {new_lat:.6f})")
+        point_wkt = f"POINT ({new_lon:.6f} {new_lat:.6f})"
+        points.append(validate_and_log_latlon_wkt(point_wkt, "random", len(points)))
 
     return points[:count]
 
@@ -593,7 +661,19 @@ def generate_dwithin_query_point(center_lat: float = 40.7128, center_lon: float 
     Returns:
         WKT POINT string for query
     """
-    return f"POINT ({center_lon:.6f} {center_lat:.6f})"
+    query_wkt = f"POINT ({center_lon:.6f} {center_lat:.6f})"
+
+    # Validate and log the query point
+    try:
+        geom = wkt.loads(query_wkt)
+        log.debug(f"Generated DWITHIN query point: {query_wkt}")
+        log.debug(f"DWITHIN query point validation - Type: {geom.geom_type}, Valid: {geom.is_valid}")
+        if not geom.is_valid:
+            log.warning(f"Generated invalid DWITHIN query point: {query_wkt}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
+    except Exception as e:
+        log.error(f"Failed to parse DWITHIN query WKT: {query_wkt}, Error: {e}")
+
+    return query_wkt
 
 
 def calculate_expected_ids_for_dwithin(base_data, query_point, distance_meters, geo_field_name="geo", pk_field_name="id"):
