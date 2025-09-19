@@ -1599,6 +1599,65 @@ func (_c *MockQueryCoord_ResumeNode_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// RunAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) RunAnalyzer(_a0 context.Context, _a1 *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunAnalyzer")
+	}
+
+	var r0 *milvuspb.RunAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.RunAnalyzerRequest) *milvuspb.RunAnalyzerResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RunAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.RunAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_RunAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunAnalyzer'
+type MockQueryCoord_RunAnalyzer_Call struct {
+	*mock.Call
+}
+
+// RunAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.RunAnalyzerRequest
+func (_e *MockQueryCoord_Expecter) RunAnalyzer(_a0 interface{}, _a1 interface{}) *MockQueryCoord_RunAnalyzer_Call {
+	return &MockQueryCoord_RunAnalyzer_Call{Call: _e.mock.On("RunAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_RunAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *querypb.RunAnalyzerRequest)) *MockQueryCoord_RunAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.RunAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_RunAnalyzer_Call) Return(_a0 *milvuspb.RunAnalyzerResponse, _a1 error) *MockQueryCoord_RunAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)) *MockQueryCoord_RunAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetAddress provides a mock function with given fields: address
 func (_m *MockQueryCoord) SetAddress(address string) {
 	_m.Called(address)
@@ -2592,6 +2651,65 @@ func (_c *MockQueryCoord_UpdateStateCode_Call) Return() *MockQueryCoord_UpdateSt
 
 func (_c *MockQueryCoord_UpdateStateCode_Call) RunAndReturn(run func(commonpb.StateCode)) *MockQueryCoord_UpdateStateCode_Call {
 	_c.Run(run)
+	return _c
+}
+
+// ValidateAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ValidateAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockQueryCoord_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ValidateAnalyzerRequest
+func (_e *MockQueryCoord_Expecter) ValidateAnalyzer(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ValidateAnalyzer_Call {
+	return &MockQueryCoord_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest)) *MockQueryCoord_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ValidateAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MockQueryCoord_ValidateAnalyzer_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
