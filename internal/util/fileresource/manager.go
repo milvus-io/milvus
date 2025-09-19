@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 var GlobalFileManager Manager
@@ -47,6 +49,7 @@ func InitManager(storage storage.ChunkManager, mode Mode) {
 
 func Sync(resource_list []*internalpb.FileResourceInfo) error {
 	if GlobalFileManager == nil {
+		log.Error("sync file resource to file manager not init")
 		return nil
 	}
 
@@ -91,7 +94,8 @@ func (m *BaseManager) Mode() Mode                                        { retur
 type SyncManager struct {
 	BaseManager
 	sync.RWMutex
-	downloader storage.ChunkManager
+	downloader  storage.ChunkManager
+	resourceSet map[int64]struct{}
 }
 
 // sync file to local if file mode was Sync
@@ -100,24 +104,46 @@ func (m *SyncManager) Sync(resource_list []*internalpb.FileResourceInfo) error {
 	defer m.Unlock()
 
 	ctx := context.Background()
-	err := download(ctx, m.localPath, m.downloader, resource_list)
-	if err != nil {
-		return err
-	}
-
-	resource_set := map[string]struct{}{}
+	new_set := make(map[int64]interface{})
 	for _, resource := range resource_list {
-		resource_set[fmt.Sprint(resource.GetId())] = struct{}{}
+		new_set[resource.GetId()] = struct{}{}
+		if _, ok := m.resourceSet[resource.GetId()]; ok {
+			continue
+		}
+
+		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
+
+		err := os.MkdirAll(localResourcePath, os.ModePerm)
+		if err != nil {
+			return err
+		}
+
+		reader, err := m.downloader.Reader(ctx, resource.GetPath())
+		if err != nil {
+			log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+			return err
+		}
+
+		fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
+		file, err := os.Create(fileName)
+		if err != nil {
+			return err
+		}
+
+		if _, err = io.Copy(file, reader); err != nil {
+			log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+			return err
+		}
+		log.Info("sync file to local", zap.String("name", fileName))
 	}
 
-	entries, err := os.ReadDir(m.localPath)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if _, ok := resource_set[entry.Name()]; !ok {
-			os.RemoveAll(path.Join(m.localPath))
+	for resourceId := range m.resourceSet {
+		if _, ok := new_set[resourceId]; !ok {
+			err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceId)))
+			if err != nil {
+				log.Warn("remove local resource failed", zap.Error(err))
+				new_set[resourceId] = struct{}{}
+			}
 		}
 	}
 	return nil
@@ -129,6 +155,7 @@ func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 	return &SyncManager{
 		BaseManager: BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
 		downloader:  downloader,
+		resourceSet: make(map[int64]struct{}),
 	}
 }
 
@@ -167,6 +194,7 @@ func (m *RefManager) Download(downloader storage.ChunkManager, resources ...*int
 			localResourcePath := path.Join(m.localPath, key)
 			reader, err := downloader.Reader(ctx, resource.GetPath())
 			if err != nil {
+				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
 				return nil, err
 			}
 
