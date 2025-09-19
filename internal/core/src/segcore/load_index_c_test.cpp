@@ -1853,6 +1853,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     SearchResult result_on_index;
     vec_index->Query(
         query_dataset, search_info, nullptr, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
