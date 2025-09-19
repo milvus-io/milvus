@@ -1230,9 +1230,9 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 				return false
 			}
 		} else if key == "field-geometry" {
-			arr1 := value.([]uint8)
-			arr2 := string(m2[key].([]byte))
-			if arr2 != (string)(arr1) {
+			arr1 := value.(string)
+			arr2 := m2[key].(string)
+			if arr2 != arr1 {
 				return false
 			}
 		} else if strings.HasPrefix(key, "array-") {
@@ -1600,13 +1600,12 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 		FieldName: "field-geometry",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_GeometryData{
-					GeometryData: &schemapb.GeometryArray{
-						// WKT: POINT (30.123 -10.456)
-						Data: [][]byte{
-							[]byte(`POINT (30.123 -10.456)`),
-							[]byte(`POINT (30.123 -10.456)`),
-							[]byte(`POINT (30.123 -10.456)`),
+				Data: &schemapb.ScalarField_GeometryWktData{
+					GeometryWktData: &schemapb.GeometryWktArray{
+						Data: []string{
+							`POINT (30.123 -10.456)`,
+							`POINT (30.123 -10.456)`,
+							`POINT (30.123 -10.456)`,
 							// wkb:{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x4},
 						},
 					},
@@ -1919,7 +1918,7 @@ func newSearchResult(results []map[string]interface{}) []map[string]interface{} 
 		result["field-varchar"] = strconv.Itoa(i)
 		result["field-string"] = strconv.Itoa(i)
 		result["field-json"] = []byte(`{"XXX": 0}`)
-		result["field-geometry"] = []byte(`POINT (30.123 -10.456)`)
+		result["field-geometry"] = `POINT (30.123 -10.456)`
 		result["field-array"] = []bool{true}
 		result["array-bool"] = []bool{true}
 		result["array-int8"] = []int32{0}
