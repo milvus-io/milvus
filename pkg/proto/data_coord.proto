@@ -169,16 +169,34 @@ message FlushResult {
   int64 timeOfSeal = 4;
   uint64 flush_ts = 5;
   map<string, msg.MsgPosition> channel_cps = 6;
+  string db_name = 7; // database name for this flush result
+  string collection_name = 8; // collection name for this flush result
 }
 
 message FlushAllRequest {
   common.MsgBase base = 1;
-  string dbName = 2;
+  string dbName = 2;  // Deprecated: use flush_targets instead
+  
+  // List of specific databases and collections to flush
+  repeated FlushAllTarget flush_targets = 3;
+}
+
+// Specific collection to flush with database context
+// This message allows targeting specific collections within a database for flush operations  
+message FlushAllTarget {
+  // Database name to target for flush operation
+  string db_name = 1;
+  // Collections within this database to flush
+  // If empty, flush all collections in this database
+  repeated int64 collection_ids = 3;
 }
 
 message FlushAllResponse {
   common.Status status = 1;
   uint64 flushTs = 2;
+  
+  // Detailed flush results for each target
+  repeated FlushResult flush_results = 3;
 }
 
 message FlushChannelsRequest {

@@ -3758,15 +3758,12 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	log.Debug(
 		rpcDone(method),
-		zap.Uint64("FlushAllTs", ft.result.GetFlushTs()),
+		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &milvuspb.FlushAllResponse{
-		Status:     merr.Success(),
-		FlushAllTs: ft.result.GetFlushTs(),
-	}, nil
+	return ft.result, nil
 }
 
 // GetDdChannel returns the used channel for dd operations.
