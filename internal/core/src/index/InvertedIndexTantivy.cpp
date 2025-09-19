@@ -506,8 +506,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_array_data(
-                    arr[i].data(), arr[i].size(), i);
+                wrapper_->add_array_data(arr[i].data(), arr[i].size(), i);
             }
         } else {
             wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
@@ -517,7 +516,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_array_data_by_single_segment_writer(
+                wrapper_->add_array_data_by_single_segment_writer(
                     arr[i].data(), arr[i].size());
             }
         } else {
@@ -633,13 +632,12 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_array_data(
-                    reinterpret_cast<const ElementType*>(
-                        array_column[i].data()),
-                    length,
-                    offset++);
+                wrapper_->add_array_data(reinterpret_cast<const ElementType*>(
+                                             array_column[i].data()),
+                                         length,
+                                         offset++);
             } else {
-                wrapper_->template add_array_data_by_single_segment_writer(
+                wrapper_->add_array_data_by_single_segment_writer(
                     reinterpret_cast<const ElementType*>(
                         array_column[i].data()),
                     length);
@@ -672,11 +670,10 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_array_data(
-                    output.data(), length, offset++);
+                wrapper_->add_array_data(output.data(), length, offset++);
             } else {
-                wrapper_->template add_array_data_by_single_segment_writer(
-                    output.data(), length);
+                wrapper_->add_array_data_by_single_segment_writer(output.data(),
+                                                                  length);
             }
         }
     }
