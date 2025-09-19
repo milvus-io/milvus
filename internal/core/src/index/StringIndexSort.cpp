@@ -913,6 +913,7 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
 
 size_t
 StringIndexSortMmapImpl::FindValueIndex(const std::string& value) const {
+    std::string_view search_value(value);
     size_t left = 0;
     size_t right = unique_count_;
 
@@ -921,9 +922,10 @@ StringIndexSortMmapImpl::FindValueIndex(const std::string& value) const {
         MmapEntry entry = GetEntry(mid);
         std::string_view entry_sv = entry.get_string_view();
 
-        if (entry_sv < value) {
+        int cmp = entry_sv.compare(search_value);
+        if (cmp < 0) {
             left = mid + 1;
-        } else if (entry_sv > value) {
+        } else if (cmp > 0) {
             right = mid;
         } else {
             return mid;
