@@ -21,7 +21,7 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev gcc g++ && \
     apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
