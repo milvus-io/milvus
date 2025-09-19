@@ -456,6 +456,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
+                                    fs,
                                     nullptr,
                                     infos.load_priority);
         });
