@@ -392,6 +392,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 5, Params.BalanceSegmentBatchSize.GetAsInt())
 		assert.Equal(t, 1, Params.BalanceChannelBatchSize.GetAsInt())
 		assert.Equal(t, true, Params.EnableBalanceOnMultipleCollections.GetAsBool())
+
+		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
