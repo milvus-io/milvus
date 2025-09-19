@@ -154,6 +154,11 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 	}()
 
 	for i := 0; i < len(text); i++ {
+		if len(text[i]) == 0 {
+			dst[i] = map[uint32]float32{}
+			continue
+		}
+
 		if !typeutil.IsUTF8(text[i]) {
 			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
 		}
