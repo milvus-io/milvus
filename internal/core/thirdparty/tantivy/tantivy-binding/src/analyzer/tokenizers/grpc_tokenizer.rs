@@ -3,14 +3,14 @@ use std::vec::Vec;
 use log::warn;
 use once_cell::sync::Lazy;
 use serde_json as json;
-use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
+use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tokio::runtime::Runtime;
-use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 use tonic::transport::Channel;
+use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 
 use tokenizer::tokenization_request::Parameter;
-use tokenizer::TokenizationRequest;
 use tokenizer::tokenizer_client::TokenizerClient;
+use tokenizer::TokenizationRequest;
 
 use crate::error::TantivyBindingError;
 
