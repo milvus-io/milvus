@@ -113,7 +113,7 @@ class FixedWidthChunk : public Chunk {
                     std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
         : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)),
           dim_(dim),
-          element_size_(element_size){};
+          element_size_(element_size) {};
 
     milvus::SpanBase
     Span() const {
@@ -180,10 +180,12 @@ class StringChunk : public Chunk {
         while (left <= right) {
             int mid = left + (right - left) / 2;
             std::string_view midString = (*this)[mid];
-            if (midString == target) {
+            auto cmp = midString.compare(target);
+
+            if (cmp == 0) {
                 result = mid;     // Store the index of match
                 right = mid - 1;  // Continue searching in the left half
-            } else if (midString < target) {
+            } else if (cmp < 0) {
                 // midString < target
                 left = mid + 1;
             } else {
