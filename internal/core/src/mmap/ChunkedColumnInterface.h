@@ -127,7 +127,10 @@ class ChunkedColumnInterface {
                 int64_t count) = 0;
 
     virtual void
-    BulkPrimitiveValueAt(void* dst, const int64_t* offsets, int64_t count) = 0;
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count,
+                         bool int_raw_type = false) = 0;
 
     virtual void
     BulkVectorValueAt(void* dst,

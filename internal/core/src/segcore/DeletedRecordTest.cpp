@@ -22,11 +22,16 @@
 #include "segcore/Record.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "exec/expression/function/FunctionFactory.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+using namespace milvus::exec;
 
 TEST(DeleteMVCC, common_case) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.Initialize();
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);

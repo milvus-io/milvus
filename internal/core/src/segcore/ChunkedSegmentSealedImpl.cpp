@@ -1347,7 +1347,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(proto::plan::OpType op,
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
 ChunkedSegmentSealedImpl::find_first(int64_t limit,
-                                     const BitsetType& bitset) const {
+                                     const BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
         return insert_record_.pk2offset_->find_first(limit, bitset);
     }
@@ -1449,6 +1449,89 @@ ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
     }
 }
 
+void
+ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
+                                         DataType data_type,
+                                         const int64_t* seg_offsets,
+                                         int64_t count,
+                                         void* data,
+                                         TargetBitmap& valid_map,
+                                         bool int_raw_type) const {
+    auto& field_meta = schema_->operator[](field_id);
+    auto& field_data = fields_.rlock()->at(field_id);
+    valid_map.set();
+    if (field_data->IsNullable()) {
+        for (auto i = 0; i < count; i++) {
+            valid_map.set(i, field_data->IsValid(seg_offsets[i]));
+        }
+    }
+    switch (data_type) {
+        case DataType::BOOL: {
+            bulk_subscript_impl<bool>(
+                field_data.get(), seg_offsets, count, static_cast<bool*>(data));
+            break;
+        }
+        case DataType::INT8: {
+            bulk_subscript_impl<int8_t>(field_data.get(),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<int8_t*>(data),
+                                        int_raw_type);
+            break;
+        }
+        case DataType::INT16: {
+            bulk_subscript_impl<int16_t>(field_data.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int16_t*>(data),
+                                         int_raw_type);
+            break;
+        }
+        case DataType::INT32: {
+            bulk_subscript_impl<int32_t>(field_data.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int32_t*>(data));
+            break;
+        }
+        case DataType::INT64: {
+            bulk_subscript_impl<int32_t>(field_data.get(),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int64_t*>(data));
+            break;
+        }
+        case DataType::FLOAT: {
+            bulk_subscript_impl<float>(field_data.get(),
+                                       seg_offsets,
+                                       count,
+                                       static_cast<float*>(data));
+            break;
+        }
+        case DataType::DOUBLE: {
+            bulk_subscript_impl<double>(field_data.get(),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<double*>(data));
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            bulk_subscript_ptr_impl<std::string>(
+                field_data.get(),
+                seg_offsets,
+                count,
+                static_cast<std::string*>(data));
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  field_meta.get_data_type()));
+        }
+    }
+}
+
 template <typename S, typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
@@ -1467,10 +1550,12 @@ void
 ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
-                                              T* dst) {
+                                              T* dst,
+                                              bool int_raw_type) {
     static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
     // use field->data_type_ to determine the type of dst
-    field->BulkPrimitiveValueAt(static_cast<void*>(dst), seg_offsets, count);
+    field->BulkPrimitiveValueAt(
+        static_cast<void*>(dst), seg_offsets, count, int_raw_type);
 }
 
 // for dense vector
@@ -1503,6 +1588,31 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
         column->BulkRawStringAt(
             [dst](std::string_view value, size_t offset, bool is_valid) {
                 dst->at(offset) = std::move(std::string(value));
+            },
+            seg_offsets,
+            count);
+    }
+}
+
+template <typename S, typename T>
+void
+ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    T* dst) {
+    if constexpr (std::is_same_v<S, Json>) {
+        column->BulkRawJsonAt(
+            [&](Json json, size_t offset, bool is_valid) {
+                dst[offset] = std::move(T(json));
+            },
+            seg_offsets,
+            count);
+    } else {
+        static_assert(std::is_same_v<S, std::string>);
+        column->BulkRawStringAt(
+            [&](std::string_view value, size_t offset, bool is_valid) {
+                dst[offset] = std::move(T(value));
             },
             seg_offsets,
             count);

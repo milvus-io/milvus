@@ -268,7 +268,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override;
+    find_first(int64_t limit, const BitsetTypeView& bitset) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
@@ -340,6 +340,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    void* output) const override;
 
     void
+    bulk_subscript(FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmap& valid_map,
+                   bool int_raw_type = false) const override;
+
+    void
     check_search(const query::Plan* plan) const override;
 
     int64_t
@@ -366,7 +375,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bulk_subscript_impl(ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
-                        T* dst_raw);
+                        T* dst_raw,
+                        bool int_raw_type = false);
 
     static void
     bulk_subscript_impl(int64_t element_sizeof,
@@ -382,6 +392,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw);
+
+    template <typename S, typename T = S>
+    static void
+    bulk_subscript_ptr_impl(const ChunkedColumnInterface* field,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            T* dst);
 
     template <typename T>
     static void

@@ -76,9 +76,9 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     // all is satisfied.
     BitsetType all(num);
     all.reset();
-
+    BitsetTypeView all_view(all.data(), num);
     {
-        auto [offsets, has_more_res] = this->map_.find_first(num / 2, all);
+        auto [offsets, has_more_res] = this->map_.find_first(num / 2, all_view);
         ASSERT_EQ(num / 2, offsets.size());
         ASSERT_TRUE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -86,7 +86,8 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
         }
     }
     {
-        auto [offsets, has_more_res] = this->map_.find_first(Unlimited, all);
+        auto [offsets, has_more_res] =
+            this->map_.find_first(Unlimited, all_view);
         ASSERT_EQ(num, offsets.size());
         ASSERT_FALSE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -97,9 +98,10 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     // corner case, segment offset exceeds the size of bitset.
     BitsetType all_minus_1(num - 1);
     all_minus_1.reset();
+    BitsetTypeView all_minus_1_view(all_minus_1.data(), num - 1);
     {
         auto [offsets, has_more_res] =
-            this->map_.find_first(num / 2, all_minus_1);
+            this->map_.find_first(num / 2, all_minus_1_view);
         ASSERT_EQ(num / 2, offsets.size());
         ASSERT_TRUE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -108,7 +110,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     }
     {
         auto [offsets, has_more_res] =
-            this->map_.find_first(Unlimited, all_minus_1);
+            this->map_.find_first(Unlimited, all_minus_1_view);
         ASSERT_EQ(all_minus_1.size(), offsets.size());
         ASSERT_FALSE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -119,13 +121,16 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     // none is satisfied.
     BitsetType none(num);
     none.set();
+    BitsetTypeView none_view(none.data(), num);
     {
-        auto [offsets, has_more_res] = this->map_.find_first(num / 2, none);
+        auto [offsets, has_more_res] =
+            this->map_.find_first(num / 2, none_view);
         ASSERT_TRUE(has_more_res);
         ASSERT_EQ(0, offsets.size());
     }
     {
-        auto [offsets, has_more_res] = this->map_.find_first(NoLimit, none);
+        auto [offsets, has_more_res] =
+            this->map_.find_first(NoLimit, none_view);
         ASSERT_TRUE(has_more_res);
         ASSERT_EQ(0, offsets.size());
     }
