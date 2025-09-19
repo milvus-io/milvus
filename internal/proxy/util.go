@@ -2414,7 +2414,7 @@ func SetReportValue(status *commonpb.Status, value int) {
 }
 
 func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
-	if storageCost.ScannedRemoteBytes == 0 && storageCost.ScannedTotalBytes == 0 {
+	if storageCost.ScannedTotalBytes <= 0 {
 		return
 	}
 	if !merr.Ok(status) {

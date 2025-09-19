@@ -1219,7 +1219,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     search_info.search_params_ = generate_search_conf(
         IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
     SearchResult result_on_index;
-    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    vec_index->Query(
+        query_dataset, search_info, nullptr, nullptr, result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -1454,7 +1455,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    vec_index->Query(
+        query_dataset, search_info, nullptr, nullptr, result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
