@@ -4468,3 +4468,53 @@ func TestUpdateFieldData_IndexFix(t *testing.T) {
 		assert.Equal(t, updateSparseData.Contents[1], updatedContents[2])
 	})
 }
+
+func TestGetNeedProcessFunctions(t *testing.T) {
+	{
+		f, err := GetNeedProcessFunctions([]int64{}, []*schemapb.FunctionSchema{}, false, false)
+		assert.Len(t, f, 0)
+		assert.NoError(t, err)
+	}
+	{
+		fs := []*schemapb.FunctionSchema{{Name: "test_func", OutputFieldIds: []int64{1}}}
+		_, err := GetNeedProcessFunctions([]int64{1, 2}, fs, false, false)
+		assert.ErrorContains(t, err, "Insert data has function output field")
+		f, err := GetNeedProcessFunctions([]int64{1, 2}, fs, true, false)
+		assert.NoError(t, err)
+		assert.Len(t, f, 0)
+	}
+	{
+		fs := []*schemapb.FunctionSchema{{Name: "test_func", OutputFieldIds: []int64{1}}}
+		_, err := GetNeedProcessFunctions([]int64{1}, fs, false, false)
+		assert.ErrorContains(t, err, "Insert data has function output field")
+		f, err := GetNeedProcessFunctions([]int64{1}, fs, true, false)
+		assert.NoError(t, err)
+		assert.Len(t, f, 0)
+	}
+	{
+		fs := []*schemapb.FunctionSchema{{Name: "test_func", OutputFieldIds: []int64{1}}, {Name: "test_func2", OutputFieldIds: []int64{2}}}
+		_, err := GetNeedProcessFunctions([]int64{1}, fs, false, false)
+		assert.Error(t, err)
+		f, err := GetNeedProcessFunctions([]int64{1}, fs, true, false)
+		assert.NoError(t, err)
+		assert.Len(t, f, 1)
+		assert.Equal(t, f[0].Name, "test_func2")
+	}
+	{
+		fs := []*schemapb.FunctionSchema{{Name: "test_func", Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{1}}}
+		_, err := GetNeedProcessFunctions([]int64{1}, fs, true, false)
+		assert.ErrorContains(t, err, "Attempt to insert bm25 function output field")
+	}
+	{
+		fs := []*schemapb.FunctionSchema{
+			{Name: "test_func", InputFieldIds: []int64{1, 2}, OutputFieldIds: []int64{3}},
+			{Name: "test_func2", InputFieldIds: []int64{1}, OutputFieldIds: []int64{2}},
+		}
+		_, err := GetNeedProcessFunctions([]int64{1, 2}, fs, false, true)
+		assert.Error(t, err)
+		f, err := GetNeedProcessFunctions([]int64{1, 2}, fs, true, true)
+		assert.NoError(t, err)
+		assert.Len(t, f, 1)
+		assert.Equal(t, f[0].Name, "test_func")
+	}
+}

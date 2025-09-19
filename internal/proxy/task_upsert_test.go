@@ -501,6 +501,8 @@ func TestUpsertTask_Function(t *testing.T) {
 		schema:      info,
 		result:      &milvuspb.MutationResult{},
 	}
+	err = genFunctionFields(task.ctx, task.upsertMsg.InsertMsg, task.schema, task.req.GetPartialUpdate())
+	assert.NoError(t, err)
 	err = task.insertPreExecute(ctx)
 	assert.NoError(t, err)
 

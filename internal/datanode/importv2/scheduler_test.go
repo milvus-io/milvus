@@ -505,6 +505,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 				},
 			},
 		},
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionAllowInsertNonBM25FunctionOutputs, Value: "true"}},
 	}
 
 	var once sync.Once
