@@ -18,38 +18,6 @@
 
 package fileresource
 
-import (
-	"context"
-	"fmt"
-	"io"
-	"os"
-	"path"
-
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-)
-
-func download(ctx context.Context, localPath string, downloader storage.ChunkManager, infos []*internalpb.FileResourceInfo) error {
-	for _, resource := range infos {
-		localResourcePath := path.Join(localPath, fmt.Sprint(resource.GetId()))
-
-		reader, err := downloader.Reader(ctx, resource.GetPath())
-		if err != nil {
-			return err
-		}
-
-		file, err := os.Create(localResourcePath)
-		if err != nil {
-			return err
-		}
-
-		if _, err = io.Copy(file, reader); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func ParseMode(value string) Mode {
 	switch value {
 	case "close":
