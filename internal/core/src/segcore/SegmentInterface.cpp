@@ -40,23 +40,11 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
-    auto pk_type = get_schema()[pk_field_id].get_data_type();
-    if (type() == SegmentType::Sealed && IsStringDataType(pk_type)) {
-        results.pk_type_ = DataType::VARCHAR;
-        for (auto& offset : results.seg_offsets_) {
-            auto [chunk_id, chunk_offset] =
-                get_chunk_by_offset(pk_field_id, offset);
-            auto [string_views, valid_data] = chunk_string_views_by_offsets(
-                pk_field_id, chunk_id, {static_cast<int>(chunk_offset)});
-            results.primary_keys_.emplace_back(std::string(string_views[0]));
-        }
-    } else {
-        auto field_data =
-            bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
+    auto field_data =
+        bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
+    results.pk_type_ = DataType(field_data->type());
 
-        results.pk_type_ = DataType(field_data->type());
-        ParsePksFromFieldData(results.primary_keys_, *field_data.get());
-    }
+    ParsePksFromFieldData(results.primary_keys_, *field_data.get());
 }
 
 PkType
