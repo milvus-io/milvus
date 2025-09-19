@@ -634,15 +634,15 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		returnedRowNum := 0
 		for index := int(offset); index < len(groupList); index++ {
 			group := groupList[index]
-			for i, score := range group.scoreList {
+			for idx, score := range group.scoreList {
 				// idList and scoreList must have same length
-				typeutil.AppendPKs(ret.Results.Ids, group.idList[i])
+				typeutil.AppendPKs(ret.Results.Ids, group.idList[idx])
 				if roundDecimal != -1 {
 					multiplier := math.Pow(10.0, float64(roundDecimal))
 					score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				loc := pk2DataOffset[i][group.idList[i]]
+				loc := pk2DataOffset[i][group.idList[idx]]
 				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
 				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
 			}
