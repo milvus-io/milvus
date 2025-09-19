@@ -330,6 +330,8 @@ type commonConfig struct {
 
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 	ClusterID              ParamItem `refreshable:"false"`
+
+	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1253,7 +1255,6 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.ClusterID = ParamItem{
 		Key:          "common.clusterID",
-		Version:      "2.6.3",
 		DefaultValue: "0",
 		Doc:          "cluster id",
 		Export:       true,
@@ -1270,9 +1271,16 @@ This helps Milvus-CDC synchronize incremental data`,
 		},
 	}
 	p.ClusterID.Init(base.mgr)
+
+	p.HybridSearchRequeryPolicy = ParamItem{
+		Key:          "common.requery.hybridSearchPolicy",
+		DefaultValue: "OutputVector",
+		Doc:          `the policy to decide when to do requery in hybrid search, support "always", "outputvector" and "outputfields"`,
+		Export:       false,
+	}
+	p.HybridSearchRequeryPolicy.Init(base.mgr)
 }
 
-type gpuConfig struct {
 	InitSize                            ParamItem `refreshable:"false"`
 	MaxSize                             ParamItem `refreshable:"false"`
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
@@ -1770,6 +1778,8 @@ type proxyConfig struct {
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+
+	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
