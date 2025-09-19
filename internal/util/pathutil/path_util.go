@@ -17,13 +17,15 @@ const (
 	LocalChunkPath
 	BM25Path
 	RootCachePath
+	FileResourcePath
 )
 
 const (
-	CachePathPrefix       = "cache"
-	GrowingMMapPathPrefix = "growing_mmap"
-	LocalChunkPathPrefix  = "local_chunk"
-	BM25PathPrefix        = "bm25"
+	CachePathPrefix        = "cache"
+	GrowingMMapPathPrefix  = "growing_mmap"
+	LocalChunkPathPrefix   = "local_chunk"
+	BM25PathPrefix         = "bm25"
+	FileResourcePathPrefix = "file_resource"
 )
 
 func GetPath(pathType PathType, nodeID int64) string {
@@ -37,6 +39,8 @@ func GetPath(pathType PathType, nodeID int64) string {
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), LocalChunkPathPrefix)
 	case BM25Path:
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), BM25PathPrefix)
+	case FileResourcePath:
+		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), FileResourcePathPrefix)
 	case RootCachePath:
 	}
 	log.Info("Get path for", zap.Any("pathType", pathType), zap.Int64("nodeID", nodeID), zap.String("path", path))
