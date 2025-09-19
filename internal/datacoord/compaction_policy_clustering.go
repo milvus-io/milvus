@@ -306,6 +306,14 @@ func (v *ClusteringSegmentsView) Trigger() (CompactionView, string) {
 	return v, ""
 }
 
+func (v *ClusteringSegmentsView) GetTriggerID() int64 {
+	return v.triggerID
+}
+
 func (v *ClusteringSegmentsView) ForceTrigger() (CompactionView, string) {
+	panic("implement me")
+}
+
+func (v *ClusteringSegmentsView) ForceTriggerAll() ([]CompactionView, string) {
 	panic("implement me")
 }

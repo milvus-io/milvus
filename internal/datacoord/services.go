@@ -1346,8 +1346,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.MajorCompaction {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+	if req.GetMajorCompaction() || req.GetL0Compaction() {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction())
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1372,7 +1372,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Bool("isMajor", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
+	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
+		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
