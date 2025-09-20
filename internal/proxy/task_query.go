@@ -722,24 +722,18 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		log.Warn("fail to get collection info", zap.Error(err))
 		return err
 	}
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
-	if err != nil {
-		log.Warn("fail to get database info", zap.Error(err))
-		return err
-	}
 	_, colTimezone := getColTimezone(colInfo)
-	_, dbTimezone := getDbTimezone(dbInfo)
 	if !t.reQuery {
 		if len(t.queryParams.extractTimeFields) > 0 {
 			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
-			err = extractFieldsFromResults(t.result.GetFieldsData(), []string{t.queryParams.timezone, colTimezone, dbTimezone}, t.queryParams.extractTimeFields)
+			err = extractFieldsFromResults(t.result.GetFieldsData(), []string{t.queryParams.timezone, colTimezone}, t.queryParams.extractTimeFields)
 			if err != nil {
 				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
 				return err
 			}
 		} else {
 			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
-			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone, dbTimezone)
+			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone)
 			if err != nil {
 				log.Warn("fail to translate timestamp", zap.Error(err))
 				return err

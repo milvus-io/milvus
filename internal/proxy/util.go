@@ -2823,15 +2823,13 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 	return nil
 }
 
-func timestamptzUTC2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string, dbTimezone string) error {
+func timestamptzUTC2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string) error {
 	// Determine the target timezone based on priority: collection -> database -> UTC.
 	defaultTZ := "UTC"
 	if userDefineTimezone != "" {
 		defaultTZ = userDefineTimezone
 	} else if colTimezone != "" {
 		defaultTZ = colTimezone
-	} else if dbTimezone != "" {
-		defaultTZ = dbTimezone
 	}
 
 	location, err := time.LoadLocation(defaultTZ)

@@ -850,7 +850,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	} else {
 		log.Debug("translate timstamp to ISO string", zap.String("user define timezone", timezoneUserDefined))
-		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), timezoneUserDefined, colTimezone, dbTimezone)
+		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), timezoneUserDefined, colTimezone)
 		if err != nil {
 			log.Warn("fail to translate timestamp", zap.Error(err))
 			return err
