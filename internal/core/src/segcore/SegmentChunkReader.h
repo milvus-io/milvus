@@ -38,11 +38,13 @@ using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 
 class SegmentChunkReader {
  public:
-    SegmentChunkReader(const segcore::SegmentInternalInterface* segment,
+    SegmentChunkReader(milvus::OpContext* op_ctx,
+                       const segcore::SegmentInternalInterface* segment,
                        int64_t active_count)
         : segment_(segment),
           active_count_(active_count),
-          size_per_chunk_(segment->size_per_chunk()) {
+          size_per_chunk_(segment->size_per_chunk()),
+          op_ctx_(op_ctx) {
     }
 
     MultipleChunkDataAccessor
@@ -138,6 +140,7 @@ class SegmentChunkReader {
                              pinned_index) const;
 
     const int64_t size_per_chunk_;
+    milvus::OpContext* op_ctx_;
 };
 
 }  // namespace milvus::segcore

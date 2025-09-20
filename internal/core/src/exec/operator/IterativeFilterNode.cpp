@@ -16,6 +16,7 @@
 
 #include "IterativeFilterNode.h"
 
+#include "exec/Driver.h"
 #include "monitor/Monitor.h"
 
 namespace milvus {

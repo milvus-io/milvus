@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
@@ -65,8 +66,13 @@ struct ConjunctElementFunc {
 
 class PhyConjunctFilterExpr : public Expr {
  public:
-    PhyConjunctFilterExpr(std::vector<ExprPtr>&& inputs, bool is_and)
-        : Expr(DataType::BOOL, std::move(inputs), "PhyConjunctFilterExpr"),
+    PhyConjunctFilterExpr(std::vector<ExprPtr>&& inputs,
+                          bool is_and,
+                          milvus::OpContext* op_ctx)
+        : Expr(DataType::BOOL,
+               std::move(inputs),
+               "PhyConjunctFilterExpr",
+               op_ctx),
           is_and_(is_and) {
         std::vector<DataType> input_types;
         input_types.reserve(inputs_.size());

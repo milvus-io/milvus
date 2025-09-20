@@ -23,6 +23,7 @@
 #include <vector>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/OpContext.h"
 #include "common/Utils.h"
 #include "common/Vector.h"
 #include "exec/expression/EvalCtx.h"
@@ -40,10 +41,11 @@ class PhyCallExpr : public Expr {
     PhyCallExpr(const std::vector<std::shared_ptr<Expr>>& input,
                 const std::shared_ptr<const milvus::expr::CallExpr>& expr,
                 const std::string& name,
+                milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 int64_t active_count,
                 int64_t batch_size)
-        : Expr(DataType::BOOL, std::move(input), name),
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           expr_(expr),
           active_count_(active_count),
           segment_(segment),

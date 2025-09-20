@@ -98,6 +98,7 @@ InterimSealedIndexTranslator::get_cells(
             int64_t data_id = id;
 
             field_raw_data_ptr->BulkValueAt(
+                nullptr,
                 [&data, &data_id](const char* value, size_t i) {
                     data = static_cast<const void*>(value);
                 },
@@ -143,7 +144,7 @@ InterimSealedIndexTranslator::get_cells(
 
     auto num_chunk = vec_data_->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vec_data_->GetChunk(i);
+        auto pw = vec_data_->GetChunk(nullptr, i);
         auto chunk = pw.get();
         auto dataset = knowhere::GenDataSet(
             vec_data_->chunk_row_nums(i), dim_, chunk->Data());

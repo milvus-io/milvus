@@ -142,6 +142,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
 
         exec::SegmentExpr segment_expr(std::move(std::vector<exec::ExprPtr>{}),
                                        "SegmentExpr",
+                                       nullptr,
                                        segment.get(),
                                        field_id,
                                        {},
