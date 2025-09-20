@@ -70,6 +70,9 @@ class ChunkedColumnGroup {
     GetGroupChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const {
         auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] GroupChunk is nullptr for chunk_id: {}",
+                   chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }
 
@@ -195,6 +198,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<const char*>(group_chunk, chunk->Data());
     }
 
@@ -203,6 +210,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto [chunk_id, offset_in_chunk] = group_->GetChunkIDByOffset(offset);
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return chunk->isValid(offset_in_chunk);
     }
 
@@ -231,6 +242,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto valid = chunk->isValid(offsets_in_chunk[i]);
             fn(valid, i);
         }
@@ -270,6 +285,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<SpanBase>(
             chunk_wrapper, static_cast<FixedWidthChunk*>(chunk.get())->Span());
     }
@@ -286,6 +305,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
             chunk_wrapper,
@@ -304,6 +327,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             chunk_wrapper,
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
@@ -321,6 +348,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<
             std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
             chunk_wrapper,
@@ -337,6 +368,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<const size_t*>(
             chunk_wrapper, static_cast<VectorArrayChunk*>(chunk.get())->Lims());
     }
@@ -352,6 +387,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
             chunk_wrapper,
@@ -364,6 +403,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                         const FixedVector<int32_t>& offsets) const override {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             chunk_wrapper,
             static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
@@ -382,7 +425,15 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
-        auto chunk = group_chunk.get()->GetChunk(field_id_);
+        auto* group_chunk_ptr = group_chunk.get();
+        AssertInfo(group_chunk_ptr != nullptr,
+                   "[StorageV2] GroupChunk is nullptr for chunk_id: {}",
+                   chunk_id);
+        auto chunk = group_chunk_ptr->GetChunk(field_id_);
+        AssertInfo(chunk != nullptr,
+                   "[StorageV2] Field {} not found in GroupChunk for chunk_id {}",
+                   field_id_.get(),
+                   chunk_id);
         return PinWrapper<Chunk*>(group_chunk, chunk.get());
     }
 
@@ -394,6 +445,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
         for (auto& group_chunk : group_chunks) {
             auto chunk = group_chunk.get()->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       group_chunk.get()->chunk_id());
             ret.emplace_back(group_chunk, chunk.get());
         }
         return ret;
@@ -419,6 +474,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             fn(chunk->ValueAt(offsets_in_chunk[i]), i);
         }
     }
@@ -436,6 +495,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto value = chunk->ValueAt(offsets_in_chunk[i]);
             typed_dst[i] =
                 *static_cast<const S*>(static_cast<const void*>(value));
@@ -505,6 +568,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto value = chunk->ValueAt(offsets_in_chunk[i]);
             memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
         }
@@ -527,6 +594,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             for (cid_t cid = 0; cid < num_chunks(); ++cid) {
                 auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
                 auto chunk = group_chunk.get()->GetChunk(field_id_);
+                AssertInfo(chunk != nullptr,
+                           "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                           field_id_.get(),
+                           cid);
                 auto chunk_rows = chunk->RowNums();
                 for (int64_t i = 0; i < chunk_rows; ++i) {
                     auto valid = chunk->isValid(i);
@@ -542,6 +613,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             for (int64_t i = 0; i < count; i++) {
                 auto* group_chunk = ca->get_cell_of(cids[i]);
                 auto chunk = group_chunk->GetChunk(field_id_);
+                AssertInfo(chunk != nullptr,
+                           "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                           field_id_.get(),
+                           cids[i]);
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
                 auto value = static_cast<StringChunk*>(chunk.get())
                                  ->
@@ -571,6 +646,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto valid = chunk->isValid(offsets_in_chunk[i]);
             auto str_view = static_cast<StringChunk*>(chunk.get())
                                 ->
@@ -601,6 +680,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto str_view = static_cast<StringChunk*>(chunk.get())
                                 ->
                                 operator[](offsets_in_chunk[i]);
@@ -626,6 +709,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto array = static_cast<ArrayChunk*>(chunk.get())
                              ->View(offsets_in_chunk[i])
                              .output_data();
@@ -648,6 +735,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "[StorageV2] Field {} not found in GroupChunk for cid {}",
+                       field_id_.get(),
+                       cids[i]);
             auto array = static_cast<VectorArrayChunk*>(chunk.get())
                              ->View(offsets_in_chunk[i])
                              .output_data();
