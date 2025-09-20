@@ -807,29 +807,27 @@ func parseISODuration(durationStr string) (*planpb.Interval, error) {
 	}
 
 	interval := &planpb.Interval{}
-	if matches[1] != "" {
-		years, _ := strconv.ParseInt(matches[1], 10, 64)
-		interval.Years = years
+	targets := []struct {
+		fieldPtr *int64
+		unitName string
+	}{
+		{fieldPtr: &interval.Years, unitName: "year"},
+		{fieldPtr: &interval.Months, unitName: "month"},
+		{fieldPtr: &interval.Days, unitName: "day"},
+		{fieldPtr: &interval.Hours, unitName: "hour"},
+		{fieldPtr: &interval.Minutes, unitName: "minute"},
+		{fieldPtr: &interval.Seconds, unitName: "second"},
 	}
-	if matches[2] != "" {
-		months, _ := strconv.ParseInt(matches[2], 10, 64)
-		interval.Months = months
-	}
-	if matches[3] != "" {
-		days, _ := strconv.ParseInt(matches[3], 10, 64)
-		interval.Days = days
-	}
-	if matches[4] != "" {
-		hours, _ := strconv.ParseInt(matches[4], 10, 64)
-		interval.Hours = hours
-	}
-	if matches[5] != "" {
-		minutes, _ := strconv.ParseInt(matches[5], 10, 64)
-		interval.Minutes = minutes
-	}
-	if matches[6] != "" {
-		seconds, _ := strconv.ParseInt(matches[6], 10, 64)
-		interval.Seconds = seconds
+
+	for i, target := range targets {
+		matchIndex := i + 1
+		if matches[matchIndex] != "" {
+			value, err := strconv.ParseInt(matches[matchIndex], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s value '%s' in duration: %w", target.unitName, matches[matchIndex], err)
+			}
+			*target.fieldPtr = value
+		}
 	}
 
 	return interval, nil

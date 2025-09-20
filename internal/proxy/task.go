@@ -383,6 +383,23 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
 	}
 
+	// set collection timezone
+	properties := t.CreateCollectionRequest.GetProperties()
+	ok, _ := getDefaultTimezoneVal(properties...)
+	if !ok {
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, t.CreateCollectionRequest.GetDbName())
+		if err != nil {
+			log.Ctx(ctx).Warn("fail to get database info", zap.Error(err))
+			return err
+		}
+		ok, defaultTz := getDbTimezone(dbInfo)
+		if !ok {
+			defaultTz = "UTC"
+		}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: defaultTz}
+		t.CreateCollectionRequest.Properties = append(properties, timezoneKV)
+	}
+
 	// validate collection name
 	if err := validateCollectionName(t.schema.Name); err != nil {
 		return err
@@ -451,10 +468,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
-	}
-	// prevent user creating collection with timestamptz field for now (not implemented)
-	if hasTimestamptzField(t.schema) {
-		return merr.WrapErrParameterInvalidMsg("timestamptz field is still in development")
 	}
 	return nil
 }
