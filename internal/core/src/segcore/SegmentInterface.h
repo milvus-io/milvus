@@ -143,10 +143,11 @@ class SegmentInterface {
     CreateTextIndex(FieldId field_id) = 0;
 
     virtual index::TextMatchIndex*
-    GetTextIndex(FieldId field_id) const = 0;
+    GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinJsonIndex(FieldId field_id,
+    PinJsonIndex(milvus::OpContext* op_ctx,
+                 FieldId field_id,
                  const std::string& path,
                  DataType data_type,
                  bool any_type,
@@ -155,25 +156,29 @@ class SegmentInterface {
     }
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(FieldId field_id, bool include_ngram = false) const {
+    PinIndex(milvus::OpContext* op_ctx,
+             FieldId field_id,
+             bool include_ngram = false) const {
         return {};
     };
 
     virtual void
-    BulkGetJsonData(FieldId field_id,
+    BulkGetJsonData(milvus::OpContext* op_ctx,
+                    FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(FieldId field_id) const = 0;
+    GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(FieldId field_id,
+    GetNgramIndexForJson(milvus::OpContext* op_ctx,
+                         FieldId field_id,
                          const std::string& nested_path) const = 0;
 
     virtual index::JsonKeyStats*
-    GetJsonStats(FieldId field_id) const = 0;
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -194,8 +199,10 @@ class SegmentInternalInterface : public SegmentInterface {
  public:
     template <typename T>
     PinWrapper<Span<T>>
-    chunk_data(FieldId field_id, int64_t chunk_id) const {
-        return chunk_data_impl(field_id, chunk_id)
+    chunk_data(milvus::OpContext* op_ctx,
+               FieldId field_id,
+               int64_t chunk_id) const {
+        return chunk_data_impl(op_ctx, field_id, chunk_id)
             .transform<Span<T>>([](SpanBase&& span_base) {
                 return static_cast<Span<T>>(span_base);
             });
@@ -203,18 +210,23 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    chunk_view(FieldId field_id,
+    chunk_view(milvus::OpContext* op_ctx,
+               FieldId field_id,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const {
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_string_view_impl(field_id, chunk_id, offset_len);
+            return chunk_string_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            return chunk_array_view_impl(field_id, chunk_id, offset_len);
+            return chunk_array_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
-            return chunk_vector_array_view_impl(field_id, chunk_id, offset_len);
+            return chunk_vector_array_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto pw = chunk_string_view_impl(field_id, chunk_id, offset_len);
+            auto pw =
+                chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
             auto [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
@@ -229,7 +241,8 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_batch_views(FieldId field_id,
+    get_batch_views(milvus::OpContext* op_ctx,
+                    FieldId field_id,
                     int64_t chunk_id,
                     int64_t start_offset,
                     int64_t length) const {
@@ -238,12 +251,13 @@ class SegmentInternalInterface : public SegmentInterface {
                       "get chunk views not supported for growing segment");
         }
         return chunk_view<ViewType>(
-            field_id, chunk_id, std::make_pair(start_offset, length));
+            op_ctx, field_id, chunk_id, std::make_pair(start_offset, length));
     }
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_views_by_offsets(FieldId field_id,
+    get_views_by_offsets(milvus::OpContext* op_ctx,
+                         FieldId field_id,
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
         if (this->type() == SegmentType::Growing) {
@@ -251,10 +265,11 @@ class SegmentInternalInterface : public SegmentInterface {
                       "get chunk views not supported for growing segment");
         }
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_string_views_by_offsets(field_id, chunk_id, offsets);
+            return chunk_string_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto pw =
-                chunk_string_views_by_offsets(field_id, chunk_id, offsets);
+            auto pw = chunk_string_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
             std::vector<ViewType> res;
             res.reserve(pw.get().first.size());
             for (const auto& view : pw.get().first) {
@@ -264,7 +279,8 @@ class SegmentInternalInterface : public SegmentInterface {
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
                 {std::move(res), pw.get().second});
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            return chunk_array_views_by_offsets(field_id, chunk_id, offsets);
+            return chunk_array_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
         }
     }
 
@@ -340,17 +356,18 @@ class SegmentInternalInterface : public SegmentInterface {
     GetFieldDataType(FieldId fieldId) const = 0;
 
     index::TextMatchIndex*
-    GetTextIndex(FieldId field_id) const override;
+    GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(FieldId field_id) const override;
+    GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(FieldId field_id,
+    GetNgramIndexForJson(milvus::OpContext* op_ctx,
+                         FieldId field_id,
                          const std::string& nested_path) const override;
 
     virtual index::JsonKeyStats*
-    GetJsonStats(FieldId field_id) const override;
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
  public:
     // `query_lims` is not null only for vector array (embedding list) search
@@ -474,25 +491,30 @@ class SegmentInternalInterface : public SegmentInterface {
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
     virtual PinWrapper<SpanBase>
-    chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
+    chunk_data_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_view_impl(FieldId field_id,
+    chunk_string_view_impl(milvus::OpContext* op_ctx,
+                           FieldId field_id,
                            int64_t chunk_id,
                            std::optional<std::pair<int64_t, int64_t>>
                                offset_len = std::nullopt) const = 0;
 
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_view_impl(FieldId field_id,
+    chunk_array_view_impl(milvus::OpContext* op_ctx,
+                          FieldId field_id,
                           int64_t chunk_id,
                           std::optional<std::pair<int64_t, int64_t>>
                               offset_len = std::nullopt) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    chunk_vector_array_view_impl(FieldId field_id,
+    chunk_vector_array_view_impl(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
                                  int64_t chunk_id,
                                  std::optional<std::pair<int64_t, int64_t>>
                                      offset_len = std::nullopt) const = 0;
@@ -500,12 +522,14 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const = 0;
 
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_views_by_offsets(FieldId field_id,
+    chunk_array_views_by_offsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
 
@@ -520,29 +544,35 @@ class SegmentInternalInterface : public SegmentInterface {
     is_field_exist(FieldId field_id) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
-    bulk_subscript(SystemFieldType system_type,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   SystemFieldType system_type,
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const = 0;
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
                    const int64_t* seg_offsets,
                    int64_t count) const = 0;
 
     virtual std::unique_ptr<DataArray>
     bulk_subscript(
+        milvus::OpContext* op_ctx,
         FieldId field_ids,
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
 
     virtual std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const = 0;
+    search_pk(milvus::OpContext* op_ctx,
+              const PkType& pk,
+              Timestamp timestamp) const = 0;
 
     virtual void
-    pk_range(proto::plan::OpType op,
+    pk_range(milvus::OpContext* op_ctx,
+             proto::plan::OpType op,
              const PkType& pk,
              BitsetTypeView& bitset) const = 0;
 

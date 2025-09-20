@@ -105,7 +105,8 @@ class DataGetter {
 template <typename OutputType, typename InnerRawType = OutputType>
 class GrowingDataGetter : public DataGetter<OutputType> {
  public:
-    GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
+    GrowingDataGetter(milvus::OpContext* op_ctx,
+                      const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId,
                       std::optional<std::string> json_path,
                       std::optional<DataType> json_type,
@@ -171,6 +172,7 @@ class GrowingDataGetter : public DataGetter<OutputType> {
 template <typename OutputType, typename InnerRawType = OutputType>
 class SealedDataGetter : public DataGetter<OutputType> {
  private:
+    milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
     const FieldId field_id_;
     bool from_data_;
@@ -188,15 +190,16 @@ class SealedDataGetter : public DataGetter<OutputType> {
         json_pw_map;
 
  public:
-    SealedDataGetter(const segcore::SegmentSealed& segment,
+    SealedDataGetter(milvus::OpContext* op_ctx,
+                     const segcore::SegmentSealed& segment,
                      FieldId field_id,
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
                      bool strict_cast)
-        : segment_(segment), field_id_(field_id) {
+        : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_) {
-            auto index = segment_.PinIndex(field_id_);
+            auto index = segment_.PinIndex(op_ctx_, field_id_);
             if (index.empty()) {
                 ThrowInfo(
                     UnexpectedError,
@@ -221,8 +224,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
                 if (str_pw_map.find(chunk_id) == str_pw_map.end()) {
                     // for now, search_group_by does not handle null values
-                    auto pw = segment_.chunk_view<std::string_view>(field_id_,
-                                                                    chunk_id);
+                    auto pw = segment_.chunk_view<std::string_view>(
+                        op_ctx_, field_id_, chunk_id);
                     str_pw_map[chunk_id] = std::move(pw);
                 }
                 auto& pw = str_pw_map[chunk_id];
@@ -234,8 +237,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 return std::string(str_val_view.data(), str_val_view.length());
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
                 if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
-                    auto pw =
-                        segment_.chunk_view<milvus::Json>(field_id_, chunk_id);
+                    auto pw = segment_.chunk_view<milvus::Json>(
+                        op_ctx_, field_id_, chunk_id);
                     json_pw_map[chunk_id] = std::move(pw);
                 }
                 auto& pw = json_pw_map[chunk_id];
@@ -252,8 +255,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     std::is_same_v<OutputType, InnerRawType>,
                     "OutputType and InnerRawType must be the same for "
                     "non-json/string field group by");
-                auto pw =
-                    segment_.chunk_data<InnerRawType>(field_id_, chunk_id);
+                auto pw = segment_.chunk_data<InnerRawType>(
+                    op_ctx_, field_id_, chunk_id);
                 auto& span = pw.get();
                 if (span.valid_data() && !span.valid_data()[inner_offset]) {
                     return std::nullopt;
@@ -277,7 +280,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
 
 template <typename OutputType, typename InnerRawType = OutputType>
 static const std::shared_ptr<DataGetter<OutputType>>
-GetDataGetter(const segcore::SegmentInternalInterface& segment,
+GetDataGetter(milvus::OpContext* op_ctx,
+              const segcore::SegmentInternalInterface& segment,
               FieldId fieldId,
               std::optional<std::string> json_path = std::nullopt,
               std::optional<DataType> json_type = std::nullopt,
@@ -289,11 +293,21 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
     if (const auto* growing_segment =
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<OutputType, InnerRawType>>(
-            *growing_segment, fieldId, json_path, json_type, strict_cast);
+            op_ctx,
+            *growing_segment,
+            fieldId,
+            json_path,
+            json_type,
+            strict_cast);
     } else if (const auto* sealed_segment =
                    dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<OutputType, InnerRawType>>(
-            *sealed_segment, fieldId, json_path, json_type, strict_cast);
+            op_ctx,
+            *sealed_segment,
+            fieldId,
+            json_path,
+            json_type,
+            strict_cast);
     } else {
         ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
@@ -302,7 +316,8 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
 }
 
 void
-SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
+SearchGroupBy(milvus::OpContext* op_ctx,
+              const std::vector<std::shared_ptr<VectorIterator>>& iterators,
               const SearchInfo& searchInfo,
               std::vector<GroupByValueType>& group_by_values,
               const segcore::SegmentInternalInterface& segment,

@@ -574,19 +574,24 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
-    auto chunk_span4 = segment->chunk_data<int8_t>(int8_nullable_id, 0);
-    auto chunk_span5 = segment->chunk_data<int16_t>(int16_nullable_id, 0);
-    auto chunk_span6 = segment->chunk_data<int32_t>(int32_nullable_id, 0);
-    auto chunk_span7 = segment->chunk_data<int64_t>(int64_nullable_id, 0);
-    auto chunk_span8 = segment->chunk_data<double>(double_nullable_id, 0);
-    auto chunk_span9 =
-        segment->get_batch_views<std::string_view>(str_nullable_id, 0, 0, N);
+        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
+    auto chunk_span4 =
+        segment->chunk_data<int8_t>(nullptr, int8_nullable_id, 0);
+    auto chunk_span5 =
+        segment->chunk_data<int16_t>(nullptr, int16_nullable_id, 0);
+    auto chunk_span6 =
+        segment->chunk_data<int32_t>(nullptr, int32_nullable_id, 0);
+    auto chunk_span7 =
+        segment->chunk_data<int64_t>(nullptr, int64_nullable_id, 0);
+    auto chunk_span8 =
+        segment->chunk_data<double>(nullptr, double_nullable_id, 0);
+    auto chunk_span9 = segment->get_batch_views<std::string_view>(
+        nullptr, str_nullable_id, 0, 0, N);
 
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
@@ -735,12 +740,12 @@ TEST(Sealed, ClearData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
+        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -840,12 +845,12 @@ TEST(Sealed, LoadFieldDataMmap) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
+    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
+        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -1436,7 +1441,7 @@ TEST(Sealed, GetVector) {
     EXPECT_TRUE(has);
 
     auto ids_ds = GenRandomIds(N);
-    auto result = segment->get_vector(fakevec_id, ids_ds->GetIds(), N);
+    auto result = segment->get_vector(nullptr, fakevec_id, ids_ds->GetIds(), N);
 
     auto vector = result.get()->mutable_vectors()->float_vector().data();
     EXPECT_TRUE(vector.size() == fakevec.size());
@@ -1500,7 +1505,8 @@ TEST(Sealed, LoadArrayFieldData) {
 
     auto ids_ds = GenRandomIds(N);
     auto s = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    auto int64_result = s->bulk_subscript(array_id, ids_ds->GetIds(), N);
+    auto int64_result =
+        s->bulk_subscript(nullptr, array_id, ids_ds->GetIds(), N);
     auto result_count = int64_result->scalars().array_data().data().size();
     ASSERT_EQ(result_count, N);
 }
@@ -2006,44 +2012,44 @@ TEST(Sealed, QueryAllFields) {
     auto int8_vector_values = dataset.get_col<int8>(int8_vec);
 
     auto ids_ds = GenRandomIds(dataset_size);
-    auto bool_result =
-        segment->bulk_subscript(bool_field, ids_ds->GetIds(), dataset_size);
-    auto int8_result =
-        segment->bulk_subscript(int8_field, ids_ds->GetIds(), dataset_size);
-    auto int16_result =
-        segment->bulk_subscript(int16_field, ids_ds->GetIds(), dataset_size);
-    auto int32_result =
-        segment->bulk_subscript(int32_field, ids_ds->GetIds(), dataset_size);
-    auto int64_result =
-        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
-    auto float_result =
-        segment->bulk_subscript(float_field, ids_ds->GetIds(), dataset_size);
-    auto double_result =
-        segment->bulk_subscript(double_field, ids_ds->GetIds(), dataset_size);
-    auto varchar_result =
-        segment->bulk_subscript(varchar_field, ids_ds->GetIds(), dataset_size);
-    auto json_result =
-        segment->bulk_subscript(json_field, ids_ds->GetIds(), dataset_size);
+    auto bool_result = segment->bulk_subscript(
+        nullptr, bool_field, ids_ds->GetIds(), dataset_size);
+    auto int8_result = segment->bulk_subscript(
+        nullptr, int8_field, ids_ds->GetIds(), dataset_size);
+    auto int16_result = segment->bulk_subscript(
+        nullptr, int16_field, ids_ds->GetIds(), dataset_size);
+    auto int32_result = segment->bulk_subscript(
+        nullptr, int32_field, ids_ds->GetIds(), dataset_size);
+    auto int64_result = segment->bulk_subscript(
+        nullptr, int64_field, ids_ds->GetIds(), dataset_size);
+    auto float_result = segment->bulk_subscript(
+        nullptr, float_field, ids_ds->GetIds(), dataset_size);
+    auto double_result = segment->bulk_subscript(
+        nullptr, double_field, ids_ds->GetIds(), dataset_size);
+    auto varchar_result = segment->bulk_subscript(
+        nullptr, varchar_field, ids_ds->GetIds(), dataset_size);
+    auto json_result = segment->bulk_subscript(
+        nullptr, json_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
-        int_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
-        long_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, long_array_field, ids_ds->GetIds(), dataset_size);
     auto bool_array_result = segment->bulk_subscript(
-        bool_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, bool_array_field, ids_ds->GetIds(), dataset_size);
     auto string_array_result = segment->bulk_subscript(
-        string_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, string_array_field, ids_ds->GetIds(), dataset_size);
     auto double_array_result = segment->bulk_subscript(
-        double_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, double_array_field, ids_ds->GetIds(), dataset_size);
     auto float_array_result = segment->bulk_subscript(
-        float_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, float_array_field, ids_ds->GetIds(), dataset_size);
     auto vec_result =
-        segment->bulk_subscript(vec, ids_ds->GetIds(), dataset_size);
-    auto float16_vec_result =
-        segment->bulk_subscript(float16_vec, ids_ds->GetIds(), dataset_size);
-    auto bfloat16_vec_result =
-        segment->bulk_subscript(bfloat16_vec, ids_ds->GetIds(), dataset_size);
-    auto int8_vec_result =
-        segment->bulk_subscript(int8_vec, ids_ds->GetIds(), dataset_size);
+        segment->bulk_subscript(nullptr, vec, ids_ds->GetIds(), dataset_size);
+    auto float16_vec_result = segment->bulk_subscript(
+        nullptr, float16_vec, ids_ds->GetIds(), dataset_size);
+    auto bfloat16_vec_result = segment->bulk_subscript(
+        nullptr, bfloat16_vec, ids_ds->GetIds(), dataset_size);
+    auto int8_vec_result = segment->bulk_subscript(
+        nullptr, int8_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(bool_result->scalars().bool_data().data_size(), dataset_size);
     EXPECT_EQ(int8_result->scalars().int_data().data_size(), dataset_size);
@@ -2181,38 +2187,38 @@ TEST(Sealed, QueryAllNullableFields) {
     auto float_array_valid_values = dataset.get_col_valid(float_array_field);
 
     auto ids_ds = GenRandomIds(dataset_size);
-    auto bool_result =
-        segment->bulk_subscript(bool_field, ids_ds->GetIds(), dataset_size);
-    auto int8_result =
-        segment->bulk_subscript(int8_field, ids_ds->GetIds(), dataset_size);
-    auto int16_result =
-        segment->bulk_subscript(int16_field, ids_ds->GetIds(), dataset_size);
-    auto int32_result =
-        segment->bulk_subscript(int32_field, ids_ds->GetIds(), dataset_size);
-    auto int64_result =
-        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
-    auto float_result =
-        segment->bulk_subscript(float_field, ids_ds->GetIds(), dataset_size);
-    auto double_result =
-        segment->bulk_subscript(double_field, ids_ds->GetIds(), dataset_size);
-    auto varchar_result =
-        segment->bulk_subscript(varchar_field, ids_ds->GetIds(), dataset_size);
-    auto json_result =
-        segment->bulk_subscript(json_field, ids_ds->GetIds(), dataset_size);
+    auto bool_result = segment->bulk_subscript(
+        nullptr, bool_field, ids_ds->GetIds(), dataset_size);
+    auto int8_result = segment->bulk_subscript(
+        nullptr, int8_field, ids_ds->GetIds(), dataset_size);
+    auto int16_result = segment->bulk_subscript(
+        nullptr, int16_field, ids_ds->GetIds(), dataset_size);
+    auto int32_result = segment->bulk_subscript(
+        nullptr, int32_field, ids_ds->GetIds(), dataset_size);
+    auto int64_result = segment->bulk_subscript(
+        nullptr, int64_field, ids_ds->GetIds(), dataset_size);
+    auto float_result = segment->bulk_subscript(
+        nullptr, float_field, ids_ds->GetIds(), dataset_size);
+    auto double_result = segment->bulk_subscript(
+        nullptr, double_field, ids_ds->GetIds(), dataset_size);
+    auto varchar_result = segment->bulk_subscript(
+        nullptr, varchar_field, ids_ds->GetIds(), dataset_size);
+    auto json_result = segment->bulk_subscript(
+        nullptr, json_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
-        int_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
-        long_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, long_array_field, ids_ds->GetIds(), dataset_size);
     auto bool_array_result = segment->bulk_subscript(
-        bool_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, bool_array_field, ids_ds->GetIds(), dataset_size);
     auto string_array_result = segment->bulk_subscript(
-        string_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, string_array_field, ids_ds->GetIds(), dataset_size);
     auto double_array_result = segment->bulk_subscript(
-        double_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, double_array_field, ids_ds->GetIds(), dataset_size);
     auto float_array_result = segment->bulk_subscript(
-        float_array_field, ids_ds->GetIds(), dataset_size);
+        nullptr, float_array_field, ids_ds->GetIds(), dataset_size);
     auto vec_result =
-        segment->bulk_subscript(vec, ids_ds->GetIds(), dataset_size);
+        segment->bulk_subscript(nullptr, vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(bool_result->scalars().bool_data().data_size(), dataset_size);
     EXPECT_EQ(int8_result->scalars().int_data().data_size(), dataset_size);
@@ -2269,11 +2275,13 @@ TEST(Sealed, SearchSortedPk) {
     LoadGeneratedDataIntoSegment(dataset, segment);
 
     auto pk_values = dataset.get_col<std::string>(varchar_pk_field);
-    auto offsets = segment->search_pk(PkType(pk_values[100]), Timestamp(99999));
+    auto offsets =
+        segment->search_pk(nullptr, PkType(pk_values[100]), Timestamp(99999));
     EXPECT_EQ(10, offsets.size());
     EXPECT_EQ(100, offsets[0].get());
 
-    auto offsets2 = segment->search_pk(PkType(pk_values[100]), int64_t(105));
+    auto offsets2 =
+        segment->search_pk(nullptr, PkType(pk_values[100]), int64_t(105));
     EXPECT_EQ(6, offsets2.size());
     EXPECT_EQ(100, offsets2[0].get());
 }
@@ -2301,10 +2309,10 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     auto array_vec_values = dataset.get_col<VectorFieldProto>(array_vec);
 
     auto ids_ds = GenRandomIds(dataset_size);
-    auto int64_result =
-        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
-    auto array_float_vector_result =
-        segment->bulk_subscript(array_vec, ids_ds->GetIds(), dataset_size);
+    auto int64_result = segment->bulk_subscript(
+        nullptr, int64_field, ids_ds->GetIds(), dataset_size);
+    auto array_float_vector_result = segment->bulk_subscript(
+        nullptr, array_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
     EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),

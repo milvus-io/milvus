@@ -166,12 +166,14 @@ CompileExpression(const expr::TypedExprPtr& expr,
         return types;
     };
     auto input_types = GetTypes(compiled_inputs);
+    auto op_ctx = context->get_op_context();
 
     if (auto call = std::dynamic_pointer_cast<const expr::CallExpr>(expr)) {
         result = std::make_shared<PhyCallExpr>(
             compiled_inputs,
             call,
             "PhyCallExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
@@ -181,6 +183,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyUnaryRangeFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -188,13 +191,14 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
         result = std::make_shared<PhyLogicalUnaryExpr>(
-            compiled_inputs, casted_expr, "PhyLogicalUnaryExpr");
+            compiled_inputs, casted_expr, "PhyLogicalUnaryExpr", op_ctx);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TermFilterExpr>(expr)) {
         result = std::make_shared<PhyTermFilterExpr>(
             compiled_inputs,
             casted_expr,
             "PhyTermFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->get_query_timestamp(),
@@ -209,10 +213,11 @@ CompileExpression(const expr::TypedExprPtr& expr,
             result = std::make_shared<PhyConjunctFilterExpr>(
                 std::move(compiled_inputs),
                 casted_expr->op_type_ ==
-                    milvus::expr::LogicalBinaryExpr::OpType::And);
+                    milvus::expr::LogicalBinaryExpr::OpType::And,
+                op_ctx);
         } else {
             result = std::make_shared<PhyLogicalBinaryExpr>(
-                compiled_inputs, casted_expr, "PhyLogicalBinaryExpr");
+                compiled_inputs, casted_expr, "PhyLogicalBinaryExpr", op_ctx);
         }
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryRangeFilterExpr>(expr)) {
@@ -220,6 +225,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyBinaryRangeFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -230,6 +236,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyAlwaysTrueExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
@@ -239,6 +246,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyBinaryArithOpEvalRangeExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -250,6 +258,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyCompareFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
@@ -260,6 +269,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyExistsFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -270,6 +280,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             casted_expr,
             "PhyJsonContainsFilterExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -282,6 +293,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             value_expr,
             "PhyValueExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
@@ -292,6 +304,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             column_expr,
             "PhyColumnExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
@@ -302,6 +315,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             column_expr,
             "PhyNullExpr",
+            op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
@@ -486,6 +500,7 @@ ConvertMultiNotEqualToNotInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
         std::vector<std::shared_ptr<Expr>>{},
         logical_expr,
         "PhyTermFilterExpr",
+        query_context->get_op_context(),
         query_context->get_segment(),
         query_context->get_active_count(),
         query_context->get_query_timestamp(),
@@ -495,7 +510,8 @@ ConvertMultiNotEqualToNotInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
         std::vector<std::shared_ptr<Expr>>{term_expr},
         std::make_shared<milvus::expr::LogicalUnaryExpr>(
             milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, logical_expr),
-        "PhyLogicalUnaryExpr");
+        "PhyLogicalUnaryExpr",
+        query_context->get_op_context());
 }
 
 inline std::shared_ptr<PhyTermFilterExpr>
@@ -522,6 +538,7 @@ ConvertMultiOrToInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
         std::vector<std::shared_ptr<Expr>>{},
         logical_expr,
         "PhyTermFilterExpr",
+        query_context->get_op_context(),
         query_context->get_segment(),
         query_context->get_active_count(),
         query_context->get_query_timestamp(),
