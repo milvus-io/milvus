@@ -197,6 +197,14 @@ ALL_DATATYPES_1(DECLARE_PARTIAL_OP_ARITH_COMPARE)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose (32-bit indices)
+template <size_t data_bits>
+size_t
+idx_decompose_u32_avx512(const uint32_t* idxs,
+                         const size_t n,
+                         uint32_t* elems,
+                         uint32_t* bits);
+
 // forward ops
 template <typename ElementT>
 struct ForwardOpsImpl {

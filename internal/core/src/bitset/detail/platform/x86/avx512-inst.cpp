@@ -83,6 +83,13 @@ namespace avx512 {
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose instantiation
+template size_t
+idx_decompose_u32_avx512<64>(const uint32_t*,
+                             const size_t,
+                             uint32_t*,
+                             uint32_t*);
+
 //
 #define INSTANTIATE_COMPARE_VAL_AVX512(TTYPE, OP)                             \
     template bool OpCompareValImpl<TTYPE, CompareOpType::OP>::op_compare_val( \

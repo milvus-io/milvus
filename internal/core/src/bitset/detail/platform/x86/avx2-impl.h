@@ -297,6 +297,34 @@ struct CmpHelperI64<CompareOpType::NE> {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <size_t data_bits>
+size_t
+idx_decompose_u32_avx2(const uint32_t* idxs,
+                       const size_t n,
+                       uint32_t* elems,
+                       uint32_t* bits) {
+    constexpr int kShift = []() constexpr {
+        int s = 0;
+        size_t v = data_bits;
+        while (v > 1) {
+            v >>= 1;
+            ++s;
+        }
+        return s;
+    }
+    ();
+    const __m256i mask_vec = _mm256_set1_epi32((int)(data_bits - 1));
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(idxs + i));
+        __m256i e = _mm256_srli_epi32(v, kShift);
+        __m256i b = _mm256_and_si256(v, mask_vec);
+        _mm256_storeu_si256((__m256i*)(elems + i), e);
+        _mm256_storeu_si256((__m256i*)(bits + i), b);
+    }
+    return i;
+}
+
 //
 template <CompareOpType Op>
 bool

@@ -146,6 +146,44 @@ ALL_COMPARE_OPS(DISPATCH_OP_COMPARE_COLUMN_IMPL, double)
 
 #undef DISPATCH_OP_COMPARE_COLUMN_IMPL
 
+template <size_t data_bits>
+void
+idx_decompose_u32(const uint32_t* idxs,
+                  const size_t n,
+                  uint32_t* elems,
+                  uint32_t* bits) {
+#if defined(__x86_64__)
+    if (cpu_support_avx512()) {
+        x86::avx512::idx_decompose_u32_avx512<data_bits>(idxs, n, elems, bits);
+        return;
+    }
+    if (cpu_support_avx2()) {
+        x86::avx2::idx_decompose_u32_avx2<data_bits>(idxs, n, elems, bits);
+        return;
+    }
+#endif
+#if defined(__aarch64__)
+#if defined(BITSET_ENABLE_SVE_SUPPORT)
+    if (arm::InstructionSet::GetInstance().supports_sve()) {
+        arm::sve::idx_decompose_u32_sve<data_bits>(idxs, n, elems, bits);
+        return;
+    }
+#endif
+    arm::neon::idx_decompose_u32_neon<data_bits>(idxs, n, elems, bits);
+    return;
+#endif
+    // scalar fallback
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t elem = static_cast<uint32_t>(idxs[i] / data_bits);
+        const uint32_t bit = static_cast<uint32_t>(idxs[i] % data_bits);
+        elems[i] = elem;
+        bits[i] = bit;
+    }
+}
+
+template void
+idx_decompose_u32<64>(const uint32_t*, size_t, uint32_t*, uint32_t*);
+
 }  // namespace dynamic
 
 /////////////////////////////////////////////////////////////////////////////
@@ -443,7 +481,6 @@ ALL_FORWARD_OPS(DISPATCH_FORWARD_OPS_OP_AND)
 #undef DISPATCH_FORWARD_OPS_OP_AND
 
 }  // namespace dynamic
-
 }  // namespace detail
 }  // namespace bitset
 }  // namespace milvus

@@ -186,6 +186,12 @@ ALL_ARITH_CMP_OPS(INSTANTIATE_ARITH_COMPARE_SVE, double)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose instantiation
+template void
+idx_decompose_u32_sve<64>(const uint32_t*, const size_t, uint32_t*, uint32_t*);
+
+///////////////////////////////////////////////////////////////////////////
+
 //
 #undef ALL_COMPARE_OPS
 #undef ALL_RANGE_OPS

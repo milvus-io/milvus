@@ -84,6 +84,10 @@ namespace neon {
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose instantiation
+template size_t
+idx_decompose_u32_neon<64>(const uint32_t*, const size_t, uint32_t*, uint32_t*);
+
 //
 #define INSTANTIATE_COMPARE_VAL_NEON(TTYPE, OP)                               \
     template bool OpCompareValImpl<TTYPE, CompareOpType::OP>::op_compare_val( \
