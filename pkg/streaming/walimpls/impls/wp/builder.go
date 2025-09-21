@@ -109,7 +109,15 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	// storage
 	wpConfig.Woodpecker.Storage.Type = cfg.StorageType.GetValue()
-	wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+
+	// Set RootPath based on configuration
+	if cfg.RootPath.GetValue() == "default" {
+		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
+		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().LocalStorageCfg.Path.GetValue())
+	} else {
+		// Use custom directory as-is
+		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+	}
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()

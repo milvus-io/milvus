@@ -896,8 +896,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
 		Version:      "2.6.0",
-		DefaultValue: "/var/lib/milvus/woodpecker",
-		Doc:          "The root path of the storage provider.",
+		DefaultValue: "default",
+		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
 		Export:       true,
 	}
 	p.RootPath.Init(base.mgr)
