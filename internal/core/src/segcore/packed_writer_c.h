@@ -53,9 +53,7 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowSchema* schema);
 
 CStatus
-EnableSkipIndex(void* field_list,
-                int64_t len,
-                CPackedWriter c_packed_writer);
+EnableSkipIndex(const int64_t* group_ids, const int64_t length, CPackedWriter c_packed_writer);
 
 CStatus
 CloseWriter(CPackedWriter c_packed_writer);

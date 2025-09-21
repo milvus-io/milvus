@@ -28,8 +28,6 @@ import "C"
 import (
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
@@ -38,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -154,7 +151,7 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return nil
 }
 
-func (pw *PackedWriter) enableSkipIndex(groups []typeutil.UniqueID) error {
+func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID) error {
 	if len(groups) == 0 {
 		return nil
 	}

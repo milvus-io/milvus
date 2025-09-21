@@ -248,8 +248,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 }
 
 CStatus
-EnableSkipIndex(void* group_ids,
-                int64_t length,
+EnableSkipIndex(const int64_t* group_ids,
+                const int64_t length,
                 CPackedWriter c_packed_writer) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -262,7 +262,10 @@ EnableSkipIndex(void* group_ids,
             std::vector<int64_t>(group_ids, group_ids + length);
 
         for (const auto& group_id : group_id_list) {
-            packed_writer->AddMetadataAppender(group_id, milvus::ChunkSkipIndex::KEY, std::make_unique<milvus::ChunkSkipIndexAppender>());
+            packed_writer->AddMetadataAppender(
+                group_id,
+                milvus::ChunkSkipIndex::KEY,
+                std::make_unique<milvus::ChunkSkipIndexAppender>());
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

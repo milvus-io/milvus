@@ -224,8 +224,8 @@ func (pw *packedRecordWriter) enableSkipIndex(fields []*schemapb.FieldSchema) er
 		flag := false
 		for _, idx := range columnGroup.Fields {
 			field := fields[idx]
-			if field.GetFieldID() < common.StartOfUserFieldID || field.GetIsPrimaryKey()|| IsVectorDataType(field.GetDataType()) {
-				break;
+			if field.GetFieldID() < common.StartOfUserFieldID || field.GetIsPrimaryKey() || storagecommon.IsVectorDataType(field.GetDataType()) {
+				break
 			}
 			flag = true
 		}
@@ -233,7 +233,7 @@ func (pw *packedRecordWriter) enableSkipIndex(fields []*schemapb.FieldSchema) er
 			groups = append(groups, columnGroup.GroupID)
 		}
 	}
-	return pw.writer.enableSkipIndex(groups)
+	return pw.writer.EnableSkipIndex(groups)
 }
 
 func (pw *packedRecordWriter) Close() error {
@@ -639,7 +639,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		maxRowNum:            maxRowNum,
 		bufferSize:           bufferSize,
 		multiPartUploadSize:  multiPartUploadSize,
-		enableSkipIndex: 	 enableSkipIndex,
+		enableSkipIndex:      enableSkipIndex,
 		columnGroups:         columnGroups,
 		pkstats:              stats,
 		bm25Stats:            bm25Stats,
