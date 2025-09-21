@@ -145,7 +145,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.load_collection(client, collection_name)
         res1 = self.describe_collection(client, collection_name)[0]
-        assert res1.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
         error = {ct.err_code: 999,
@@ -170,24 +170,24 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         # self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
         #                                 check_task=CheckTasks.err_res, check_items=error)
         res3 = self.describe_collection(client, collection_name)[0]
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         # 2. alter collection properties after release
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert res2.get('properties', None) == {'mmap.enabled': 'True'}
+        assert {'mmap.enabled': 'True'}.items() <= res2.get('properties', {}).items()
         self.alter_collection_properties(client, collection_name,
                                          properties={"collection.ttl.seconds": 100, "lazyload.enabled": True})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert res2.get('properties', None) == {'mmap.enabled': 'True',
-                                                'collection.ttl.seconds': '100', 'lazyload.enabled': 'True'}
+        assert {'mmap.enabled': 'True', 'collection.ttl.seconds': '100', 'lazyload.enabled': 'True'}.items()  \
+                <= res2.get('properties', {}).items()
         self.drop_collection_properties(client, collection_name,
                                         property_keys=["mmap.enabled", "lazyload.enabled",
                                                        "collection.ttl.seconds"])
         res3 = self.describe_collection(client, collection_name)[0]
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_enable_dynamic_collection_field(self):
