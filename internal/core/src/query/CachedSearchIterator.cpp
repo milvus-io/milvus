@@ -140,8 +140,10 @@ CachedSearchIterator::CachedSearchIterator(
         bitset,
         data_type,
         [this, column](int64_t chunk_id) {
-            auto pw = column->DataOfChunk(chunk_id).transform<const void*>(
-                [](const auto& x) { return static_cast<const void*>(x); });
+            auto pw = column->DataOfChunk(nullptr, chunk_id)
+                          .transform<const void*>([](const auto& x) {
+                              return static_cast<const void*>(x);
+                          });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();

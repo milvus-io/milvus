@@ -222,7 +222,7 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     EXPECT_EQ(column_group->NumRows(), 5);
 
     // Get group chunk
-    auto retrieved_group_chunk = column_group->GetGroupChunk(0);
+    auto retrieved_group_chunk = column_group->GetGroupChunk(nullptr, 0);
     EXPECT_NE(retrieved_group_chunk.get(), nullptr);
     EXPECT_EQ(retrieved_group_chunk.get()->RowNums(), 5);
 
@@ -260,13 +260,15 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     EXPECT_EQ(proxy_int64->NumRows(), 5);
     EXPECT_EQ(proxy_int64->num_chunks(), 1);
     EXPECT_FALSE(proxy_int64->IsNullable());
-    EXPECT_NE(proxy_int64->DataOfChunk(0).get(), nullptr);
+    EXPECT_NE(proxy_int64->DataOfChunk(nullptr, 0).get(), nullptr);
     int64_t offset = 0;
     proxy_int64->BulkValueAt(
+        nullptr,
         [&](const char* value, size_t size) { EXPECT_NE(value, nullptr); },
         &offset,
         1);
     proxy_int64->BulkIsValid(
+        nullptr,
         [&](bool is_valid, size_t offset) { EXPECT_TRUE(is_valid); },
         &offset,
         1);

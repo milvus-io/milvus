@@ -102,11 +102,19 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
 
+    // Set op context to query context
+    auto op_context = milvus::OpContext();
+    query_context->set_op_context(&op_context);
+
     // Do plan fragment task work
     auto result = ExecuteTask(plan, query_context);
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->search_storage_cost_.scanned_remote_bytes =
+        op_context.storage_usage.scanned_cold_bytes.load();
+    search_result_opt_->search_storage_cost_.scanned_total_bytes =
+        op_context.storage_usage.scanned_total_bytes.load();
 }
 
 std::unique_ptr<RetrieveResult>
@@ -157,12 +165,20 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      consystency_level_,
                                                      node.plan_options_);
 
+    // Set op context to query context
+    auto op_context = milvus::OpContext();
+    query_context->set_op_context(&op_context);
+
     // Do task execution
     auto bitset_holder = ExecuteTask(plan, query_context);
 
     // Store result
     if (node.is_count_) {
         retrieve_result_opt_ = std::move(query_context->get_retrieve_result());
+        retrieve_result_opt_->retrieve_storage_cost_.scanned_remote_bytes =
+            op_context.storage_usage.scanned_cold_bytes.load();
+        retrieve_result_opt_->retrieve_storage_cost_.scanned_total_bytes =
+            op_context.storage_usage.scanned_total_bytes.load();
     } else {
         retrieve_result.total_data_cnt_ = bitset_holder.size();
         tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
@@ -170,6 +186,10 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         retrieve_result.result_offsets_ = std::move(results_pair.first);
         retrieve_result.has_more_result = results_pair.second;
         retrieve_result_opt_ = std::move(retrieve_result);
+        retrieve_result_opt_->retrieve_storage_cost_.scanned_remote_bytes =
+            op_context.storage_usage.scanned_cold_bytes.load();
+        retrieve_result_opt_->retrieve_storage_cost_.scanned_total_bytes =
+            op_context.storage_usage.scanned_total_bytes.load();
     }
 }
 

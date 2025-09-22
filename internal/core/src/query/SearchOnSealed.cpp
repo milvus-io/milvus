@@ -152,7 +152,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     auto offset = 0;
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = column->DataOfChunk(i);
+        auto pw = column->DataOfChunk(op_context, i);
         auto vec_data = pw.get();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
@@ -163,7 +163,7 @@ SearchOnSealedColumn(const Schema& schema,
             AssertInfo(query_lims != nullptr,
                        "query_lims is nullptr, but data_type is vector array");
 
-            lims_pw = column->VectorArrayLims(i);
+            lims_pw = column->VectorArrayLims(op_context, i);
             raw_dataset.raw_data_lims = lims_pw.get();
         }
 
