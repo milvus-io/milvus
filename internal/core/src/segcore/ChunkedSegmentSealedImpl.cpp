@@ -557,6 +557,10 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                     std::make_shared<ChunkedVariableColumn<std::string>>(
                         field_meta, chunks);
                 // var_column->Seal(std::move(indices));
+
+                // Construct GeometryCache for the entire field
+                LoadGeometryCache(field_id, *var_column);
+
                 column = std::move(var_column);
                 break;
             }
@@ -2235,7 +2239,9 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
         auto num_chunks = var_column.num_chunks();
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             // Get all string views from this chunk
-            auto [string_views, valid_data] = var_column.StringViews(chunk_id);
+            auto [string_views, valid_data] =
+                static_cast<const ChunkedColumnBase&>(var_column)
+                    .StringViews(chunk_id, std::nullopt);
 
             // Add each string view to the geometry cache
             for (size_t i = 0; i < string_views.size(); ++i) {

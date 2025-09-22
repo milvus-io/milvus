@@ -10,161 +10,264 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 
-#include "ogr_geometry.h"
+#include <geos_c.h>
 #include <memory>
 #include <cmath>
+#include <string>
 #include "common/EasyAssert.h"
 
 namespace milvus {
 
-struct OGRGeometryDeleter {
+struct GEOSGeometryDeleter {
+    GEOSContextHandle_t ctx;
+    explicit GEOSGeometryDeleter(GEOSContextHandle_t c) : ctx(c) {
+    }
+
     void
-    operator()(OGRGeometry* ptr) const noexcept {
-        if (ptr) {
-            OGRGeometryFactory::destroyGeometry(ptr);
+    operator()(GEOSGeometry* ptr) const noexcept {
+        if (ptr && ctx) {
+            GEOSGeom_destroy_r(ctx, ptr);
         }
     }
 };
 
 class Geometry {
  public:
-    Geometry() = default;
-
-    // all ctr assume that wkb data is valid
-    explicit Geometry(const void* wkb, size_t size) {
-        OGRGeometry* geometry = nullptr;
-        OGRGeometryFactory::createFromWkb(wkb, nullptr, &geometry, size);
-
-        AssertInfo(geometry != nullptr,
-                   "failed to construct geometry from wkb data");
-        geometry_.reset(geometry);
+    Geometry() : ctx_(GEOS_init_r()) {
+        // Initialize context successfully
+        AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
     }
 
-    explicit Geometry(const char* wkt) {
-        OGRGeometry* geometry = nullptr;
-        OGRGeometryFactory::createFromWkt(wkt, nullptr, &geometry);
-        AssertInfo(geometry != nullptr,
-                   "failed to construct geometry from wkt data");
-        geometry_.reset(geometry);
+    // Constructor from WKB data
+    explicit Geometry(const void* wkb, size_t size) : ctx_(GEOS_init_r()) {
+        AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
+
+        GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx_);
+        AssertInfo(reader != nullptr, "Failed to create GEOS WKB reader");
+
+        GEOSGeometry* geom = GEOSWKBReader_read_r(
+            ctx_, reader, static_cast<const unsigned char*>(wkb), size);
+        GEOSWKBReader_destroy_r(ctx_, reader);
+
+        AssertInfo(geom != nullptr,
+                   "Failed to construct geometry from WKB data");
+        geometry_.reset(geom);
     }
 
-    Geometry(const Geometry& other) {
+    // Constructor from WKT string
+    explicit Geometry(const char* wkt) : ctx_(GEOS_init_r()) {
+        AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
+
+        GEOSWKTReader* reader = GEOSWKTReader_create_r(ctx_);
+        AssertInfo(reader != nullptr, "Failed to create GEOS WKT reader");
+
+        GEOSGeometry* geom = GEOSWKTReader_read_r(ctx_, reader, wkt);
+        GEOSWKTReader_destroy_r(ctx_, reader);
+
+        AssertInfo(geom != nullptr,
+                   "Failed to construct geometry from WKT data");
+        geometry_.reset(geom);
+    }
+
+    // Copy constructor
+    Geometry(const Geometry& other) : ctx_(GEOS_init_r()) {
+        AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
+
         if (other.IsValid()) {
-            this->geometry_.reset(other.geometry_->clone());
+            GEOSGeometry* cloned =
+                GEOSGeom_clone_r(ctx_, other.geometry_.get());
+            AssertInfo(cloned != nullptr, "Failed to clone geometry");
+            geometry_.reset(cloned);
         }
     }
 
+    // Move constructor
     Geometry(Geometry&& other) noexcept
-        : geometry_(std::move(other.geometry_)) {
+        : ctx_(other.ctx_), geometry_(std::move(other.geometry_)) {
+        other.ctx_ = nullptr;
     }
 
+    // Copy assignment
     Geometry&
     operator=(const Geometry& other) {
-        if (this != &other && other.IsValid()) {
-            this->geometry_.reset(other.geometry_->clone());
+        if (this != &other) {
+            if (ctx_) {
+                GEOS_finish_r(ctx_);
+            }
+            ctx_ = GEOS_init_r();
+            AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
+
+            if (other.IsValid()) {
+                GEOSGeometry* cloned =
+                    GEOSGeom_clone_r(ctx_, other.geometry_.get());
+                AssertInfo(cloned != nullptr, "Failed to clone geometry");
+                geometry_.reset(cloned);
+            } else {
+                geometry_.reset();
+            }
         }
         return *this;
     }
 
+    // Move assignment
     Geometry&
     operator=(Geometry&& other) noexcept {
         if (this != &other) {
+            if (ctx_) {
+                GEOS_finish_r(ctx_);
+            }
+            ctx_ = other.ctx_;
             geometry_ = std::move(other.geometry_);
+            other.ctx_ = nullptr;
         }
         return *this;
     }
 
-    ~Geometry() = default;
+    // Destructor
+    ~Geometry() {
+        if (ctx_) {
+            GEOS_finish_r(ctx_);
+        }
+    }
 
     bool
     IsValid() const {
-        return geometry_ != nullptr;
+        return geometry_ != nullptr && ctx_ != nullptr;
     }
 
-    OGRGeometry*
+    GEOSGeometry*
     GetGeometry() const {
         return geometry_.get();
     }
 
-    //spatial relation
+    GEOSContextHandle_t
+    GetContext() const {
+        return ctx_;
+    }
+
+    // Spatial relation operations using GEOS API
     bool
     equals(const Geometry& other) const {
-        return geometry_->Equals(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSEquals_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     touches(const Geometry& other) const {
-        return geometry_->Touches(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSTouches_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     overlaps(const Geometry& other) const {
-        return geometry_->Overlaps(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSOverlaps_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     crosses(const Geometry& other) const {
-        return geometry_->Crosses(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSCrosses_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     contains(const Geometry& other) const {
-        return geometry_->Contains(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSContains_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     intersects(const Geometry& other) const {
-        return geometry_->Intersects(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSIntersects_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
     bool
     within(const Geometry& other) const {
-        return geometry_->Within(other.geometry_.get());
+        if (!IsValid() || !other.IsValid()) {
+            return false;
+        }
+        char result =
+            GEOSWithin_r(ctx_, geometry_.get(), other.geometry_.get());
+        return result == 1;
     }
 
-    // RangeWithin implementation supporting all geometry types
-    // Note: other geometry is always a POINT (query point)
+    // Distance within check using GEOS distance calculation
     bool
     dwithin(const Geometry& other, double distance) const {
-        AssertInfo(other.geometry_->getGeometryType() == wkbPoint,
-                   "other geometry is not a point");
-        // Step 1: Extract query point coordinates (other is always a point)
-        OGRPoint* query_point = static_cast<OGRPoint*>(other.geometry_.get());
-        double query_lon = query_point->getX();  // longitude
-        double query_lat = query_point->getY();  // latitude
-
-        // Step 2: Special case for point-to-point using Haversine formula (most accurate)
-        if (geometry_->getGeometryType() == wkbPoint) {
-            OGRPoint* data_point = static_cast<OGRPoint*>(geometry_.get());
-            double data_lon = data_point->getX();  // longitude
-            double data_lat = data_point->getY();  // latitude
-
-            double actual_distance = haversine_distance_meters(
-                data_lat, data_lon, query_lat, query_lon);
-            return actual_distance <= distance;
+        if (!IsValid() || !other.IsValid()) {
+            return false;
         }
 
-        // Step 3: For other geometry types, use OGR Distance (returns degrees)
-        double degrees_distance = geometry_->Distance(other.geometry_.get());
+        // Get geometry types
+        int thisType = GEOSGeomTypeId_r(ctx_, geometry_.get());
+        int otherType = GEOSGeomTypeId_r(ctx_, other.geometry_.get());
 
-        // Step 4: Convert degrees distance to meters using query point location
-        // Use the query point's latitude as reference for unit conversion
-        double distance_in_meters =
-            degrees_to_meters_at_location(degrees_distance, query_lat);
+        // Ensure other geometry is a point
+        AssertInfo(otherType == GEOS_POINT, "other geometry is not a point");
 
-        // Step 5: Compare with given distance in meters
-        return distance_in_meters <= distance;
+        // For point-to-point, use Haversine formula for accuracy
+        if (thisType == GEOS_POINT) {
+            double thisX, thisY, otherX, otherY;
+            if (GEOSGeomGetX_r(ctx_, geometry_.get(), &thisX) == 1 &&
+                GEOSGeomGetY_r(ctx_, geometry_.get(), &thisY) == 1 &&
+                GEOSGeomGetX_r(ctx_, other.geometry_.get(), &otherX) == 1 &&
+                GEOSGeomGetY_r(ctx_, other.geometry_.get(), &otherY) == 1) {
+                double actual_distance =
+                    haversine_distance_meters(thisY, thisX, otherY, otherX);
+                return actual_distance <= distance;
+            }
+        }
+
+        // For other geometry types, use GEOS distance (in degrees)
+        double geos_distance;
+        if (GEOSDistance_r(
+                ctx_, geometry_.get(), other.geometry_.get(), &geos_distance) ==
+            1) {
+            // Get query point coordinates for conversion reference
+            double query_lat, query_lon;
+            if (GEOSGeomGetX_r(ctx_, other.geometry_.get(), &query_lon) == 1 &&
+                GEOSGeomGetY_r(ctx_, other.geometry_.get(), &query_lat) == 1) {
+                double distance_in_meters =
+                    degrees_to_meters_at_location(geos_distance, query_lat);
+                return distance_in_meters <= distance;
+            }
+        }
+
+        return false;
     }
 
  private:
     // Convert degrees distance to meters using approximate location
-    // This approximates the degrees distance returned by OGR to meters
     static double
     degrees_to_meters_at_location(double degrees_distance, double center_lat) {
         const double metersPerDegreeLat = 111320.0;
 
         // For small distances, approximate using latitude-adjusted conversion
-        // This is a rough approximation since degrees_distance could be in any direction
         double latRad = center_lat * 3.14159265358979323846 / 180.0;
         double avgMetersPerDegree =
             metersPerDegreeLat *
@@ -174,8 +277,6 @@ class Geometry {
     }
 
     // Haversine formula to calculate great-circle distance between two points on Earth
-    // Input: latitude and longitude in degrees
-    // Output: distance in meters
     static double
     haversine_distance_meters(double lat1,
                               double lon1,
@@ -203,23 +304,56 @@ class Geometry {
     }
 
  public:
+    // Export to WKT string
     std::string
     to_wkt_string() const {
-        return geometry_->exportToWkt();
+        if (!IsValid()) {
+            return "";
+        }
+
+        GEOSWKTWriter* writer = GEOSWKTWriter_create_r(ctx_);
+        AssertInfo(writer != nullptr, "Failed to create GEOS WKT writer");
+
+        char* wkt = GEOSWKTWriter_write_r(ctx_, writer, geometry_.get());
+        GEOSWKTWriter_destroy_r(ctx_, writer);
+
+        if (!wkt) {
+            return "";
+        }
+
+        std::string result(wkt);
+        GEOSFree_r(ctx_, wkt);
+        return result;
     }
 
-    // used for test
+    // Export to WKB string (for test)
     std::string
     to_wkb_string() const {
-        std::unique_ptr<unsigned char[]> wkb(
-            new unsigned char[geometry_->WkbSize()]);
-        geometry_->exportToWkb(wkbNDR, wkb.get());
-        return std::string(reinterpret_cast<const char*>(wkb.get()),
-                           geometry_->WkbSize());
+        if (!IsValid()) {
+            return "";
+        }
+
+        GEOSWKBWriter* writer = GEOSWKBWriter_create_r(ctx_);
+        AssertInfo(writer != nullptr, "Failed to create GEOS WKB writer");
+
+        size_t size;
+        unsigned char* wkb =
+            GEOSWKBWriter_write_r(ctx_, writer, geometry_.get(), &size);
+        GEOSWKBWriter_destroy_r(ctx_, writer);
+
+        if (!wkb) {
+            return "";
+        }
+
+        std::string result(reinterpret_cast<const char*>(wkb), size);
+        GEOSFree_r(ctx_, wkb);
+        return result;
     }
 
  private:
-    std::unique_ptr<OGRGeometry, OGRGeometryDeleter> geometry_;
+    GEOSContextHandle_t ctx_;
+    std::unique_ptr<GEOSGeometry, GEOSGeometryDeleter> geometry_{
+        nullptr, GEOSGeometryDeleter(ctx_)};
 };
 
 }  // namespace milvus

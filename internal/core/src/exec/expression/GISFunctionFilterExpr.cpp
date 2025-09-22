@@ -208,10 +208,14 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
 static Geometry
 create_bounding_box_for_dwithin(const Geometry& query_point,
                                 double distance_meters) {
-    // Extract query point coordinates
-    OGRPoint* point = static_cast<OGRPoint*>(query_point.GetGeometry());
-    double query_lon = point->getX();  // longitude
-    double query_lat = point->getY();  // latitude
+    // Extract query point coordinates using GEOS
+    auto ctx = query_point.GetContext();
+    double query_lon, query_lat;
+
+    AssertInfo(GEOSGeomGetX_r(ctx, query_point.GetGeometry(), &query_lon) == 1,
+               "Failed to get X coordinate from query point");
+    AssertInfo(GEOSGeomGetY_r(ctx, query_point.GetGeometry(), &query_lat) == 1,
+               "Failed to get Y coordinate from query point");
 
     const double metersPerDegreeLat = 111320.0;
 

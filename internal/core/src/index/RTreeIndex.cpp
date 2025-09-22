@@ -449,8 +449,10 @@ RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
                                const Geometry query_geometry,
                                std::vector<int64_t>& candidate_offsets) {
     AssertInfo(wrapper_ != nullptr, "R-Tree index wrapper is null");
-    wrapper_->query_candidates(
-        op, query_geometry.GetGeometry(), candidate_offsets);
+    wrapper_->query_candidates(op,
+                               query_geometry.GetGeometry(),
+                               query_geometry.GetContext(),
+                               candidate_offsets);
 }
 
 template <typename T>

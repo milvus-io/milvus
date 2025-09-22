@@ -21,6 +21,7 @@
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "common/Types.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -52,6 +53,7 @@ class SimpleGeometryCache {
                           e.what());
             }
         }
+        LOG_INFO("Appended geometry to cache: {}", geometries_.size());
     }
 
     // Get shared lock for batch operations (RAII)
@@ -64,7 +66,10 @@ class SimpleGeometryCache {
     const Geometry*
     GetByOffsetUnsafe(size_t offset) const {
         if (offset >= geometries_.size()) {
-            return nullptr;
+            PanicInfo(UnexpectedError,
+                      "Offset {} out of range: {}",
+                      offset,
+                      geometries_.size());
         }
 
         const auto& geometry = geometries_[offset];
