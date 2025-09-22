@@ -141,7 +141,10 @@ func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 		if err != nil {
 			return err, false
 		}
-		writer.Flush()
+		err = writer.Flush()
+		if err != nil {
+			return err, false
+		}
 		file.Close()
 	}
 
@@ -160,7 +163,7 @@ func (s *sealedBm25Stats) ShouldOffLoadToDisk() bool {
 func (s *sealedBm25Stats) ToLocal(dirPath string) error {
 	dir := path.Join(dirPath, fmt.Sprint(s.segmentID))
 	if err, skip := s.writeFile(dir); err != nil {
-		os.Remove(dir)
+		os.RemoveAll(dir)
 		return err
 	} else if skip {
 		return nil
@@ -216,7 +219,7 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 		stats[fieldID] = storage.NewBM25Stats()
 		err = stats[fieldID].Deserialize(b)
 		if err != nil {
-			return nil, errors.Newf("deserialize local file :%s failed: %v", path, err)
+			return nil, errors.Newf("deserialize local file : %s failed: %v", path, err)
 		}
 	}
 
@@ -476,6 +479,7 @@ func (o *idfOracle) localloop() {
 }
 
 // WARN: SyncDistribution not concurrent safe.
+// SyncDistribution sync current target to idf oracle.
 func (o *idfOracle) SyncDistribution() error {
 	snapshot, snapshotTs := o.next.GetSnapshot()
 	if snapshot.targetVersion <= o.targetVersion.Load() {
@@ -486,6 +490,7 @@ func (o *idfOracle) SyncDistribution() error {
 
 	sealedMap := map[int64]bool{} // sealed diff map, activate segment stats if true, and remove if not in map
 
+	// only remain current target segment and unknown version segment in snapshot.
 	for _, item := range sealed {
 		for _, segment := range item.Segments {
 			if segment.Level == datapb.SegmentLevel_L0 {
@@ -508,16 +513,21 @@ func (o *idfOracle) SyncDistribution() error {
 
 	var rangeErr error
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
-		activate, ok := sealedMap[segmentID]
-		statsActivate := stats.activate.Load()
-		if ok && activate && !statsActivate {
+		// segment was unreadable if in snapshot but not in target.
+		intarget, insnap := sealedMap[segmentID]
+		activate := stats.activate.Load()
+		// activate segment if segment in target
+		if insnap && intarget && !activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
 				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
 				return false
 			}
 			diff.Merge(stats)
-		} else if !ok && statsActivate {
+		} else
+		// deactivate segment if segment not in snapshot
+		// or deactivate segment if segment unreadable (only exist at preload segment)
+		if (!insnap || (insnap && !intarget)) && activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
 				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
@@ -548,15 +558,23 @@ func (o *idfOracle) SyncDistribution() error {
 
 	// remove sealed segment not in target
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
-		activate, ok := sealedMap[segmentID]
-		statsActivate := stats.activate.Load()
-		if !ok && stats.ts.Before(snapshotTs) {
+		intarget, insnap := sealedMap[segmentID]
+		activate := stats.activate.Load()
+		// remove if segment not in snapshot
+		// and add before snapshot
+		if !insnap && stats.ts.Before(snapshotTs) {
 			stats.Remove()
 			o.sealed.Remove(segmentID)
 		}
 
-		if ok && activate && !statsActivate {
+		// save activate if segment in target.
+		if insnap && intarget && !activate {
 			stats.activate.Store(true)
+		}
+
+		// deactivate if segment unreadable.
+		if insnap && !intarget && activate {
+			stats.activate.Store(false)
 		}
 		return true
 	})
