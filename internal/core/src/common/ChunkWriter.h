@@ -146,7 +146,9 @@ class ChunkWriter final : public ChunkWriterBase {
     std::unique_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+        auto mmap_file_raii = file_path_.empty()
+                                  ? nullptr
+                                  : std::make_unique<MmapFileRAII>(file_path_);
         return std::make_unique<FixedWidthChunk>(row_nums_,
                                                  dim_,
                                                  data,

@@ -305,7 +305,7 @@ IndexFactory::ScalarIndexLoadResource(
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = 0;
+            request.max_disk_cost = index_size_in_bytes;
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
