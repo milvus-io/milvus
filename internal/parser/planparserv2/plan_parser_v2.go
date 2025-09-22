@@ -303,7 +303,7 @@ func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*c
 	for key, value := range paramsMap {
 		switch key {
 		// parse field name to field ID
-		case "field":
+		case RandomScoreFileNameKey:
 			name, ok := value.(string)
 			if !ok {
 				return nil, merr.WrapErrParameterInvalidMsg("random seed field name must be string")
@@ -313,11 +313,15 @@ func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*c
 			if err != nil {
 				return nil, merr.WrapErrFieldNotFound(value, "random seed field not found")
 			}
-			result = append(result, &commonpb.KeyValuePair{Key: "field_id", Value: fmt.Sprint(field.FieldID)})
-		case "seed":
+
+			if field.DataType != schemapb.DataType_Int64 {
+				return nil, merr.WrapErrParameterInvalidMsg("only support int64 field as random seed, but got %s", field.DataType.String())
+			}
+			result = append(result, &commonpb.KeyValuePair{Key: RandomScoreFileIdKey, Value: fmt.Sprint(field.FieldID)})
+		case RandomScoreSeedKey:
 			number, ok := value.(json.Number)
 			if !ok {
-				return nil, merr.WrapErrParameterInvalidMsg("random seed must be int")
+				return nil, merr.WrapErrParameterInvalidMsg("random seed must be number")
 			}
 
 			result = append(result, &commonpb.KeyValuePair{Key: key, Value: number.String()})
@@ -330,7 +334,7 @@ func setBoostType(schema *typeutil.SchemaHelper, scorer *planpb.ScoreFunction, p
 	scorer.Type = planpb.FunctionType_FunctionTypeWeight
 	for _, param := range params {
 		switch param.GetKey() {
-		case "random_score":
+		case BoostRandomScoreKey:
 			{
 				scorer.Type = planpb.FunctionType_FunctionTypeRandom
 				params, err := prepareBoostRandomParams(schema, param.GetValue())

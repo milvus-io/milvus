@@ -285,11 +285,15 @@ enum FunctionType{
   FunctionTypeRandom = 1;
 }
 
+// FunctionMode decide how to calculate boost score
+// for multiple boost function scores
 enum FunctionMode{
   FunctionModeMultiply = 0;
   FunctionModeSum = 1;
 };
 
+// BoostMode decide how to calculate final score
+// for origin score and boost score.
 enum BoostMode{
   BoostModeMultiply = 0;
   BoostModeSum = 1;

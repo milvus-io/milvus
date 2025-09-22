@@ -280,5 +280,17 @@ TEST(Rescorer, Normal) {
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        auto search_result_same_seed =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        // should return same score when use same seed
+        for (auto i = 0; i < 10; i++) {
+            AssertInfo(search_result->distances_[i] ==
+                           search_result_same_seed->distances_[i],
+                       "distance not equal %f:%f",
+                       search_result->distances_[i],
+                       search_result_same_seed->distances_[i]);
+        }
     }
 }

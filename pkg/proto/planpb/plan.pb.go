@@ -287,6 +287,8 @@ func (FunctionType) EnumDescriptor() ([]byte, []int) {
 	return file_plan_proto_rawDescGZIP(), []int{3}
 }
 
+// FunctionMode decide how to calculate boost score
+// for multiple boost function scores
 type FunctionMode int32
 
 const (
@@ -333,6 +335,8 @@ func (FunctionMode) EnumDescriptor() ([]byte, []int) {
 	return file_plan_proto_rawDescGZIP(), []int{4}
 }
 
+// BoostMode decide how to calculate final score
+// for origin score and boost score.
 type BoostMode int32
 
 const (

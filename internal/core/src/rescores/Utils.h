@@ -38,7 +38,7 @@ function_score_merge(const float& a,
             return a + b;
         default:
             ThrowInfo(ErrorCode::UnexpectedError,
-                      fmt::format("unknwon boost function mode: {}:{}",
+                      fmt::format("unknown boost function mode: {}:{}",
                                   proto::plan::FunctionMode_Name(mode),
                                   mode));
     }

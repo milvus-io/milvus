@@ -66,6 +66,7 @@ PhyRescoresNode::GetOutput() {
     auto query_info = exec_context->get_query_config();
     milvus::SearchResult search_result = query_context_->get_search_result();
     auto segment = query_context_->get_segment();
+    auto op_ctx = query_context_->get_op_context();
 
     // prepare segment offset
     FixedVector<int32_t> offsets;
@@ -94,7 +95,8 @@ PhyRescoresNode::GetOutput() {
         auto filter = scorer->filter();
         // boost for all result if no filter
         if (!filter) {
-            scorer->batch_score(segment, function_mode, offsets, boost_scores);
+            scorer->batch_score(
+                op_ctx, segment, function_mode, offsets, boost_scores);
             continue;
         }
 
@@ -120,8 +122,12 @@ PhyRescoresNode::GetOutput() {
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
-            scorer->batch_score(
-                segment, function_mode, offsets, bitsetview, boost_scores);
+            scorer->batch_score(op_ctx,
+                                segment,
+                                function_mode,
+                                offsets,
+                                bitsetview,
+                                boost_scores);
         } else {
             // query all segment if expr not native
             expr_set->Eval(0, 1, true, eval_ctx, results);
@@ -133,7 +139,7 @@ PhyRescoresNode::GetOutput() {
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             bitset.append(view);
             scorer->batch_score(
-                segment, function_mode, offsets, bitset, boost_scores);
+                op_ctx, segment, function_mode, offsets, bitset, boost_scores);
         }
     }
 
@@ -152,7 +158,7 @@ PhyRescoresNode::GetOutput() {
                     break;
                 default:
                     ThrowInfo(ErrorCode::UnexpectedError,
-                              fmt::format("unknwon boost function mode: {}",
+                              fmt::format("unknown boost function mode: {}",
                                           boost_mode));
             }
         }

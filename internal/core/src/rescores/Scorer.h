@@ -36,7 +36,8 @@ class Scorer {
     // filter result of offset[i] was bitmapview[i]
     // add boost score for idx[i] if bitmap[i] was true
     virtual void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
@@ -46,7 +47,8 @@ class Scorer {
     // filter result of offset[i] was bitmap[offset[i]]
     // add boost score for idx[i] if bitmap[i] was true
     virtual void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
@@ -55,7 +57,8 @@ class Scorer {
     // score for all offset
     // used when no filter
     virtual void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 std::vector<std::optional<float>>& boost_scores) = 0;
@@ -75,25 +78,24 @@ class WeightScorer : public Scorer {
     }
 
     void
-    set_score(std::optional<float>& old_score,
-              const proto::plan::FunctionMode& mode);
-
-    void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 std::vector<std::optional<float>>& boost_scores) override;
@@ -104,6 +106,10 @@ class WeightScorer : public Scorer {
     }
 
  private:
+    void
+    set_score(std::optional<float>& old_score,
+              const proto::plan::FunctionMode& mode);
+
     expr::TypedExprPtr filter_;
     float weight_;
 };
@@ -146,36 +152,27 @@ class RandomScorer : public Scorer {
     }
 
     void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(const segcore::SegmentInternalInterface* segment,
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 std::vector<std::optional<float>>& boost_scores) override;
-
-    void
-    random_score(const segcore::SegmentInternalInterface* segment,
-                 const proto::plan::FunctionMode& mode,
-                 const FixedVector<int64_t>& target_offsets,
-                 const FixedVector<int>* idx,
-                 std::vector<std::optional<float>>& boost_scores);
-
-    void
-    set_score(float random_value,
-              std::optional<float>& old_score,
-              const proto::plan::FunctionMode& mode);
 
     float
     weight() override {
@@ -183,6 +180,19 @@ class RandomScorer : public Scorer {
     }
 
  private:
+    void
+    set_score(float random_value,
+              std::optional<float>& old_score,
+              const proto::plan::FunctionMode& mode);
+
+    void
+    random_score(milvus::OpContext* op_ctx,
+                 const segcore::SegmentInternalInterface* segment,
+                 const proto::plan::FunctionMode& mode,
+                 const FixedVector<int64_t>& target_offsets,
+                 const FixedVector<int>* idx,
+                 std::vector<std::optional<float>>& boost_scores);
+
     expr::TypedExprPtr filter_;
     float weight_;
     int64_t seed_;
