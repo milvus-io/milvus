@@ -44,6 +44,11 @@ class SealedIndexTranslator
     int64_t
     cells_storage_bytes(
         const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        if (IsVectorDataType(index_load_info_.field_type) &&
+            knowhere::IndexFactory::Instance().FeatureCheck(
+                index_info_.index_type, knowhere::feature::LAZY_LOAD)) {
+            return 0;
+        }
         constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
         return std::max(index_load_info_.index_size, MIN_STORAGE_BYTES);
     }

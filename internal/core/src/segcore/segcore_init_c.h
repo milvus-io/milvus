@@ -106,6 +106,8 @@ ConfigureTieredStorage(
     const int64_t disk_low_watermark_bytes,
     const int64_t disk_high_watermark_bytes,
     const int64_t disk_max_bytes,
+    // storage usage tracking enabled
+    const bool storage_usage_tracking_enabled,
     // eviction enabled
     const bool eviction_enabled,
     // eviction configs
