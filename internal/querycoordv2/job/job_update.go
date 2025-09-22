@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -40,6 +41,7 @@ type UpdateLoadConfigJob struct {
 	targetMgr                meta.TargetManagerInterface
 	targetObserver           *observers.TargetObserver
 	collectionObserver       *observers.CollectionObserver
+	nodeMgr                  *session.NodeManager
 	userSpecifiedReplicaMode bool
 }
 
@@ -49,6 +51,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
+	nodeMgr *session.NodeManager,
 	userSpecifiedReplicaMode bool,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
@@ -61,6 +64,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 		collectionID:             collectionID,
 		newReplicaNumber:         req.GetReplicaNumber(),
 		newResourceGroups:        req.GetResourceGroups(),
+		nodeMgr:                  nodeMgr,
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	}
 }
@@ -87,7 +91,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 
 	var err error
 	// 2. reassign
-	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
+	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups, job.nodeMgr)
 	if err != nil {
 		log.Warn("failed to reassign replica", zap.Error(err))
 		return err

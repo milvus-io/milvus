@@ -554,11 +554,11 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
 					},
 				},
 			}, nil)
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, 1)
+		loadConfig, err := s.broker.GetCollectionLoadInfo(ctx, 1)
 		s.NoError(err)
-		s.Equal(int64(3), replicas)
-		s.Contains(rgs, "rg1")
-		s.Contains(rgs, "rg2")
+		s.Equal(int64(3), loadConfig.ReplicaNumber)
+		s.Contains(loadConfig.ResourceGroups, "rg1")
+		s.Contains(loadConfig.ResourceGroups, "rg2")
 		s.resetMock()
 	})
 
@@ -571,7 +571,7 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
 				Status:     merr.Success(),
 				Properties: []*commonpb.KeyValuePair{},
 			}, nil)
-		_, _, err := s.broker.GetCollectionLoadInfo(ctx, 1)
+		_, err := s.broker.GetCollectionLoadInfo(ctx, 1)
 		s.NoError(err)
 		s.resetMock()
 	})

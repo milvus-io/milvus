@@ -219,6 +219,7 @@ message LoadCollectionRequest {
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    bool enable_auto_replica = 11;
 }
 
 message ReleaseCollectionRequest {
@@ -251,6 +252,7 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    bool enable_auto_replica = 13;
 }
 
 message ReleasePartitionsRequest {
@@ -693,6 +695,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    bool auto_replica_enable = 11;
 }
 
 message PartitionLoadInfo {
@@ -974,6 +977,7 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+    map<int64, bool> auto_replica_enable = 6;
 }
 
 message UpdateSchemaRequest {

@@ -380,75 +380,208 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 }
 
 func TestApplyLoadConfigChanges(t *testing.T) {
-	mockey.PatchConvey("TestApplyLoadConfigChanges", t, func() {
-		ctx := context.Background()
+	ctx := context.Background()
 
-		// Create mock server
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
+	// Create mock server
+	testServer := &Server{}
+	testServer.meta = &meta.Meta{}
+	testServer.ctx = ctx
 
-		// Create mock collection with IsUserSpecifiedReplicaMode = false
-		mockCollection1 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1001,
-				UserSpecifiedReplicaMode: false,
-			},
+	// Create mock collection with IsUserSpecifiedReplicaMode = false
+	mockCollection1 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:             1001,
+			UserSpecifiedReplicaMode: false,
+		},
+	}
+
+	// Create mock collection with IsUserSpecifiedReplicaMode = true
+	mockCollection2 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:             1002,
+			UserSpecifiedReplicaMode: true,
+		},
+	}
+
+	// Mock meta.CollectionManager.GetAll to return collection IDs
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+	defer mockGetAll.UnPatch()
+
+	// Mock meta.CollectionManager.GetCollection to return different collections
+	mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+		if collectionID == 1001 {
+			return mockCollection1
+		} else if collectionID == 1002 {
+			return mockCollection2
 		}
+		return nil
+	}).Build()
+	defer mockGetCollection.UnPatch()
 
-		// Create mock collection with IsUserSpecifiedReplicaMode = true
-		mockCollection2 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1002,
-				UserSpecifiedReplicaMode: true,
-			},
+	// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
+	mockGetAsUint32 := mockey.Mock((*paramtable.ParamItem).GetAsUint32).Return(uint32(2)).Build()
+	defer mockGetAsUint32.UnPatch()
+
+	// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
+	mockGetAsStrings := mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default"}).Build()
+	defer mockGetAsStrings.UnPatch()
+
+	// Mock UpdateLoadConfig to capture the call
+	var updateLoadConfigCalled bool
+	var capturedCollectionIDs []int64
+	var capturedReplicaNum int32
+	var capturedRGs []string
+	mockUpdateLoadConfig := mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newAutoReplicaEnable map[int64]bool) error {
+		updateLoadConfigCalled = true
+		capturedCollectionIDs = collectionIDs
+		capturedReplicaNum = newReplicaNum
+		capturedRGs = newRGs
+		return nil
+	}).Build()
+	defer mockUpdateLoadConfig.UnPatch()
+
+	replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
+	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	// Call applyLoadConfigChanges
+	testServer.applyLoadConfigChanges(ctx, int32(replicaNum), rgs)
+
+	// Verify UpdateLoadConfig was called
+	assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
+
+	// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
+	assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
+	assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
+	assert.Equal(t, []string{"default"}, capturedRGs, "ResourceGroups should match cluster level config")
+}
+
+// TestApplyLoadConfigChangesWithAutoReplicaEnable tests the filtering logic for AutoReplicaEnable collections
+func TestApplyLoadConfigChangesWithAutoReplicaEnable(t *testing.T) {
+	ctx := context.Background()
+
+	// Create mock server
+	testServer := &Server{}
+	testServer.meta = &meta.Meta{}
+	testServer.ctx = ctx
+
+	// Create mock collection with AutoReplicaEnable = true
+	mockCollection1 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:             1001,
+			UserSpecifiedReplicaMode: false,
+			AutoReplicaEnable:        true,
+		},
+	}
+
+	// Create mock collection with AutoReplicaEnable = false
+	mockCollection2 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:             1002,
+			UserSpecifiedReplicaMode: false,
+			AutoReplicaEnable:        false,
+		},
+	}
+
+	// Mock meta.CollectionManager.GetAll to return collection IDs
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+	defer mockGetAll.UnPatch()
+
+	// Mock meta.CollectionManager.GetCollection to return different collections
+	mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+		if collectionID == 1001 {
+			return mockCollection1
+		} else if collectionID == 1002 {
+			return mockCollection2
 		}
+		return nil
+	}).Build()
+	defer mockGetCollection.UnPatch()
 
-		// Mock meta.CollectionManager.GetAll to return collection IDs
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+	// Mock UpdateLoadConfig to capture the call
+	var updateLoadConfigCalled bool
+	var capturedCollectionIDs []int64
+	mockUpdateLoadConfig := mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newAutoReplicaEnable map[int64]bool) error {
+		updateLoadConfigCalled = true
+		capturedCollectionIDs = collectionIDs
+		return nil
+	}).Build()
+	defer mockUpdateLoadConfig.UnPatch()
 
-		// Mock meta.CollectionManager.GetCollection to return different collections
-		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			if collectionID == 1001 {
-				return mockCollection1
-			} else if collectionID == 1002 {
-				return mockCollection2
-			}
-			return nil
-		}).Build()
+	// Act: Call applyLoadConfigChanges
+	testServer.applyLoadConfigChanges(ctx, int32(2), []string{"default"})
 
-		// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
-		mockey.Mock((*paramtable.ParamItem).GetAsUint32).Return(uint32(2)).Build()
+	// Assert: Verify UpdateLoadConfig was called with only non-AutoReplicaEnable collections
+	assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
+	assert.Equal(t, []int64{1002}, capturedCollectionIDs, "Only collections with AutoReplicaEnable = false should be included")
+}
 
-		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default"}).Build()
+// TestApplyNodeChangesForAutoReplicaEnable tests the new applyNodeChangesForAutoReplicaEnable function
+func TestApplyNodeChangesForAutoReplicaEnable_Success(t *testing.T) {
+	ctx := context.Background()
 
-		// Mock UpdateLoadConfig to capture the call
-		var updateLoadConfigCalled bool
-		var capturedCollectionIDs []int64
-		var capturedReplicaNum int32
-		var capturedRGs []string
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
-			updateLoadConfigCalled = true
-			capturedCollectionIDs = collectionIDs
-			capturedReplicaNum = newReplicaNum
-			capturedRGs = newRGs
-			return nil
-		}).Build()
+	// Create mock server
+	testServer := &Server{}
+	testServer.meta = &meta.Meta{}
+	testServer.ctx = ctx
 
-		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
-		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-		// Call applyLoadConfigChanges
-		testServer.applyLoadConfigChanges(ctx, int32(replicaNum), rgs)
+	// Create mock collection with AutoReplicaEnable = true
+	mockCollection1 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:      1001,
+			AutoReplicaEnable: true,
+		},
+	}
 
-		// Verify UpdateLoadConfig was called
-		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
+	// Create mock collection with AutoReplicaEnable = false
+	mockCollection2 := &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:      1002,
+			AutoReplicaEnable: false,
+		},
+	}
 
-		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
-		assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
-		assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
-		assert.Equal(t, []string{"default"}, capturedRGs, "ResourceGroups should match cluster level config")
-	})
+	// Mock meta.CollectionManager.GetAll to return collection IDs
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+	defer mockGetAll.UnPatch()
+
+	// Mock meta.CollectionManager.GetCollection to return different collections
+	mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+		if collectionID == 1001 {
+			return mockCollection1
+		} else if collectionID == 1002 {
+			return mockCollection2
+		}
+		return nil
+	}).Build()
+	defer mockGetCollection.UnPatch()
+
+	// Mock UpdateLoadConfig to capture the call
+	var updateLoadConfigCalled bool
+	var capturedCollectionIDs []int64
+	var capturedReplicaNum int32
+	var capturedRGs []string
+	var capturedAutoReplicaEnable map[int64]bool
+	var capturedTriggerAction string
+
+	mockUpdateLoadConfig := mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newAutoReplicaEnable map[int64]bool) error {
+		updateLoadConfigCalled = true
+		capturedCollectionIDs = collectionIDs
+		capturedReplicaNum = newReplicaNum
+		capturedRGs = newRGs
+		capturedAutoReplicaEnable = newAutoReplicaEnable
+		return nil
+	}).Build()
+	defer mockUpdateLoadConfig.UnPatch()
+
+	// Act: Call applyNodeChangesForAutoReplicaEnable
+	capturedTriggerAction = "node up"
+	testServer.applyNodeChangesForAutoReplicaEnable(ctx, capturedTriggerAction)
+
+	// Assert: Verify UpdateLoadConfig was called with correct parameters
+	assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
+	assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with AutoReplicaEnable = true should be included")
+	assert.Equal(t, int32(0), capturedReplicaNum, "ReplicaNum should be 0 for auto replica")
+	assert.Equal(t, []string{}, capturedRGs, "ResourceGroups should be empty for auto replica")
+	assert.Equal(t, map[int64]bool{1001: true}, capturedAutoReplicaEnable, "AutoReplicaEnable should contain collection 1001")
 }
 
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {
