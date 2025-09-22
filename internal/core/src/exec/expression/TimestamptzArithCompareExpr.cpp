@@ -67,6 +67,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                 inputs_,
                 helperExpr,
                 "PhyTimestamptzArithCompareExprHelper",
+                op_ctx_,
                 segment_,
                 active_count_,
                 batch_size_,

@@ -28,12 +28,14 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
         const std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr>&
             expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->timestamp_column_.field_id_,
                       expr->timestamp_column_.nested_path_,
