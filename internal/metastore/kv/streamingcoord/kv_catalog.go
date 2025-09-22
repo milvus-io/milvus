@@ -216,8 +216,8 @@ func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.R
 	return config, nil
 }
 
-func (c *catalog) RemoveReplicatePChannel(ctx context.Context, targetClusterID, sourceChannelName string) error {
-	key := buildReplicatePChannelPath(targetClusterID, sourceChannelName)
+func (c *catalog) RemoveReplicatePChannel(ctx context.Context, task *streamingpb.ReplicatePChannelMeta) error {
+	key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
 	return c.metaKV.Remove(ctx, key)
 }
 

@@ -371,17 +371,17 @@ func (_c *MockStreamingCoordCataLog_ListReplicatePChannels_Call) RunAndReturn(ru
 	return _c
 }
 
-// RemoveReplicatePChannel provides a mock function with given fields: ctx, sourceChannelName, targetChannelName
-func (_m *MockStreamingCoordCataLog) RemoveReplicatePChannel(ctx context.Context, sourceChannelName string, targetChannelName string) error {
-	ret := _m.Called(ctx, sourceChannelName, targetChannelName)
+// RemoveReplicatePChannel provides a mock function with given fields: ctx, meta
+func (_m *MockStreamingCoordCataLog) RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error {
+	ret := _m.Called(ctx, meta)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveReplicatePChannel")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
-		r0 = rf(ctx, sourceChannelName, targetChannelName)
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.ReplicatePChannelMeta) error); ok {
+		r0 = rf(ctx, meta)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -396,15 +396,14 @@ type MockStreamingCoordCataLog_RemoveReplicatePChannel_Call struct {
 
 // RemoveReplicatePChannel is a helper method to define mock.On call
 //   - ctx context.Context
-//   - sourceChannelName string
-//   - targetChannelName string
-func (_e *MockStreamingCoordCataLog_Expecter) RemoveReplicatePChannel(ctx interface{}, sourceChannelName interface{}, targetChannelName interface{}) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
-	return &MockStreamingCoordCataLog_RemoveReplicatePChannel_Call{Call: _e.mock.On("RemoveReplicatePChannel", ctx, sourceChannelName, targetChannelName)}
+//   - meta *streamingpb.ReplicatePChannelMeta
+func (_e *MockStreamingCoordCataLog_Expecter) RemoveReplicatePChannel(ctx interface{}, meta interface{}) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
+	return &MockStreamingCoordCataLog_RemoveReplicatePChannel_Call{Call: _e.mock.On("RemoveReplicatePChannel", ctx, meta)}
 }
 
-func (_c *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call) Run(run func(ctx context.Context, sourceChannelName string, targetChannelName string)) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
+func (_c *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call) Run(run func(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta)) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string))
+		run(args[0].(context.Context), args[1].(*streamingpb.ReplicatePChannelMeta))
 	})
 	return _c
 }
@@ -414,7 +413,7 @@ func (_c *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call) Return(_a0 err
 	return _c
 }
 
-func (_c *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call) RunAndReturn(run func(context.Context, string, string) error) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
+func (_c *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call) RunAndReturn(run func(context.Context, *streamingpb.ReplicatePChannelMeta) error) *MockStreamingCoordCataLog_RemoveReplicatePChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
