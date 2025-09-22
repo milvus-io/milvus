@@ -342,6 +342,7 @@ func newGroupingIDScores[T PKType](idScores map[T]float32, idLocations map[T]IDL
 			}
 			ret.scores = append(ret.scores, score)
 			ret.ids = append(ret.ids, group.idList[i])
+			ret.locations = append(ret.locations, idLocations[group.idList[i]])
 		}
 	}
 	ret.size = int64(len(ret.ids))
