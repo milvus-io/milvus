@@ -69,7 +69,6 @@ ExecPlanNodeVisitor::ExecuteTask(
     return bitset_holder;
 }
 
-template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     assert(!search_result_opt_.has_value());
@@ -194,38 +193,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 }
 
 void
-ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    VectorVisitorImpl<FloatVector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    VectorVisitorImpl<BinaryVector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(Float16VectorANNS& node) {
-    VectorVisitorImpl<Float16Vector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(BFloat16VectorANNS& node) {
-    VectorVisitorImpl<BFloat16Vector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(SparseFloatVectorANNS& node) {
-    VectorVisitorImpl<SparseFloatVector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(Int8VectorANNS& node) {
-    VectorVisitorImpl<Int8Vector>(node);
-}
-
-void
-ExecPlanNodeVisitor::visit(EmbListFloatVectorANNS& node) {
-    VectorVisitorImpl<EmbListFloatVector>(node);
+ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
+    VectorVisitorImpl(node);
 }
 
 }  // namespace milvus::query

@@ -2,8 +2,7 @@
 Visitor Pattern is used in segcore for parse and execute Execution Plan.
 
 1. Inside `${internal/core}/src/query/PlanNode.h`, contains physical plan for vector search:
-    1. `FloatVectorANNS` FloatVector search execution node
-    2. `BinaryVectorANNS` BinaryVector search execution node
+    1. `VectorPlanNode` vector search execution node
 2. `${internal/core}/src/query/Expr.h` contains physical plan for scalar expression:
     1. `TermExpr` support operation like `col in [1, 2, 3]`
     2. `RangeExpr` support constant compare with data column like `a >= 5` `1 < b < 2`
