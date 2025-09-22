@@ -44,6 +44,8 @@ class SealedIndexTranslator
     int64_t
     cells_storage_bytes(
         const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        // if index data supports lazy load internally, cell storage size becomes 0
+        // currently only vector index is possible to support lazy load
         if (IsVectorDataType(index_load_info_.field_type) &&
             knowhere::IndexFactory::Instance().FeatureCheck(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)) {
