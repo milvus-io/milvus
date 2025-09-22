@@ -1776,7 +1776,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     }
 
     if (cached_match_res_ == nullptr) {
-        auto index = segment_->GetTextIndex(op_ctx_, field_id_);
+        auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
+        auto index = pw.get();
         auto res = std::move(func(index, query));
         auto valid_res = index->IsNotNull();
         cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
