@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -65,7 +64,6 @@ type deleteTask struct {
 	// result
 	count       int64
 	allQueryCnt int64
-	storageCost segcore.StorageCost
 
 	sessionTS Timestamp
 }
@@ -515,10 +513,6 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
-		task.storageCost = segcore.StorageCost{
-			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
-			ScannedTotalBytes:  result.GetScannedTotalBytes(),
-		}
 
 		taskCh <- task
 	}
