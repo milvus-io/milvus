@@ -68,7 +68,7 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const {
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = slot_->PinOneCellDirect(op_ctx, chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }
@@ -76,7 +76,7 @@ class ChunkedColumnGroup {
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) {
-        return SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
+        return slot_->PinCellsDirect(op_ctx, chunk_ids);
     }
 
     std::vector<PinWrapper<GroupChunk*>>

@@ -117,7 +117,7 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (best_match == nullptr) {
                     return nullptr;
                 }
-                auto ca = SemiInlineGet(best_match->PinCells(op_ctx, {0}));
+                auto ca = best_match->PinOneCellDirect(op_ctx, 0);
                 auto index = ca->get_cell_of(0);
                 return PinWrapper<const index::IndexBase*>(ca, index);
             });
