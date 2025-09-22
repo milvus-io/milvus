@@ -14,6 +14,7 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
+#include "cachinglayer/Manager.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/IndexStats.h"
 
@@ -96,4 +97,33 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
 };
+
+class TextMatchIndexHolder {
+ public:
+    explicit TextMatchIndexHolder(
+        std::unique_ptr<milvus::index::TextMatchIndex> index)
+        : index_(std::move(index)), size_(index_ ? index_->ByteSize() : 0) {
+        if (size_ > 0) {
+            milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+                {size_, 0});
+        }
+    }
+
+    ~TextMatchIndexHolder() {
+        if (size_ > 0) {
+            milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {size_, 0});
+        }
+    }
+
+    milvus::index::TextMatchIndex*
+    get() const {
+        return index_.get();
+    }
+
+ private:
+    std::unique_ptr<milvus::index::TextMatchIndex> index_;
+    int64_t size_;
+};
+
 }  // namespace milvus::index

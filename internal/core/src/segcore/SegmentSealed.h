@@ -22,6 +22,7 @@
 #include "index/Index.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/JsonFlatIndex.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
@@ -56,8 +57,8 @@ class SegmentSealed : public SegmentInternalInterface {
                int64_t count) const = 0;
 
     virtual void
-    LoadTextIndex(FieldId field_id,
-                  std::unique_ptr<index::TextMatchIndex> index) = 0;
+    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) = 0;
 
     virtual InsertRecord<true>&
     get_insert_record() = 0;

@@ -1196,6 +1196,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		PartitionID:  s.Partition(),
 		LoadPriority: s.LoadInfo().GetPriority(),
 		EnableMmap:   enableMmap,
+		IndexSize:    textLogs.GetMemorySize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
