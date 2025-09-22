@@ -163,6 +163,7 @@ StringIndexSort::BuildWithFieldData(
 
     // Initialize structures
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    idx_to_offsets_.clear();
 
     // Create MemoryImpl and build directly from field data
     impl_ = std::make_unique<StringIndexSortMemoryImpl>();

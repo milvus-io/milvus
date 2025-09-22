@@ -90,9 +90,6 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
         return std::make_unique<HybridScalarIndex<std::string>>(
             create_index_info.tantivy_index_version, file_manager_context);
     }
-    if (index_type == ASCENDING_SORT) {
-        return CreateStringIndexSort(file_manager_context);
-    }
     return CreateStringIndexSort(file_manager_context);
 #else
     ThrowInfo(Unsupported, "unsupported platform");
