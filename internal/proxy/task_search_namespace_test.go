@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -111,7 +112,7 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 		assert.NoError(t, err)
 
 		ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
-		_, runErr := op.run(context.Background(), nil, ids)
+		_, runErr := op.run(context.Background(), nil, ids, segcore.StorageCost{})
 		assert.NoError(t, runErr)
 		assert.NotNil(t, capturedPlan)
 		assert.NotNil(t, capturedPlan.Namespace)
