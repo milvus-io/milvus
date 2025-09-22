@@ -447,6 +447,18 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 	}
 	t.dbProperties = db.Properties
 
+	// set collection timezone
+	properties := t.Req.GetProperties()
+	ok, _ := getDefaultTimezoneVal(properties...)
+	if !ok {
+		ok, defaultTz := getDefaultTimezoneVal(db.Properties...)
+		if !ok {
+			defaultTz = "UTC"
+		}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: defaultTz}
+		t.Req.Properties = append(properties, timezoneKV)
+	}
+
 	if hookutil.GetEzPropByDBProperties(t.dbProperties) != nil {
 		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(t.dbProperties))
 	}

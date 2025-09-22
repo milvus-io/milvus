@@ -565,3 +565,13 @@ func nextFieldID(coll *model.Collection) int64 {
 	}
 	return maxFieldID + 1
 }
+
+func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
+	for _, p := range props {
+		// used in collection or database
+		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone {
+			return true, p.Value
+		}
+	}
+	return false, ""
+}

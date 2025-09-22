@@ -832,18 +832,12 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		log.Warn("fail to get collection info", zap.Error(err))
 		return err
 	}
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
-	if err != nil {
-		log.Warn("fail to get database info", zap.Error(err))
-		return err
-	}
 	_, colTimezone := getColTimezone(colInfo)
-	_, dbTimezone := getDbTimezone(dbInfo)
 	timeFields := parseTimeFields(t.request.SearchParams)
 	timezoneUserDefined := parseTimezone(t.request.SearchParams)
 	if timeFields != nil {
 		log.Debug("extracting fields for timestamptz", zap.Strings("fields", timeFields))
-		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), []string{timezoneUserDefined, colTimezone, dbTimezone}, timeFields)
+		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), []string{timezoneUserDefined, colTimezone}, timeFields)
 		if err != nil {
 			log.Warn("fail to extract fields for timestamptz", zap.Error(err))
 			return err

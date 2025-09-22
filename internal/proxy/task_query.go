@@ -383,11 +383,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.CollectionID = collID
 
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, t.request.GetDbName())
-	if err != nil {
-		log.Warn("Failed to get database info.", zap.String("databaseName", t.request.GetDbName()), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
-	}
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err != nil {
 		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
@@ -455,9 +450,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
-	_, dbTimezone := getDbTimezone(dbInfo)
 	_, colTimezone := getColTimezone(colInfo)
-	timezonePreference := []string{t.queryParams.timezone, colTimezone, dbTimezone}
+	timezonePreference := []string{t.queryParams.timezone, colTimezone}
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}); err != nil {
 		return err
 	}
