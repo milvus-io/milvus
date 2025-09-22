@@ -1289,7 +1289,13 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
 
 SegmentSealedImpl::~SegmentSealedImpl() {
     // Clean up geometry cache for all fields in this segment using global function
-    milvus::RemoveSegmentGeometryCaches(get_segment_id());
+    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
+    cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
+
+    if (ctx_) {
+        GEOS_finish_r(ctx_);
+        ctx_ = nullptr;
+    }
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
@@ -2280,10 +2286,11 @@ SegmentSealedImpl::LoadGeometryCache(
             if (valid_data.empty() || valid_data[i]) {
                 // Valid geometry data
                 const auto& wkb_data = string_views[i];
-                geometry_cache.AppendData(wkb_data.data(), wkb_data.size());
+                geometry_cache.AppendData(
+                    ctx_, wkb_data.data(), wkb_data.size());
             } else {
                 // Null/invalid geometry
-                geometry_cache.AppendData(nullptr, 0);
+                geometry_cache.AppendData(ctx_, nullptr, 0);
             }
         }
 

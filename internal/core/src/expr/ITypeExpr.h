@@ -774,7 +774,7 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
                 "WktValue: {}, Distance: {}]",
                 column_.ToString(),
                 GISFunctionFilterExpr_GISOp_Name(op_),
-                geometry_.to_wkt_string(),
+                geometry_.to_wkt_string(GEOS_init_r()),
                 distance_);
         } else {
             return fmt::format(
@@ -782,7 +782,7 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
                 "WktValue: {}]",
                 column_.ToString(),
                 GISFunctionFilterExpr_GISOp_Name(op_),
-                geometry_.to_wkt_string());
+                geometry_.to_wkt_string(GEOS_init_r()));
         }
     }
 

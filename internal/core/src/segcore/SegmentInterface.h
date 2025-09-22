@@ -532,6 +532,11 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_pk(const PkType& pk, int64_t insert_barrier) const = 0;
 
+    virtual GEOSContextHandle_t
+    get_ctx() const {
+        return ctx_;
+    };
+
  protected:
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
@@ -546,6 +551,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId,
                        std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_indexes_;
+
+    GEOSContextHandle_t ctx_ = GEOS_init_r();
 };
 
 }  // namespace milvus::segcore

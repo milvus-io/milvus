@@ -46,7 +46,8 @@ namespace exec {
                 geometry_cache.GetByOffsetUnsafe(absolute_offset);                                    \
             AssertInfo(cached_geometry != nullptr,                                                    \
                        "cached geometry is nullptr");                                                 \
-            res[i] = cached_geometry->method(right_source);                                           \
+            res[i] =                                                                                  \
+                cached_geometry->method(segment_->get_ctx(), right_source);                           \
         }                                                                                             \
     };                                                                                                \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(                                      \
@@ -84,7 +85,8 @@ namespace exec {
                 geometry_cache.GetByOffsetUnsafe(absolute_offset);             \
             AssertInfo(cached_geometry != nullptr,                             \
                        "cached geometry is nullptr");                          \
-            res[i] = cached_geometry->method(right_source, expr_->distance_);  \
+            res[i] = cached_geometry->method(                                  \
+                segment_->get_ctx(), right_source, expr_->distance_);          \
         }                                                                      \
     };                                                                         \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
@@ -206,10 +208,9 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
 // Helper function to calculate bounding box for range_within query optimization
 // Creates a rectangular bounding box around a query point with given distance in meters
 static Geometry
-create_bounding_box_for_dwithin(const Geometry& query_point,
+create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
+                                const Geometry& query_point,
                                 double distance_meters) {
-    // Extract query point coordinates using GEOS
-    auto ctx = query_point.GetContext();
     double query_lon, query_lat;
 
     AssertInfo(GEOSGeomGetX_r(ctx, query_point.GetGeometry(), &query_lon) == 1,
@@ -249,7 +250,7 @@ create_bounding_box_for_dwithin(const Geometry& query_point,
         minLat  // Close the ring
     );
 
-    return Geometry(bboxWKT.c_str());
+    return Geometry(ctx, bboxWKT.c_str());
 }
 
 VectorPtr
@@ -265,24 +266,25 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
      * query for all index chunks and cache their coarse bitmaps.
      * ------------------------------------------------------------------*/
 
-    auto evaluate_geometry = [this](const Geometry& left) -> bool {
+    auto evaluate_geometry = [this](GEOSContextHandle_t ctx,
+                                    const Geometry& left) -> bool {
         switch (expr_->op_) {
             case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-                return left.equals(expr_->geometry_);
+                return left.equals(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
-                return left.touches(expr_->geometry_);
+                return left.touches(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
-                return left.overlaps(expr_->geometry_);
+                return left.overlaps(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
-                return left.crosses(expr_->geometry_);
+                return left.crosses(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
-                return left.contains(expr_->geometry_);
+                return left.contains(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
-                return left.intersects(expr_->geometry_);
+                return left.intersects(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_Within:
-                return left.within(expr_->geometry_);
+                return left.within(ctx, expr_->geometry_);
             case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
-                return left.dwithin(expr_->geometry_, expr_->distance_);
+                return left.dwithin(ctx, expr_->geometry_, expr_->distance_);
             default:
                 PanicInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
         }
@@ -303,7 +305,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
             // Create bounding box geometry for index coarse filtering
             Geometry bbox_geometry = create_bounding_box_for_dwithin(
-                expr_->geometry_, expr_->distance_);
+                segment_->get_ctx(), expr_->geometry_, expr_->distance_);
 
             ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
 
@@ -371,7 +373,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     if (cached_geometry == nullptr) {
                         continue;
                     }
-                    bool result = evaluate_geometry(*cached_geometry);
+                    bool result = evaluate_geometry(segment_->get_ctx(),
+                                                    *cached_geometry);
 
                     if (result) {
                         refined.set(pos);
