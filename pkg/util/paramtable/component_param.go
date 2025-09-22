@@ -3057,6 +3057,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3440,6 +3441,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.StorageUsageTrackingEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
+		Version:      "2.6.3",
+		DefaultValue: "false",
+		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
+		Export:       true,
+	}
+	p.StorageUsageTrackingEnabled.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
