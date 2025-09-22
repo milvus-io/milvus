@@ -142,6 +142,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 60*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
 		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
+
+		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
+		params.Save("common.clusterID", "32")
+		assert.Panics(t, func() {
+			params.CommonCfg.ClusterID.GetAsInt()
+		})
+		params.Save("common.clusterID", "0")
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
