@@ -1255,6 +1255,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.ClusterID = ParamItem{
 		Key:          "common.clusterID",
+		Version:      "2.6.3",
 		DefaultValue: "0",
 		Doc:          "cluster id",
 		Export:       true,
@@ -1274,6 +1275,7 @@ This helps Milvus-CDC synchronize incremental data`,
 
 	p.HybridSearchRequeryPolicy = ParamItem{
 		Key:          "common.requery.hybridSearchPolicy",
+		Version:      "2.6.3",
 		DefaultValue: "OutputVector",
 		Doc:          `the policy to decide when to do requery in hybrid search, support "always", "outputvector" and "outputfields"`,
 		Export:       false,
@@ -1281,6 +1283,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
 }
 
+type gpuConfig struct {
 	InitSize                            ParamItem `refreshable:"false"`
 	MaxSize                             ParamItem `refreshable:"false"`
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`

@@ -48,6 +48,10 @@ type rerankInputs struct {
 	idGroupValue map[any]any
 	nq           int64
 
+	// field data need for non-requery rerank
+	// multipIdField []map[int64]*schemapb.FieldData
+	fieldData []*schemapb.SearchResultData
+
 	// There is only fieldId in schemapb.SearchResultData, but no fieldName
 	inputFieldIds []int64
 }
@@ -116,9 +120,9 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 		if err != nil {
 			return nil, err
 		}
-		return &rerankInputs{cols, idGroup, nq, inputFieldIds}, nil
+		return &rerankInputs{cols, idGroup, nq, multipSearchResultData, inputFieldIds}, nil
 	}
-	return &rerankInputs{cols, nil, nq, inputFieldIds}, nil
+	return &rerankInputs{cols, nil, nq, multipSearchResultData, inputFieldIds}, nil
 }
 
 func (inputs *rerankInputs) numOfQueries() int64 {
@@ -129,7 +133,7 @@ type rerankOutputs struct {
 	searchResultData *schemapb.SearchResultData
 }
 
-func newRerankOutputs(searchParams *SearchParams) *rerankOutputs {
+func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankOutputs {
 	topk := searchParams.limit
 	if searchParams.isGrouping() {
 		topk = topk * searchParams.groupSize
@@ -142,12 +146,23 @@ func newRerankOutputs(searchParams *SearchParams) *rerankOutputs {
 		Ids:        &schemapb.IDs{},
 		Topks:      []int64{},
 	}
+	if len(inputs.fieldData) > 0 {
+		ret.FieldsData = typeutil.PrepareResultFieldData(inputs.fieldData[0].GetFieldsData(), searchParams.limit)
+	}
 	return &rerankOutputs{ret}
 }
 
-func appendResult[T PKType](outputs *rerankOutputs, ids []T, scores []float32) {
+func appendResult[T PKType](inputs *rerankInputs, outputs *rerankOutputs, idScores *IDScores[T]) {
+	ids := idScores.ids
+	scores := idScores.scores
 	outputs.searchResultData.Topks = append(outputs.searchResultData.Topks, int64(len(ids)))
 	outputs.searchResultData.Scores = append(outputs.searchResultData.Scores, scores...)
+	if len(inputs.fieldData) > 0 {
+		for idx := range ids {
+			loc := idScores.locations[idx]
+			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, inputs.fieldData[loc.batchIdx].GetFieldsData(), int64(loc.offset))
+		}
+	}
 	switch any(ids).(type) {
 	case []int64:
 		if outputs.searchResultData.Ids.GetIntId() == nil {
@@ -171,12 +186,18 @@ func appendResult[T PKType](outputs *rerankOutputs, ids []T, scores []float32) {
 }
 
 type IDScores[T PKType] struct {
-	ids    []T
-	scores []float32
-	size   int64
+	ids       []T
+	scores    []float32
+	size      int64
+	locations []IDLoc
 }
 
-func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, descendingOrder bool) *IDScores[T] {
+type IDLoc struct {
+	batchIdx int
+	offset   int
+}
+
+func newIDScores[T PKType](idScores map[T]float32, idLocs map[T]IDLoc, searchParams *SearchParams, descendingOrder bool) *IDScores[T] {
 	ids := make([]T, 0, len(idScores))
 	for id := range idScores {
 		ids = append(ids, id)
@@ -200,6 +221,7 @@ func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, d
 		make([]T, 0, searchParams.limit),
 		make([]float32, 0, searchParams.limit),
 		0,
+		make([]IDLoc, 0, searchParams.limit),
 	}
 	for index := searchParams.offset; index < int64(len(ids)); index++ {
 		score := idScores[ids[index]]
@@ -209,6 +231,7 @@ func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, d
 		}
 		ret.ids = append(ret.ids, ids[index])
 		ret.scores = append(ret.scores, score)
+		ret.locations = append(ret.locations, idLocs[ids[index]])
 	}
 	ret.size = int64(len(ret.ids))
 	return &ret
@@ -240,7 +263,7 @@ type Group[T PKType] struct {
 	finalScore float32
 }
 
-func newGroupingIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, idGroup map[any]any) (*IDScores[T], error) {
+func newGroupingIDScores[T PKType](idScores map[T]float32, idLocations map[T]IDLoc, searchParams *SearchParams, idGroup map[any]any) (*IDScores[T], error) {
 	ids := make([]T, 0, len(idScores))
 	for id := range idScores {
 		ids = append(ids, id)
@@ -307,6 +330,7 @@ func newGroupingIDScores[T PKType](idScores map[T]float32, searchParams *SearchP
 		make([]T, 0, searchParams.limit),
 		make([]float32, 0, searchParams.limit),
 		0,
+		make([]IDLoc, 0, searchParams.limit),
 	}
 	for index := int(searchParams.offset); index < len(groupList); index++ {
 		group := groupList[index]
