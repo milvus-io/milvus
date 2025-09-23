@@ -239,7 +239,7 @@ const (
 	// timezone releated
 	DatabaseDefaultTimezone   = "database.timezone"
 	CollectionDefaultTimezone = "collection.timezone"
-	AllowInsertAutoIDKey       = "allow_insert_auto_id"
+	AllowInsertAutoIDKey      = "allow_insert_auto_id"
 )
 
 const (
