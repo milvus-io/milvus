@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -60,7 +61,8 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 
 	// Verify replicator was created
 	assert.Equal(t, 1, len(manager.replicators))
-	replicator, exists := manager.replicators["test-source-channel-1_test-target-channel-1"]
+	key := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo)
+	replicator, exists := manager.replicators[key]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator)
 
@@ -77,12 +79,13 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 
 	// Verify second replicator was created
 	assert.Equal(t, 2, len(manager.replicators))
-	replicator2, exists := manager.replicators["test-source-channel-2_test-target-channel-2"]
+	key2 := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo2)
+	replicator2, exists := manager.replicators[key2]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator2)
 
 	// Verify first replicator still exists
-	replicator1, exists := manager.replicators["test-source-channel-1_test-target-channel-1"]
+	replicator1, exists := manager.replicators[key]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator1)
 }

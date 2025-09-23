@@ -90,7 +90,7 @@ func (r *replicateStreamClient) startInternal() {
 	backoff.Reset()
 
 	for {
-		// Create a local context for this connection that can be cancelled
+		// Create a local context for this connection that can be canceled
 		// when we need to stop the send/recv loops
 		connCtx, connCancel := context.WithCancel(r.ctx)
 
