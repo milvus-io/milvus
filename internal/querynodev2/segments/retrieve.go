@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -160,7 +161,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 }
 
 // retrieve will retrieve all the validate target segments
-func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, []Segment, error) {
+func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, queryPlan *planpb.PlanNode) ([]RetrieveSegmentResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
@@ -168,6 +169,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
+	var segFilters []SegmentFilter = make([]SegmentFilter, 0)
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
@@ -176,10 +178,18 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
+		segFilters = append(segFilters, WithType(SegmentTypeSealed))
+		if paramtable.Get().QueryNodeCfg.EnableSparseFilterInQuery.GetAsBool() {
+			segFilters = append(segFilters, WithSparseFilter(queryPlan))
+		}
+		retrieveSegments, err = validate(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, segFilters...)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
+		segFilters = append(segFilters, WithType(SegmentTypeGrowing))
+		if paramtable.Get().QueryNodeCfg.EnableSparseFilterInQuery.GetAsBool() {
+			segFilters = append(segFilters, WithSparseFilter(queryPlan))
+		}
+		retrieveSegments, err = validate(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, segFilters...)
 	}
 
 	if err != nil {
@@ -198,6 +208,7 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
+	log.Ctx(ctx).Debug("retrieve stream on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed

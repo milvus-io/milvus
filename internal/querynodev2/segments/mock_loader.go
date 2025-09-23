@@ -183,14 +183,14 @@ func (_c *MockLoader_LoadBM25Stats_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// LoadBloomFilterSet provides a mock function with given fields: ctx, collectionID, version, infos
-func (_m *MockLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+// LoadBloomFilterSet provides a mock function with given fields: ctx, collectionID, infos
+func (_m *MockLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	_va := make([]interface{}, len(infos))
 	for _i := range infos {
 		_va[_i] = infos[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, ctx, collectionID, version)
+	_ca = append(_ca, ctx, collectionID)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -200,19 +200,19 @@ func (_m *MockLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64
 
 	var r0 []*pkoracle.BloomFilterSet
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)); ok {
-		return rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)); ok {
+		return rf(ctx, collectionID, infos...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet); ok {
-		r0 = rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet); ok {
+		r0 = rf(ctx, collectionID, infos...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*pkoracle.BloomFilterSet)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) error); ok {
-		r1 = rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, ...*querypb.SegmentLoadInfo) error); ok {
+		r1 = rf(ctx, collectionID, infos...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -228,22 +228,21 @@ type MockLoader_LoadBloomFilterSet_Call struct {
 // LoadBloomFilterSet is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-//   - version int64
 //   - infos ...*querypb.SegmentLoadInfo
-func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collectionID interface{}, version interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
+func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collectionID interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
 	return &MockLoader_LoadBloomFilterSet_Call{Call: _e.mock.On("LoadBloomFilterSet",
-		append([]interface{}{ctx, collectionID, version}, infos...)...)}
+		append([]interface{}{ctx, collectionID}, infos...)...)}
 }
 
-func (_c *MockLoader_LoadBloomFilterSet_Call) Run(run func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo)) *MockLoader_LoadBloomFilterSet_Call {
+func (_c *MockLoader_LoadBloomFilterSet_Call) Run(run func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo)) *MockLoader_LoadBloomFilterSet_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-3)
-		for i, a := range args[3:] {
+		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-2)
+		for i, a := range args[2:] {
 			if a != nil {
 				variadicArgs[i] = a.(*querypb.SegmentLoadInfo)
 			}
 		}
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), variadicArgs...)
+		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -253,7 +252,7 @@ func (_c *MockLoader_LoadBloomFilterSet_Call) Return(_a0 []*pkoracle.BloomFilter
 	return _c
 }
 
-func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)) *MockLoader_LoadBloomFilterSet_Call {
+func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Context, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)) *MockLoader_LoadBloomFilterSet_Call {
 	_c.Call.Return(run)
 	return _c
 }
