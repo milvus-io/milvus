@@ -81,7 +81,7 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
         // try singleton if possible
         if (!trueFs) {
             trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+                         .GetArrowFileSystem();
         }
         if (!trueFs) {
             ThrowInfo(ErrorCode::UnexpectedError, "Failed to get filesystem");
