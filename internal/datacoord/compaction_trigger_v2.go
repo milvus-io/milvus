@@ -324,7 +324,8 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType CompactionTriggerType,
-	view CompactionView) ([]CompactionView, string) {
+	view CompactionView,
+) ([]CompactionView, string) {
 	if eventType == TriggerTypeLevelZeroViewIDLE {
 		view, reason := view.ForceTrigger()
 		return []CompactionView{view}, reason
