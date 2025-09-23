@@ -23,7 +23,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -34,8 +33,7 @@ import (
 )
 
 const (
-	maxTaskQueueNum    = 1024
-	maxParallelTaskNum = 10
+	maxTaskQueueNum = 1024
 )
 
 type Executor interface {
@@ -53,7 +51,6 @@ type executor struct {
 	completedCompactor *typeutil.ConcurrentMap[int64, Compactor]                    // planID to compactor
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
 	taskCh             chan Compactor
-	taskSem            *semaphore.Weighted             // todo remove this, unify with slot logic
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 	usingSlots         int64
 	slotMu             sync.RWMutex
@@ -69,7 +66,6 @@ func NewExecutor() *executor {
 		completedCompactor: typeutil.NewConcurrentMap[int64, Compactor](),
 		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
 		taskCh:             make(chan Compactor, maxTaskQueueNum),
-		taskSem:            semaphore.NewWeighted(maxParallelTaskNum),
 		dropped:            typeutil.NewConcurrentSet[string](),
 		usingSlots:         0,
 	}
@@ -146,12 +142,7 @@ func (e *executor) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-e.taskCh:
-			err := e.taskSem.Acquire(ctx, 1)
-			if err != nil {
-				return
-			}
 			go func() {
-				defer e.taskSem.Release(1)
 				e.executeTask(task)
 			}()
 		}
