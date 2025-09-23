@@ -5341,7 +5341,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 	})
 }
 
-func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
+func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc, nil)
 	ctx := context.Background()
@@ -5364,11 +5364,10 @@ func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	}
 	qc.CreateCollection(ctx, createColReq)
 
-	task := &alterCollectionFieldTask{
-		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
-			FieldName:      "",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: common.AllowInsertAutoIDKey, Value: "true"},
 			},
