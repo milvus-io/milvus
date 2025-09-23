@@ -259,7 +259,7 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		return nil, err
 	}
 
-	scorers, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
+	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,8 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 				FieldId:        fieldID,
 			},
 		},
-		Scorers: scorers,
+		Scorers:     scorers,
+		ScoreOption: options,
 		PlanOptions: &planpb.PlanOption{
 			ExprUseJsonStats: exprParams.UseJSONStats,
 		},
@@ -388,22 +389,67 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 	}
 }
 
-func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, error) {
+func ParseBoostMode(s string) (planpb.BoostMode, error) {
+	s = strings.ToLower(s)
+	switch s {
+	case "multiply":
+		return planpb.BoostMode_BoostModeMultiply, nil
+	case "sum":
+		return planpb.BoostMode_BoostModeSum, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unknown boost mode: %s", s)
+	}
+}
+
+func ParseFunctionMode(s string) (planpb.FunctionMode, error) {
+	s = strings.ToLower(s)
+	switch s {
+	case "multiply":
+		return planpb.FunctionMode_FunctionModeMultiply, nil
+	case "sum":
+		return planpb.FunctionMode_FunctionModeSum, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unknown boost mode: %s", s)
+	}
+}
+
+func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, *planpb.ScoreOption, error) {
 	scorers := []*planpb.ScoreFunction{}
 	for _, function := range functionScore.GetFunctions() {
 		// create scorer for search plan
 		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if scorer != nil {
 			scorers = append(scorers, scorer)
 		}
 	}
 	if len(scorers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return scorers, nil
+
+	option := &planpb.ScoreOption{}
+
+	s, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(BoostModeKey, functionScore.GetParams())
+	if ok {
+		boostMode, err := ParseBoostMode(s)
+		if err != nil {
+			return nil, nil, err
+		}
+		option.BoostMode = boostMode
+	}
+
+	s, ok = funcutil.TryGetAttrByKeyFromRepeatedKV(BoostFunctionModeKey, functionScore.GetParams())
+	if ok {
+		functionMode, err := ParseFunctionMode(s)
+		if err != nil {
+			return nil, nil, err
+		}
+		option.FunctionMode = functionMode
+	}
+
+	return scorers, option, nil
 }
 
 func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
