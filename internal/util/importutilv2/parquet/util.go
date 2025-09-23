@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -85,6 +86,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	// this loop is for "how many fields are provided by this parquet file?"
 	readFields := make(map[string]int64)
 	crs := make(map[int64]*FieldReader)
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
 		if !ok {
@@ -93,7 +95,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 
 		// auto-id field must not provided
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) && !allowInsertAutoID {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}

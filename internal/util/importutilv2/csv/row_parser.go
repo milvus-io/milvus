@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -99,10 +100,11 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 	for _, name := range header {
 		headerMap[name] = true
 	}
+	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
 
 	// check if csv header provides the primary key while it should be auto-generated
 	_, pkInHeader := headerMap[pkField.GetName()]
-	if pkInHeader && pkField.GetAutoID() {
+	if pkInHeader && pkField.GetAutoID() && !allowInsertAutoID {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", pkField.GetName()))
 	}
