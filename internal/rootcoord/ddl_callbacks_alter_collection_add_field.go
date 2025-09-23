@@ -72,6 +72,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
 		Version:            coll.SchemaVersion + 1,
+		DoPhysicalBackfill: false,
 	}
 	schema.Fields = append(schema.Fields, fieldSchema)
 

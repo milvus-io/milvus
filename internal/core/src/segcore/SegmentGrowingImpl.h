@@ -380,14 +380,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
-        auto& field_meta = schema_->operator[](field_id);
-        if ((IsVectorDataType(field_meta.get_data_type()) ||
-             IsGeometryType(field_meta.get_data_type())) &&
-            indexing_record_.SyncDataWithIndex(field_id)) {
-            return true;
+        if (!schema_->is_field_exist(field_id)) {
+            return false;
         }
-
-        return false;
+        const auto& field_meta = schema_->operator[](field_id);
+        return (IsVectorDataType(field_meta.get_data_type()) ||
+                IsGeometryType(field_meta.get_data_type())) &&
+               indexing_record_.SyncDataWithIndex(field_id);
     }
 
     std::vector<PinWrapper<const index::IndexBase*>>
@@ -424,7 +423,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasFieldData(FieldId field_id) const override {
-        return true;
+        return insert_record_.is_data_exist(field_id);
     }
 
     bool

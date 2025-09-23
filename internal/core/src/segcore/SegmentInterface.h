@@ -172,6 +172,14 @@ class SegmentInterface {
     HasFieldData(FieldId field_id) const = 0;
 
     virtual bool
+    HasIndex(FieldId field_id) const = 0;
+
+    bool
+    FieldAccessable(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
+
+    virtual bool
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
@@ -387,9 +395,6 @@ class SegmentInternalInterface : public SegmentInterface {
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
              int64_t size) const override;
-
-    virtual bool
-    HasIndex(FieldId field_id) const = 0;
 
     int64_t
     get_real_count() const override;

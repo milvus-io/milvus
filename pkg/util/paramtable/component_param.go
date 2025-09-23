@@ -4519,22 +4519,23 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout             ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
-	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	SegmentSmallProportion           ParamItem `refreshable:"true"`
-	SegmentCompactableProportion     ParamItem `refreshable:"true"`
-	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval       ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
-	GlobalCompactionInterval         ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
+	CompactionRPCTimeout              ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks     ParamItem `refreshable:"true"`
+	MinSegmentToMerge                 ParamItem `refreshable:"true"`
+	SegmentSmallProportion            ParamItem `refreshable:"true"`
+	SegmentCompactableProportion      ParamItem `refreshable:"true"`
+	SegmentExpansionRate              ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds     ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval        ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval      ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval       ParamItem `refreshable:"false"`
+	GlobalCompactionInterval          ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance         ParamItem `refreshable:"true"`
+	BackfillCompactionTriggerInterval ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5027,6 +5028,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CompactionExpiryTolerance.Init(base.mgr)
+
+	p.BackfillCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.backfill.triggerInterval",
+		Version:      "2.6.2",
+		Doc:          "The time interval in seconds for trigger backfill compaction",
+		DefaultValue: "20",
+		Export:       true,
+	}
+	p.BackfillCompactionTriggerInterval.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",

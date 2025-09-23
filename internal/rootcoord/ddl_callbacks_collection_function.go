@@ -47,6 +47,7 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
 		Version:            coll.SchemaVersion + 1,
+		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)

@@ -44,6 +44,7 @@ type embeddingNode struct {
 
 	// embeddingType EmbeddingType
 	functionRunners map[int64]function.FunctionRunner
+	curSchema       *schemapb.CollectionSchema
 }
 
 func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embeddingNode, error) {
@@ -51,14 +52,14 @@ func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embed
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
+	schema := metaCache.GetSchema(0)
 	node := &embeddingNode{
 		BaseNode:        baseNode,
 		channelName:     channelName,
 		metaCache:       metaCache,
 		functionRunners: make(map[int64]function.FunctionRunner),
+		curSchema:       schema,
 	}
-
-	schema := metaCache.GetSchema(0)
 
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -148,17 +149,43 @@ func (eNode *embeddingNode) Embedding(datas []*writebuffer.InsertData) error {
 	return nil
 }
 
+func (eNode *embeddingNode) checkHasFunctions(schema *schemapb.CollectionSchema) (bool, error) {
+	if schema != eNode.curSchema {
+		eNode.curSchema = schema
+		eNode.functionRunners = make(map[int64]function.FunctionRunner)
+		for _, tf := range schema.GetFunctions() {
+			functionRunner, err := function.NewFunctionRunner(schema, tf)
+			if err != nil {
+				return false, err
+			}
+			if functionRunner == nil {
+				continue
+			}
+			eNode.functionRunners[tf.GetId()] = functionRunner
+		}
+	}
+	return len(eNode.functionRunners) > 0, nil
+}
+
 func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*FlowGraphMsg)
 
 	if fgMsg.IsCloseMsg() {
 		return []Msg{fgMsg}
 	}
-
+	currentSchema := eNode.metaCache.GetSchema(fgMsg.TimeTick())
+	hasFunctions, err := eNode.checkHasFunctions(currentSchema)
+	if err != nil {
+		log.Error("failed to check has functions", zap.Error(err))
+		panic(err)
+	}
+	if !hasFunctions {
+		return []Msg{fgMsg}
+	}
 	insertData := make([]*writebuffer.InsertData, 0)
 	if len(fgMsg.InsertMessages) > 0 {
 		var err error
-		if insertData, err = writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages); err != nil {
+		if insertData, err = writebuffer.PrepareInsert(currentSchema, eNode.pkField, fgMsg.InsertMessages); err != nil {
 			log.Error("failed to prepare insert data", zap.Error(err))
 			panic(err)
 		}
