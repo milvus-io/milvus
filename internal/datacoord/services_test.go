@@ -14,24 +14,26 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/datacoord/session"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -48,29 +50,25 @@ import (
 type ServerSuite struct {
 	suite.Suite
 
-	testServer *Server
-	mockChMgr  *MockChannelManager
+	testServer   *Server
+	mockMixCoord *mocks2.MixCoord
 }
 
-func WithChannelManager(cm ChannelManager) Option {
-	return func(svr *Server) {
-		svr.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(svr.dataNodeCreator))
-		svr.channelManager = cm
-		svr.cluster = NewClusterImpl(svr.sessionManager, svr.channelManager)
-		svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
-		svr.cluster2 = session.NewCluster(svr.nodeManager)
-	}
+func (s *ServerSuite) SetupSuite() {
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(s.T())
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(0, true)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 }
 
 func (s *ServerSuite) SetupTest() {
-	s.mockChMgr = NewMockChannelManager(s.T())
-	s.mockChMgr.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mockChMgr.EXPECT().Close().Maybe()
-
-	s.testServer = newTestServer(s.T(), WithChannelManager(s.mockChMgr))
-	if s.testServer.channelManager != nil {
-		s.testServer.channelManager.Close()
-	}
+	s.testServer = newTestServer(s.T())
+	s.mockMixCoord = mocks2.NewMixCoord(s.T())
+	s.testServer.mixCoord = s.mockMixCoord
 }
 
 func (s *ServerSuite) TearDownTest() {
@@ -103,10 +101,19 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(0)).
-		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
-
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(1)).Return(nil).Times(1)
+	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		if req.CollectionID == 0 {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				CollectionID:        0,
+				VirtualChannelNames: []string{"ch1"},
+			}, nil
+		}
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+		}, nil
+	})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -143,9 +150,12 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_BySegment() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(mock.Anything).
-		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
-
+	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			VirtualChannelNames: []string{"ch1"},
+		}, nil
+	})
 	tests := []struct {
 		description string
 		segID       int64
@@ -196,8 +206,10 @@ func (s *ServerSuite) TestSaveBinlogPath_ClosedServer() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
-	s.mockChMgr.EXPECT().Match(mock.Anything, mock.Anything).Return(false)
 	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			SourceID: 1,
+		},
 		SegmentID: 1,
 		Channel:   "test",
 	})
@@ -206,7 +218,6 @@ func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
@@ -251,7 +262,6 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
@@ -318,7 +328,6 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
@@ -371,7 +380,6 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]int64{
@@ -683,16 +691,6 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 		CollectionID: 0,
 	}
 
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
-		1: {"channel-1"},
-	})
-
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(nil)
-	mockCluster.EXPECT().Close().Maybe()
-	s.testServer.cluster = mockCluster
-
 	schema := newTestSchema()
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
 	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1, storage.StorageV1)
@@ -764,33 +762,6 @@ func (s *ServerSuite) TestFlush_ClosedServer() {
 	resp, err := s.testServer.Flush(context.Background(), req)
 	s.NoError(err)
 	s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-}
-
-func (s *ServerSuite) TestFlush_RollingUpgrade() {
-	req := &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Flush,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  0,
-		},
-		DbID:         0,
-		CollectionID: 0,
-	}
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.WrapErrServiceUnimplemented(grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error")))
-	mockCluster.EXPECT().Close().Maybe()
-	s.testServer.cluster = mockCluster
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
-		1: {"channel-1"},
-	}).Once()
-
-	resp, err := s.testServer.Flush(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	s.EqualValues(0, resp.GetFlushTs())
 }
 
 func (s *ServerSuite) TestGetSegmentInfoChannel() {
@@ -1005,7 +976,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 0, len(resp.GetSegments()))
-		assert.EqualValues(t, 0, len(resp.GetChannels()))
+		assert.EqualValues(t, 1, len(resp.GetChannels()))
 	})
 
 	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
@@ -1119,10 +1090,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(context.Background(), ch)
-
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -1196,10 +1163,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-
-		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -1289,11 +1252,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
-		assert.NoError(t, err)
-
 		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 
@@ -1340,10 +1298,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
-		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(context.Background(), ch)
-
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -1384,10 +1338,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-
-		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -1461,10 +1411,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			IndexFileKeys:       nil,
 			IndexSerializedSize: 0,
 		})
-
-		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
-		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -3004,4 +2950,12 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		assert.False(t, stateMap["db2"].GetCollectionFlushStates()["collection2"]) // db2 not flushed
 		assert.False(t, resp.GetFlushed())                                         // Overall not flushed due to db2
 	})
+}
+
+func getWatchKV(t *testing.T) kv.WatchKV {
+	rootPath := "/etcd/test/root/" + t.Name()
+	kv, err := etcdkv.NewWatchKVFactory(rootPath, &Params.EtcdCfg)
+	require.NoError(t, err)
+
+	return kv
 }
