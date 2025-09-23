@@ -1,8 +1,11 @@
 package broadcaster
 
 import (
+	"context"
 	"sort"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -145,14 +148,43 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 			TimeTick:               result.TimeTick,
 		}
 	}
-	if err := registry.CallMessageAckCallback(s.notifier.Context(), msg, makeMap); err != nil {
+
+	// call the ack callback until done.
+	if err := s.callMessageAckCallbackUntilDone(s.notifier.Context(), msg, makeMap); err != nil {
 		return err
 	}
 	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
+		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
 	}
 	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
 	return nil
+}
+
+// callMessageAckCallbackUntilDone calls the message ack callback until done.
+func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Context, msg message.BroadcastMutableMessage, result map[string]*message.AppendResult) error {
+	backoff := backoff.NewExponentialBackOff()
+	backoff.InitialInterval = 10 * time.Millisecond
+	backoff.MaxInterval = 10 * time.Second
+	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
+	for {
+		err := registry.CallMessageAckCallback(ctx, msg, result)
+		if err == nil {
+			return nil
+		}
+		nextInterval := backoff.NextBackOff()
+		s.Logger().Warn("failed to call message ack callback, wait for retry...",
+			log.FieldMessage(msg),
+			zap.Duration("nextInterval", nextInterval),
+			zap.Error(err))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(nextInterval):
+		}
+	}
 }
 
 func sortByBroadcastID(tasks []*broadcastTask) {
