@@ -27,12 +27,12 @@ func TestStreamingNodeManager(t *testing.T) {
 
 	ch := make(chan pChannelInfoAssigned, 1)
 	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil)
-	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Run(
-		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 			for {
 				select {
 				case <-ctx.Done():
-					return
+					return ctx.Err()
 				case p := <-ch:
 					cb(balancer.WatchChannelAssignmentsCallbackParam{
 						Version:            p.version,

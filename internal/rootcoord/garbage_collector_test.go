@@ -552,9 +552,10 @@ func TestGcPartitionData(t *testing.T) {
 
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Run(
-		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 			<-ctx.Done()
+			return ctx.Err()
 		})
 	b.EXPECT().RegisterStreamingEnabledNotifier(mock.Anything).Run(func(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 		notifier.Cancel()
