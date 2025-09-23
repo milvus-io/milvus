@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -468,5 +469,37 @@ func (mc *MilvusClient) RunAnalyzer(ctx context.Context, option client.RunAnalyz
 // AddCollectionField Add collection field
 func (mc *MilvusClient) AddCollectionField(ctx context.Context, option client.AddCollectionFieldOption, callOptions ...grpc.CallOption) error {
 	err := mc.mClient.AddCollectionField(ctx, option, callOptions...)
+	return err
+}
+
+// -- snapshot --
+
+// CreateSnapshot creates a snapshot for the specified collection
+func (mc *MilvusClient) CreateSnapshot(ctx context.Context, option client.CreateSnapshotOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreateSnapshot(ctx, option, callOptions...)
+	return err
+}
+
+// DropSnapshot drops a snapshot by name
+func (mc *MilvusClient) DropSnapshot(ctx context.Context, option client.DropSnapshotOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropSnapshot(ctx, option, callOptions...)
+	return err
+}
+
+// ListSnapshots lists all snapshots for the specified collection or all snapshots if no collection is specified
+func (mc *MilvusClient) ListSnapshots(ctx context.Context, option client.ListSnapshotsOption, callOptions ...grpc.CallOption) ([]string, error) {
+	snapshots, err := mc.mClient.ListSnapshots(ctx, option, callOptions...)
+	return snapshots, err
+}
+
+// DescribeSnapshot describes a snapshot by name
+func (mc *MilvusClient) DescribeSnapshot(ctx context.Context, option client.DescribeSnapshotOption, callOptions ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
+	resp, err := mc.mClient.DescribeSnapshot(ctx, option, callOptions...)
+	return resp, err
+}
+
+// RestoreSnapshot restores a snapshot to a target collection
+func (mc *MilvusClient) RestoreSnapshot(ctx context.Context, option client.RestoreSnapshotOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RestoreSnapshot(ctx, option, callOptions...)
 	return err
 }

@@ -3,6 +3,7 @@ module github.com/milvus-io/milvus/tests/go_client
 go 1.24.4
 
 require (
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250911093549-4cc2bace3f8c
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.0.0-20250319085209-5a6b4e56d59e
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -51,7 +52,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250911093549-4cc2bace3f8c // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
@@ -116,3 +116,5 @@ require (
 	k8s.io/apimachinery v0.28.6 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20250912094014-4f7471a7bbdd
