@@ -108,7 +108,7 @@ func (t *flushAllTaskbyStreamingService) Execute(ctx context.Context) error {
 func (t *flushAllTaskbyStreamingService) sendManualFlushAllToWal(ctx context.Context, flushTargets []*datapb.FlushAllTarget, flushTs Timestamp) (map[int64][]int64, error) {
 	wg := errgroup.Group{}
 	// limit goroutine number to 100
-	wg.SetLimit(100)
+	wg.SetLimit(Params.DataCoordCfg.FlushAllMaxParallelTasks.GetAsInt())
 
 	var mu sync.Mutex
 	results := make(map[int64][]int64)

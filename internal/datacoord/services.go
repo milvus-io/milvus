@@ -274,7 +274,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	flushInfos := make([]*datapb.FlushResult, 0)
 	wg := errgroup.Group{}
 	// limit goroutine number to 100
-	wg.SetLimit(100)
+	wg.SetLimit(Params.DataCoordCfg.FlushAllMaxParallelTasks.GetAsInt())
 	for _, cid := range collectionsToFlush {
 		wg.Go(func() error {
 			flushResult, err := s.flushCollection(ctx, cid, ts, nil)
