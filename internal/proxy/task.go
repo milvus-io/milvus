@@ -1177,7 +1177,6 @@ var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
-	common.AllowInsertAutoIDKey,
 }
 
 var allowedDropProps = []string{
