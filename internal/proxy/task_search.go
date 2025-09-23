@@ -388,22 +388,23 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 
+	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
+		log.Error("parseRankParams failed", zap.Error(err))
+		return err
+	}
+
 	switch strings.ToLower(paramtable.Get().CommonCfg.HybridSearchRequeryPolicy.GetValue()) {
 	case "always":
 		t.needRequery = true
 	case "outputvector":
-		t.needRequery = len(vectorOutputFields) > 0
+		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
+		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
 	case "outputfields":
 		fallthrough
 	default:
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
 	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
-
-	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
-		log.Error("parseRankParams failed", zap.Error(err))
-		return err
-	}
 
 	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
 		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
