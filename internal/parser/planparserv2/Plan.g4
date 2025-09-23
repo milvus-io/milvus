@@ -1,7 +1,8 @@
 grammar Plan;
 
 expr:
-	IntegerConstant											                     # Integer
+  Identifier (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? op2=(LT | LE | GT | GE | EQ | NE) ISO compare_string=StringLiteral # TimestamptzCompare
+	| IntegerConstant											                     # Integer
 	| FloatingConstant										                     # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
@@ -64,6 +65,8 @@ EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
+INTERVAL: 'interval' | 'INTERVAL';
+ISO: 'iso' | 'ISO';
 
 ADD: '+';
 SUB: '-';

@@ -399,6 +399,21 @@ ProtoParser::ParseBinaryRangeExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseTimestamptzArithCompareExprs(
+    const proto::plan::TimestamptzArithCompareExpr& expr_pb) {
+    auto& columnInfo = expr_pb.timestamptz_column();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema->operator[](field_id).get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    return std::make_shared<expr::TimestamptzArithCompareExpr>(
+        columnInfo,
+        expr_pb.arith_op(),
+        expr_pb.interval(),
+        expr_pb.compare_op(),
+        expr_pb.compare_value());
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
     std::vector<expr::TypedExprPtr> parameters;
     std::vector<DataType> func_param_type_list;
@@ -591,6 +606,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kNullExpr: {
             result = ParseNullExprs(expr_pb.null_expr());
+            break;
+        }
+        case ppe::kTimestamptzArithCompareExpr: {
+            result = ParseTimestamptzArithCompareExprs(
+                expr_pb.timestamptz_arith_compare_expr());
             break;
         }
         default: {

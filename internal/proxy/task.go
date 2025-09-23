@@ -73,6 +73,9 @@ const (
 	LimitKey             = "limit"
 	// offsets for embedding list search
 	LimsKey = "lims"
+	// key for timestamptz translation
+	TimezoneKey   = "timezone"
+	TimefieldsKey = "time_fields"
 
 	SearchIterV2Key        = "search_iter_v2"
 	SearchIterBatchSizeKey = "search_iter_batch_size"
@@ -448,10 +451,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
-	}
-	// prevent user creating collection with timestamptz field for now (not implemented)
-	if hasTimestamptzField(t.schema) {
-		return merr.WrapErrParameterInvalidMsg("timestamptz field is still in development")
 	}
 	return nil
 }
@@ -1176,6 +1175,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 			}
+		}
+		// Check the validation of timezone
+		err := checkTimezone(t.Properties...)
+		if err != nil {
+			return err
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)

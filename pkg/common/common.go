@@ -235,12 +235,27 @@ const (
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 	NamespaceEnabledKey        = "namespace.enabled"
+
+	// timezone releated
+	DatabaseDefaultTimezone   = "database.timezone"
+	CollectionDefaultTimezone = "collection.timezone"
 )
 
 const (
 	PropertiesKey        string = "properties"
 	TraceIDKey           string = "uber-trace-id"
 	ClientRequestMsecKey string = "client-request-unixmsec"
+)
+
+// Timestamptz field
+const (
+	TszYear        string = "year"
+	TszMonth       string = "month"
+	TszDay         string = "day"
+	TszHour        string = "hour"
+	TszMinute      string = "minute"
+	TszSecond      string = "second"
+	TszMicrosecond string = "microsecond"
 )
 
 func IsSystemField(fieldID int64) bool {

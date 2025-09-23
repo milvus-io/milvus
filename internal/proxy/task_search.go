@@ -819,6 +819,38 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
+	// Translate timestamp to ISO string
+	collName := t.request.GetCollectionName()
+	dbName := t.request.GetDbName()
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	_, colTimezone := getColTimezone(colInfo)
+	timeFields := parseTimeFields(t.request.SearchParams)
+	timezoneUserDefined := parseTimezone(t.request.SearchParams)
+	if timeFields != nil {
+		log.Debug("extracting fields for timestamptz", zap.Strings("fields", timeFields))
+		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), []string{timezoneUserDefined, colTimezone}, timeFields)
+		if err != nil {
+			log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+			return err
+		}
+	} else {
+		log.Debug("translate timstamp to ISO string", zap.String("user define timezone", timezoneUserDefined))
+		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), timezoneUserDefined, colTimezone)
+		if err != nil {
+			log.Warn("fail to translate timestamp", zap.Error(err))
+			return err
+		}
+	}
+
 	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
