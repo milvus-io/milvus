@@ -584,5 +584,4 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 		return fmt.Errorf("namespace data is not set but namespace enabled")
 	}
 	return nil
->>>>>>> e1ce5e1d93 (enhance: add namespace for query and search request)
 }
