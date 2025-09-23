@@ -4724,3 +4724,22 @@ func TestUpdateFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.Equal(t, []byte{0xFB, 0xFA}, geoData[2])
 	})
 }
+
+func TestIsBM25FunctionOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(schema.Fields[0], schema))
+	assert.True(t, IsBM25FunctionOutputField(schema.Fields[1], schema))
+}
