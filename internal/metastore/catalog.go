@@ -207,8 +207,23 @@ type QueryCoordCatalog interface {
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
+// ReplicationCatalog is the interface for replication catalog
+// it's used by CDC component.
+type ReplicationCatalog interface {
+	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
+	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
+	RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error
+
+	// ListReplicatePChannels lists all replicate pchannels from metastore.
+	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.
+	// the task is written by streaming coord, SaveReplicateConfiguration operation.
+	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
+}
+
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	ReplicationCatalog
+
 	// GetCChannel get the control channel from metastore.
 	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
 
@@ -237,6 +252,12 @@ type StreamingCoordCataLog interface {
 	// Make the task recoverable after restart.
 	// When broadcast task is done, it will be removed from metastore.
 	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
+
+	// SaveReplicateConfiguration saves the replicate configuration to metastore.
+	SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error
+
+	// GetReplicateConfiguration gets the replicate configuration from metastore.
+	GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error)
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

@@ -3,8 +3,10 @@
 package mock_message
 
 import (
-	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -255,20 +257,67 @@ func (_c *MockImmutableTxnMessage_EstimateSize_Call) RunAndReturn(run func() int
 	return _c
 }
 
+// IntoBroadcastMutableMessage provides a mock function with no fields
+func (_m *MockImmutableTxnMessage) IntoBroadcastMutableMessage() message.BroadcastMutableMessage {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IntoBroadcastMutableMessage")
+	}
+
+	var r0 message.BroadcastMutableMessage
+	if rf, ok := ret.Get(0).(func() message.BroadcastMutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.BroadcastMutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IntoBroadcastMutableMessage'
+type MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call struct {
+	*mock.Call
+}
+
+// IntoBroadcastMutableMessage is a helper method to define mock.On call
+func (_e *MockImmutableTxnMessage_Expecter) IntoBroadcastMutableMessage() *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	return &MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call{Call: _e.mock.On("IntoBroadcastMutableMessage")}
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) Run(run func()) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) Return(_a0 message.BroadcastMutableMessage) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) RunAndReturn(run func() message.BroadcastMutableMessage) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IntoImmutableMessageProto provides a mock function with no fields
-func (_m *MockImmutableTxnMessage) IntoImmutableMessageProto() *messagespb.ImmutableMessage {
+func (_m *MockImmutableTxnMessage) IntoImmutableMessageProto() *commonpb.ImmutableMessage {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for IntoImmutableMessageProto")
 	}
 
-	var r0 *messagespb.ImmutableMessage
-	if rf, ok := ret.Get(0).(func() *messagespb.ImmutableMessage); ok {
+	var r0 *commonpb.ImmutableMessage
+	if rf, ok := ret.Get(0).(func() *commonpb.ImmutableMessage); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*messagespb.ImmutableMessage)
+			r0 = ret.Get(0).(*commonpb.ImmutableMessage)
 		}
 	}
 
@@ -292,12 +341,12 @@ func (_c *MockImmutableTxnMessage_IntoImmutableMessageProto_Call) Run(run func()
 	return _c
 }
 
-func (_c *MockImmutableTxnMessage_IntoImmutableMessageProto_Call) Return(_a0 *messagespb.ImmutableMessage) *MockImmutableTxnMessage_IntoImmutableMessageProto_Call {
+func (_c *MockImmutableTxnMessage_IntoImmutableMessageProto_Call) Return(_a0 *commonpb.ImmutableMessage) *MockImmutableTxnMessage_IntoImmutableMessageProto_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockImmutableTxnMessage_IntoImmutableMessageProto_Call) RunAndReturn(run func() *messagespb.ImmutableMessage) *MockImmutableTxnMessage_IntoImmutableMessageProto_Call {
+func (_c *MockImmutableTxnMessage_IntoImmutableMessageProto_Call) RunAndReturn(run func() *commonpb.ImmutableMessage) *MockImmutableTxnMessage_IntoImmutableMessageProto_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -764,6 +813,53 @@ func (_c *MockImmutableTxnMessage_RangeOver_Call) RunAndReturn(run func(func(mes
 	return _c
 }
 
+// ReplicateHeader provides a mock function with no fields
+func (_m *MockImmutableTxnMessage) ReplicateHeader() *message.ReplicateHeader {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicateHeader")
+	}
+
+	var r0 *message.ReplicateHeader
+	if rf, ok := ret.Get(0).(func() *message.ReplicateHeader); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*message.ReplicateHeader)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableTxnMessage_ReplicateHeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplicateHeader'
+type MockImmutableTxnMessage_ReplicateHeader_Call struct {
+	*mock.Call
+}
+
+// ReplicateHeader is a helper method to define mock.On call
+func (_e *MockImmutableTxnMessage_Expecter) ReplicateHeader() *MockImmutableTxnMessage_ReplicateHeader_Call {
+	return &MockImmutableTxnMessage_ReplicateHeader_Call{Call: _e.mock.On("ReplicateHeader")}
+}
+
+func (_c *MockImmutableTxnMessage_ReplicateHeader_Call) Run(run func()) *MockImmutableTxnMessage_ReplicateHeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_ReplicateHeader_Call) Return(_a0 *message.ReplicateHeader) *MockImmutableTxnMessage_ReplicateHeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_ReplicateHeader_Call) RunAndReturn(run func() *message.ReplicateHeader) *MockImmutableTxnMessage_ReplicateHeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Size provides a mock function with no fields
 func (_m *MockImmutableTxnMessage) Size() int {
 	ret := _m.Called()
@@ -992,18 +1088,18 @@ func (_c *MockImmutableTxnMessage_Version_Call) RunAndReturn(run func() message.
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockImmutableTxnMessage) WALName() string {
+func (_m *MockImmutableTxnMessage) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -1026,12 +1122,12 @@ func (_c *MockImmutableTxnMessage_WALName_Call) Run(run func()) *MockImmutableTx
 	return _c
 }
 
-func (_c *MockImmutableTxnMessage_WALName_Call) Return(_a0 string) *MockImmutableTxnMessage_WALName_Call {
+func (_c *MockImmutableTxnMessage_WALName_Call) Return(_a0 message.WALName) *MockImmutableTxnMessage_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockImmutableTxnMessage_WALName_Call) RunAndReturn(run func() string) *MockImmutableTxnMessage_WALName_Call {
+func (_c *MockImmutableTxnMessage_WALName_Call) RunAndReturn(run func() message.WALName) *MockImmutableTxnMessage_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

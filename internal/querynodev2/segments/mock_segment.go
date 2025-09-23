@@ -15,6 +15,8 @@ import (
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
+	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
+
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
@@ -81,6 +83,51 @@ func (_c *MockSegment_BatchPkExist_Call) Return(_a0 []bool) *MockSegment_BatchPk
 }
 
 func (_c *MockSegment_BatchPkExist_Call) RunAndReturn(run func(*storage.BatchLocationsCache) []bool) *MockSegment_BatchPkExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// BloomFilterExist provides a mock function with no fields
+func (_m *MockSegment) BloomFilterExist() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for BloomFilterExist")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_BloomFilterExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BloomFilterExist'
+type MockSegment_BloomFilterExist_Call struct {
+	*mock.Call
+}
+
+// BloomFilterExist is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) BloomFilterExist() *MockSegment_BloomFilterExist_Call {
+	return &MockSegment_BloomFilterExist_Call{Call: _e.mock.On("BloomFilterExist")}
+}
+
+func (_c *MockSegment_BloomFilterExist_Call) Run(run func()) *MockSegment_BloomFilterExist_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_BloomFilterExist_Call) Return(_a0 bool) *MockSegment_BloomFilterExist_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_BloomFilterExist_Call) RunAndReturn(run func() bool) *MockSegment_BloomFilterExist_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -492,12 +539,12 @@ func (_c *MockSegment_GetFieldJSONIndexStats_Call) Run(run func()) *MockSegment_
 	return _c
 }
 
-func (_c *MockSegment_GetFieldJSONIndexStats_Call) Return(_a0 []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) Return(_a0 map[int64]*querypb.JsonStatsInfo) *MockSegment_GetFieldJSONIndexStats_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_GetFieldJSONIndexStats_Call) RunAndReturn(run func() []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) RunAndReturn(run func() map[int64]*querypb.JsonStatsInfo) *MockSegment_GetFieldJSONIndexStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -594,6 +641,100 @@ func (_c *MockSegment_GetIndexByID_Call) Return(_a0 *IndexedFieldInfo) *MockSegm
 }
 
 func (_c *MockSegment_GetIndexByID_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndexByID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetMaxPk provides a mock function with no fields
+func (_m *MockSegment) GetMaxPk() *storage.PrimaryKey {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMaxPk")
+	}
+
+	var r0 *storage.PrimaryKey
+	if rf, ok := ret.Get(0).(func() *storage.PrimaryKey); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.PrimaryKey)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetMaxPk_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaxPk'
+type MockSegment_GetMaxPk_Call struct {
+	*mock.Call
+}
+
+// GetMaxPk is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetMaxPk() *MockSegment_GetMaxPk_Call {
+	return &MockSegment_GetMaxPk_Call{Call: _e.mock.On("GetMaxPk")}
+}
+
+func (_c *MockSegment_GetMaxPk_Call) Run(run func()) *MockSegment_GetMaxPk_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetMaxPk_Call) Return(_a0 *storage.PrimaryKey) *MockSegment_GetMaxPk_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetMaxPk_Call) RunAndReturn(run func() *storage.PrimaryKey) *MockSegment_GetMaxPk_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetMinPk provides a mock function with no fields
+func (_m *MockSegment) GetMinPk() *storage.PrimaryKey {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMinPk")
+	}
+
+	var r0 *storage.PrimaryKey
+	if rf, ok := ret.Get(0).(func() *storage.PrimaryKey); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.PrimaryKey)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetMinPk_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMinPk'
+type MockSegment_GetMinPk_Call struct {
+	*mock.Call
+}
+
+// GetMinPk is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetMinPk() *MockSegment_GetMinPk_Call {
+	return &MockSegment_GetMinPk_Call{Call: _e.mock.On("GetMinPk")}
+}
+
+func (_c *MockSegment_GetMinPk_Call) Run(run func()) *MockSegment_GetMinPk_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetMinPk_Call) Return(_a0 *storage.PrimaryKey) *MockSegment_GetMinPk_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetMinPk_Call) RunAndReturn(run func() *storage.PrimaryKey) *MockSegment_GetMinPk_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1765,6 +1906,39 @@ func (_c *MockSegment_Search_Call) Return(_a0 *segcore.SearchResult, _a1 error) 
 
 func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *segcore.SearchRequest) (*segcore.SearchResult, error)) *MockSegment_Search_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// SetBloomFilter provides a mock function with given fields: bf
+func (_m *MockSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
+	_m.Called(bf)
+}
+
+// MockSegment_SetBloomFilter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBloomFilter'
+type MockSegment_SetBloomFilter_Call struct {
+	*mock.Call
+}
+
+// SetBloomFilter is a helper method to define mock.On call
+//   - bf *pkoracle.BloomFilterSet
+func (_e *MockSegment_Expecter) SetBloomFilter(bf interface{}) *MockSegment_SetBloomFilter_Call {
+	return &MockSegment_SetBloomFilter_Call{Call: _e.mock.On("SetBloomFilter", bf)}
+}
+
+func (_c *MockSegment_SetBloomFilter_Call) Run(run func(bf *pkoracle.BloomFilterSet)) *MockSegment_SetBloomFilter_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*pkoracle.BloomFilterSet))
+	})
+	return _c
+}
+
+func (_c *MockSegment_SetBloomFilter_Call) Return() *MockSegment_SetBloomFilter_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_SetBloomFilter_Call) RunAndReturn(run func(*pkoracle.BloomFilterSet)) *MockSegment_SetBloomFilter_Call {
+	_c.Run(run)
 	return _c
 }
 

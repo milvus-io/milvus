@@ -32,17 +32,6 @@ RUN pip3 install conan==1.64.1
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
-# https://github.com/microsoft/vcpkg/pull/35084
-RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/refs/tags/2023.11.20.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
-    rm -rf vcpkg.tar.gz
-
-ENV VCPKG_FORCE_SYSTEM_BINARIES 1
-
-RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
-
-RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest --only-downloads
-
 RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
     wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-2.el9.`uname -m`.rpm &&\
     wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/c/ccache-4.5.1-2.el9.`uname -m`.rpm &&\

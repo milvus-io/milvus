@@ -143,7 +143,8 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	if len(data.Data) == 0 {
 		return nil
 	}
-	idToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	idToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 
@@ -175,7 +176,13 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 	for i := 0; i < rowNum; i++ {
 		ids[i] = start + int64(i)
 	}
+	pkData, ok := data.Data[pkField.GetFieldID()]
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(task.req.Schema.GetProperties()...)
 	if pkField.GetAutoID() {
+		if allowInsertAutoID && ok && pkData != nil {
+			// if allowInsertAutoID is true, and pkData is not nil, skip generating primary key data
+			return nil
+		}
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
@@ -238,7 +245,8 @@ func IsFillableField(field *schemapb.FieldSchema) bool {
 }
 
 func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
-	for _, field := range schema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for _, field := range allFields {
 		if !IsFillableField(field) {
 			continue
 		}

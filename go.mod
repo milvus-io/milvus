@@ -21,7 +21,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.2-0.20250903080546-f1a74984d9e4
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.3-0.20250918113553-d15826602cc9
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
@@ -58,6 +58,7 @@ require (
 require (
 	cloud.google.com/go/storage v1.50.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
+	github.com/apache/pulsar-client-go v0.15.1
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.62
@@ -72,7 +73,8 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus/pkg/v2 v2.0.0-00010101000000-000000000000
+	github.com/milvus-io/milvus/client/v2 v2.0.0-00010101000000-000000000000
+	github.com/milvus-io/milvus/pkg/v2 v2.5.7
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.24.10
@@ -84,6 +86,7 @@ require (
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
 	mosn.io/holmes v1.0.2
+	mosn.io/pkg v0.0.0-20211217101631-d914102d1baf
 )
 
 require (
@@ -92,6 +95,8 @@ require (
 	github.com/smartystreets/assertions v1.2.0 // indirect
 	github.com/smartystreets/goconvey v1.7.2 // indirect
 )
+
+replace github.com/milvus-io/milvus/client/v2 => ./client
 
 require (
 	cel.dev/expr v0.19.1 // indirect
@@ -116,7 +121,6 @@ require (
 	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
 	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
-	github.com/apache/pulsar-client-go v0.15.1 // indirect
 	github.com/apache/thrift v0.20.0 // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.7 // indirect
@@ -148,6 +152,8 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
+	github.com/dubbogo/getty v1.3.4 // indirect
+	github.com/dubbogo/gost v1.11.16 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dvsekhvalnov/jose2go v1.6.0 // indirect
 	github.com/ebitengine/purego v0.8.1 // indirect
@@ -191,6 +197,7 @@ require (
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/k0kubun/pp v3.0.1+incompatible // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -256,7 +263,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.4 // indirect
+	github.com/zilliztech/woodpecker v0.1.5-0.20250919073140-d96966813dbd // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
@@ -295,7 +302,6 @@ require (
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e // indirect
 	mosn.io/api v0.0.0-20210204052134-5b9a826795fd // indirect
-	mosn.io/pkg v0.0.0-20211217101631-d914102d1baf // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect

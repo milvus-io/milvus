@@ -150,14 +150,13 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  int64_t memory_limit,
                  std::unique_ptr<RowGroupSplitStrategy> strategy,
                  const std::vector<std::vector<int64_t>>& row_group_lists,
+                 const milvus_storage::ArrowFileSystemPtr& fs,
                  const std::shared_ptr<arrow::Schema> schema,
                  milvus::proto::common::LoadPriority priority) {
     try {
         AssertInfo(remote_files.size() == row_group_lists.size(),
                    "[StorageV2] Number of remote files must match number of "
                    "row group lists");
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
         auto& pool =
             ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 

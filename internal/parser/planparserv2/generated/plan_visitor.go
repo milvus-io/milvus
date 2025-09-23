@@ -94,6 +94,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Unary.
 	VisitUnary(ctx *UnaryContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TimestamptzCompare.
+	VisitTimestamptzCompare(ctx *TimestamptzCompareContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Integer.
 	VisitInteger(ctx *IntegerContext) interface{}
 

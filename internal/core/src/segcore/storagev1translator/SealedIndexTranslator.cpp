@@ -39,9 +39,17 @@ SealedIndexTranslator::SealedIndexTranslator(
           milvus::segcore::getCellDataType(
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          milvus::segcore::getCacheWarmupPolicy(
-              /* is_vector */ IsVectorDataType(load_index_info->field_type),
-              /* is_index */ true),
+          // if index data supports lazy load internally, we always use sync for index metadata
+          // warmup policy will be used for index internally
+          // currently only vector index is possible to support lazy load
+          (IsVectorDataType(load_index_info->field_type) &&
+           knowhere::IndexFactory::Instance().FeatureCheck(
+               index_info_.index_type, knowhere::feature::LAZY_LOAD))
+              ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
+              : milvus::segcore::getCacheWarmupPolicy(
+                    /* is_vector */ IsVectorDataType(
+                        load_index_info->field_type),
+                    /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load
@@ -75,8 +83,10 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.num_rows,
             index_load_info_.dim);
     // this is an estimation, error could be up to 20%.
-    return {{request.final_memory_cost, request.final_disk_cost},
-            {request.max_memory_cost, request.max_disk_cost}};
+    return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
+                                                request.final_disk_cost),
+            milvus::cachinglayer::ResourceUsage(request.max_memory_cost,
+                                                request.max_disk_cost * 2)};
 }
 
 const std::string&
@@ -100,7 +110,8 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
             index_load_info_.dim);
-    index->SetCellSize({request.final_memory_cost, request.final_disk_cost});
+    index->SetCellSize(milvus::cachinglayer::ResourceUsage(
+        request.final_memory_cost, request.final_disk_cost));
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");

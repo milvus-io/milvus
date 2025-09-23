@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -22,13 +23,14 @@ type (
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
 	ChannelInfo            types.PChannelInfo
-	WAL                    *syncutil.Future[wal.WAL]  // The wal final object, can be used after interceptor is ready.
-	LastTimeTickMessage    message.ImmutableMessage   // The last time tick message in wal.
-	WriteAheadBuffer       *wab.WriteAheadBuffer      // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
-	MVCCManager            *mvcc.MVCCManager          // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
-	InitialRecoverSnapshot *recovery.RecoverySnapshot // The initial recover snapshot for the wal, used to recover the wal state.
-	TxnManager             *txn.TxnManager            // The transaction manager for the wal, used to manage the transactions.
-	ShardManager           shards.ShardManager        // The shard manager for the wal, used to manage the shards, segment assignment, partition.
+	WAL                    *syncutil.Future[wal.WAL]   // The wal final object, can be used after interceptor is ready.
+	LastTimeTickMessage    message.ImmutableMessage    // The last time tick message in wal.
+	WriteAheadBuffer       *wab.WriteAheadBuffer       // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
+	MVCCManager            *mvcc.MVCCManager           // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
+	InitialRecoverSnapshot *recovery.RecoverySnapshot  // The initial recover snapshot for the wal, used to recover the wal state.
+	TxnManager             *txn.TxnManager             // The transaction manager for the wal, used to manage the transactions.
+	ShardManager           shards.ShardManager         // The shard manager for the wal, used to manage the shards, segment assignment, partition.
+	ReplicateManager       replicates.ReplicateManager // The replicates manager for the wal, used to manage the replicates.
 }
 
 // Clear release the resources in the interceptor build param.

@@ -33,7 +33,6 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
-        test_c_api.cpp
         test_loading.cpp
         test_exec.cpp
         test_expr_materialized_view.cpp
@@ -74,7 +73,8 @@ if (NOT (LINUX OR APPLE))
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ExprArrayTest\\.cpp$")
 endif()
 
-if (DEFINED AZURE_BUILD_DIR)
+if (ENABLE_AZURE_FS)
+    set(AZURE_BUILD_DIR ON)
     add_definitions(-DAZURE_BUILD_DIR)
 else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "AzureChunkManagerTest\\.cpp$")

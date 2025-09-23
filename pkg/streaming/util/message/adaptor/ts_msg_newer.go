@@ -149,3 +149,31 @@ func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, 
 		SchemaChangeMessage: schChgMsg,
 	}, nil
 }
+
+type AlterCollectionMessageBody struct {
+	*tsMsgImpl
+	AlterCollectionMessage message.ImmutableAlterCollectionMessageV2
+}
+
+func (p *AlterCollectionMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewAlterCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	alterCollMsg, err := message.AsImmutableAlterCollectionMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &AlterCollectionMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		AlterCollectionMessage: alterCollMsg,
+	}, nil
+}

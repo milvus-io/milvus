@@ -17,6 +17,7 @@
 package storagecommon
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -35,6 +36,10 @@ type ColumnGroup struct {
 	Fields  []int64
 }
 
+func (cg ColumnGroup) String() string {
+	return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v]", cg.GroupID, cg.Columns, cg.Fields)
+}
+
 func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, policies ...ColumnGroupSplitPolicy) []ColumnGroup {
 	split := newCurrentSplit(fields, stats)
 	for _, policy := range policies {
@@ -50,7 +55,9 @@ func DefaultPolicies() []ColumnGroupSplitPolicy {
 	paramtable.Init()
 	result := make([]ColumnGroupSplitPolicy, 0, 4)
 	if paramtable.Get().CommonCfg.Stv2SplitSystemColumn.GetAsBool() {
-		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool()))
+		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludePartitionKey.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludeClusteringKey.GetAsBool()))
 	}
 	if paramtable.Get().CommonCfg.Stv2SplitByAvgSize.GetAsBool() {
 		result = append(result, NewAvgSizePolicy(paramtable.Get().CommonCfg.Stv2SplitAvgSizeThreshold.GetAsInt64()))

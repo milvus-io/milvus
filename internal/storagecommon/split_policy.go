@@ -96,11 +96,17 @@ func NewSelectedDataTypePolicy() ColumnGroupSplitPolicy {
 // systemColumnPolicy split system columns to a new column group
 // if includePK is true, system columns include primary key column.
 type systemColumnPolicy struct {
-	includePK bool
+	includePrimaryKey    bool
+	includePartitionKey  bool
+	includeClusteringKey bool
 }
 
-func NewSystemColumnPolicy(includePK bool) ColumnGroupSplitPolicy {
-	return &systemColumnPolicy{includePK: includePK}
+func NewSystemColumnPolicy(includePK bool, includePartKey bool, includeClusteringKey bool) ColumnGroupSplitPolicy {
+	return &systemColumnPolicy{
+		includePrimaryKey:    includePK,
+		includePartitionKey:  includePartKey,
+		includeClusteringKey: includeClusteringKey,
+	}
 }
 
 func (p *systemColumnPolicy) Split(currentSplit *currentSplit) *currentSplit {
@@ -109,7 +115,9 @@ func (p *systemColumnPolicy) Split(currentSplit *currentSplit) *currentSplit {
 
 	currentSplit.Range(func(idx int, field *schemapb.FieldSchema) {
 		if field.GetFieldID() < common.StartOfUserFieldID ||
-			(p.includePK && field.GetIsPrimaryKey()) {
+			(p.includePrimaryKey && field.GetIsPrimaryKey()) ||
+			(p.includePartitionKey && field.GetIsPartitionKey()) ||
+			(p.includeClusteringKey && field.GetIsClusteringKey()) {
 			systemFields = append(systemFields, field.GetFieldID())
 			systemFieldIndices = append(systemFieldIndices, idx)
 		}

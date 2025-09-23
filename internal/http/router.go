@@ -64,6 +64,22 @@ const (
 	RouteCheckQueryNodeDistribution = "/management/querycoord/distribution/check"
 )
 
+const (
+	BatchBalanceStatusPath    = "/management/batch/balance/status"
+	BatchNodesPath            = "/management/batch/nodes"
+	BatchNodeStatusPath       = "/management/batch/nodes/status"
+	BatchNodeDistributionPath = "/management/batch/nodes/distribution"
+	BatchTransferPath         = "/management/batch/transfer"
+
+	StreamingBalanceStatusPath    = "/management/streaming/balance/status"
+	StreamingNodesPath            = "/management/streaming/nodes"
+	StreamingNodeStatusPath       = "/management/streaming/nodes/status"
+	StreamingNodeDistributionPath = "/management/streaming/nodes/distribution"
+	StreamingTransferPath         = "/management/streaming/transfer"
+
+	DataGCPath = "/management/data_gc"
+)
+
 // for WebUI restful api root path
 const (
 	// ClusterInfoPath is the path to get cluster information.

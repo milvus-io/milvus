@@ -145,9 +145,6 @@ while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
   y)
     USE_DYNAMIC_SIMD=$OPTARG
     ;;
-  Z)
-    BUILD_WITHOUT_AZURE="on"
-    ;;
   x)
     INDEX_ENGINE=$OPTARG
     ;;

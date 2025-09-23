@@ -146,6 +146,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
+
+		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
+		params.Save("common.clusterID", "32")
+		assert.Panics(t, func() {
+			params.CommonCfg.ClusterID.GetAsInt()
+		})
+		params.Save("common.clusterID", "0")
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -393,6 +400,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+
+		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -493,6 +502,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
+		assert.Equal(t, true, Params.EnableSparseFilterInQuery.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 

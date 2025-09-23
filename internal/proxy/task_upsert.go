@@ -223,7 +223,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	defer func() {
 		sp.End()
 	}()
-	queryResult, err := t.node.(*Proxy).query(ctx, qt, sp)
+	// ignore storage cost?
+	queryResult, _, err := t.node.(*Proxy).query(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, err
 	}
@@ -767,7 +768,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
-	rowIDBegin, rowIDEnd, _ := it.idAllocator.Alloc(rowNums)
+	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	rowIDBegin, rowIDEnd, _ := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)

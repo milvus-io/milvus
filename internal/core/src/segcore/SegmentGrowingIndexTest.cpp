@@ -493,8 +493,8 @@ TEST_P(GrowingIndexTest, GetVector) {
                             dataset.raw_);
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
-            auto result =
-                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            auto result = segment->bulk_subscript(
+                nullptr, vec, ids_ds->GetIds(), num_inserted);
 
             auto vector =
                 result.get()->mutable_vectors()->float_vector().data();
@@ -520,8 +520,8 @@ TEST_P(GrowingIndexTest, GetVector) {
                             dataset.raw_);
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
-            auto result =
-                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            auto result = segment->bulk_subscript(
+                nullptr, vec, ids_ds->GetIds(), num_inserted);
             auto vector = result.get()->mutable_vectors()->float16_vector();
             EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));
             for (size_t i = 0; i < num_inserted; ++i) {
@@ -546,8 +546,8 @@ TEST_P(GrowingIndexTest, GetVector) {
                             dataset.raw_);
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
-            auto result =
-                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            auto result = segment->bulk_subscript(
+                nullptr, vec, ids_ds->GetIds(), num_inserted);
 
             auto vector = result.get()->mutable_vectors()->bfloat16_vector();
             EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(bfloat16));
@@ -574,8 +574,8 @@ TEST_P(GrowingIndexTest, GetVector) {
                             dataset.raw_);
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
-            auto result =
-                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            auto result = segment->bulk_subscript(
+                nullptr, vec, ids_ds->GetIds(), num_inserted);
 
             auto vector = result.get()
                               ->mutable_vectors()

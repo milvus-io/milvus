@@ -19,6 +19,7 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
 
@@ -234,12 +235,28 @@ const (
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 	NamespaceEnabledKey        = "namespace.enabled"
+
+	// timezone releated
+	DatabaseDefaultTimezone   = "database.timezone"
+	CollectionDefaultTimezone = "collection.timezone"
+	AllowInsertAutoIDKey      = "allow_insert_auto_id"
 )
 
 const (
 	PropertiesKey        string = "properties"
 	TraceIDKey           string = "uber-trace-id"
 	ClientRequestMsecKey string = "client-request-unixmsec"
+)
+
+// Timestamptz field
+const (
+	TszYear        string = "year"
+	TszMonth       string = "month"
+	TszDay         string = "day"
+	TszHour        string = "hour"
+	TszMinute      string = "minute"
+	TszSecond      string = "second"
+	TszMicrosecond string = "microsecond"
 )
 
 func IsSystemField(fieldID int64) bool {
@@ -514,4 +531,26 @@ func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, 
 		}
 	}
 	return false, false, nil
+}
+
+func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
+	idStart, idEnd, err := allocFunc(rowNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	reversed := bits.Reverse64(clusterID)
+	// right shift by 1 to preserve sign bit
+	reversed = reversed >> 1
+
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
+func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.Key == AllowInsertAutoIDKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
+		}
+	}
+	return false, false
 }

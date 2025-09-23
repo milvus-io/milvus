@@ -694,6 +694,8 @@ WriteOptFieldIvfData(
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
         case DataType::INT32:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
+        case DataType::TIMESTAMPTZ:
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::TIMESTAMPTZ);
         case DataType::INT64:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
         case DataType::FLOAT:

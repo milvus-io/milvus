@@ -216,7 +216,7 @@ TEST_P(ExprTest, InvalidRange) {
 }
 
 TEST_P(ExprTest, ShowExecutor) {
-    auto node = std::make_unique<FloatVectorANNS>();
+    auto node = std::make_unique<VectorPlanNode>();
     auto schema = std::make_shared<Schema>();
     auto field_id =
         schema->AddDebugField("fakevec", data_type, 16, metric_type);

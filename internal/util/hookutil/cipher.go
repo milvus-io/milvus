@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"plugin"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -100,10 +101,6 @@ func ContainsCipherProperties(properties []*commonpb.KeyValuePair, deletedKeys [
 
 func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID int64) *EZ {
 	if len(collProperties) == 0 {
-		log.Warn("GetEzByCollProperties empty properties",
-			zap.Any("insertCodec collID", collectionID),
-			zap.Any("properties", collProperties),
-		)
 		return nil
 	}
 	for _, property := range collProperties {
@@ -230,7 +227,7 @@ func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 }
 
 func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
-	dbEncryptionEnabled := IsDBEncyptionEnabled(dbProperties)
+	dbEncryptionEnabled := IsDBEncryptionEnabled(dbProperties)
 	if GetCipher() == nil {
 		if dbEncryptionEnabled {
 			return nil, ErrCipherPluginMissing
@@ -279,9 +276,9 @@ func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 	return nil
 }
 
-func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
+func IsDBEncryptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEnabledKey {
+		if property.Key == EncryptionEnabledKey && strings.ToLower(property.Value) == "true" {
 			return true
 		}
 	}

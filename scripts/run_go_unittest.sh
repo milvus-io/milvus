@@ -139,7 +139,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/root
 
 function test_datacoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -v -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querycoord()
@@ -172,6 +172,10 @@ function test_mixcoord() {
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/mixcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
+function test_cdc() {
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/cdc/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+}
+
 function test_all()
 {
 test_proxy
@@ -191,6 +195,7 @@ test_metastore
 test_cmd
 test_streaming
 test_mixcoord
+test_cdc
 }
 
 
@@ -249,6 +254,9 @@ case "${TEST_TAG}" in
         ;;
     mixcoord)
 	test_mixcoord
+        ;;
+    cdc)
+	test_cdc
         ;;
     *)   echo "Test All";
 	test_all

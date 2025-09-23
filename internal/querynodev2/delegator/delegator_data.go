@@ -498,7 +498,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 	}
 
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
 	if err != nil {
 		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
 		return err

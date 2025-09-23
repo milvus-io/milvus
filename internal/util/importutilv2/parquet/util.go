@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -65,7 +67,9 @@ func WrapNullElementErr(field *schemapb.FieldSchema) error {
 }
 
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
-	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+	// Create map for all fields including sub-fields from StructArrayFields
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	nameToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
 
@@ -82,6 +86,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	// this loop is for "how many fields are provided by this parquet file?"
 	readFields := make(map[string]int64)
 	crs := make(map[int64]*FieldReader)
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
 		if !ok {
@@ -90,7 +95,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 
 		// auto-id field must not provided
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) && !allowInsertAutoID {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
@@ -285,6 +290,19 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		}), nil
+	case schemapb.DataType_ArrayOfVector:
+		// VectorArrayToArrowType now returns the element type (e.g., float32)
+		// We wrap it in a single list to get list<float32> (flattened)
+		elemType, err := storage.VectorArrayToArrowType(field.GetElementType())
+		if err != nil {
+			return nil, err
+		}
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     elemType,
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %v", dataType.String())
 	}
@@ -293,8 +311,11 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 // This method is used only by import util and related tests. Returned arrow.Schema
 // doesn't include function output fields.
 func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
-	arrFields := make([]arrow.Field, 0)
-	for _, field := range schema.GetFields() {
+	// Get all fields including struct sub-fields
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	arrFields := make([]arrow.Field, 0, len(allFields))
+
+	for _, field := range allFields {
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
@@ -321,10 +342,15 @@ func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bo
 }
 
 func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) error {
+	// Get all fields including struct sub-fields
+	allFields := typeutil.GetAllFieldSchemas(schema)
+
 	arrNameToField := lo.KeyBy(arrSchema.Fields(), func(field arrow.Field) string {
 		return field.Name
 	})
-	for _, field := range schema.GetFields() {
+
+	// Check all fields (including struct sub-fields which are stored as separate columns)
+	for _, field := range allFields {
 		// ignore autoPKField and functionOutputField
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue

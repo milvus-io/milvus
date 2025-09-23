@@ -40,11 +40,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -62,6 +65,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -1737,7 +1741,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	}, nil
 }
 
-func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (resp *milvuspb.GetLoadStateResponse, err error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetLoadStateResponse{Status: merr.Status(err)}, nil
 	}
@@ -1771,7 +1775,10 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	defer func() {
 		log.Debug(
 			rpcDone(method),
-			zap.Any("request", request))
+			zap.Any("request", request),
+			zap.Any("response", resp),
+			zap.Error(err),
+		)
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
@@ -2874,6 +2881,20 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Add(float64(qt.storageCost.ScannedRemoteBytes))
+
+	metrics.ProxyScannedTotalBytes.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Add(float64(qt.storageCost.ScannedTotalBytes))
+
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.result)
@@ -2886,6 +2907,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -3081,6 +3103,20 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Add(float64(qt.storageCost.ScannedRemoteBytes))
+
+	metrics.ProxyScannedTotalBytes.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Add(float64(qt.storageCost.ScannedTotalBytes))
+
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
 		username := GetCurUserFromContextOrDefault(ctx)
@@ -3093,6 +3129,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
@@ -3220,14 +3257,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 }
 
 // Query get the records by primary keys.
-func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, error) {
+func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.request
 	method := "Query"
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	log := log.Ctx(ctx).With(
@@ -3285,7 +3322,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
 
@@ -3298,7 +3335,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	if !qt.reQuery {
@@ -3321,9 +3358,23 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes))
+
+		metrics.ProxyScannedTotalBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes))
 	}
 
-	return qt.result, nil
+	return qt.result, qt.storageCost, nil
 }
 
 // Query get the records by primary keys.
@@ -3370,7 +3421,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	defer sp.End()
 	method := "Query"
 
-	res, err := node.query(ctx, qt, sp)
+	res, storageCost, err := node.query(ctx, qt, sp)
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
@@ -3388,6 +3439,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.RelatedCntKey:      qt.allQueryCnt,
 	})
 	SetReportValue(res.Status, v)
+	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if log.Ctx(ctx).Core().Enabled(zap.DebugLevel) && matchCountRule(request.GetOutputFields()) {
@@ -3752,15 +3804,12 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	log.Debug(
 		rpcDone(method),
-		zap.Uint64("FlushAllTs", ft.result.GetFlushTs()),
+		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &milvuspb.FlushAllResponse{
-		Status:     merr.Success(),
-		FlushAllTs: ft.result.GetFlushTs(),
-	}, nil
+	return ft.result, nil
 }
 
 // GetDdChannel returns the used channel for dd operations.
@@ -6444,4 +6493,87 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 
 	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
 	return resp, nil
+}
+
+// UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
+func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateReplicateConfiguration")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
+	if err != nil {
+		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	return merr.Status(nil), nil
+}
+
+// GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
+// TODO: sheep, only get target checkpoint
+func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (resp *milvuspb.GetReplicateInfoResponse, err error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateInfo")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return nil, err
+	}
+
+	logger := log.Ctx(ctx).With(zap.String("sourceClusterID", req.GetSourceClusterId()))
+	logger.Info("GetReplicateInfo received")
+	defer func() {
+		if err != nil {
+			logger.Warn("GetReplicateInfo fail", zap.Error(err))
+		} else {
+			logger.Info("GetReplicateInfo success", zap.Any("checkpoints", resp.GetCheckpoints()))
+		}
+	}()
+
+	configHelper, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	currentCluster := configHelper.GetCurrentCluster()
+
+	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
+	for _, pchannel := range currentCluster.GetPchannels() {
+		checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, pchannel)
+		if err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, checkpoint.IntoProto())
+	}
+	return &milvuspb.GetReplicateInfoResponse{
+		Checkpoints: checkpoints,
+	}, nil
+}
+
+// CreateReplicateStream establishes a replication stream on the target Milvus cluster.
+func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+	ctx := stream.Context()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateReplicateStream")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("replicate stream created")
+	defer func() {
+		if err != nil {
+			log.Ctx(ctx).Warn("replicate stream closed with error", zap.Error(err))
+		} else {
+			log.Ctx(ctx).Info("replicate stream closed")
+		}
+	}()
+
+	s, err := replicate.CreateReplicateServer(stream)
+	if err != nil {
+		return err
+	}
+	return s.Execute()
 }

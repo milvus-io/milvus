@@ -99,6 +99,10 @@ class ProtoParser {
     ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseTimestamptzArithCompareExprs(
+        const proto::plan::TimestamptzArithCompareExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void

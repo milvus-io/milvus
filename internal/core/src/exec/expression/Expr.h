@@ -23,6 +23,7 @@
 
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
@@ -41,7 +42,8 @@ namespace exec {
 enum class FilterType { sequential = 0, random = 1 };
 
 inline std::vector<PinWrapper<const index::IndexBase*>>
-PinIndex(const segcore::SegmentInternalInterface* segment,
+PinIndex(milvus::OpContext* op_ctx,
+         const segcore::SegmentInternalInterface* segment,
          const FieldMeta& field_meta,
          const std::vector<std::string>& path = {},
          DataType data_type = DataType::NONE,
@@ -49,10 +51,14 @@ PinIndex(const segcore::SegmentInternalInterface* segment,
          bool is_array = false) {
     if (field_meta.get_data_type() == DataType::JSON) {
         auto pointer = milvus::Json::pointer(path);
-        return segment->PinJsonIndex(
-            field_meta.get_id(), pointer, data_type, any_type, is_array);
+        return segment->PinJsonIndex(op_ctx,
+                                     field_meta.get_id(),
+                                     pointer,
+                                     data_type,
+                                     any_type,
+                                     is_array);
     } else {
-        return segment->PinIndex(field_meta.get_id());
+        return segment->PinIndex(op_ctx, field_meta.get_id());
     }
 }
 
@@ -60,8 +66,12 @@ class Expr {
  public:
     Expr(DataType type,
          const std::vector<std::shared_ptr<Expr>>&& inputs,
-         const std::string& name)
-        : type_(type), inputs_(std::move(inputs)), name_(name) {
+         const std::string& name,
+         milvus::OpContext* op_ctx)
+        : type_(type),
+          inputs_(std::move(inputs)),
+          name_(name),
+          op_ctx_(op_ctx) {
     }
 
     virtual ~Expr() = default;
@@ -120,6 +130,7 @@ class Expr {
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
+    milvus::OpContext* op_ctx_;
 
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
@@ -135,6 +146,7 @@ class SegmentExpr : public Expr {
  public:
     SegmentExpr(const std::vector<ExprPtr>&& input,
                 const std::string& name,
+                milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId field_id,
                 const std::vector<std::string> nested_path,
@@ -144,7 +156,7 @@ class SegmentExpr : public Expr {
                 int32_t consistency_level,
                 bool allow_any_json_cast_type = false,
                 bool is_json_contains = false)
-        : Expr(DataType::BOOL, std::move(input), name),
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
           field_id_(field_id),
           nested_path_(nested_path),
@@ -175,7 +187,8 @@ class SegmentExpr : public Expr {
             pk_type_ = field_meta.get_data_type();
         }
 
-        pinned_index_ = PinIndex(segment_,
+        pinned_index_ = PinIndex(op_ctx_,
+                                 segment_,
                                  field_meta,
                                  nested_path_,
                                  value_type_,
@@ -344,7 +357,7 @@ class SegmentExpr : public Expr {
 
         auto& skip_index = segment_->GetSkipIndex();
         auto pw = segment_->get_batch_views<T>(
-            field_id_, 0, current_data_chunk_pos_, need_size);
+            op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
@@ -381,7 +394,8 @@ class SegmentExpr : public Expr {
         Assert(num_data_chunk_ == 1);
 
         auto& skip_index = segment_->GetSkipIndex();
-        auto pw = segment_->get_views_by_offsets<T>(field_id_, 0, *input);
+        auto pw =
+            segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
@@ -503,7 +517,10 @@ class SegmentExpr : public Expr {
                         auto [chunk_id, chunk_offset] =
                             segment_->get_chunk_by_offset(field_id_, offset);
                         auto pw = segment_->get_views_by_offsets<T>(
-                            field_id_, chunk_id, {int32_t(chunk_offset)});
+                            op_ctx_,
+                            field_id_,
+                            chunk_id,
+                            {int32_t(chunk_offset)});
                         auto [data_vec, valid_data] = pw.get();
                         if (!skip_func ||
                             !skip_func(skip_index, field_id_, chunk_id)) {
@@ -527,7 +544,8 @@ class SegmentExpr : public Expr {
                     int64_t offset = (*input)[i];
                     auto [chunk_id, chunk_offset] =
                         segment_->get_chunk_by_offset(field_id_, offset);
-                    auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                    auto pw =
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + chunk_offset;
                     const bool* valid_data = chunk.valid_data();
@@ -560,7 +578,7 @@ class SegmentExpr : public Expr {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
-                auto pw = segment_->chunk_data<T>(field_id_, 0);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, 0);
                 auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
@@ -583,7 +601,7 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const T* data = chunk.data() + chunk_offset;
                 const bool* valid_data = chunk.valid_data();
@@ -643,7 +661,7 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
 
             auto& skip_index = segment_->GetSkipIndex();
-            auto pw = segment_->chunk_data<T>(field_id_, i);
+            auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
             auto chunk = pw.get();
             const bool* valid_data = chunk.valid_data();
             if (valid_data != nullptr) {
@@ -716,7 +734,7 @@ class SegmentExpr : public Expr {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
-                            field_id_, i, data_pos, size);
+                            op_ctx_, field_id_, i, data_pos, size);
                         auto [data_vec, valid_data] = pw.get();
 
                         func(data_vec.data(),
@@ -730,7 +748,7 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (!is_seal) {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + data_pos;
                     const bool* valid_data = chunk.valid_data();
@@ -751,14 +769,14 @@ class SegmentExpr : public Expr {
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
-                        field_id_, i, data_pos, size);
+                        op_ctx_, field_id_, i, data_pos, size);
                     valid_data = pw.get().second.data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
@@ -1065,7 +1083,7 @@ class SegmentExpr : public Expr {
                         return {0, offset};
                     }
                 }();
-                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data != nullptr) {
@@ -1110,7 +1128,7 @@ class SegmentExpr : public Expr {
                           std::is_same_v<T, ArrayView>) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<T>(
-                        field_id_, i, data_pos, size);
+                        op_ctx_, field_id_, i, data_pos, size);
                     auto [data_vec, valid_data] = pw.get();
                     ApplyValidData(valid_data.data(),
                                    valid_result + processed_size,
@@ -1121,7 +1139,7 @@ class SegmentExpr : public Expr {
             }
 
             if (!access_sealed_variable_column) {
-                auto pw = segment_->chunk_data<T>(field_id_, i);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                 auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data == nullptr) {
@@ -1289,7 +1307,7 @@ class SegmentExpr : public Expr {
     HasJsonStats(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
                static_cast<const segcore::SegmentSealed*>(segment_)
-                       ->GetJsonStats(field_id) != nullptr;
+                       ->GetJsonStats(op_ctx_, field_id) != nullptr;
     }
 
     bool

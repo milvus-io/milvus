@@ -1706,6 +1706,25 @@ func TestManualCompaction(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockTriggerManager := NewMockTriggerManager(t)
+		svr.compactionTriggerManager = mockTriggerManager
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		svr.compactionInspector = mockHandler
+		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+			CollectionID: 1,
+			Timetravel:   1,
+			L0Compaction: true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)

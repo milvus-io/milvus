@@ -104,7 +104,8 @@ func EstimateAvgSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 
 func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLengthPolicy) (int, error) {
 	res := 0
-	for _, fs := range schema.Fields {
+	allFields := GetAllFieldSchemas(schema)
+	for _, fs := range allFields {
 		switch fs.DataType {
 		case schemapb.DataType_Bool, schemapb.DataType_Int8:
 			res++
@@ -169,6 +170,31 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 					res += v
 					break
 				}
+			}
+		case schemapb.DataType_ArrayOfVector:
+			dim := 0
+			for _, kv := range fs.TypeParams {
+				if kv.Key == common.DimKey {
+					v, err := strconv.Atoi(kv.Value)
+					if err != nil {
+						return -1, err
+					}
+					dim = v
+				}
+			}
+			assumedArrayLen := 10
+			// Estimate size based on element type
+			switch fs.ElementType {
+			case schemapb.DataType_FloatVector:
+				res += assumedArrayLen * dim * 4
+			case schemapb.DataType_BinaryVector:
+				res += assumedArrayLen * (dim / 8)
+			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+				res += assumedArrayLen * dim * 2
+			case schemapb.DataType_Int8Vector:
+				res += assumedArrayLen * dim
+			default:
+				return 0, fmt.Errorf("unsupported element type in VectorArray: %s", fs.ElementType.String())
 			}
 		}
 	}
@@ -570,7 +596,8 @@ func IsVectorArrayType(dataType schemapb.DataType) bool {
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64:
+		schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Timestamptz:
 		return true
 	default:
 		return false

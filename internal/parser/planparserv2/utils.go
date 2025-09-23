@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cockroachdb/errors"
@@ -786,4 +787,76 @@ func decodeUnicode(input string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
+}
+
+func parseISODuration(durationStr string) (*planpb.Interval, error) {
+	iso8601DurationRegex := regexp.MustCompile(
+		`^P` + // P at the start
+			`(?:(\d+)Y)?` + // Years (optional)
+			`(?:(\d+)M)?` + // Months (optional)
+			`(?:(\d+)D)?` + // Days (optional)
+			`(?:T` + // T separator (optional, but required for time parts)
+			`(?:(\d+)H)?` + // Hours (optional)
+			`(?:(\d+)M)?` + // Minutes (optional)
+			`(?:(\d+)S)?` + // Seconds (optional)
+			`)?$`,
+	)
+	matches := iso8601DurationRegex.FindStringSubmatch(durationStr)
+	if matches == nil {
+		return nil, fmt.Errorf("invalid ISO 8601 duration: %s", durationStr)
+	}
+
+	interval := &planpb.Interval{}
+	targets := []struct {
+		fieldPtr *int64
+		unitName string
+	}{
+		{fieldPtr: &interval.Years, unitName: "year"},
+		{fieldPtr: &interval.Months, unitName: "month"},
+		{fieldPtr: &interval.Days, unitName: "day"},
+		{fieldPtr: &interval.Hours, unitName: "hour"},
+		{fieldPtr: &interval.Minutes, unitName: "minute"},
+		{fieldPtr: &interval.Seconds, unitName: "second"},
+	}
+
+	for i, target := range targets {
+		matchIndex := i + 1
+		if matches[matchIndex] != "" {
+			value, err := strconv.ParseInt(matches[matchIndex], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s value '%s' in duration: %w", target.unitName, matches[matchIndex], err)
+			}
+			*target.fieldPtr = value
+		}
+	}
+
+	return interval, nil
+}
+
+func parseISOWithTimezone(isoString string, preferredZones []string) (int64, error) {
+	timeZoneOffsetRegex := regexp.MustCompile(`([+-]\d{2}:\d{2}|Z)$`)
+	// layout for timestamp string without timezone
+	const layoutForNaiveTime = "2025-01-02T15:04:05.999999999"
+	if timeZoneOffsetRegex.MatchString(isoString) { // has timezone
+		t, err := time.Parse(time.RFC3339Nano, isoString)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse timezone-aware string '%s': %w", isoString, err)
+		}
+		return t.UnixMicro(), nil
+	}
+	for _, zoneName := range preferredZones {
+		loc, err := time.LoadLocation(zoneName)
+		if err != nil {
+			continue
+		}
+		t, err := time.ParseInLocation(layoutForNaiveTime, isoString, loc)
+		if err == nil {
+			return t.UnixMicro(), nil
+		}
+	}
+	t, err := time.ParseInLocation(layoutForNaiveTime, isoString, time.UTC)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse naive time string '%s' even with UTC fallback: %w", isoString, err)
+	}
+	return t.UnixMicro(), nil
 }

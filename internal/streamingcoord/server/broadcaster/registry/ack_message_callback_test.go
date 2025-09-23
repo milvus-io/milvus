@@ -23,7 +23,7 @@ func TestMessageCallbackRegistration(t *testing.T) {
 		return nil
 	}
 
-	RegisterDropPartitionMessageV1AckCallback(callback)
+	RegisterDropPartitionV1AckCallback(callback)
 
 	// Verify callback was registered
 	callbackFuture, ok := messageAckCallbacks[message.MessageTypeDropPartitionV1]

@@ -11,6 +11,7 @@
 
 #include "index/JsonInvertedIndex.h"
 #include <string>
+#include <shared_mutex>
 #include <string_view>
 #include <type_traits>
 #include "common/EasyAssert.h"
@@ -84,7 +85,7 @@ JsonInvertedIndex<T>::Exists() {
     };
 
     if (this->is_growing_) {
-        folly::SharedMutex::ReadHolder lock(this->mutex_);
+        std::shared_lock<folly::SharedMutex> lock(this->mutex_);
         fill_bitset();
     } else {
         fill_bitset();

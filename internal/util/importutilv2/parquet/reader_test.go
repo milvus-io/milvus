@@ -635,6 +635,120 @@ func TestParquetReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
 
+func TestParquetReaderWithStructArray(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("test struct array field reading", func(t *testing.T) {
+		// Create schema with StructArrayField
+		schema := &schemapb.CollectionSchema{
+			Name: "test_struct_array",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "varchar_field",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "100"},
+					},
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 200,
+					Name:    "struct_array",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     201,
+							Name:        "int_array",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.MaxCapacityKey, Value: "20"},
+							},
+						},
+						{
+							FieldID:     202,
+							Name:        "float_array",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Float,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.MaxCapacityKey, Value: "20"},
+							},
+						},
+						{
+							FieldID:     203,
+							Name:        "vector_array",
+							DataType:    schemapb.DataType_ArrayOfVector,
+							ElementType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "4"},
+								{Key: common.MaxCapacityKey, Value: "20"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Create test data file
+		filePath := fmt.Sprintf("/tmp/test_struct_array_%d.parquet", rand.Int())
+		defer os.Remove(filePath)
+
+		numRows := 10
+		f, err := os.Create(filePath)
+		assert.NoError(t, err)
+
+		// Use writeParquet to create test file
+		insertData, err := writeParquet(f, schema, numRows, 0)
+		assert.NoError(t, err)
+		f.Close()
+
+		// Verify the insert data contains struct fields
+		assert.Contains(t, insertData.Data, int64(201)) // int_array field
+		assert.Contains(t, insertData.Data, int64(202)) // float_array field
+		assert.Contains(t, insertData.Data, int64(203)) // vector_array field
+
+		// Now test reading the file using ChunkManager
+		factory := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp"))
+		cm, err := factory.NewPersistentStorageChunkManager(ctx)
+		assert.NoError(t, err)
+
+		reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		// Read data
+		readData, err := reader.Read()
+		assert.NoError(t, err)
+		assert.NotNil(t, readData)
+
+		// Verify the data includes struct fields
+		assert.Contains(t, readData.Data, int64(201)) // int_array field ID
+		assert.Contains(t, readData.Data, int64(202)) // float_array field ID
+		assert.Contains(t, readData.Data, int64(203)) // vector_array field ID
+
+		// Check row count matches
+		assert.Equal(t, numRows, readData.Data[100].RowNum()) // id field
+		assert.Equal(t, numRows, readData.Data[101].RowNum()) // varchar_field
+		assert.Equal(t, numRows, readData.Data[201].RowNum()) // int_array
+		assert.Equal(t, numRows, readData.Data[202].RowNum()) // float_array
+		assert.Equal(t, numRows, readData.Data[203].RowNum()) // vector_array
+
+		// Verify data content matches
+		for fieldID, originalData := range insertData.Data {
+			readFieldData, ok := readData.Data[fieldID]
+			assert.True(t, ok, "field %d not found in read data", fieldID)
+			assert.Equal(t, originalData.RowNum(), readFieldData.RowNum(), "row count mismatch for field %d", fieldID)
+		}
+	})
+}
+
 func TestParquetReaderError(t *testing.T) {
 	ctx := context.Background()
 	cm := mocks.NewChunkManager(t)
@@ -708,6 +822,13 @@ func TestParquetReaderError(t *testing.T) {
 	// NewReader will return error "the primary key is auto-generated, no need to provide"
 	schema.Fields[0].AutoID = true
 	checkFunc(schema, filePath, false)
+
+	// allow_insert_autoid=true should allow providing PK even if AutoID
+	schema.Fields[0].AutoID = true
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
+	checkFunc(schema, filePath, true)
+	// reset properties
+	schema.Properties = nil
 
 	// now set the vec to be FunctionOutput
 	// NewReader will return error "the field is output by function, no need to provide"

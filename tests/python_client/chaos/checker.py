@@ -213,6 +213,7 @@ class Op(Enum):
     insert_freshness = 'insert_freshness'
     upsert = 'upsert'
     upsert_freshness = 'upsert_freshness'
+    partial_update = 'partial_update'
     flush = 'flush'
     index = 'index'
     create_index = 'create_index'
@@ -1201,6 +1202,61 @@ class UpsertFreshnessChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
+            sleep(constants.WAIT_PER_OP * 6)
+    
+class PartialUpdateChecker(Checker):
+    """check partial update operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("PartialUpdateChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        schema = self.get_schema()
+        self.data = cf.gen_row_data_by_schema(nb=4, schema=schema)
+
+    @trace()
+    def partial_update_entities(self):
+        res, result = self.c_wrap.upsert(data=self.data,
+                                         partial_update=True,
+                                         timeout=timeout,
+                                         enable_traceback=enable_traceback,
+                                         check_task=CheckTasks.check_nothing)
+        return res, result
+
+    @exception_handler()
+    def run_task(self, count=0):
+        # first half: partial update existing rows; second half: insert new rows
+        schema = self.get_schema()
+        pk_field_name = self.int64_field_name
+        rows = len(self.data)
+        half = rows // 2
+        num_fields = len(schema.fields)
+
+        pk_old = [d[pk_field_name] for d in self.data[:half]]
+
+        # Generate a fresh full batch (used for inserts and as a source of values)
+        full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
+
+        # Choose subset fields to update: always include PK + one non-PK field if available
+        num = count % num_fields
+        desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
+        partial_rows = cf.gen_row_data_by_schema(nb=half, schema=schema,
+                                                 desired_field_names=desired_fields)
+
+        # Override PKs for partial updates to target existing rows
+        for i in range(half):
+            partial_rows[i][pk_field_name] = pk_old[i]
+
+        # Assemble final batch: first half partial updates, second half full inserts
+        self.data = partial_rows + full_rows[half:]
+        res, result = self.partial_update_entities()
+        return res, result
+
+    def keep_running(self):
+        count = 0
+        while self._keep_running:
+            self.run_task(count)
+            count += 1
             sleep(constants.WAIT_PER_OP * 6)
 
 

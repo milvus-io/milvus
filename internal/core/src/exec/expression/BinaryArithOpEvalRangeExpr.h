@@ -450,19 +450,24 @@ struct ArithOpIndexFunc {
     }
 };
 
+class PhyTimestamptzArithCompareExpr;
 class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
+    friend class PhyTimestamptzArithCompareExpr;
+
  public:
     PhyBinaryArithOpEvalRangeExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,

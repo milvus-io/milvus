@@ -1,12 +1,13 @@
 package registry
 
 import (
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // builders is a map of registered wal builders.
-var builders typeutil.ConcurrentMap[string, walimpls.OpenerBuilderImpls]
+var builders typeutil.ConcurrentMap[message.WALName, walimpls.OpenerBuilderImpls]
 
 // Register registers the wal builder.
 //
@@ -16,15 +17,15 @@ var builders typeutil.ConcurrentMap[string, walimpls.OpenerBuilderImpls]
 func RegisterBuilder(b walimpls.OpenerBuilderImpls) {
 	_, loaded := builders.GetOrInsert(b.Name(), b)
 	if loaded {
-		panic("walimpls builder already registered: " + b.Name())
+		panic("walimpls builder already registered: " + b.Name().String())
 	}
 }
 
 // MustGetBuilder returns the walimpls builder by name.
-func MustGetBuilder(name string) walimpls.OpenerBuilderImpls {
+func MustGetBuilder(name message.WALName) walimpls.OpenerBuilderImpls {
 	b, ok := builders.Get(name)
 	if !ok {
-		panic("walimpls builder not found: " + name)
+		panic("walimpls builder not found: " + name.String())
 	}
 	return b
 }

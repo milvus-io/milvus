@@ -1840,5 +1840,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     return res_vec;
 }
 
+template VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
+    OffsetVector*);  // add this for macos
+
 }  //namespace exec
 }  // namespace milvus

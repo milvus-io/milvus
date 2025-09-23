@@ -76,7 +76,8 @@ TEST(TraverseJsonForBuildStatsTest,
         {"id": 34495370646 ,"type":"PublicEvent","actor":{"id":126890008,"login":"gegangene","display_login":"gegangene","gravatar_id":"",
         "url":"https:\/\/api.github.com\/users\/gegangene","avatar_url":"https:\/\/avatars.githubusercontent.com\/u\/126890008?"},
         "repo":{"id":737601171,"name":"gegangene\/scheduler","url":"https:\/\/api.github.com\/repos\/gegangene\/scheduler"},
-        "payload":{},"public":true,"created_at":"2024-01-01T00:01:28Z"}
+        "payload":{},"public":true,"created_at":"2024-01-01T00:01:28Z",
+        "msg":"line1\nline2\t\u4e2d\u6587 \/ backslash \\"}
     )";
 
     auto tokens = Tokenize(json);
@@ -113,4 +114,8 @@ TEST(TraverseJsonForBuildStatsTest,
     expect_has("/payload", JSONType::OBJECT, "{}");
     expect_has("/public", JSONType::BOOL, "true");
     expect_has("/created_at", JSONType::STRING, "2024-01-01T00:01:28Z");
+    expect_has("/repo/url",
+               JSONType::STRING,
+               "https://api.github.com/repos/gegangene/scheduler");
+    expect_has("/msg", JSONType::STRING, "line1\nline2\t中文 / backslash \\");
 }

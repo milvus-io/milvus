@@ -22,23 +22,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-const (
-	WALName = "woodpecker"
-)
-
 func init() {
 	// register the builder to the wal registry.
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
-	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(message.WALNameWoodpecker, UnmarshalMessageID)
 }
 
 // builderImpl is the builder for woodpecker opener.
 type builderImpl struct{}
 
 // Name of the wal builder, should be a lowercase string.
-func (b *builderImpl) Name() string {
-	return WALName
+func (b *builderImpl) Name() message.WALName {
+	return message.WALNameWoodpecker
 }
 
 // Build build a wal instance.
@@ -113,7 +109,15 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	// storage
 	wpConfig.Woodpecker.Storage.Type = cfg.StorageType.GetValue()
-	wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+
+	// Set RootPath based on configuration
+	if cfg.RootPath.GetValue() == "default" {
+		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
+		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().LocalStorageCfg.Path.GetValue())
+	} else {
+		// Use custom directory as-is
+		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+	}
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()

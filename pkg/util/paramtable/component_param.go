@@ -57,6 +57,7 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+	MaxClusterIDBits                = 3
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -280,11 +281,13 @@ type commonConfig struct {
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	// storage v2
-	EnableStorageV2           ParamItem `refreshable:"false"`
-	Stv2SplitSystemColumn     ParamItem `refreshable:"true"`
-	Stv2SystemColumnIncludePK ParamItem `refreshable:"true"`
-	Stv2SplitByAvgSize        ParamItem `refreshable:"true"`
-	Stv2SplitAvgSizeThreshold ParamItem `refreshable:"true"`
+	EnableStorageV2                      ParamItem `refreshable:"false"`
+	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
+	Stv2SystemColumnIncludeClusteringKey ParamItem `refreshable:"true"`
+	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
+	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
@@ -326,6 +329,7 @@ type commonConfig struct {
 	EnablePosixMode ParamItem `refreshable:"false"`
 
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
+	ClusterID              ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -950,6 +954,24 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.Stv2SystemColumnIncludePK.Init(base.mgr)
 
+	p.Stv2SystemColumnIncludePartitionKey = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includePartitionKey",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include partition key field",
+		Export:       false,
+	}
+	p.Stv2SystemColumnIncludePartitionKey.Init(base.mgr)
+
+	p.Stv2SystemColumnIncludeClusteringKey = ParamItem{
+		Key:          "common.storage.stv2.splitSystemColumn.includeClusteringKey",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "whether split system column policy include clustering key field",
+		Export:       false,
+	}
+	p.Stv2SystemColumnIncludeClusteringKey.Init(base.mgr)
+
 	p.Stv2SplitByAvgSize = ParamItem{
 		Key:          "common.storage.stv2.splitByAvgSize.enabled",
 		Version:      "2.6.2",
@@ -1228,6 +1250,26 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnablePosixMode.Init(base.mgr)
+
+	p.ClusterID = ParamItem{
+		Key:          "common.clusterID",
+		Version:      "2.6.3",
+		DefaultValue: "0",
+		Doc:          "cluster id",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 0 {
+				return ""
+			}
+			maxClusterID := (int64(1) << MaxClusterIDBits) - 1
+			if getAsInt64(v) > maxClusterID {
+				return ""
+			}
+			return v
+		},
+	}
+	p.ClusterID.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2327,6 +2369,8 @@ type queryCoordConfig struct {
 
 	// query node task parallelism factor
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
+
+	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2959,6 +3003,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.QueryNodeTaskParallelismFactor.Init(base.mgr)
+
+	p.BalanceCheckCollectionMaxCount = ParamItem{
+		Key:          "queryCoord.balanceCheckCollectionMaxCount",
+		Version:      "2.6.2",
+		DefaultValue: "100",
+		Doc:          "the max collection count for each balance check",
+		Export:       false,
+	}
+	p.BalanceCheckCollectionMaxCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3004,6 +3057,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3105,6 +3159,7 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
+	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -3387,6 +3442,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.StorageUsageTrackingEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
+		Version:      "2.6.3",
+		DefaultValue: "false",
+		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
+		Export:       true,
+	}
+	p.StorageUsageTrackingEnabled.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
@@ -4214,6 +4278,14 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
+	p.EnableSparseFilterInQuery = ParamItem{
+		Key:          "queryNode.enableSparseFilterInQuery",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "Enable use sparse filter in query.",
+	}
+	p.EnableSparseFilterInQuery.Init(base.mgr)
+
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",
 		Version:      "2.5",
@@ -4287,7 +4359,7 @@ type dataCoordConfig struct {
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
@@ -4318,7 +4390,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
 	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`

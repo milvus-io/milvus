@@ -289,6 +289,14 @@ build-cpp-with-coverage: generated-proto
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
 
+generate-message-codegen:
+	@if [ -z "$(INSTALL_GOFUMPT)" ]; then \
+		echo "Installing gofumpt v$(GOFUMPT_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install mvdan.cc/gofumpt@v$(GOFUMPT_VERSION); \
+	else \
+		echo "gofumpt v$(GOFUMPT_VERSION) already installed"; \
+	fi
+	@echo "Generating message codegen ..."
+	@(cd pkg/streaming/util/message/codegen && PATH=$(INSTALL_PATH):$(PATH) go generate .)
 
 # Run the tests.
 unittest: test-cpp test-go
@@ -360,6 +368,10 @@ test-streaming:
 test-mixcoord:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
+
+test-cdc:
+	@echo "Running cdc unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t cdc)
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
@@ -464,7 +476,6 @@ generate-mockery-types: getdeps
 
 generate-mockery-rootcoord: getdeps
 	$(INSTALL_PATH)/mockery --name=IMetaTable --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=meta_table.go --with-expecter --outpkg=mockrootcoord
-	$(INSTALL_PATH)/mockery --name=GarbageCollector --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=garbage_collector.go --with-expecter --outpkg=mockrootcoord
 
 generate-mockery-proxy: getdeps
 	$(INSTALL_PATH)/mockery --name=Cache --dir=$(PWD)/internal/proxy --output=$(PWD)/internal/proxy --filename=mock_cache.go --structname=MockCache --with-expecter --outpkg=proxy --inpackage
@@ -536,15 +547,14 @@ generate-mockery-pkg:
 generate-mockery-internal: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/.mockery.yaml
 
+generate-mockery-cdc: getdeps
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
+
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
 	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
-
-generate-message-codegen: getdeps
-	@echo "Generating message codegen ..."
-	@(cd pkg/streaming/util/message/codegen && PATH=$(PWD)/bin:$(PATH) go generate .)
 
 MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
 mmap-migration:

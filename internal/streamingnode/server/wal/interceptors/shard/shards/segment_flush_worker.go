@@ -76,7 +76,7 @@ func (w *segmentFlushWorker) do() {
 		}
 
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Info("failed to allocate new growing segment, retrying", zap.Duration("nextInterval", nextInterval), zap.Error(err))
+		w.Logger().Info("failed to flush new growing segment, retrying", zap.Duration("nextInterval", nextInterval), zap.Error(err))
 		select {
 		case <-w.ctx.Done():
 			w.Logger().Info("flush segment canceled", zap.Error(w.ctx.Err()))

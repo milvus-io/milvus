@@ -172,7 +172,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 		}
 		switch resp := resp.Response.(type) {
 		case *streamingpb.ConsumeResponse_Consume:
-			msgID, err := message.UnmarshalMessageID(c.walName, resp.Consume.GetMessage().GetId().GetId())
+			msgID, err := message.UnmarshalMessageID(resp.Consume.Message.Id)
 			if err != nil {
 				return err
 			}

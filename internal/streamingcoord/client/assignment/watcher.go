@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -18,8 +19,9 @@ func newWatcher() *watcher {
 	return &watcher{
 		cond: syncutil.NewContextCond(&sync.Mutex{}),
 		lastVersionedAssignment: types.VersionedStreamingNodeAssignments{
-			Version:     typeutil.VersionInt64Pair{Global: -1, Local: -1},
-			Assignments: make(map[int64]types.StreamingNodeAssignment),
+			Version:               typeutil.VersionInt64Pair{Global: -1, Local: -1},
+			Assignments:           make(map[int64]types.StreamingNodeAssignment),
+			ReplicateConfigHelper: nil,
 		},
 	}
 }
@@ -40,6 +42,19 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	last := w.lastVersionedAssignment
 	w.cond.L.Unlock()
 	return &last, nil
+}
+
+func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
+	w.cond.L.Lock()
+	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
+		w.lastVersionedAssignment.ReplicateConfigHelper == nil {
+		if err := w.cond.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	last := w.lastVersionedAssignment
+	w.cond.L.Unlock()
+	return last.ReplicateConfigHelper, nil
 }
 
 // AssignmentDiscover watches the assignment discovery.

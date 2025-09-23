@@ -436,7 +436,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -453,7 +453,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                     arg_set_, arg_set_double_);
 
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
         // process shared data
@@ -490,7 +495,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
             }
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -632,7 +637,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -648,7 +653,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             if (!target_field.empty()) {
                 ShreddingArrayBsonContainsArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -677,7 +687,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             return false;
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -912,7 +922,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -929,7 +939,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                     elements);
 
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
         // process shared data
@@ -960,7 +975,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             res_view[row_offset] = tmp_elements.empty();
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1164,7 +1179,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1181,7 +1196,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                 ShreddingArrayBsonContainsAllWithDiffTypeExecutor executor(
                     elements, elements_index);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1278,7 +1298,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1426,7 +1446,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1442,7 +1462,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             if (!target_field.empty()) {
                 ShreddingArrayBsonContainsAllArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1478,7 +1503,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
                 exist_elements_index.size() == elements.size();
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1666,7 +1691,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1683,7 +1708,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 ShreddingArrayBsonContainsAnyWithDiffTypeExecutor executor(
                     elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1772,7 +1802,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             }
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }

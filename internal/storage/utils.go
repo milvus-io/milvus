@@ -517,7 +517,6 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 			idata.Data[field.FieldID] = &DoubleFieldData{
 				Data: readDoubleArray(blobReaders),
 			}
-
 		case schemapb.DataType_Timestamptz:
 			idata.Data[field.FieldID] = &TimestamptzFieldData{
 				Data: readTimestamptzArray(blobReaders),
@@ -1640,4 +1639,24 @@ func SortFieldBinlogs(fieldBinlogs map[int64]*datapb.FieldBinlog) []*datapb.Fiel
 		binlogs = append(binlogs, fieldBinlogs[fieldID])
 	}
 	return binlogs
+}
+
+// VectorArrayToArrowType converts VectorArray element type to the corresponding Arrow type
+// Note: This returns the element type (e.g., float32), not a list type
+// The caller is responsible for wrapping it in a list if needed
+func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		return arrow.PrimitiveTypes.Float32, nil
+	case schemapb.DataType_BinaryVector:
+		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
+	case schemapb.DataType_Float16Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
+	case schemapb.DataType_BFloat16Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
+	case schemapb.DataType_Int8Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
+	}
 }

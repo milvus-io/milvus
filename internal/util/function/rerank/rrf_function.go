@@ -85,7 +85,7 @@ func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParam
 	if searchParams.isGrouping() {
 		return newGroupingIDScores(rrfScores, searchParams, idGroup)
 	}
-	return newIDScores(rrfScores, searchParams), nil
+	return newIDScores(rrfScores, searchParams, true), nil
 }
 
 func (rrf *RRFFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
