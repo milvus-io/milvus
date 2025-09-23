@@ -329,7 +329,6 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 	// group messages by vchannel
 	for _, msg := range pack.Msgs {
 		var vchannel, collectionID string
-
 		if msg.GetType() == commonpb.MsgType_Insert || msg.GetType() == commonpb.MsgType_Delete {
 			vchannel = msg.GetVChannel()
 		} else if msg.GetType() == commonpb.MsgType_CreateCollection ||

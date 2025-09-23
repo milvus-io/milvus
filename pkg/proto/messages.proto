@@ -149,6 +149,7 @@ message TimeTickMessageHeader {}
 message InsertMessageHeader {
     int64 collection_id                            = 1;
     repeated PartitionSegmentAssignment partitions = 2;
+    int32 schema_version                           = 3;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
@@ -186,6 +187,7 @@ message CreateSegmentMessageHeader {
     uint64 max_segment_size = 5; // the max size bytes of the segment.
     uint64 max_rows         = 6; // the max rows of the segment.
     data.SegmentLevel level = 7; // the level of the segment.
+    int32 schema_version   = 8;
 }
 
 message ManualFlushMessageHeader {
@@ -256,6 +258,7 @@ message ImportMessageHeader {}
 message SchemaChangeMessageHeader{
     int64 collection_id = 1;
     repeated int64 flushed_segment_ids = 2; // will be filled by wal shard manager.
+    int32 schema_version = 3;
 }
 
 // SchemaChangeMessageBody is the body of CollectionSchema update message.

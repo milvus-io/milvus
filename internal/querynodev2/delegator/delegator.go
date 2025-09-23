@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -80,6 +81,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
+	UpdateIndex(ctx context.Context, indexInfo *indexpb.IndexInfo) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -1060,6 +1062,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		zap.Int("growingNum", len(growing)),
 	)
 
+	// Update BM25 functions if there are new BM25 output fields
+	sd.updateBM25Functions(schema, ctx)
+
 	tasks, err := organizeSubTask(ctx, &querypb.UpdateSchemaRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -1087,6 +1092,133 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}, "UpdateSchema", log)
 
 	return err
+}
+
+func (sd *shardDelegator) UpdateIndex(ctx context.Context, indexInfo *indexpb.IndexInfo) error {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	log.Info("delegator received update index event",
+		zap.Int64("collectionID", indexInfo.GetCollectionID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
+		zap.String("indexName", indexInfo.GetIndexName()))
+
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+	defer sd.distribution.Unpin(version)
+
+	log.Info("update index targets...",
+		zap.Int("sealedNum", len(sealed)),
+		zap.Int("growingNum", len(growing)),
+	)
+
+	tasks, err := organizeSubTask(ctx, &querypb.UpdateIndexRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID: indexInfo.GetCollectionID(),
+		Action:       &querypb.UpdateIndexRequest_Action{Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{IndexInfo: indexInfo}}},
+	},
+		sealed,
+		growing,
+		sd,
+		false, // don't skip empty
+		func(req *querypb.UpdateIndexRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateIndexRequest {
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = targetID
+			return nodeReq
+		})
+	if err != nil {
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateIndexRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		status, err := worker.UpdateIndex(ctx, req)
+		return (*StatusWrapper)(status), err
+	}, "UpdateIndex", log)
+
+	return err
+}
+
+// updateBM25Functions updates BM25-related runners and IDF oracle based on schema diff
+func (sd *shardDelegator) updateBM25Functions(newSchema *schemapb.CollectionSchema, ctx context.Context) {
+	log := sd.getLogger(ctx)
+	// Get current schema
+	currentSchema := sd.collection.Schema()
+	if currentSchema == nil {
+		log.Warn("current schema is nil, skip BM25 functions update")
+		return
+	}
+
+	// Calculate diff: find new BM25 functions in newSchema that don't exist in currentSchema
+	currentFunctions := currentSchema.GetFunctions()
+	currentOutputFieldSet := make(map[int64]bool)
+	for _, tf := range currentFunctions {
+		if tf.GetType() == schemapb.FunctionType_BM25 && len(tf.GetOutputFieldIds()) > 0 {
+			currentOutputFieldSet[tf.GetOutputFieldIds()[0]] = true
+		}
+	}
+
+	newFunctions := newSchema.GetFunctions()
+	diffFunctions := make([]*schemapb.FunctionSchema, 0)
+	for _, tf := range newFunctions {
+		if tf.GetType() == schemapb.FunctionType_BM25 && len(tf.GetOutputFieldIds()) > 0 {
+			outputFieldID := tf.GetOutputFieldIds()[0]
+			// Only add if it's a new BM25 output field
+			if !currentOutputFieldSet[outputFieldID] {
+				diffFunctions = append(diffFunctions, tf)
+			}
+		}
+	}
+
+	// If there are new BM25 functions, update runners
+	if len(diffFunctions) > 0 {
+		log.Info("found new BM25 functions, updating runners",
+			zap.Int("newFunctionsCount", len(diffFunctions)))
+
+		for _, tf := range diffFunctions {
+			if len(tf.GetOutputFieldIds()) == 0 || len(tf.GetInputFieldIds()) == 0 {
+				log.Warn("BM25 function missing output or input field IDs, skip",
+					zap.Any("function", tf))
+				continue
+			}
+
+			functionRunner, err := function.NewFunctionRunner(newSchema, tf)
+			if err != nil {
+				log.Warn("failed to create function runner for BM25 function",
+					zap.Error(err),
+					zap.Int64("outputFieldID", tf.GetOutputFieldIds()[0]))
+				continue
+			}
+
+			outputFieldID := tf.GetOutputFieldIds()[0]
+			inputFieldID := tf.GetInputFieldIds()[0]
+
+			// Update function runners
+			sd.functionRunners[outputFieldID] = functionRunner
+			// bm25 input field could use same runner between function and analyzer.
+			sd.analyzerRunners[inputFieldID] = functionRunner.(function.Analyzer)
+			sd.isBM25Field[outputFieldID] = true
+
+			log.Info("updated BM25 function runner",
+				zap.Int64("outputFieldID", outputFieldID),
+				zap.Int64("inputFieldID", inputFieldID))
+		}
+
+		// Update IDF oracle if it's nil
+		if sd.idfOracle == nil {
+			log.Info("creating new IDF oracle for BM25 functions")
+			sd.idfOracle = NewIDFOracle(sd.vchannelName, newSchema.GetFunctions())
+			sd.distribution.SetIDFOracle(sd.idfOracle)
+			sd.idfOracle.Start()
+		} else {
+			// Update existing IDF oracle with new functions
+			sd.idfOracle.UpdateCurrent(newSchema.GetFunctions())
+			log.Info("updated existing IDF oracle with new functions")
+		}
+	}
 }
 
 type StatusWrapper commonpb.Status

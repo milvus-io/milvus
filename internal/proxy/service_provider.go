@@ -210,6 +210,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Properties:         c.schema.CollectionSchema.Properties,
 		Functions:          c.schema.CollectionSchema.Functions,
 		DbName:             c.schema.CollectionSchema.DbName,
+		Version:            c.schema.CollectionSchema.Version,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
@@ -236,12 +237,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.ShardsNum = c.shardsNum
 	resp.Aliases = c.aliases
 	resp.Properties = c.properties
-
 	log.Debug("DescribeCollection done",
 		zap.Int64("collectionID", resp.GetCollectionID()),
 		zap.Any("schema", resp.GetSchema()),
 	)
-
 	return resp, nil
 }
 

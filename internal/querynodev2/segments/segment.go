@@ -1385,6 +1385,15 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	return nil
 }
 
+func (s *LocalSegment) SyncSchema(colSchema *schemapb.CollectionSchema) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	return s.csegment.SyncSchema(colSchema)
+}
+
 type ReleaseScope int
 
 const (

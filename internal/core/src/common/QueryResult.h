@@ -359,6 +359,14 @@ struct SearchResult {
 using SearchResultPtr = std::shared_ptr<SearchResult>;
 using SearchResultOpt = std::optional<SearchResult>;
 
+inline SearchResult
+make_empty_search_result(int64_t num_queries) {
+    SearchResult final_result;
+    final_result.total_nq_ = num_queries;
+    final_result.unity_topK_ = 0;  // no result
+    final_result.total_data_cnt_ = 0;
+    return final_result;
+}
 struct RetrieveResult {
     RetrieveResult() = default;
 

@@ -29,6 +29,9 @@ type l0CompactionPolicy struct {
 	skipLocker                sync.RWMutex
 }
 
+// Ensure l0CompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*l0CompactionPolicy)(nil)
+
 func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
 		meta:                      meta,
@@ -40,6 +43,10 @@ func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0Compact
 
 func (policy *l0CompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+}
+
+func (policy *l0CompactionPolicy) Name() string {
+	return "L0Compaction"
 }
 
 func (policy *l0CompactionPolicy) AddSkipCollection(collectionID UniqueID) {

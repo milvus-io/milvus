@@ -81,7 +81,8 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	if err != nil {
 		return msgID, err
 	}
-	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
+	immutableMsg := message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID))
+	impl.shardManager.CreateCollection(immutableMsg)
 	return msgID, nil
 }
 
@@ -146,6 +147,12 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+	schemaVersion := header.GetSchemaVersion()
+	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header.GetCollectionId(), schemaVersion); err != nil {
+		log.Warn("insertMessage schema version mismatch", zap.Error(err))
+		return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
+			schemaVersion, correctSchemaVersion)
+	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
@@ -241,7 +248,6 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 	// Modify the header of schema change message, carry with the all flushed segment ids.
 	header.FlushedSegmentIds = segmentIDs
 	schemaChangeMsg.OverwriteHeader(header)
-
 	return appendOp(ctx, msg)
 }
 
@@ -249,6 +255,8 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	putCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
 	header := putCollectionMsg.Header()
+
+	// Flush segments if it's a schema change (needed before appendOp to write segment IDs to WAL)
 	var segmentIDs []int64
 	var err error
 	if messageutil.IsSchemaChange(header) {
@@ -256,11 +264,23 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 		if err != nil {
 			return nil, status.NewUnrecoverableError(err.Error())
 		}
+		header.FlushedSegmentIds = segmentIDs
+		putCollectionMsg.OverwriteHeader(header)
 	}
 
-	header.FlushedSegmentIds = segmentIDs
-	putCollectionMsg.OverwriteHeader(header)
-	return appendOp(ctx, msg)
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+
+	// Update memory state (schema) after WAL append
+	alterCollectionMsg := message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID))
+	if err := impl.shardManager.AlterCollection(alterCollectionMsg); err != nil {
+		// Panic because this should not fail after WAL append succeeds.
+		panic(errors.Wrapf(err, "failed to alter collection after WAL append succeeded, collectionID: %d", alterCollectionMsg.Header().CollectionId))
+	}
+
+	return msgID, nil
 }
 
 // handleCreateSegment handles the create segment message.

@@ -23,7 +23,6 @@ func TestCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, ccollection)
 	assert.NotNil(t, ccollection.Schema())
-	assert.NotNil(t, ccollection.IndexMeta())
 	assert.Equal(t, int64(1), ccollection.ID())
 	defer ccollection.Release()
 }

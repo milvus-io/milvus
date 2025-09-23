@@ -55,6 +55,8 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
+		DbName:             coll.DBName,
+		FileResourceIds:    coll.FileResourceIds,
 		Version:            coll.SchemaVersion + 1,
 	}
 	for _, field := range schema.Fields {

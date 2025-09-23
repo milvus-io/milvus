@@ -168,13 +168,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 	// shall be checked by caller
 	var currentSplit []storagecommon.ColumnGroup
 	if info.GetStorageVersion() == storage.StorageV2 && len(info.Binlogs) > 0 {
-		currentSplit = make([]storagecommon.ColumnGroup, 0, len(info.Binlogs))
-		for _, group := range info.Binlogs {
-			currentSplit = append(currentSplit, storagecommon.ColumnGroup{
-				GroupID: group.GetFieldID(),
-				Fields:  group.GetChildFields(),
-			})
-		}
+		currentSplit = storage.RecoverColumnGroup(info.Binlogs)
 		log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{

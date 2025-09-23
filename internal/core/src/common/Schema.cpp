@@ -108,7 +108,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
-
+    schema->set_do_physical_backfill(schema_proto.do_physical_backfill());
     return schema;
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -59,9 +60,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schemaVersion)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -71,7 +72,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
 		log.Warn("append messages to wal failed", zap.Error(err))
-		it.result.Status = merr.Status(err)
+		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
+			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
+		} else {
+			it.result.Status = merr.Status(err)
+		}
 	}
 	// Update result.Timestamp for session consistency.
 	it.result.Timestamp = resp.MaxTimeTick()
@@ -84,6 +89,7 @@ func repackInsertDataForStreamingService(
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	ez *message.CipherConfig,
+	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -112,6 +118,7 @@ func repackInsertDataForStreamingService(
 							BinarySize:  0, // TODO: current not used, message estimate size is used.
 						},
 					},
+					SchemaVersion: schemaVersion,
 				}).
 				WithBody(insertRequest).
 				WithCipher(ez).
@@ -132,6 +139,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
 	ez *message.CipherConfig,
+	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -193,6 +201,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 								BinarySize:  0, // TODO: current not used, message estimate size is used.
 							},
 						},
+						SchemaVersion: schemaVersion,
 					}).
 					WithBody(insertRequest).
 					WithCipher(ez).

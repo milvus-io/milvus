@@ -45,6 +45,7 @@
 #include "exec/expression/ExprCache.h"
 #include "monitor/Monitor.h"
 #include "common/GeometryCache.h"
+#include "common/QueryResult.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 
@@ -233,24 +234,31 @@ AsyncSearch(CTraceContext c_trace,
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
-
-            segment->LazyCheckSchema(plan->schema_);
-
-            auto search_result = segment->Search(plan,
-                                                 phg_ptr,
-                                                 timestamp,
-                                                 cancel_token,
-                                                 consistency_level,
-                                                 collection_ttl);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
+            auto ret = [&]() -> std::unique_ptr<milvus::SearchResult> {
+                if (!segment->FieldAccessable(target_vector_field_id)) {
+                    return std::make_unique<milvus::SearchResult>(
+                        milvus::make_empty_search_result(
+                            phg_ptr->at(0).num_of_queries_));
+                }
+                segment->LazyCheckSchema(plan->schema_);
+                return segment->Search(plan,
+                                       phg_ptr,
+                                       timestamp,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl);
+            }();
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
-                for (auto& dis : search_result->distances_) {
+                for (auto& dis : ret->distances_) {
                     dis *= -1;
                 }
             }
             span->End();
             milvus::tracer::CloseRootSpan();
-            return search_result.release();
+            return ret.release();
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
@@ -673,6 +681,27 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropFieldData(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+SyncSchema(CSegmentInterface c_segment,
+           const uint8_t* schema_blob,
+           const int64_t schema_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
+        milvus::proto::schema::CollectionSchema schema_proto;
+        auto suc = schema_proto.ParseFromArray(schema_blob, schema_length);
+        AssertInfo(suc, "failed to parse schema from blob");
+        auto schema = milvus::Schema::ParseFrom(schema_proto);
+        segment_interface->SyncSchema(schema);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

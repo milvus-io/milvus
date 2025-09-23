@@ -235,6 +235,8 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: targetValue,
 		Properties:         coll.Properties,
+		DbName:             coll.DBName,
+		FileResourceIds:    coll.FileResourceIds,
 		Version:            coll.SchemaVersion + 1,
 	}
 	schema.Fields = append(schema.Fields, fieldSchema)

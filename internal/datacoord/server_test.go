@@ -2466,13 +2466,13 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
 
 	t.Run("describeCollectionInternal fail", func(t *testing.T) {
-		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).
 			Return(nil, errors.New("describeCollectionInternal error")).Once()
 		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
 		assert.Error(t, err, "describeCollectionInternal error")
 	})
 
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionID: 1,
 	}, nil).Twice()
 

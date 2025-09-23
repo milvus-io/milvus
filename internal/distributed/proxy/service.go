@@ -662,6 +662,10 @@ func (s *Server) AddCollectionField(ctx context.Context, request *milvuspb.AddCo
 	return s.proxy.AddCollectionField(ctx, request)
 }
 
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.proxy.AlterCollectionSchema(ctx, request)
+}
+
 // GetCollectionStatistics notifies Proxy to get a collection's Statistics
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)

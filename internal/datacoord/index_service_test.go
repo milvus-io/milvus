@@ -694,7 +694,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		}, nil).Once()
 	}
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 		Status:         merr.Status(nil),
 		DbName:         "test_db",
 		CollectionName: "test_collection",
@@ -1447,7 +1447,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 	}
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 		Status:         merr.Status(nil),
 		DbName:         "test_db",
 		CollectionName: "test_collection",
@@ -1990,7 +1990,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		},
 	}
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 		Status:         merr.Status(nil),
 		DbName:         "test_db",
 		CollectionName: "test_collection",
@@ -2264,7 +2264,7 @@ func TestServer_DropIndex(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 		Status:         merr.Status(nil),
 		DbName:         "test_db",
 		CollectionName: "test_collection",

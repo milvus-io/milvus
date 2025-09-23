@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel"
@@ -37,6 +38,7 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	schemaVersion   int32
 }
 
 // TraceCtx returns insertTask context
@@ -154,6 +156,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	it.schema = schema.CollectionSchema
+	it.schemaVersion = schema.CollectionSchema.Version
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
@@ -211,6 +214,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
+	if it.insertMsg.NRows() <= 0 {
+		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.insertMsg.NRows()), "num_rows should be greater than 0")
+	}
+	if err := checkFieldsDataBySchema(allFields, it.schema, it.insertMsg, true); err != nil {
+		return err
+	}
 	it.result.IDs, err = checkPrimaryFieldData(allFields, it.schema, it.insertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {

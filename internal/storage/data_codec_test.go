@@ -447,11 +447,11 @@ func generateTestAddedFieldSchema() *schemapb.CollectionSchema {
 func generateTestSchema() *schemapb.CollectionSchema {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
-		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64},
 		{FieldID: 10, Name: "bool", DataType: schemapb.DataType_Bool},
 		{FieldID: 11, Name: "int8", DataType: schemapb.DataType_Int8},
 		{FieldID: 12, Name: "int16", DataType: schemapb.DataType_Int16},
-		{FieldID: 13, Name: "int64", DataType: schemapb.DataType_Int64},
+		{FieldID: 13, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 14, Name: "float", DataType: schemapb.DataType_Float},
 		{FieldID: 15, Name: "double", DataType: schemapb.DataType_Double},
 		{FieldID: 16, Name: "varchar", DataType: schemapb.DataType_VarChar},

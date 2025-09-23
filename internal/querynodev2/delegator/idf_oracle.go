@@ -55,6 +55,9 @@ type IDFOracle interface {
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
+	// UpdateCurrent updates current stats with new functions, only creates stats for new fields
+	UpdateCurrent(functions []*schemapb.FunctionSchema)
+
 	Start()
 	Close()
 }
@@ -186,17 +189,95 @@ func (s *sealedBm25Stats) ToLocal(dirPath string) error {
 	return nil
 }
 
-func (s *sealedBm25Stats) Remove() {
+func (s *sealedBm25Stats) ClearLocalData(toRemove bool) {
 	s.Lock()
 	defer s.Unlock()
-	s.removed = true
-
+	s.removed = toRemove
 	if !s.inmemory {
 		err := os.RemoveAll(s.localDir)
 		if err != nil {
 			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
 		}
 	}
+}
+
+// loadStatsFromLocalNoLock loads stats from local disk files.
+// Must be called while holding the lock (read or write lock).
+func (s *sealedBm25Stats) loadStatsFromLocalNoLock() (map[int64]*storage.BM25Stats, error) {
+	stats := make(map[int64]*storage.BM25Stats)
+	for _, fieldID := range s.fieldList {
+		filePath := path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID))
+		b, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, errors.Newf("read local file %s: failed: %v", filePath, err)
+		}
+
+		stats[fieldID] = storage.NewBM25Stats()
+		err = stats[fieldID].Deserialize(b)
+		if err != nil {
+			return nil, errors.Newf("deserialize local file %s: failed: %v", filePath, err)
+		}
+	}
+	return stats, nil
+}
+
+// MergeStats merges new stats into existing sealed stats.
+// Returns true if current stats should be updated (segment is activated), false otherwise.
+// This method handles concurrency control internally with its own lock.
+func (s *sealedBm25Stats) MergeStats(newStats bm25Stats) (bool, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	var oldStats map[int64]*storage.BM25Stats
+
+	// Get existing stats (load from disk if needed)
+	if s.inmemory {
+		// Stats are in memory, use directly
+		oldStats = s.bm25Stats
+	} else {
+		// Stats are on disk, load them
+		var err error
+		oldStats, err = s.loadStatsFromLocalNoLock()
+		if err != nil {
+			return false, err
+		}
+	}
+
+	// Merge new stats into existing stats
+	for fieldID, newStat := range newStats {
+		if oldStat, ok := oldStats[fieldID]; ok {
+			// Field exists, merge new stats into old stats
+			oldStat.Merge(newStat)
+		} else {
+			// Field doesn't exist, create new stats and merge
+			oldStats[fieldID] = storage.NewBM25Stats()
+			oldStats[fieldID].Merge(newStat)
+		}
+	}
+
+	// Update sealed stats structure
+	// If stats were on disk, we need to bring them back to memory
+	if !s.inmemory {
+		// Save localDir before clearing it
+		oldLocalDir := s.localDir
+		s.bm25Stats = oldStats
+		s.inmemory = true
+		s.localDir = "" // Clear local dir since we're back in memory
+
+		// Clear local disk files to prevent leakage
+		if oldLocalDir != "" {
+			err := os.RemoveAll(oldLocalDir)
+			if err != nil {
+				log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", oldLocalDir))
+			}
+		}
+	} else {
+		// Stats were in memory, oldStats is the same reference as s.bm25Stats
+		// so the merge above already updated s.bm25Stats
+	}
+
+	// Return whether current stats should be updated
+	return s.activate.Load(), nil
 }
 
 // Fetch sealed bm25 stats
@@ -209,22 +290,7 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 		return s.bm25Stats, nil
 	}
 
-	stats := make(map[int64]*storage.BM25Stats)
-	for _, fieldID := range s.fieldList {
-		path := path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID))
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, errors.Newf("read local file %s: failed: %v", path, err)
-		}
-
-		stats[fieldID] = storage.NewBM25Stats()
-		err = stats[fieldID].Deserialize(b)
-		if err != nil {
-			return nil, errors.Newf("deserialize local file : %s failed: %v", path, err)
-		}
-	}
-
-	return stats, nil
+	return s.loadStatsFromLocalNoLock()
 }
 
 type growingBm25Stats struct {
@@ -286,6 +352,23 @@ type idfOracle struct {
 	wg      sync.WaitGroup
 }
 
+func (o *idfOracle) UpdateCurrent(functions []*schemapb.FunctionSchema) {
+	o.Lock()
+	defer o.Unlock()
+
+	for _, function := range functions {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			outputFieldIDs := function.GetOutputFieldIds()
+			if len(outputFieldIDs) > 0 {
+				fieldID := outputFieldIDs[0]
+				if _, exists := o.current[fieldID]; !exists {
+					o.current[fieldID] = storage.NewBM25Stats()
+				}
+			}
+		}
+	}
+}
+
 // now only used for test
 func (o *idfOracle) TargetVersion() int64 {
 	return o.targetVersion.Load()
@@ -324,7 +407,24 @@ func (o *idfOracle) Register(segmentID int64, stats bm25Stats, state commonpb.Se
 		}
 		o.current.Merge(stats)
 	case segments.SegmentTypeSealed:
-		if ok := o.sealed.Contain(segmentID); ok {
+		existingStats, exists := o.sealed.Get(segmentID)
+		if exists {
+			// Merge new stats with existing stats (with internal concurrency control)
+			shouldUpdateCurrent, err := existingStats.MergeStats(stats)
+			if err != nil {
+				log.Warn("failed to merge sealed stats",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err))
+				return
+			}
+
+			// Update current stats if segment is activated
+			if shouldUpdateCurrent {
+				o.Lock()
+				o.current.Merge(stats)
+				o.Unlock()
+			}
+
 			return
 		}
 
@@ -546,7 +646,6 @@ func (o *idfOracle) SyncDistribution() error {
 	}
 
 	o.Lock()
-	defer o.Unlock()
 
 	for segmentID, stats := range o.growing {
 		// drop growing segment bm25 stats
@@ -559,7 +658,9 @@ func (o *idfOracle) SyncDistribution() error {
 	}
 	o.current.Merge(diff)
 
-	// remove sealed segment not in target
+	// Collect segment IDs that need to be removed while holding o.Lock
+	// Also update activate flags (safe since it's atomic)
+	segmentsToRemove := []int64{}
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
 		reserve := reserveMap.Contain(segmentID)
 		intarget := targetMap.Contain(segmentID)
@@ -575,19 +676,30 @@ func (o *idfOracle) SyncDistribution() error {
 			stats.activate.Store(false)
 		}
 
-		// remove
+		// Collect segment IDs that need removal
 		// if segment not in target and not in reserve list
 		// (means segment target version was old version or segment not in snapshot)
 		// and add before snapshot Ts
 		// (forbid remove some new segment register after current snapshot)
 		if !intarget && !reserve && stats.ts.Before(snapshotTs) {
-			stats.Remove()
-			o.sealed.Remove(segmentID)
+			segmentsToRemove = append(segmentsToRemove, segmentID)
 		}
 		return true
 	})
 
 	o.targetVersion.Store(snapshot.targetVersion)
+	o.Unlock() // Release o.Lock before calling ClearLocalData
+
+	// Now process removals outside of o.Lock to avoid lock-order inversion
+	// ClearLocalData acquires stats.Lock, so we must not hold o.Lock when calling it
+	for _, segmentID := range segmentsToRemove {
+		stats, exists := o.sealed.Get(segmentID)
+		if exists {
+			stats.ClearLocalData(true)
+			o.sealed.Remove(segmentID)
+		}
+	}
+
 	o.NotifyLocal()
 	log.Ctx(context.TODO()).Info("sync idf distribution finished", zap.Int64("version", snapshot.targetVersion), zap.Int64("numrow", o.current.NumRow()), zap.Int("growing", len(o.growing)), zap.Int("sealed", o.sealed.Len()))
 	return nil

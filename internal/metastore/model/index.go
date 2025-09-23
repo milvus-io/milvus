@@ -8,17 +8,18 @@ import (
 )
 
 type Index struct {
-	TenantID        string
-	CollectionID    int64
-	FieldID         int64
-	IndexID         int64
-	IndexName       string
-	IsDeleted       bool
-	CreateTime      uint64
-	TypeParams      []*commonpb.KeyValuePair
-	IndexParams     []*commonpb.KeyValuePair
-	IsAutoIndex     bool
-	UserIndexParams []*commonpb.KeyValuePair
+	TenantID         string
+	CollectionID     int64
+	FieldID          int64
+	IndexID          int64
+	IndexName        string
+	IsDeleted        bool
+	CreateTime       uint64
+	TypeParams       []*commonpb.KeyValuePair
+	IndexParams      []*commonpb.KeyValuePair
+	IsAutoIndex      bool
+	UserIndexParams  []*commonpb.KeyValuePair
+	MinSchemaVersion int32
 }
 
 func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
@@ -27,16 +28,17 @@ func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 	}
 
 	return &Index{
-		CollectionID:    indexInfo.IndexInfo.GetCollectionID(),
-		FieldID:         indexInfo.IndexInfo.GetFieldID(),
-		IndexID:         indexInfo.IndexInfo.GetIndexID(),
-		IndexName:       indexInfo.IndexInfo.GetIndexName(),
-		IsDeleted:       indexInfo.GetDeleted(),
-		CreateTime:      indexInfo.CreateTime,
-		TypeParams:      indexInfo.IndexInfo.GetTypeParams(),
-		IndexParams:     indexInfo.IndexInfo.GetIndexParams(),
-		IsAutoIndex:     indexInfo.IndexInfo.GetIsAutoIndex(),
-		UserIndexParams: indexInfo.IndexInfo.GetUserIndexParams(),
+		CollectionID:     indexInfo.IndexInfo.GetCollectionID(),
+		FieldID:          indexInfo.IndexInfo.GetFieldID(),
+		IndexID:          indexInfo.IndexInfo.GetIndexID(),
+		IndexName:        indexInfo.IndexInfo.GetIndexName(),
+		IsDeleted:        indexInfo.GetDeleted(),
+		CreateTime:       indexInfo.CreateTime,
+		TypeParams:       indexInfo.IndexInfo.GetTypeParams(),
+		IndexParams:      indexInfo.IndexInfo.GetIndexParams(),
+		IsAutoIndex:      indexInfo.IndexInfo.GetIsAutoIndex(),
+		UserIndexParams:  indexInfo.IndexInfo.GetUserIndexParams(),
+		MinSchemaVersion: indexInfo.GetMinSchemaVersion(),
 	}
 }
 
@@ -56,8 +58,9 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 			IsAutoIndex:     index.IsAutoIndex,
 			UserIndexParams: index.UserIndexParams,
 		},
-		Deleted:    index.IsDeleted,
-		CreateTime: index.CreateTime,
+		Deleted:          index.IsDeleted,
+		CreateTime:       index.CreateTime,
+		MinSchemaVersion: index.MinSchemaVersion,
 	}
 }
 
@@ -113,17 +116,18 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 
 func CloneIndex(index *Index) *Index {
 	clonedIndex := &Index{
-		TenantID:        index.TenantID,
-		CollectionID:    index.CollectionID,
-		FieldID:         index.FieldID,
-		IndexID:         index.IndexID,
-		IndexName:       index.IndexName,
-		IsDeleted:       index.IsDeleted,
-		CreateTime:      index.CreateTime,
-		TypeParams:      make([]*commonpb.KeyValuePair, len(index.TypeParams)),
-		IndexParams:     make([]*commonpb.KeyValuePair, len(index.IndexParams)),
-		IsAutoIndex:     index.IsAutoIndex,
-		UserIndexParams: make([]*commonpb.KeyValuePair, len(index.UserIndexParams)),
+		TenantID:         index.TenantID,
+		CollectionID:     index.CollectionID,
+		FieldID:          index.FieldID,
+		IndexID:          index.IndexID,
+		IndexName:        index.IndexName,
+		IsDeleted:        index.IsDeleted,
+		CreateTime:       index.CreateTime,
+		TypeParams:       make([]*commonpb.KeyValuePair, len(index.TypeParams)),
+		IndexParams:      make([]*commonpb.KeyValuePair, len(index.IndexParams)),
+		IsAutoIndex:      index.IsAutoIndex,
+		UserIndexParams:  make([]*commonpb.KeyValuePair, len(index.UserIndexParams)),
+		MinSchemaVersion: index.MinSchemaVersion,
 	}
 	for i, param := range index.TypeParams {
 		clonedIndex.TypeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)

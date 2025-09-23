@@ -60,6 +60,7 @@ message FieldIndex {
     IndexInfo index_info = 1;
     bool deleted = 2;
     uint64 create_time = 3;
+    int32 min_schema_version = 4;
 }
 
 message SegmentIndex {

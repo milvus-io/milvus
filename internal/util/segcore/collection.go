@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -95,10 +96,6 @@ func (c *CCollection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
-func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
-	return c.indexMeta
-}
-
 func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
@@ -113,10 +110,55 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	return ConsumeCStatusIntoError(&status)
 }
 
+func (c *CCollection) AppendIndexMeta(indexInfo *indexpb.IndexInfo) error {
+	if c.indexMeta == nil {
+		return merr.WrapErrServiceInternal("index meta is nil")
+	}
+	indexMeta := c.indexMeta
+
+	// Check if the index with the same IndexID already exists
+	for _, existingMeta := range indexMeta.IndexMetas {
+		if existingMeta.GetIndexId() == indexInfo.GetIndexID() {
+			log.Info("index meta already exists",
+				zap.Int64("indexID", indexInfo.GetIndexID()),
+				zap.Int64("fieldID", indexInfo.GetFieldID()))
+			return nil // or return an error if you want to fail on duplicate
+		}
+	}
+
+	indexMeta.IndexMetas = append(indexMeta.IndexMetas, &segcorepb.FieldIndexMeta{
+		FieldID:         indexInfo.FieldID,
+		CollectionID:    c.collectionID,
+		IndexName:       indexInfo.IndexName,
+		TypeParams:      indexInfo.TypeParams,
+		IndexParams:     indexInfo.IndexParams,
+		IsAutoIndex:     indexInfo.IsAutoIndex,
+		UserIndexParams: indexInfo.UserIndexParams,
+		IndexId:         indexInfo.IndexID,
+	})
+
+	indexMetaBlob, err := proto.Marshal(indexMeta)
+	if err != nil {
+		return errors.New("marshal index meta failed when trying to update index meta")
+	}
+	if indexMetaBlob != nil {
+		status := C.SetIndexMeta(c.ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			C.DeleteCollection(c.ptr)
+			c.ptr = nil
+			return err
+		}
+	}
+	log.Info("append index meta success", zap.Any("indexMeta", indexMeta))
+	return nil
+}
+
 // Release releases the underlying collection
 func (c *CCollection) Release() {
-	C.DeleteCollection(c.ptr)
-	c.ptr = nil
+	if c.ptr != nil {
+		C.DeleteCollection(c.ptr)
+		c.ptr = nil
+	}
 }
 
 func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {

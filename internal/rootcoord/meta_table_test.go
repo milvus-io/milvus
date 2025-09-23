@@ -1100,7 +1100,7 @@ func Test_filterUnavailable(t *testing.T) {
 		}
 		coll.Partitions = append(coll.Partitions, partition)
 	}
-	clone := filterUnavailable(coll)
+	clone := filterUnavailablePartition(coll)
 	assert.Equal(t, nAvailablePartition, len(clone.Partitions))
 	for _, p := range clone.Partitions {
 		assert.True(t, p.Available())

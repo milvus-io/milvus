@@ -1,10 +1,13 @@
 package shards
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -48,6 +51,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	partitionIDs := msg.Header().PartitionIds
 	vchannel := msg.VChannel()
 	timetick := msg.TimeTick()
+	schema := msg.MustBody().GetCollectionSchema()
 	logger := m.Logger().With(log.FieldMessage(msg))
 
 	m.mu.Lock()
@@ -58,8 +62,18 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 		return
 	}
 
-	m.collections[collectionID] = newCollectionInfo(vchannel, partitionIDs)
-	for partitionID := range m.collections[collectionID].PartitionIDs {
+	collectionInfo := newCollectionInfo(vchannel, partitionIDs)
+	// Set schema when creating collection
+	if schema != nil {
+		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+			Schema:             schema,
+			CheckpointTimeTick: timetick,
+			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		}
+	}
+	m.collections[collectionID] = collectionInfo
+
+	for partitionID := range collectionInfo.PartitionIDs {
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		if _, ok := m.partitionManagers[uniqueKey]; ok {
 			logger.Warn("partition already exists", zap.Int64("partitionID", partitionID))
@@ -118,4 +132,102 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
+}
+
+// AlterCollection handles the alter collection message.
+// It updates the schema if present. Schema updates are handled after WAL append.
+func (m *shardManagerImpl) AlterCollection(msg message.ImmutableAlterCollectionMessageV2) error {
+	header := msg.Header()
+	collectionID := header.CollectionId
+	timetick := msg.TimeTick()
+	logger := m.Logger().With(log.FieldMessage(msg))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.checkIfCollectionExists(collectionID); err != nil {
+		logger.Warn("collection not found when altering collection", zap.Int64("collectionID", collectionID))
+		return err
+	}
+
+	// Update schema if present
+	schema := msg.MustBody().Updates.Schema
+	if schema != nil {
+		collectionInfo, ok := m.collections[collectionID]
+		if !ok {
+			logger.Warn("collection not found when updating schema", zap.Int64("collectionID", collectionID))
+			return ErrCollectionNotFound
+		}
+
+		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+			Schema:             schema,
+			CheckpointTimeTick: timetick,
+			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		}
+		log.Info("UpdatedCollectionSchema", zap.Any("schema", schema), zap.Int32("schemaVersion", schema.GetVersion()))
+	}
+
+	return nil
+}
+
+func (m *shardManagerImpl) AppendNewCollectionSchema(msg message.ImmutableAlterCollectionMessageV2) error {
+	header := msg.Header()
+	collectionID := header.CollectionId
+	schema := msg.MustBody().Updates.Schema
+	timetick := msg.TimeTick()
+	vchannel := msg.VChannel()
+
+	if schema == nil {
+		log.Error("schema is nil when appending collection schema",
+			zap.Int64("collectionID", collectionID),
+			zap.String("vchannel", vchannel),
+			zap.Uint64("timetick", timetick),
+			zap.String("messageType", msg.MessageType().String()))
+		return fmt.Errorf("collection schema cannot be nil when appending schema for collection %d on vchannel %s", collectionID, vchannel)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		log.Warn("collection not found when updating schema", zap.Int64("collectionID", collectionID))
+		return ErrCollectionNotFound
+	}
+
+	collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+		Schema:             schema,
+		CheckpointTimeTick: timetick,
+		State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+	}
+	log.Info("UpdatedCollectionSchema", zap.Any("schema", schema), zap.Int32("schemaVersion", schema.GetVersion()))
+	return nil
+}
+
+func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.checkIfCollectionSchemaVersionMatch(collectionID, schemaVersion)
+}
+
+func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+	if _, ok := m.collections[collectionID]; !ok {
+		log.Warn("collection not found", zap.Int64("collectionID", collectionID))
+		return -1, ErrCollectionNotFound
+	}
+	collectionInfo := m.collections[collectionID]
+	if collectionInfo.Schema == nil {
+		log.Warn("collection schema not found", zap.Int64("collectionID", collectionID))
+		return -1, ErrCollectionSchemaNotFound
+	}
+	collectionSchemaVersion := collectionInfo.Schema.GetSchema().GetVersion()
+	if collectionSchemaVersion != schemaVersion {
+		log.Warn("collection schema version not match", zap.Int64("collectionID", collectionID),
+			zap.Int32("schemaVersion", schemaVersion),
+			zap.Int32("collectionSchemaVersion", collectionSchemaVersion))
+		return -1, ErrCollectionSchemaVersionNotMatch
+	}
+	log.Info("collection schema version match", zap.Int64("collectionID", collectionID), zap.Int32("schemaVersion", schemaVersion), zap.Int32("collectionSchemaVersion", collectionSchemaVersion))
+	return collectionSchemaVersion, nil
 }

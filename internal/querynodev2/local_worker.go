@@ -78,6 +78,10 @@ func (w *LocalWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchem
 	return w.node.UpdateSchema(ctx, req)
 }
 
+func (w *LocalWorker) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	return w.node.UpdateIndex(ctx, req)
+}
+
 func (w *LocalWorker) IsHealthy() bool {
 	return true
 }

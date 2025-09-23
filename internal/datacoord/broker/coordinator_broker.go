@@ -35,7 +35,7 @@ import (
 
 //go:generate mockery --name=Broker --structname=MockBroker --output=./  --filename=mock_coordinator_broker.go --with-expecter --inpackage
 type Broker interface {
-	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
+	DescribeCollectionInternal(ctx context.Context, collectionID int64, startPositionTimestamp uint64) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
 	ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)
@@ -53,7 +53,7 @@ func NewCoordinatorBroker(mixCoord types.MixCoord) *coordinatorBroker {
 	}
 }
 
-func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64, startPositionTimestamp uint64) (*milvuspb.DescribeCollectionResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
@@ -65,6 +65,7 @@ func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 		),
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
+		TimeStamp:    startPositionTimestamp,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("DescribeCollectionInternal failed", zap.Error(err))
