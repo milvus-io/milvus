@@ -18,7 +18,6 @@
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <geos_c.h>
-#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 
 // Forward declaration to avoid pulling heavy field data headers here

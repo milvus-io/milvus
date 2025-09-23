@@ -11,7 +11,6 @@
 
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 #include <filesystem>
 #include <fstream>
@@ -275,16 +274,10 @@ RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
     AssertInfo(geom != nullptr, "Geometry is null");
     AssertInfo(ctx != nullptr, "GEOS context is null");
 
-    // Get envelope from GEOS geometry
-    GEOSGeometry* envelope = GEOSEnvelope_r(ctx, geom);
-    AssertInfo(envelope != nullptr, "Failed to get envelope from geometry");
-
     GEOSGeom_getXMin_r(ctx, geom, &minX);
     GEOSGeom_getXMax_r(ctx, geom, &maxX);
     GEOSGeom_getYMin_r(ctx, geom, &minY);
     GEOSGeom_getYMax_r(ctx, geom, &maxY);
-
-    GEOSGeom_destroy_r(ctx, envelope);
 }
 
 int64_t

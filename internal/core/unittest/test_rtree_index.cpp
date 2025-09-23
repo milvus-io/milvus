@@ -11,9 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
-#include <iostream>
 #include <vector>
 #include <string>
+#include <fstream>
 
 #include "index/RTreeIndex.h"
 #include "storage/Util.h"
@@ -27,10 +27,7 @@
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "common/FieldData.h"
 #include <boost/algorithm/string/predicate.hpp>
-#include <fstream>
-#include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -58,12 +55,18 @@ CreatePointWKB(double x, double y) {
 // Helper: create simple WKB from WKT
 static std::string
 CreateWkbFromWkt(const std::string& wkt) {
-    return milvus::Geometry(wkt.c_str()).to_wkb_string();
+    auto ctx = GEOS_init_r();
+    auto wkb = milvus::Geometry(ctx, wkt.c_str()).to_wkb_string();
+    GEOS_finish_r(ctx);
+    return wkb;
 }
 
 static milvus::Geometry
 CreateGeometryFromWkt(const std::string& wkt) {
-    return milvus::Geometry(wkt.c_str());
+    auto ctx = GEOS_init_r();
+    auto geom = milvus::Geometry(ctx, wkt.c_str());
+    GEOS_finish_r(ctx);
+    return geom;
 }
 
 // Helper: write an InsertData parquet file to "remote" storage managed by chunk_manager_
@@ -664,20 +667,23 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     // Prepare controlled geometry WKBs mirroring the shapes used in growing
     std::vector<std::string> wkbs;
     wkbs.reserve(N * num_iters);
+    auto ctx = GEOS_init_r();
     for (int i = 0; i < N * num_iters; ++i) {
         if (i % 4 == 0) {
-            wkbs.emplace_back(milvus::Geometry("POINT(0 0)").to_wkb_string());
+            wkbs.emplace_back(
+                milvus::Geometry(ctx, "POINT(0 0)").to_wkb_string());
         } else if (i % 4 == 1) {
             wkbs.emplace_back(
-                milvus::Geometry("POLYGON((-1 -1,1 -1,1 1,-1 1,-1 -1))")
+                milvus::Geometry(ctx, "POLYGON((-1 -1,1 -1,1 1,-1 1,-1 -1))")
                     .to_wkb_string());
         } else if (i % 4 == 2) {
             wkbs.emplace_back(
-                milvus::Geometry("POLYGON((10 10,20 10,20 20,10 20,10 10))")
+                milvus::Geometry(ctx,
+                                 "POLYGON((10 10,20 10,20 20,10 20,10 10))")
                     .to_wkb_string());
         } else {
             wkbs.emplace_back(
-                milvus::Geometry("LINESTRING(-1 0,1 0)").to_wkb_string());
+                milvus::Geometry(ctx, "LINESTRING(-1 0,1 0)").to_wkb_string());
         }
     }
 
@@ -737,9 +743,8 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     auto test_op = [&](const std::string& wkt,
                        proto::plan::GISFunctionFilterExpr_GISOp op,
                        std::function<bool(int)> expected) {
-        milvus::Geometry right(wkt.c_str());
         auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
-            milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY), op, right);
+            milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY), op, wkt);
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            gis_expr);
         BitsetType bits =
@@ -764,4 +769,5 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     test_op("POINT(0 0)",
             proto::plan::GISFunctionFilterExpr_GISOp_Equals,
             [](int i) { return (i % 4 == 0); });
+    GEOS_finish_r(ctx);
 }

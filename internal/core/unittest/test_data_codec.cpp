@@ -18,8 +18,6 @@
 #include <string>
 
 #include "common/Geometry.h"
-#include "ogr_core.h"
-#include "ogr_geometry.h"
 #include "storage/DataCodec.h"
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
@@ -354,23 +352,23 @@ TEST(storage, InsertDataInt64Nullable) {
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
     delete[] valid_data;
 }
+
 TEST(storage, InsertDataGeometry) {
-    OGRPoint point1(10.25, 0.55), point2(9.75, -0.23), point3(-8.50, 1.44);
-    OGRLineString linstring;
-    linstring.addPoint(&point1);
-    linstring.addPoint(&point2);
-    linstring.addPoint(&point3);
-    OGRPolygon polygon;
-    OGRLinearRing ring;
-    ring.addPoint(&point1);
-    ring.addPoint(&point2);
-    ring.addPoint(&point3);
-    ring.closeRings();
-    polygon.addRing(&ring);
+    auto ctx = GEOS_init_r();
+
+    // Define geometries using WKT strings directly
+    const char* point_wkt = "POINT (10.25 0.55)";
+    const char* linestring_wkt =
+        "LINESTRING (10.25 0.55, 9.75 -0.23, -8.50 1.44)";
+    const char* polygon_wkt =
+        "POLYGON ((10.25 0.55, 9.75 -0.23, -8.50 1.44, 10.25 0.55))";
+
     std::string str1, str2, str3;
-    str1 = Geometry(point1.exportToWkt().data()).to_wkb_string();
-    str2 = Geometry(linstring.exportToWkt().data()).to_wkb_string();
-    str3 = Geometry(polygon.exportToWkt().data()).to_wkb_string();
+    str1 = Geometry(ctx, point_wkt).to_wkb_string();
+    str2 = Geometry(ctx, linestring_wkt).to_wkb_string();
+    str3 = Geometry(ctx, polygon_wkt).to_wkb_string();
+
+    GEOS_finish_r(ctx);
     FixedVector<std::string> data = {str1, str2, str3};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::GEOMETRY, false);
@@ -404,14 +402,22 @@ TEST(storage, InsertDataGeometry) {
 }
 
 TEST(storage, InsertDataGeometryNullable) {
-    // Prepare five simple point geometries in WKB format
-    OGRPoint p1(0.0, 0.0), p2(1.0, 1.0), p3(2.0, 2.0), p4(3.0, 3.0),
-        p5(4.0, 4.0);
-    std::string str1 = Geometry(p1.exportToWkt().data()).to_wkb_string();
-    std::string str2 = Geometry(p2.exportToWkt().data()).to_wkb_string();
-    std::string str3 = Geometry(p3.exportToWkt().data()).to_wkb_string();
-    std::string str4 = Geometry(p4.exportToWkt().data()).to_wkb_string();
-    std::string str5 = Geometry(p5.exportToWkt().data()).to_wkb_string();
+    auto ctx = GEOS_init_r();
+
+    // Prepare five simple point geometries in WKB format using WKT strings directly
+    const char* p1_wkt = "POINT (0.0 0.0)";
+    const char* p2_wkt = "POINT (1.0 1.0)";
+    const char* p3_wkt = "POINT (2.0 2.0)";
+    const char* p4_wkt = "POINT (3.0 3.0)";
+    const char* p5_wkt = "POINT (4.0 4.0)";
+
+    std::string str1 = Geometry(ctx, p1_wkt).to_wkb_string();
+    std::string str2 = Geometry(ctx, p2_wkt).to_wkb_string();
+    std::string str3 = Geometry(ctx, p3_wkt).to_wkb_string();
+    std::string str4 = Geometry(ctx, p4_wkt).to_wkb_string();
+    std::string str5 = Geometry(ctx, p5_wkt).to_wkb_string();
+
+    GEOS_finish_r(ctx);
 
     FixedVector<std::string> data = {str1, str2, str3, str4, str5};
 

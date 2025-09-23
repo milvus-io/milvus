@@ -21,15 +21,23 @@ namespace milvus {
 class Geometry {
  public:
     // Default constructor creates invalid geometry
-    Geometry() : geometry_(nullptr) {
+    Geometry() : geometry_(nullptr), ctx_(nullptr) {
+    }
+
+    ~Geometry() {
+        if (geometry_ != nullptr) {
+            GEOSGeom_destroy_r(ctx_, geometry_);
+        }
     }
 
     // Constructor from raw GEOS geometry (lightweight wrapper)
-    explicit Geometry(GEOSGeometry* geom) : geometry_(geom) {
+    explicit Geometry(GEOSContextHandle_t ctx, GEOSGeometry* geom)
+        : geometry_(geom), ctx_(ctx) {
     }
 
     // Constructor from WKB data
-    explicit Geometry(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
+    explicit Geometry(GEOSContextHandle_t ctx, const void* wkb, size_t size)
+        : ctx_(ctx) {
         GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
         AssertInfo(reader != nullptr, "Failed to create GEOS WKB reader");
 
@@ -43,7 +51,7 @@ class Geometry {
     }
 
     // Constructor from WKT string
-    explicit Geometry(GEOSContextHandle_t ctx, const char* wkt) {
+    explicit Geometry(GEOSContextHandle_t ctx, const char* wkt) : ctx_(ctx) {
         GEOSWKTReader* reader = GEOSWKTReader_create_r(ctx);
         AssertInfo(reader != nullptr, "Failed to create GEOS WKT reader");
 
@@ -55,7 +63,8 @@ class Geometry {
         geometry_ = geom;
     }
 
-    Geometry(const Geometry& other) : geometry_(other.geometry_) {
+    Geometry(GEOSContextHandle_t ctx, const Geometry& other)
+        : geometry_(other.geometry_), ctx_(other.ctx_) {
     }
 
     // Copy assignment
@@ -63,14 +72,16 @@ class Geometry {
     operator=(const Geometry& other) {
         if (this != &other) {
             geometry_ = other.geometry_;
+            ctx_ = other.ctx_;
         }
         return *this;
     }
 
     // Copy constructor with context (for cloning)
-    Geometry(GEOSContextHandle_t ctx, const Geometry& other) {
+    Geometry(const Geometry& other) : ctx_(other.ctx_) {
         if (other.IsValid()) {
-            GEOSGeometry* cloned = GEOSGeom_clone_r(ctx, other.geometry_);
+            GEOSGeometry* cloned =
+                GEOSGeom_clone_r(other.ctx_, other.geometry_);
             AssertInfo(cloned != nullptr, "Failed to clone geometry");
             geometry_ = cloned;
         } else {
@@ -96,80 +107,78 @@ class Geometry {
 
     // Spatial relation operations using GEOS API
     bool
-    equals(GEOSContextHandle_t ctx, const Geometry& other) const {
+    equals(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSEquals_r(ctx, geometry_, other.geometry_);
+        char result = GEOSEquals_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    touches(GEOSContextHandle_t ctx, const Geometry& other) const {
+    touches(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSTouches_r(ctx, geometry_, other.geometry_);
+        char result = GEOSTouches_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    overlaps(GEOSContextHandle_t ctx, const Geometry& other) const {
+    overlaps(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSOverlaps_r(ctx, geometry_, other.geometry_);
+        char result = GEOSOverlaps_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    crosses(GEOSContextHandle_t ctx, const Geometry& other) const {
+    crosses(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSCrosses_r(ctx, geometry_, other.geometry_);
+        char result = GEOSCrosses_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    contains(GEOSContextHandle_t ctx, const Geometry& other) const {
+    contains(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSContains_r(ctx, geometry_, other.geometry_);
+        char result = GEOSContains_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    intersects(GEOSContextHandle_t ctx, const Geometry& other) const {
+    intersects(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSIntersects_r(ctx, geometry_, other.geometry_);
+        char result = GEOSIntersects_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
-    within(GEOSContextHandle_t ctx, const Geometry& other) const {
+    within(const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSWithin_r(ctx, geometry_, other.geometry_);
+        char result = GEOSWithin_r(ctx_, geometry_, other.geometry_);
         return result == 1;
     }
 
     // Distance within check using GEOS distance calculation
     bool
-    dwithin(GEOSContextHandle_t ctx,
-            const Geometry& other,
-            double distance) const {
+    dwithin(const Geometry& other, double distance) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
 
         // Get geometry types
-        int thisType = GEOSGeomTypeId_r(ctx, geometry_);
-        int otherType = GEOSGeomTypeId_r(ctx, other.geometry_);
+        int thisType = GEOSGeomTypeId_r(ctx_, geometry_);
+        int otherType = GEOSGeomTypeId_r(ctx_, other.geometry_);
 
         // Ensure other geometry is a point
         AssertInfo(otherType == GEOS_POINT, "other geometry is not a point");
@@ -177,10 +186,10 @@ class Geometry {
         // For point-to-point, use Haversine formula for accuracy
         if (thisType == GEOS_POINT) {
             double thisX, thisY, otherX, otherY;
-            if (GEOSGeomGetX_r(ctx, geometry_, &thisX) == 1 &&
-                GEOSGeomGetY_r(ctx, geometry_, &thisY) == 1 &&
-                GEOSGeomGetX_r(ctx, other.geometry_, &otherX) == 1 &&
-                GEOSGeomGetY_r(ctx, other.geometry_, &otherY) == 1) {
+            if (GEOSGeomGetX_r(ctx_, geometry_, &thisX) == 1 &&
+                GEOSGeomGetY_r(ctx_, geometry_, &thisY) == 1 &&
+                GEOSGeomGetX_r(ctx_, other.geometry_, &otherX) == 1 &&
+                GEOSGeomGetY_r(ctx_, other.geometry_, &otherY) == 1) {
                 double actual_distance =
                     haversine_distance_meters(thisY, thisX, otherY, otherX);
                 return actual_distance <= distance;
@@ -189,12 +198,12 @@ class Geometry {
 
         // For other geometry types, use GEOS distance (in degrees)
         double geos_distance;
-        if (GEOSDistance_r(ctx, geometry_, other.geometry_, &geos_distance) ==
+        if (GEOSDistance_r(ctx_, geometry_, other.geometry_, &geos_distance) ==
             1) {
             // Get query point coordinates for conversion reference
             double query_lat, query_lon;
-            if (GEOSGeomGetX_r(ctx, other.geometry_, &query_lon) == 1 &&
-                GEOSGeomGetY_r(ctx, other.geometry_, &query_lat) == 1) {
+            if (GEOSGeomGetX_r(ctx_, other.geometry_, &query_lon) == 1 &&
+                GEOSGeomGetY_r(ctx_, other.geometry_, &query_lat) == 1) {
                 double distance_in_meters =
                     degrees_to_meters_at_location(geos_distance, query_lat);
                 return distance_in_meters <= distance;
@@ -249,52 +258,53 @@ class Geometry {
  public:
     // Export to WKT string
     std::string
-    to_wkt_string(GEOSContextHandle_t ctx) const {
+    to_wkt_string() const {
         if (!IsValid()) {
             return "";
         }
 
-        GEOSWKTWriter* writer = GEOSWKTWriter_create_r(ctx);
+        GEOSWKTWriter* writer = GEOSWKTWriter_create_r(ctx_);
         AssertInfo(writer != nullptr, "Failed to create GEOS WKT writer");
 
-        char* wkt = GEOSWKTWriter_write_r(ctx, writer, geometry_);
-        GEOSWKTWriter_destroy_r(ctx, writer);
+        char* wkt = GEOSWKTWriter_write_r(ctx_, writer, geometry_);
+        GEOSWKTWriter_destroy_r(ctx_, writer);
 
         if (!wkt) {
             return "";
         }
 
         std::string result(wkt);
-        GEOSFree_r(ctx, wkt);
+        GEOSFree_r(ctx_, wkt);
         return result;
     }
 
     // Export to WKB string (for test)
     std::string
-    to_wkb_string(GEOSContextHandle_t ctx) const {
+    to_wkb_string() const {
         if (!IsValid()) {
             return "";
         }
 
-        GEOSWKBWriter* writer = GEOSWKBWriter_create_r(ctx);
+        GEOSWKBWriter* writer = GEOSWKBWriter_create_r(ctx_);
         AssertInfo(writer != nullptr, "Failed to create GEOS WKB writer");
 
         size_t size;
         unsigned char* wkb =
-            GEOSWKBWriter_write_r(ctx, writer, geometry_, &size);
-        GEOSWKBWriter_destroy_r(ctx, writer);
+            GEOSWKBWriter_write_r(ctx_, writer, geometry_, &size);
+        GEOSWKBWriter_destroy_r(ctx_, writer);
 
         if (!wkb) {
             return "";
         }
 
         std::string result(reinterpret_cast<const char*>(wkb), size);
-        GEOSFree_r(ctx, wkb);
+        GEOSFree_r(ctx_, wkb);
         return result;
     }
 
  private:
     GEOSGeometry* geometry_;  // Raw pointer, managed by cache
+    GEOSContextHandle_t ctx_;
 };
 
 }  // namespace milvus

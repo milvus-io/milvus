@@ -36,21 +36,6 @@ MakeCacheKey(int64_t segment_id, FieldId field_id) {
 // Vector-based Geometry cache that maintains original field data order
 class SimpleGeometryCache {
  public:
-    // Clear all cached geometries
-    void
-    Clear(GEOSContextHandle_t ctx) {
-        std::lock_guard<std::shared_mutex> lock(mutex_);
-
-        // Manually clean up all GEOS geometries using the segment's context
-        for (const auto& geometry : geometries_) {
-            GEOSGeometry* geom = geometry.GetRawGeometry();
-            if (geom) {
-                GEOSGeom_destroy_r(ctx, geom);
-            }
-        }
-        geometries_.clear();
-    }
-
     // Append WKB data during field loading
     void
     AppendData(GEOSContextHandle_t ctx, const char* wkb_data, size_t size) {
@@ -147,10 +132,6 @@ class SimpleGeometryCacheManager {
     RemoveCache(GEOSContextHandle_t ctx, int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto key = MakeCacheKey(segment_id, field_id);
-        auto cache = caches_.find(key);
-        if (cache != caches_.end()) {
-            cache->second->Clear(ctx);
-        }
         caches_.erase(key);
     }
 
@@ -163,7 +144,6 @@ class SimpleGeometryCacheManager {
         while (it != caches_.end()) {
             if (it->first.substr(0, segment_prefix.length()) ==
                 segment_prefix) {
-                it->second->Clear(ctx);
                 it = caches_.erase(it);
             } else {
                 ++it;

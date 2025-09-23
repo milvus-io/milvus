@@ -13,8 +13,7 @@
 #include <filesystem>
 #include <vector>
 #include "index/RTreeIndexWrapper.h"
-#include "common/Types.h"
-#include "gdal.h"
+#include "common/Geometry.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {
  protected:
@@ -24,8 +23,8 @@ class RTreeIndexWrapperTest : public ::testing::Test {
         test_dir_ = "/tmp/rtree_test";
         std::filesystem::create_directories(test_dir_);
 
-        // Initialize GDAL
-        GDALAllRegister();
+        // Initialize GEOS
+        ctx_ = GEOS_init_r();
     }
 
     void
@@ -33,71 +32,37 @@ class RTreeIndexWrapperTest : public ::testing::Test {
         // Clean up test directory
         std::filesystem::remove_all(test_dir_);
 
-        // Clean up GDAL
-        GDALDestroyDriverManager();
+        // Clean up GEOS
+        GEOS_finish_r(ctx_);
     }
 
-    // Helper function to create a simple point WKB
-    std::vector<uint8_t>
+    // Helper function to create a simple point WKB using GEOS
+    std::string
     create_point_wkb(double x, double y) {
-        // WKB format for a point: byte order (1) + geometry type (1) + coordinates (16 bytes)
-        std::vector<uint8_t> wkb = {
-            0x01,  // Little endian
-            0x01,
-            0x00,
-            0x00,
-            0x00,  // Point geometry type
-        };
-
-        // Add X coordinate (8 bytes, little endian double)
-        uint8_t* x_bytes = reinterpret_cast<uint8_t*>(&x);
-        wkb.insert(wkb.end(), x_bytes, x_bytes + sizeof(double));
-
-        // Add Y coordinate (8 bytes, little endian double)
-        uint8_t* y_bytes = reinterpret_cast<uint8_t*>(&y);
-        wkb.insert(wkb.end(), y_bytes, y_bytes + sizeof(double));
-
-        return wkb;
+        std::string wkt =
+            "POINT (" + std::to_string(x) + " " + std::to_string(y) + ")";
+        milvus::Geometry geom(ctx_, wkt.c_str());
+        return geom.to_wkb_string();
     }
 
-    // Helper function to create a simple polygon WKB
-    std::vector<uint8_t>
+    // Helper function to create a simple polygon WKB using GEOS
+    std::string
     create_polygon_wkb(const std::vector<std::pair<double, double>>& points) {
-        // WKB format for a polygon
-        std::vector<uint8_t> wkb = {
-            0x01,  // Little endian
-            0x03,
-            0x00,
-            0x00,
-            0x00,  // Polygon geometry type
-            0x01,
-            0x00,
-            0x00,
-            0x00,  // 1 ring
-        };
-
-        // Add number of points in the ring
-        uint32_t num_points = static_cast<uint32_t>(points.size());
-        uint8_t* num_points_bytes = reinterpret_cast<uint8_t*>(&num_points);
-        wkb.insert(
-            wkb.end(), num_points_bytes, num_points_bytes + sizeof(uint32_t));
-
-        // Add points
-        for (const auto& point : points) {
-            double x = point.first;
-            double y = point.second;
-
-            uint8_t* x_bytes = reinterpret_cast<uint8_t*>(&x);
-            wkb.insert(wkb.end(), x_bytes, x_bytes + sizeof(double));
-
-            uint8_t* y_bytes = reinterpret_cast<uint8_t*>(&y);
-            wkb.insert(wkb.end(), y_bytes, y_bytes + sizeof(double));
+        std::string wkt = "POLYGON ((";
+        for (size_t i = 0; i < points.size(); ++i) {
+            if (i > 0)
+                wkt += ", ";
+            wkt += std::to_string(points[i].first) + " " +
+                   std::to_string(points[i].second);
         }
+        wkt += "))";
 
-        return wkb;
+        milvus::Geometry geom(ctx_, wkt.c_str());
+        return geom.to_wkb_string();
     }
 
     std::string test_dir_;
+    GEOSContextHandle_t ctx_;
 };
 
 TEST_F(RTreeIndexWrapperTest, TestBuildAndLoad) {
@@ -112,9 +77,18 @@ TEST_F(RTreeIndexWrapperTest, TestBuildAndLoad) {
         auto point2_wkb = create_point_wkb(2.0, 2.0);
         auto point3_wkb = create_point_wkb(3.0, 3.0);
 
-        wrapper.add_geometry(point1_wkb.data(), point1_wkb.size(), 0);
-        wrapper.add_geometry(point2_wkb.data(), point2_wkb.size(), 1);
-        wrapper.add_geometry(point3_wkb.data(), point3_wkb.size(), 2);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point1_wkb.data()),
+            point1_wkb.size(),
+            0);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point2_wkb.data()),
+            point2_wkb.size(),
+            1);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point3_wkb.data()),
+            point3_wkb.size(),
+            2);
 
         wrapper.finish();
     }
@@ -128,18 +102,16 @@ TEST_F(RTreeIndexWrapperTest, TestBuildAndLoad) {
         auto query_polygon_wkb = create_polygon_wkb(
             {{0.0, 0.0}, {2.5, 0.0}, {2.5, 2.5}, {0.0, 2.5}, {0.0, 0.0}});
 
-        OGRGeometry* query_geom = nullptr;
-        OGRGeometryFactory::createFromWkb(query_polygon_wkb.data(),
-                                          nullptr,
-                                          &query_geom,
-                                          query_polygon_wkb.size());
-
-        ASSERT_NE(query_geom, nullptr);
+        milvus::Geometry query_geom(
+            ctx_,
+            reinterpret_cast<const void*>(query_polygon_wkb.data()),
+            query_polygon_wkb.size());
 
         std::vector<int64_t> candidates;
         wrapper.query_candidates(
             milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-            query_geom,
+            query_geom.GetGeometry(),
+            ctx_,
             candidates);
 
         // Should find points 1 and 2, but not point 3
@@ -150,8 +122,6 @@ TEST_F(RTreeIndexWrapperTest, TestBuildAndLoad) {
                     candidates.end());
         EXPECT_TRUE(std::find(candidates.begin(), candidates.end(), 2) ==
                     candidates.end());
-
-        OGRGeometryFactory::destroyGeometry(query_geom);
     }
 }
 
@@ -165,16 +135,28 @@ TEST_F(RTreeIndexWrapperTest, TestQueryOperations) {
         // Add a polygon
         auto polygon_wkb = create_polygon_wkb(
             {{0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}, {0.0, 0.0}});
-        wrapper.add_geometry(polygon_wkb.data(), polygon_wkb.size(), 0);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(polygon_wkb.data()),
+            polygon_wkb.size(),
+            0);
 
         // Add some points
         auto point1_wkb = create_point_wkb(5.0, 5.0);    // Inside polygon
         auto point2_wkb = create_point_wkb(15.0, 15.0);  // Outside polygon
         auto point3_wkb = create_point_wkb(1.0, 1.0);    // Inside polygon
 
-        wrapper.add_geometry(point1_wkb.data(), point1_wkb.size(), 1);
-        wrapper.add_geometry(point2_wkb.data(), point2_wkb.size(), 2);
-        wrapper.add_geometry(point3_wkb.data(), point3_wkb.size(), 3);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point1_wkb.data()),
+            point1_wkb.size(),
+            1);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point2_wkb.data()),
+            point2_wkb.size(),
+            2);
+        wrapper.add_geometry(
+            reinterpret_cast<const uint8_t*>(point3_wkb.data()),
+            point3_wkb.size(),
+            3);
 
         wrapper.finish();
     }
@@ -188,18 +170,16 @@ TEST_F(RTreeIndexWrapperTest, TestQueryOperations) {
         auto query_polygon_wkb = create_polygon_wkb(
             {{4.0, 4.0}, {6.0, 4.0}, {6.0, 6.0}, {4.0, 6.0}, {4.0, 4.0}});
 
-        OGRGeometry* query_geom = nullptr;
-        OGRGeometryFactory::createFromWkb(query_polygon_wkb.data(),
-                                          nullptr,
-                                          &query_geom,
-                                          query_polygon_wkb.size());
-
-        ASSERT_NE(query_geom, nullptr);
+        milvus::Geometry query_geom(
+            ctx_,
+            reinterpret_cast<const void*>(query_polygon_wkb.data()),
+            query_polygon_wkb.size());
 
         std::vector<int64_t> candidates;
         wrapper.query_candidates(
             milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-            query_geom,
+            query_geom.GetGeometry(),
+            ctx_,
             candidates);
 
         // Should find the large polygon and point1, but not point2 or point3
@@ -212,8 +192,6 @@ TEST_F(RTreeIndexWrapperTest, TestQueryOperations) {
                     candidates.end());
         EXPECT_TRUE(std::find(candidates.begin(), candidates.end(), 3) ==
                     candidates.end());
-
-        OGRGeometryFactory::destroyGeometry(query_geom);
     }
 }
 

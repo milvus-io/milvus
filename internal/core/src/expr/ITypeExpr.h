@@ -21,13 +21,12 @@
 #include <string>
 #include <vector>
 
-#include "common/Geometry.h"
+#include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 
 namespace milvus {
@@ -763,9 +762,12 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
  public:
     GISFunctionFilterExpr(ColumnInfo cloumn,
                           GISFunctionType op,
-                          const Geometry& geometry,
+                          const std::string& geometry_wkt,
                           double distance = 0.0)
-        : column_(cloumn), op_(op), geometry_(geometry), distance_(distance) {};
+        : column_(cloumn),
+          op_(op),
+          geometry_wkt_(geometry_wkt),
+          distance_(distance) {};
     std::string
     ToString() const override {
         if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
@@ -774,7 +776,7 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
                 "WktValue: {}, Distance: {}]",
                 column_.ToString(),
                 GISFunctionFilterExpr_GISOp_Name(op_),
-                geometry_.to_wkt_string(GEOS_init_r()),
+                geometry_wkt_,
                 distance_);
         } else {
             return fmt::format(
@@ -782,14 +784,14 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
                 "WktValue: {}]",
                 column_.ToString(),
                 GISFunctionFilterExpr_GISOp_Name(op_),
-                geometry_.to_wkt_string(GEOS_init_r()));
+                geometry_wkt_);
         }
     }
 
  public:
     const ColumnInfo column_;
     const GISFunctionType op_;
-    const Geometry geometry_;
+    const std::string geometry_wkt_;
     const double distance_;
 };
 

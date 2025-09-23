@@ -46,8 +46,7 @@ namespace exec {
                 geometry_cache.GetByOffsetUnsafe(absolute_offset);                                    \
             AssertInfo(cached_geometry != nullptr,                                                    \
                        "cached geometry is nullptr");                                                 \
-            res[i] =                                                                                  \
-                cached_geometry->method(segment_->get_ctx(), right_source);                           \
+            res[i] = cached_geometry->method(right_source);                                           \
         }                                                                                             \
     };                                                                                                \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(                                      \
@@ -85,8 +84,7 @@ namespace exec {
                 geometry_cache.GetByOffsetUnsafe(absolute_offset);             \
             AssertInfo(cached_geometry != nullptr,                             \
                        "cached geometry is nullptr");                          \
-            res[i] = cached_geometry->method(                                  \
-                segment_->get_ctx(), right_source, expr_->distance_);          \
+            res[i] = cached_geometry->method(right_source, expr_->distance_);  \
         }                                                                      \
     };                                                                         \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
@@ -121,7 +119,8 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    auto& right_source = expr_->geometry_;
+    auto right_source =
+        Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str());
 
     // Choose underlying data type according to segment type to avoid element
     // size mismatch: Sealed segment variable column stores std::string_view;
@@ -261,30 +260,33 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         return nullptr;
     }
 
+    Geometry query_geometry =
+        Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str());
+
     /* ------------------------------------------------------------------
      * Prefetch: if coarse results are not cached yet, run a single R-Tree
      * query for all index chunks and cache their coarse bitmaps.
      * ------------------------------------------------------------------*/
 
-    auto evaluate_geometry = [this](GEOSContextHandle_t ctx,
-                                    const Geometry& left) -> bool {
+    auto evaluate_geometry = [this](const Geometry& left,
+                                    const Geometry& query_geometry) -> bool {
         switch (expr_->op_) {
             case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-                return left.equals(ctx, expr_->geometry_);
+                return left.equals(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
-                return left.touches(ctx, expr_->geometry_);
+                return left.touches(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
-                return left.overlaps(ctx, expr_->geometry_);
+                return left.overlaps(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
-                return left.crosses(ctx, expr_->geometry_);
+                return left.crosses(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
-                return left.contains(ctx, expr_->geometry_);
+                return left.contains(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
-                return left.intersects(ctx, expr_->geometry_);
+                return left.intersects(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Within:
-                return left.within(ctx, expr_->geometry_);
+                return left.within(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
-                return left.dwithin(ctx, expr_->geometry_, expr_->distance_);
+                return left.dwithin(query_geometry, expr_->distance_);
             default:
                 PanicInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
         }
@@ -305,14 +307,16 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
             // Create bounding box geometry for index coarse filtering
             Geometry bbox_geometry = create_bounding_box_for_dwithin(
-                segment_->get_ctx(), expr_->geometry_, expr_->distance_);
+                segment_->get_ctx(), query_geometry, expr_->distance_);
 
             ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
 
             // Note: Distance is not used for bounding box intersection query
         } else {
             // For other operations, use original geometry
-            ds->Set(milvus::index::MATCH_VALUE, expr_->geometry_);
+            ds->Set(
+                milvus::index::MATCH_VALUE,
+                Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str()));
         }
 
         // Query segment-level R-Tree index **once** since each chunk shares the same index
@@ -373,8 +377,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     if (cached_geometry == nullptr) {
                         continue;
                     }
-                    bool result = evaluate_geometry(segment_->get_ctx(),
-                                                    *cached_geometry);
+                    bool result =
+                        evaluate_geometry(*cached_geometry, query_geometry);
 
                     if (result) {
                         refined.set(pos);
