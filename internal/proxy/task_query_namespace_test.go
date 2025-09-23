@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -41,7 +42,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Capture plan to verify namespace by mocking plan creation inside createPlan
 		var capturedPlan *planpb.PlanNode
-		mockey.Mock((*queryTask).createPlan).To(func(q *queryTask, ctx context.Context) error {
+		mockey.Mock((*queryTask).createPlanArgs).To(func(q *queryTask, ctx context.Context, visitorArgs *planparserv2.ParserVisitorArgs) error {
 			capturedPlan = &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}}}
 			q.plan = capturedPlan
 			q.translatedOutputFields = []string{"id"}
