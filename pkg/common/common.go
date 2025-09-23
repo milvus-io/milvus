@@ -215,6 +215,7 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
+	AllowInsertAutoIDKey       = "allow_insert_auto_id"
 )
 
 const (
@@ -470,4 +471,14 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	reversed = reversed >> 1
 
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
+func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.Key == AllowInsertAutoIDKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
+		}
+	}
+	return false, false
 }

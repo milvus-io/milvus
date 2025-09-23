@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -71,8 +72,9 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 		}
 	}
 
+	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
 	// check if csv header provides the primary key while it should be auto-generated
-	if pkField.GetAutoID() && lo.Contains(header, pkField.GetName()) {
+	if pkField.GetAutoID() && lo.Contains(header, pkField.GetName()) && !allowInsertAutoID {
 		return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", pkField.GetName())
 	}
 

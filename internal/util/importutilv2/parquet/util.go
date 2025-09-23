@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -56,6 +57,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	crs := make(map[int64]*FieldReader)
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
 		if !ok {
@@ -63,7 +65,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field: %s is not in schema, "+
 				"if it's a dynamic field, please reformat data by bulk_writer", pqField.Name))
 		}
-		if typeutil.IsAutoPKField(field) {
+		if typeutil.IsAutoPKField(field) && !allowInsertAutoID {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}

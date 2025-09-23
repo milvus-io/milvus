@@ -10,7 +10,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
@@ -310,6 +314,113 @@ func TestMaxInsertSize(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
+}
+
+func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
+	paramtable.Init()
+	// run auto-id path with field count check; allow user to pass PK
+	Params.Save(Params.ProxyCfg.SkipAutoIDCheck.Key, "false")
+	defer Params.Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Status(nil),
+		ID:     11198,
+		Count:  10,
+	}, nil)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	idAllocator.Start()
+	defer idAllocator.Close()
+	assert.NoError(t, err)
+
+	nb := 5
+	userIDs := []int64{101, 102, 103, 104, 105}
+
+	collectionName := "TestInsertTask_KeepUserPK"
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.AllowInsertAutoIDKey, Value: "true"},
+		},
+	}
+
+	pkFieldData := &schemapb.FieldData{
+		FieldName: "id",
+		FieldId:   100,
+		Type:      schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: userIDs},
+				},
+			},
+		},
+	}
+
+	task := insertTask{
+		ctx: context.Background(),
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: collectionName,
+				DbName:         "test_db",
+				PartitionName:  "_default",
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				Version:    msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: []*schemapb.FieldData{pkFieldData},
+				NumRows:    uint64(nb),
+			},
+		},
+		idAllocator: idAllocator,
+	}
+
+	info := newSchemaInfo(schema)
+	cache := NewMockCache(t)
+	collectionID := UniqueID(0)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+
+	cache.On("GetCollectionSchema",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(info, nil)
+
+	cache.On("GetCollectionInfo",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(&collectionInfo{schema: info}, nil)
+
+	cache.On("GetDatabaseInfo",
+		mock.Anything,
+		mock.Anything,
+	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil)
+
+	globalMetaCache = cache
+
+	err = task.PreExecute(context.Background())
+	assert.NoError(t, err)
+
+	ids := task.result.IDs
+	if ids.GetIntId() == nil {
+		t.Fatalf("expected int IDs, got nil")
+	}
+	got := ids.GetIntId().GetData()
+
+	assert.Equal(t, userIDs, got)
 }
 
 func TestInsertTaskForSchemaMismatch(t *testing.T) {
