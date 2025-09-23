@@ -21,6 +21,7 @@ type pChannelInfoAssigned struct {
 }
 
 func TestStreamingNodeManager(t *testing.T) {
+	StaticStreamingNodeManager.Close()
 	m := newStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
 

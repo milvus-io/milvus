@@ -2869,7 +2869,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 
 	// Test DropPartition message callback
 	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
-		WithVChannel("test_channel").
 		WithHeader(&message.DropPartitionMessageHeader{
 			CollectionId: 1,
 			PartitionId:  1,
@@ -2901,13 +2900,11 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		WithBroadcast([]string{"ch-0"}, resourceKey).
 		BuildBroadcast()
-	newMsg, err := registry.CallMessageCheckCallback(ctx, msg)
+	err = registry.CallMessageCheckCallback(ctx, msg)
 	assert.NoError(t, err)
-	assert.NotNil(t, newMsg)
 
 	// Test Import message ack callback
 	importMsg := message.NewImportMessageBuilderV1().
-		WithVChannel("test_channel").
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
