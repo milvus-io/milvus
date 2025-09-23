@@ -195,13 +195,20 @@ func (m *RefManager) Download(downloader storage.ChunkManager, resources ...*int
 			}
 
 			localResourcePath := path.Join(m.localPath, key)
+
+			err := os.MkdirAll(localResourcePath, os.ModePerm)
+			if err != nil {
+				return nil, err
+			}
+
 			reader, err := downloader.Reader(ctx, resource.GetPath())
 			if err != nil {
 				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
 				return nil, err
 			}
 
-			file, err := os.Create(localResourcePath)
+			fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
+			file, err := os.Create(fileName)
 			if err != nil {
 				return nil, err
 			}
