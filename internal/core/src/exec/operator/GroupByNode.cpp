@@ -56,6 +56,7 @@ PhyGroupByNode::GetOutput() {
     std::chrono::high_resolution_clock::time_point vector_start =
         std::chrono::high_resolution_clock::now();
 
+    auto op_context = query_context_->get_op_context();
     auto search_result = query_context_->get_search_result();
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
@@ -63,7 +64,8 @@ PhyGroupByNode::GetOutput() {
                    "Vector Iterators' count must be equal to total_nq_, Check "
                    "your code");
         std::vector<GroupByValueType> group_by_values;
-        milvus::exec::SearchGroupBy(search_result.vector_iterators_.value(),
+        milvus::exec::SearchGroupBy(op_context,
+                                    search_result.vector_iterators_.value(),
                                     search_info_,
                                     group_by_values,
                                     *segment_,
@@ -85,7 +87,8 @@ PhyGroupByNode::GetOutput() {
     double vector_cost =
         std::chrono::duration<double, std::micro>(vector_end - vector_start)
             .count();
-    monitor::internal_core_search_latency_groupby.Observe(vector_cost / 1000);
+    milvus::monitor::internal_core_search_latency_groupby.Observe(vector_cost /
+                                                                  1000);
     return input_;
 }
 

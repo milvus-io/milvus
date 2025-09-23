@@ -223,7 +223,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	defer func() {
 		sp.End()
 	}()
-	queryResult, err := t.node.(*Proxy).query(ctx, qt, sp)
+	// ignore storage cost?
+	queryResult, _, err := t.node.(*Proxy).query(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, err
 	}
@@ -296,17 +297,39 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if fieldData.GetIsDynamic() {
 			fieldName = "$meta"
 		}
-		fieldID, ok := it.schema.MapFieldID(fieldName)
-		if !ok {
-			log.Info("field not found in schema", zap.Any("field", fieldData))
-			return merr.WrapErrParameterInvalidMsg("field not found in schema")
+		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldName)
+		if err != nil {
+			log.Info("get field schema failed", zap.Error(err))
+			return err
 		}
-		fieldData.FieldId = fieldID
+		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
+
+		// compatible with different nullable data format from sdk
+		if len(fieldData.GetValidData()) != 0 {
+			err := FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			if err != nil {
+				log.Info("unify null field data format failed", zap.Error(err))
+				return err
+			}
+		}
 	}
 
-	// Note: the most difficult part is to handle the merge progress of upsert and query result
-	// we need to enable merge logic on different length between upsertFieldData and it.insertFieldData
+	// Two nullable data formats are supported:
+	//
+	//	COMPRESSED FORMAT (SDK format, before validateUtil.fillWithValue processing):
+	//		Logical data: [1, null, 2]
+	//		Storage: Data=[1, 2] + ValidData=[true, false, true]
+	//		- Data array contains only non-null values (compressed)
+	//		- ValidData array tracks null positions for all rows
+	//
+	//	FULL FORMAT (Milvus internal format, after validateUtil.fillWithValue processing):
+	//		Logical data: [1, null, 2]
+	//		Storage: Data=[1, 0, 2] + ValidData=[true, false, true]
+	//		- Data array contains values for all rows (nulls filled with zero/default)
+	//		- ValidData array still tracks null positions
+	//
+	// Note: we will unify the nullable format to FULL FORMAT before executing the merge logic
 	insertIdxInUpsert := make([]int, 0)
 	updateIdxInUpsert := make([]int, 0)
 	// 1. split upsert data into insert and update by query result
@@ -386,7 +409,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			return lackOfFieldErr
 		}
 
-		// if the nullable or default value field is not set in upsert request, which means the len(upsertFieldData) < len(it.insertFieldData)
+		// if the nullable field has not passed in upsert request, which means the len(upsertFieldData) < len(it.insertFieldData)
 		// we need to generate the nullable field data before append as insert
 		insertWithNullField := make([]*schemapb.FieldData, 0)
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (string, *schemapb.FieldData) {
@@ -411,23 +434,23 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 	}
 
-	// 4. clean field data with valid data after merge upsert and query result
 	for _, fieldData := range it.insertFieldData {
-		// Note: Since protobuf cannot correctly identify null values, zero values + valid data are used to identify null values,
-		// therefore for field data obtained from query results, if the field is nullable, it needs to clean zero values
-		if len(fieldData.GetValidData()) != 0 && getValidNumber(fieldData.GetValidData()) != len(fieldData.GetValidData()) {
-			err := ResetNullFieldData(fieldData)
+		if len(fieldData.GetValidData()) > 0 {
+			err := ToCompressedFormatNullable(fieldData)
 			if err != nil {
-				log.Info("reset null field data failed", zap.Error(err))
+				log.Info("convert to compressed format nullable failed", zap.Error(err))
 				return err
 			}
 		}
 	}
-
 	return nil
 }
 
-func ResetNullFieldData(field *schemapb.FieldData) error {
+// ToCompressedFormatNullable converts the field data from full format nullable to compressed format nullable
+func ToCompressedFormatNullable(field *schemapb.FieldData) error {
+	if getValidNumber(field.GetValidData()) == len(field.GetValidData()) {
+		return nil
+	}
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
@@ -529,6 +552,20 @@ func ResetNullFieldData(field *schemapb.FieldData) error {
 				sd.JsonData.Data = ret
 			}
 
+		case *schemapb.ScalarField_ArrayData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.ArrayData.Data = make([]*schemapb.ScalarField, 0)
+			} else {
+				ret := make([]*schemapb.ScalarField, 0, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.ArrayData.Data[i])
+					}
+				}
+				sd.ArrayData.Data = ret
+			}
+
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -540,6 +577,7 @@ func ResetNullFieldData(field *schemapb.FieldData) error {
 	return nil
 }
 
+// GenNullableFieldData generates nullable field data in FULL FORMAT
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
 	switch field.DataType {
 	case schemapb.DataType_Bool:
@@ -668,6 +706,24 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}, nil
 
+	case schemapb.DataType_Array:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data: make([]*schemapb.ScalarField, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined scalar data type:%s", field.DataType.String()))
 	}
@@ -712,7 +768,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
-	rowIDBegin, rowIDEnd, _ := it.idAllocator.Alloc(rowNums)
+	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	rowIDBegin, rowIDEnd, _ := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
@@ -739,6 +796,13 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	if it.schema.EnableDynamicField {
 		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		if err != nil {
+			return err
+		}
+	}
+
+	if Params.CommonCfg.EnableNamespace.GetAsBool() {
+		err := addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}
@@ -946,6 +1010,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				NumRows:        uint64(it.req.NumRows),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 				DbName:         it.req.DbName,
+				Namespace:      it.req.Namespace,
 			},
 		},
 		DeleteMsg: &msgstream.DeleteMsg{

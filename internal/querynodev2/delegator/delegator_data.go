@@ -498,7 +498,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 	}
 
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
 	if err != nil {
 		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
 		return err
@@ -990,4 +990,14 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
 	return avgdl, nil
+}
+
+func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
+	workers := sd.workerManager.GetAllWorkers()
+	for _, worker := range workers {
+		if err := worker.DropIndex(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
 }

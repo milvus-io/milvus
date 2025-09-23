@@ -185,7 +185,8 @@ TEST(Indexing, BinaryBruteForce) {
                                               index_info,
                                               nullptr,
                                               DataType::VECTOR_BINARY,
-                                              DataType::NONE);
+                                              DataType::NONE,
+                                              nullptr);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;
@@ -296,7 +297,7 @@ TEST(Indexing, Naive) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
     SearchResult result;
-    vec_index->Query(query_ds, searchInfo, view, result);
+    vec_index->Query(query_ds, searchInfo, view, nullptr, result);
 
     for (int i = 0; i < TOPK; ++i) {
         ASSERT_FALSE(result.seg_offsets_[i] < N / 2);
@@ -339,13 +340,17 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         }
 
-        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
+        auto dataset =
+            is_binary
+                ? GenFieldData(NB, metric_type, vec_field_data_type, BINARY_DIM)
+                : GenFieldData(NB, metric_type, vec_field_data_type);
         if (is_binary) {
             // binary vector
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
+            xb_dataset =
+                knowhere::GenDataSet(NB, BINARY_DIM, xb_bin_data.data());
             xq_dataset = knowhere::GenDataSet(
-                NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+                NQ, BINARY_DIM, xb_bin_data.data() + BINARY_DIM * query_offset);
         } else if (is_sparse) {
             // sparse vector
             xb_sparse_data = dataset.get_col<
@@ -415,7 +420,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(Indexing, Iterator) {
     constexpr int N = 10240;
     constexpr int TOPK = 100;
-    constexpr int dim = 128;
+    constexpr int dim = 4;
 
     auto [raw_data, timestamps, uids] = generate_data<dim>(N);
     milvus::index::CreateIndexInfo create_index_info;
@@ -467,6 +472,7 @@ TEST(Indexing, Iterator) {
 }
 
 TEST_P(IndexTest, BuildAndQuery) {
+    auto dim = is_binary ? BINARY_DIM : DIM;
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;
     create_index_info.metric_type = metric_type;
@@ -506,7 +512,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
     if (!is_sparse) {
-        EXPECT_EQ(vec_index->GetDim(), DIM);
+        EXPECT_EQ(vec_index->GetDim(), dim);
     }
 
     milvus::SearchInfo search_info;
@@ -514,7 +520,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -530,11 +536,12 @@ TEST_P(IndexTest, BuildAndQuery) {
     if (!is_sparse) {
         // sparse doesn't support range search yet
         search_info.search_params_ = range_search_conf;
-        vec_index->Query(xq_dataset, search_info, nullptr, result);
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     }
 }
 
 TEST_P(IndexTest, Mmap) {
+    auto dim = is_binary ? BINARY_DIM : DIM;
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;
     create_index_info.metric_type = metric_type;
@@ -577,14 +584,14 @@ TEST_P(IndexTest, Mmap) {
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
-    EXPECT_EQ(vec_index->GetDim(), is_sparse ? kTestSparseDim : DIM);
+    EXPECT_EQ(vec_index->GetDim(), is_sparse ? kTestSparseDim : dim);
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -593,10 +600,11 @@ TEST_P(IndexTest, Mmap) {
         EXPECT_EQ(result.seg_offsets_[0], query_offset);
     }
     search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
 }
 
 TEST_P(IndexTest, GetVector) {
+    auto dim = is_binary ? BINARY_DIM : DIM;
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;
     create_index_info.metric_type = metric_type;
@@ -634,7 +642,7 @@ TEST_P(IndexTest, GetVector) {
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     if (!is_sparse) {
-        EXPECT_EQ(vec_index->GetDim(), DIM);
+        EXPECT_EQ(vec_index->GetDim(), dim);
     }
     EXPECT_EQ(vec_index->Count(), NB);
 
@@ -646,7 +654,7 @@ TEST_P(IndexTest, GetVector) {
     if (is_binary) {
         auto results = vec_index->GetVector(ids_ds);
         EXPECT_EQ(results.size(), xb_bin_data.size());
-        const auto data_bytes = DIM / 8;
+        const auto data_bytes = dim / 8;
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
             for (size_t j = 0; j < data_bytes; ++j) {
@@ -672,8 +680,8 @@ TEST_P(IndexTest, GetVector) {
         ASSERT_EQ(result_vectors.size(), xb_data.size());
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
-            for (size_t j = 0; j < DIM; ++j) {
-                ASSERT_EQ(result_vectors[i * DIM + j], xb_data[id * DIM + j]);
+            for (size_t j = 0; j < dim; ++j) {
+                ASSERT_EQ(result_vectors[i * dim + j], xb_data[id * dim + j]);
             }
         }
     }
@@ -835,8 +843,9 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
     };
     SearchResult result;
-    EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result),
-                 std::runtime_error);
+    EXPECT_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result),
+        std::runtime_error);
 }
 
 TEST(Indexing, SearchDiskAnnWithFloat16) {
@@ -921,7 +930,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    EXPECT_NO_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result));
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 
 TEST(Indexing, SearchDiskAnnWithBFloat16) {
@@ -1006,7 +1016,8 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    EXPECT_NO_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result));
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 #endif
 

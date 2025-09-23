@@ -122,14 +122,14 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	s.Equal(dbPropertiesWithoutEncryption, result)
 }
 
-func (s *CipherSuite) TestIsDBEncyptionEnabled() {
+func (s *CipherSuite) TestIsDBEncryptionEnabled() {
 	dbProperties := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
 	}
-	s.True(IsDBEncyptionEnabled(dbProperties))
+	s.True(IsDBEncryptionEnabled(dbProperties))
 
 	dbProperties = []*commonpb.KeyValuePair{}
-	s.False(IsDBEncyptionEnabled(dbProperties))
+	s.False(IsDBEncryptionEnabled(dbProperties))
 }
 
 func (s *CipherSuite) TestTidyDBCipherPropertiesError() {

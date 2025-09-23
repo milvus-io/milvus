@@ -46,7 +46,15 @@ var (
 	httpDBName         = "db_name"
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
-	sensitiveKeys      = []string{"secretaccesskey", "secret_access_key", "password"}
+	sensitiveMark      = "*****"
+	sensitiveKeys      = []string{
+		"secretaccesskey",
+		"secret_access_key",
+		"password",
+		"apikey",
+		"credentialjson",
+		"credential_json",
+	}
 )
 
 func hideSensitive(configs map[string]string) {
@@ -60,7 +68,7 @@ func hideSensitive(configs map[string]string) {
 	}
 	for key := range configs {
 		if checkFunc(key) {
-			configs[key] = "*****"
+			configs[key] = sensitiveMark
 		}
 	}
 }

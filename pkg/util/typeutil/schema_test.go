@@ -3216,7 +3216,7 @@ func TestUpdateFieldData(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{
-								Data: []int64{30},
+								Data: []int64{0, 0, 30, 0},
 							},
 						},
 					},
@@ -3233,7 +3233,7 @@ func TestUpdateFieldData(t *testing.T) {
 		// Check that ValidData was updated
 		assert.Equal(t, false, baseData[0].ValidData[1])
 		// Check that data was updated
-		assert.Equal(t, int64(2), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(0), baseData[0].GetScalars().GetLongData().Data[1])
 		assert.Equal(t, int64(30), baseData[0].GetScalars().GetLongData().Data[2])
 	})
 
@@ -3424,7 +3424,6 @@ func TestUpdateFieldData(t *testing.T) {
 	t.Run("nullable field with valid data index mapping", func(t *testing.T) {
 		// Test the new logic for nullable fields where updateIdx needs to be mapped to actual data index
 		// Scenario: data=[1,2,3], valid_data=[true, false, true]
-		// updateIdx=1 should map to data index 0 (first valid data), updateIdx=2 should map to data index 1 (second valid data)
 
 		baseData := []*schemapb.FieldData{
 			{
@@ -3454,7 +3453,7 @@ func TestUpdateFieldData(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{
-								Data: []int64{999, 888, 777}, // Only indices 0 and 2 will be used
+								Data: []int64{999, 0, 777},
 							},
 						},
 					},
@@ -3462,21 +3461,19 @@ func TestUpdateFieldData(t *testing.T) {
 			},
 		}
 
-		// Test updating at index 1 (which maps to data index 0 due to valid_data[1] = false)
+		// Test updating at index 1
 		err := UpdateFieldData(baseData, updateData, 0, 1)
 		require.NoError(t, err)
 
 		// Since valid_data[1] = false, no data should be updated
-		assert.Equal(t, int64(100), baseData[0].GetScalars().GetLongData().Data[0])
+		assert.Equal(t, int64(0), baseData[0].GetScalars().GetLongData().Data[0])
 		assert.Equal(t, false, baseData[0].ValidData[0])
 
-		// Test updating at index 2 (which maps to data index 1 due to valid_data[2] = true)
+		// Test updating at index 2
 		err = UpdateFieldData(baseData, updateData, 1, 2)
 		require.NoError(t, err)
 
-		// Index 2 maps to data index 1 because valid_data[0] = true, valid_data[1] = false
-		// So updateFieldIdx = 0 + 1 = 1, which means we use data[1] = 888
-		assert.Equal(t, int64(888), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(777), baseData[0].GetScalars().GetLongData().Data[1])
 		assert.Equal(t, true, baseData[0].ValidData[1])
 	})
 
@@ -3512,7 +3509,7 @@ func TestUpdateFieldData(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_FloatData{
 							FloatData: &schemapb.FloatArray{
-								Data: []float32{999.9, 888.8},
+								Data: []float32{0, 999.9, 0, 888.8, 0},
 							},
 						},
 					},
@@ -3520,22 +3517,954 @@ func TestUpdateFieldData(t *testing.T) {
 			},
 		}
 
-		// Test updating at index 1 (valid_data[1] = true, so data[1] = 999.9)
+		// Test updating at index 1
 		err := UpdateFieldData(baseData, updateData, 1, 1)
 		require.NoError(t, err)
 		assert.Equal(t, float32(999.9), baseData[0].GetScalars().GetFloatData().Data[1])
 		assert.Equal(t, true, baseData[0].ValidData[0])
 
-		// Test updating at index 3 (valid_data[3] = true, so data[3] = 888.8)
+		// Test updating at index 3
 		err = UpdateFieldData(baseData, updateData, 3, 3)
 		require.NoError(t, err)
 		assert.Equal(t, float32(888.8), baseData[0].GetScalars().GetFloatData().Data[3])
 		assert.Equal(t, true, baseData[0].ValidData[1])
 
-		// Test updating at index 0 (valid_data[0] = false, so no data update, only ValidData update)
+		// Test updating at index 0
 		err = UpdateFieldData(baseData, updateData, 2, 2)
 		require.NoError(t, err)
-		assert.Equal(t, float32(3.3), baseData[0].GetScalars().GetFloatData().Data[2]) // Should remain unchanged
+		assert.Equal(t, float32(0), baseData[0].GetScalars().GetFloatData().Data[2])
 		assert.Equal(t, false, baseData[0].ValidData[2])
+	})
+}
+
+// TestUpdateFieldData_BoundsChecking tests the enhanced bounds checking for UpdateFieldData function
+func TestUpdateFieldData_BoundsChecking(t *testing.T) {
+	const (
+		Dim = 8
+	)
+
+	// Helper function to create test scalar field data
+	createScalarFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+		}
+
+		switch dataType {
+		case schemapb.DataType_Bool:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{Data: data.([]bool)},
+					},
+				},
+			}
+		case schemapb.DataType_Int32:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: data.([]int32)},
+					},
+				},
+			}
+		case schemapb.DataType_Int64:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: data.([]int64)},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{Data: data.([]float32)},
+					},
+				},
+			}
+		case schemapb.DataType_Double:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{Data: data.([]float64)},
+					},
+				},
+			}
+		case schemapb.DataType_VarChar:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: data.([]string)},
+					},
+				},
+			}
+		case schemapb.DataType_Array:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        data.([]*schemapb.ScalarField),
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_JSON:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: data.([][]byte)},
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	// Helper function to create test vector field data (unused in this test, but kept for consistency)
+	_ = func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, dim int64) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+		}
+
+		switch dataType {
+		case schemapb.DataType_BinaryVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_FloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: data.([]float32)},
+					},
+				},
+			}
+		case schemapb.DataType_Float16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_BFloat16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_SparseFloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: data.(*schemapb.SparseFloatArray),
+					},
+				},
+			}
+		case schemapb.DataType_Int8Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: data.([]byte),
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("scalar field bounds checking - baseIdx out of bounds", func(t *testing.T) {
+		// Test case: baseIdx is out of bounds for base data
+		baseData := []*schemapb.FieldData{
+			createScalarFieldData("bool_field", 1, schemapb.DataType_Bool, []bool{true, false}),
+		}
+		updateData := []*schemapb.FieldData{
+			createScalarFieldData("bool_field", 1, schemapb.DataType_Bool, []bool{false, true}),
+		}
+
+		// baseIdx = 2 is out of bounds (base data only has 2 elements: indices 0,1)
+		err := UpdateFieldData(baseData, updateData, 2, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+
+		// Original data should remain unchanged
+		assert.Equal(t, []bool{true, false}, baseData[0].GetScalars().GetBoolData().Data)
+	})
+
+	t.Run("scalar field bounds checking - updateIdx out of bounds", func(t *testing.T) {
+		// Test case: updateIdx is out of bounds for update data
+		baseData := []*schemapb.FieldData{
+			createScalarFieldData("int_field", 1, schemapb.DataType_Int32, []int32{1, 2, 3}),
+		}
+		updateData := []*schemapb.FieldData{
+			createScalarFieldData("int_field", 1, schemapb.DataType_Int32, []int32{10, 20}), // Only 2 elements
+		}
+
+		// updateIdx = 2 is out of bounds (update data only has 2 elements: indices 0,1)
+		err := UpdateFieldData(baseData, updateData, 1, 2)
+		require.NoError(t, err) // Should not panic, just skip update
+
+		// Original data should remain unchanged
+		assert.Equal(t, []int32{1, 2, 3}, baseData[0].GetScalars().GetIntData().Data)
+	})
+
+	t.Run("scalar field bounds checking - both indices in bounds", func(t *testing.T) {
+		// Test case: both indices are in bounds, update should succeed
+		baseData := []*schemapb.FieldData{
+			createScalarFieldData("long_field", 1, schemapb.DataType_Int64, []int64{1, 2, 3, 4}),
+		}
+		updateData := []*schemapb.FieldData{
+			createScalarFieldData("long_field", 1, schemapb.DataType_Int64, []int64{10, 20, 30, 40}),
+		}
+
+		// Both indices are in bounds
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Data at baseIdx=2 should be updated with data from updateIdx=1
+		assert.Equal(t, int64(20), baseData[0].GetScalars().GetLongData().Data[2])
+		// Other data should remain unchanged
+		assert.Equal(t, int64(1), baseData[0].GetScalars().GetLongData().Data[0])
+		assert.Equal(t, int64(2), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(4), baseData[0].GetScalars().GetLongData().Data[3])
+	})
+
+	t.Run("scalar field nil data checking - baseData is nil", func(t *testing.T) {
+		// Test case: baseData is nil
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Float,
+				FieldName: "float_field",
+				FieldId:   1,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: nil, // baseData is nil
+						},
+					},
+				},
+			},
+		}
+		updateData := []*schemapb.FieldData{
+			createScalarFieldData("float_field", 1, schemapb.DataType_Float, []float32{1.1, 2.2}),
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+	})
+
+	t.Run("scalar field nil data checking - updateData is nil", func(t *testing.T) {
+		// Test case: updateData is nil
+		baseData := []*schemapb.FieldData{
+			createScalarFieldData("double_field", 1, schemapb.DataType_Double, []float64{1.1, 2.2}),
+		}
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Double,
+				FieldName: "double_field",
+				FieldId:   1,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: nil, // updateData is nil
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+
+		// Original data should remain unchanged
+		assert.Equal(t, []float64{1.1, 2.2}, baseData[0].GetScalars().GetDoubleData().Data)
+	})
+
+	t.Run("test all scalar field types bounds checking", func(t *testing.T) {
+		// Test all scalar field types with bounds checking
+		scalarTypes := []struct {
+			name       string
+			dataType   schemapb.DataType
+			baseData   interface{}
+			updateData interface{}
+		}{
+			{
+				name:       "BoolData",
+				dataType:   schemapb.DataType_Bool,
+				baseData:   []bool{true, false, true},
+				updateData: []bool{false, true, false},
+			},
+			{
+				name:       "IntData",
+				dataType:   schemapb.DataType_Int32,
+				baseData:   []int32{1, 2, 3},
+				updateData: []int32{10, 20, 30},
+			},
+			{
+				name:       "LongData",
+				dataType:   schemapb.DataType_Int64,
+				baseData:   []int64{1, 2, 3},
+				updateData: []int64{10, 20, 30},
+			},
+			{
+				name:       "FloatData",
+				dataType:   schemapb.DataType_Float,
+				baseData:   []float32{1.1, 2.2, 3.3},
+				updateData: []float32{10.1, 20.2, 30.3},
+			},
+			{
+				name:       "DoubleData",
+				dataType:   schemapb.DataType_Double,
+				baseData:   []float64{1.1, 2.2, 3.3},
+				updateData: []float64{10.1, 20.2, 30.3},
+			},
+			{
+				name:       "StringData",
+				dataType:   schemapb.DataType_VarChar,
+				baseData:   []string{"a", "b", "c"},
+				updateData: []string{"x", "y", "z"},
+			},
+		}
+
+		for _, testCase := range scalarTypes {
+			t.Run(testCase.name, func(t *testing.T) {
+				baseData := []*schemapb.FieldData{
+					createScalarFieldData("test_field", 1, testCase.dataType, testCase.baseData),
+				}
+				updateData := []*schemapb.FieldData{
+					createScalarFieldData("test_field", 1, testCase.dataType, testCase.updateData),
+				}
+
+				// Test bounds checking - baseIdx out of bounds
+				err := UpdateFieldData(baseData, updateData, 3, 0) // baseIdx=3 is out of bounds
+				require.NoError(t, err)
+
+				// Test bounds checking - updateIdx out of bounds
+				err = UpdateFieldData(baseData, updateData, 0, 3) // updateIdx=3 is out of bounds
+				require.NoError(t, err)
+
+				// Test successful update
+				err = UpdateFieldData(baseData, updateData, 1, 1)
+				require.NoError(t, err)
+
+				// Verify the update worked correctly
+				switch testCase.dataType {
+				case schemapb.DataType_Bool:
+					assert.Equal(t, true, baseData[0].GetScalars().GetBoolData().Data[1])
+				case schemapb.DataType_Int32:
+					assert.Equal(t, int32(20), baseData[0].GetScalars().GetIntData().Data[1])
+				case schemapb.DataType_Int64:
+					assert.Equal(t, int64(20), baseData[0].GetScalars().GetLongData().Data[1])
+				case schemapb.DataType_Float:
+					assert.Equal(t, float32(20.2), baseData[0].GetScalars().GetFloatData().Data[1])
+				case schemapb.DataType_Double:
+					assert.Equal(t, float64(20.2), baseData[0].GetScalars().GetDoubleData().Data[1])
+				case schemapb.DataType_VarChar:
+					assert.Equal(t, "y", baseData[0].GetScalars().GetStringData().Data[1])
+				}
+			})
+		}
+	})
+}
+
+// TestUpdateFieldData_VectorBoundsChecking tests the enhanced bounds checking for vector fields in UpdateFieldData function
+func TestUpdateFieldData_VectorBoundsChecking(t *testing.T) {
+	const (
+		Dim = 8
+	)
+
+	// Helper function to create test vector field data
+	createVectorFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, dim int64) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+		}
+
+		switch dataType {
+		case schemapb.DataType_BinaryVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_FloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: data.([]float32)},
+					},
+				},
+			}
+		case schemapb.DataType_Float16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_BFloat16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_SparseFloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: data.(*schemapb.SparseFloatArray),
+					},
+				},
+			}
+		case schemapb.DataType_Int8Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: data.([]byte),
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("vector field bounds checking - baseIdx out of bounds", func(t *testing.T) {
+		// Test case: baseIdx is out of bounds for base vector data
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}, Dim), // Only 1 vector
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0}, Dim),
+		}
+
+		// baseIdx = 1 is out of bounds (base data only has 1 vector: index 0)
+		err := UpdateFieldData(baseData, updateData, 1, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+
+		// Original data should remain unchanged
+		originalVector := baseData[0].GetVectors().GetFloatVector().Data
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(i+1), originalVector[i])
+		}
+	})
+
+	t.Run("vector field bounds checking - updateIdx out of bounds", func(t *testing.T) {
+		// Test case: updateIdx is out of bounds for update vector data
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("binary_vector_field", 1, schemapb.DataType_BinaryVector,
+				make([]byte, 2*Dim/8), Dim), // 2 vectors
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("binary_vector_field", 1, schemapb.DataType_BinaryVector,
+				make([]byte, 1*Dim/8), Dim), // Only 1 vector
+		}
+
+		// updateIdx = 1 is out of bounds (update data only has 1 vector: index 0)
+		err := UpdateFieldData(baseData, updateData, 0, 1)
+		require.NoError(t, err) // Should not panic, just skip update
+	})
+
+	t.Run("vector field bounds checking - both indices in bounds", func(t *testing.T) {
+		// Test case: both indices are in bounds, update should succeed
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{
+					1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, // vector 0
+					9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, // vector 1
+				}, Dim),
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{
+					100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, // vector 0
+					900.0, 1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, // vector 1
+				}, Dim),
+		}
+
+		// Both indices are in bounds
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Vector at baseIdx=1 should be updated with vector from updateIdx=1
+		updatedVector := baseData[0].GetVectors().GetFloatVector().Data
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(900+i*100), updatedVector[Dim+i])
+		}
+		// Vector at baseIdx=0 should remain unchanged
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(i+1), updatedVector[i])
+		}
+	})
+
+	t.Run("vector field nil data checking - baseData is nil", func(t *testing.T) {
+		// Test case: baseData is nil
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "float_vector_field",
+				FieldId:   1,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: Dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: nil, // baseData is nil
+						},
+					},
+				},
+			},
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}, Dim),
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+	})
+
+	t.Run("vector field nil data checking - updateData is nil", func(t *testing.T) {
+		// Test case: updateData is nil
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("binary_vector_field", 1, schemapb.DataType_BinaryVector,
+				make([]byte, Dim/8), Dim),
+		}
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_BinaryVector,
+				FieldName: "binary_vector_field",
+				FieldId:   1,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: Dim,
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: nil, // updateData is nil
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err) // Should not panic, just skip update
+	})
+
+	t.Run("test all vector field types bounds checking", func(t *testing.T) {
+		// Test all vector field types with bounds checking
+		vectorTypes := []struct {
+			name       string
+			dataType   schemapb.DataType
+			baseData   interface{}
+			updateData interface{}
+		}{
+			{
+				name:       "BinaryVector",
+				dataType:   schemapb.DataType_BinaryVector,
+				baseData:   make([]byte, 2*Dim/8), // 2 vectors
+				updateData: make([]byte, 2*Dim/8), // 2 vectors
+			},
+			{
+				name:       "FloatVector",
+				dataType:   schemapb.DataType_FloatVector,
+				baseData:   []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0},                 // 2 vectors
+				updateData: []float32{10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0}, // 2 vectors
+			},
+			{
+				name:       "Float16Vector",
+				dataType:   schemapb.DataType_Float16Vector,
+				baseData:   make([]byte, 2*Dim*2), // 2 vectors
+				updateData: make([]byte, 2*Dim*2), // 2 vectors
+			},
+			{
+				name:       "BFloat16Vector",
+				dataType:   schemapb.DataType_BFloat16Vector,
+				baseData:   make([]byte, 2*Dim*2), // 2 vectors
+				updateData: make([]byte, 2*Dim*2), // 2 vectors
+			},
+			{
+				name:       "Int8Vector",
+				dataType:   schemapb.DataType_Int8Vector,
+				baseData:   make([]byte, 2*Dim), // 2 vectors
+				updateData: make([]byte, 2*Dim), // 2 vectors
+			},
+		}
+
+		for _, testCase := range vectorTypes {
+			t.Run(testCase.name, func(t *testing.T) {
+				baseData := []*schemapb.FieldData{
+					createVectorFieldData("test_vector_field", 1, testCase.dataType, testCase.baseData, Dim),
+				}
+				updateData := []*schemapb.FieldData{
+					createVectorFieldData("test_vector_field", 1, testCase.dataType, testCase.updateData, Dim),
+				}
+
+				// Test bounds checking - baseIdx out of bounds
+				err := UpdateFieldData(baseData, updateData, 2, 0) // baseIdx=2 is out of bounds
+				require.NoError(t, err)
+
+				// Test bounds checking - updateIdx out of bounds
+				err = UpdateFieldData(baseData, updateData, 0, 2) // updateIdx=2 is out of bounds
+				require.NoError(t, err)
+
+				// Test successful update
+				err = UpdateFieldData(baseData, updateData, 1, 1)
+				require.NoError(t, err)
+			})
+		}
+	})
+
+	t.Run("sparse float vector bounds checking", func(t *testing.T) {
+		// Create sparse float vector data
+		baseSparseData := &schemapb.SparseFloatArray{
+			Dim: 10,
+			Contents: [][]byte{
+				CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{1.1, 3.3, 5.5}), // vector 0
+				CreateSparseFloatRow([]uint32{2, 4, 6}, []float32{2.2, 4.4, 6.6}), // vector 1
+			},
+		}
+		updateSparseData := &schemapb.SparseFloatArray{
+			Dim: 10,
+			Contents: [][]byte{
+				CreateSparseFloatRow([]uint32{7, 9}, []float32{7.7, 9.9}),   // vector 0
+				CreateSparseFloatRow([]uint32{8, 10}, []float32{8.8, 10.0}), // vector 1
+			},
+		}
+
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("sparse_vector_field", 1, schemapb.DataType_SparseFloatVector, baseSparseData, 10),
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("sparse_vector_field", 1, schemapb.DataType_SparseFloatVector, updateSparseData, 10),
+		}
+
+		// Test bounds checking - baseIdx out of bounds
+		err := UpdateFieldData(baseData, updateData, 2, 0) // baseIdx=2 is out of bounds
+		require.NoError(t, err)
+
+		// Test bounds checking - updateIdx out of bounds
+		err = UpdateFieldData(baseData, updateData, 0, 2) // updateIdx=2 is out of bounds
+		require.NoError(t, err)
+
+		// Test successful update
+		err = UpdateFieldData(baseData, updateData, 1, 1)
+		require.NoError(t, err)
+
+		// Verify the update worked correctly
+		updatedContents := baseData[0].GetVectors().GetSparseFloatVector().Contents
+		assert.Equal(t, updateSparseData.Contents[1], updatedContents[1])
+	})
+}
+
+// TestUpdateFieldData_IndexFix tests the index fix for vector fields in UpdateFieldData function
+// This test verifies that baseIdx is used correctly for base data indexing instead of updateIdx
+func TestUpdateFieldData_IndexFix(t *testing.T) {
+	const (
+		Dim = 8
+	)
+
+	// Helper function to create test vector field data
+	createVectorFieldData := func(fieldName string, fieldID int64, dataType schemapb.DataType, data interface{}, dim int64) *schemapb.FieldData {
+		fieldData := &schemapb.FieldData{
+			Type:      dataType,
+			FieldName: fieldName,
+			FieldId:   fieldID,
+		}
+
+		switch dataType {
+		case schemapb.DataType_BinaryVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_FloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: data.([]float32)},
+					},
+				},
+			}
+		case schemapb.DataType_Float16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_BFloat16Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: data.([]byte),
+					},
+				},
+			}
+		case schemapb.DataType_SparseFloatVector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: data.(*schemapb.SparseFloatArray),
+					},
+				},
+			}
+		case schemapb.DataType_Int8Vector:
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: data.([]byte),
+					},
+				},
+			}
+		}
+		return fieldData
+	}
+
+	t.Run("vector field index fix - binary vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		// Create base data with 3 vectors
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("binary_vector_field", 1, schemapb.DataType_BinaryVector,
+				make([]byte, 3*Dim/8), Dim), // 3 vectors
+		}
+		// Create update data with 2 vectors
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("binary_vector_field", 1, schemapb.DataType_BinaryVector,
+				make([]byte, 2*Dim/8), Dim), // 2 vectors
+		}
+
+		// Fill update data with specific pattern
+		updateBytes := updateData[0].GetVectors().GetBinaryVector()
+		for i := range updateBytes {
+			updateBytes[i] = 0xFF // Fill with 0xFF pattern
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		// This should update the 3rd vector in base data with the 2nd vector from update data
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		baseBytes := baseData[0].GetVectors().GetBinaryVector()
+		baseStartIdx := 2 * (Dim / 8)
+		updateStartIdx := 1 * (Dim / 8)
+
+		// Check that the 3rd vector in base data matches the 2nd vector from update data
+		for i := 0; i < Dim/8; i++ {
+			assert.Equal(t, updateBytes[updateStartIdx+i], baseBytes[baseStartIdx+i])
+		}
+	})
+
+	t.Run("vector field index fix - float vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{
+					1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, // vector 0
+					9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, // vector 1
+					17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, // vector 2
+				}, Dim),
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("float_vector_field", 1, schemapb.DataType_FloatVector,
+				[]float32{
+					100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, // vector 0
+					900.0, 1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, // vector 1
+				}, Dim),
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		// This should update the 3rd vector in base data with the 2nd vector from update data
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		baseVectorData := baseData[0].GetVectors().GetFloatVector().Data
+		// Vector 0 should remain unchanged
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(i+1), baseVectorData[i])
+		}
+		// Vector 1 should remain unchanged
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(9+i), baseVectorData[Dim+i])
+		}
+		// Vector 2 should be updated with update vector 1
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, float32(900+i*100), baseVectorData[2*Dim+i])
+		}
+	})
+
+	t.Run("vector field index fix - float16 vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("float16_vector_field", 1, schemapb.DataType_Float16Vector,
+				make([]byte, 3*Dim*2), Dim), // 3 vectors
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("float16_vector_field", 1, schemapb.DataType_Float16Vector,
+				make([]byte, 2*Dim*2), Dim), // 2 vectors
+		}
+
+		// Fill update data with specific pattern
+		updateBytes := updateData[0].GetVectors().GetFloat16Vector()
+		for i := range updateBytes {
+			updateBytes[i] = 0xAA // Fill with 0xAA pattern
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		baseBytes := baseData[0].GetVectors().GetFloat16Vector()
+		baseStartIdx := 2 * (Dim * 2)
+		updateStartIdx := 1 * (Dim * 2)
+
+		// Check that the 3rd vector in base data matches the 2nd vector from update data
+		for i := 0; i < Dim*2; i++ {
+			assert.Equal(t, updateBytes[updateStartIdx+i], baseBytes[baseStartIdx+i])
+		}
+	})
+
+	t.Run("vector field index fix - bfloat16 vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("bfloat16_vector_field", 1, schemapb.DataType_BFloat16Vector,
+				make([]byte, 3*Dim*2), Dim), // 3 vectors
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("bfloat16_vector_field", 1, schemapb.DataType_BFloat16Vector,
+				make([]byte, 2*Dim*2), Dim), // 2 vectors
+		}
+
+		// Fill update data with specific pattern
+		updateBytes := updateData[0].GetVectors().GetBfloat16Vector()
+		for i := range updateBytes {
+			updateBytes[i] = 0xBB // Fill with 0xBB pattern
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		baseBytes := baseData[0].GetVectors().GetBfloat16Vector()
+		baseStartIdx := 2 * (Dim * 2)
+		updateStartIdx := 1 * (Dim * 2)
+
+		// Check that the 3rd vector in base data matches the 2nd vector from update data
+		for i := 0; i < Dim*2; i++ {
+			assert.Equal(t, updateBytes[updateStartIdx+i], baseBytes[baseStartIdx+i])
+		}
+	})
+
+	t.Run("vector field index fix - int8 vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("int8_vector_field", 1, schemapb.DataType_Int8Vector,
+				make([]byte, 3*Dim), Dim), // 3 vectors
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("int8_vector_field", 1, schemapb.DataType_Int8Vector,
+				make([]byte, 2*Dim), Dim), // 2 vectors
+		}
+
+		// Fill update data with specific pattern
+		updateBytes := updateData[0].GetVectors().GetInt8Vector()
+		for i := range updateBytes {
+			updateBytes[i] = 0xCC // Fill with 0xCC pattern
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		baseBytes := baseData[0].GetVectors().GetInt8Vector()
+		baseStartIdx := 2 * Dim
+		updateStartIdx := 1 * Dim
+
+		// Check that the 3rd vector in base data matches the 2nd vector from update data
+		for i := 0; i < Dim; i++ {
+			assert.Equal(t, updateBytes[updateStartIdx+i], baseBytes[baseStartIdx+i])
+		}
+	})
+
+	t.Run("vector field index fix - sparse float vector", func(t *testing.T) {
+		// Test case: Verify that baseIdx is used for base data indexing, not updateIdx
+		baseSparseData := &schemapb.SparseFloatArray{
+			Dim: 10,
+			Contents: [][]byte{
+				CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{1.1, 3.3, 5.5}), // vector 0
+				CreateSparseFloatRow([]uint32{2, 4, 6}, []float32{2.2, 4.4, 6.6}), // vector 1
+				CreateSparseFloatRow([]uint32{7, 9}, []float32{7.7, 9.9}),         // vector 2
+			},
+		}
+		updateSparseData := &schemapb.SparseFloatArray{
+			Dim: 10,
+			Contents: [][]byte{
+				CreateSparseFloatRow([]uint32{10, 12}, []float32{10.0, 12.0}), // vector 0
+				CreateSparseFloatRow([]uint32{11, 13}, []float32{11.0, 13.0}), // vector 1
+			},
+		}
+
+		baseData := []*schemapb.FieldData{
+			createVectorFieldData("sparse_vector_field", 1, schemapb.DataType_SparseFloatVector, baseSparseData, 10),
+		}
+		updateData := []*schemapb.FieldData{
+			createVectorFieldData("sparse_vector_field", 1, schemapb.DataType_SparseFloatVector, updateSparseData, 10),
+		}
+
+		// Update baseIdx=2 with updateIdx=1
+		// This should update the 3rd vector in base data with the 2nd vector from update data
+		err := UpdateFieldData(baseData, updateData, 2, 1)
+		require.NoError(t, err)
+
+		// Verify that the correct vector was updated
+		updatedContents := baseData[0].GetVectors().GetSparseFloatVector().Contents
+		// Vector 0 should remain unchanged
+		assert.Equal(t, baseSparseData.Contents[0], updatedContents[0])
+		// Vector 1 should remain unchanged
+		assert.Equal(t, baseSparseData.Contents[1], updatedContents[1])
+		// Vector 2 should be updated with update vector 1
+		assert.Equal(t, updateSparseData.Contents[1], updatedContents[2])
 	})
 }

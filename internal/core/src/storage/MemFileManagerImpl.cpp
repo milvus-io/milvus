@@ -205,6 +205,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
     AssertInfo(data_type.has_value(),
                "[StorageV2] data type is empty when build index");
+    auto element_type =
+        index::GetValueFromConfig<DataType>(config, ELEMENT_TYPE_KEY);
+    AssertInfo(element_type.has_value(),
+               "[StorageV2] element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
@@ -216,8 +220,12 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     for (auto& files : remote_files) {
         SortByPath(files);
     }
-    auto field_datas = GetFieldDatasFromStorageV2(
-        remote_files, field_meta_.field_id, data_type.value(), dim, fs_);
+    auto field_datas = GetFieldDatasFromStorageV2(remote_files,
+                                                  field_meta_.field_id,
+                                                  data_type.value(),
+                                                  element_type.value(),
+                                                  dim,
+                                                  fs_);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -261,6 +269,8 @@ GetOptFieldIvfData(const DataType& dt,
             return GetOptFieldIvfDataImpl<DataType::INT16>(field_datas);
         case DataType::INT32:
             return GetOptFieldIvfDataImpl<DataType::INT32>(field_datas);
+        case DataType::TIMESTAMPTZ:
+            return GetOptFieldIvfDataImpl<DataType::TIMESTAMPTZ>(field_datas);
         case DataType::INT64:
             return GetOptFieldIvfDataImpl<DataType::INT64>(field_datas);
         case DataType::FLOAT:
@@ -309,7 +319,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
 
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
-        auto& field_paths = std::get<2>(tup);
+        auto& field_paths = std::get<3>(tup);
         if (0 == field_paths.size()) {
             LOG_WARN("optional field {} has no data", field_id);
             return {};
@@ -353,9 +363,10 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
+        const auto& element_type = std::get<2>(tup);
 
         auto field_datas = GetFieldDatasFromStorageV2(
-            remote_files, field_id, field_type, 1, fs_);
+            remote_files, field_id, field_type, element_type, 1, fs_);
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

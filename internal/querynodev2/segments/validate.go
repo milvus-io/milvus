@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter SegmentFilter) ([]Segment, error) {
+func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter ...SegmentFilter) ([]Segment, error) {
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
@@ -43,14 +43,16 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	}()
 	if len(segmentIDs) == 0 {
 		// legacy logic
-		segments, err = manager.Segment.GetAndPinBy(segmentFilter, SegmentFilterFunc(func(s Segment) bool {
+		segmentFilter = append(segmentFilter, SegmentFilterFunc(func(s Segment) bool {
 			return s.Collection() == collectionID
 		}))
+
+		segments, err = manager.Segment.GetAndPinBy(segmentFilter...)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		segments, err = manager.Segment.GetAndPin(segmentIDs, segmentFilter)
+		segments, err = manager.Segment.GetAndPin(segmentIDs, segmentFilter...)
 		if err != nil {
 			return nil, err
 		}

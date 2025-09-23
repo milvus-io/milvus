@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc24
-pymilvus[bulk_writer]==2.7.0rc24
+pymilvus==2.7.0rc34
+pymilvus[bulk_writer]==2.7.0rc34
 
 # for protobuf
 protobuf>=5.29.5
@@ -57,7 +57,7 @@ tenacity==8.1.0
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
-deepdiff==6.7.1
+deepdiff==8.6.1
 
 # for test result analyzer
 prettytable==3.8.0

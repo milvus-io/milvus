@@ -628,7 +628,7 @@ BatchUnaryCompare(const T* src,
 
 template <typename GetType, typename ValType>
 class ShreddingExecutor {
-    using IndexInnerType =
+    using InnerType =
         std::conditional_t<std::is_same_v<GetType, std::string_view>,
                            std::string,
                            GetType>;
@@ -659,7 +659,7 @@ class ShreddingExecutor {
  private:
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
-        BatchUnaryCompare<GetType, ValType>(src, size, val_, op_type_, res);
+        BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
     }
 
     void
@@ -677,7 +677,7 @@ class ShreddingExecutor {
     }
 
     proto::plan::OpType op_type_;
-    ValType val_;
+    InnerType val_;
     std::string pointer_;
 };
 
@@ -738,12 +738,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
@@ -752,6 +754,26 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        auto val_type = FromValCase(expr_->val_.val_case());
+        if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
+            (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
+             expr_->op_type_ == proto::plan::OpType::Match ||
+             expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
+             expr_->op_type_ == proto::plan::OpType::PostfixMatch)) {
+            // try to pin ngram index for json
+            auto field_id = expr_->column_.field_id_;
+            auto schema = segment->get_schema();
+            auto field_meta = schema[field_id];
+
+            if (field_meta.is_json()) {
+                auto pointer =
+                    milvus::Json::pointer(expr_->column_.nested_path_);
+                pinned_ngram_index_ =
+                    segment->GetNgramIndexForJson(op_ctx_, field_id, pointer);
+            } else {
+                pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
+            }
+        }
     }
 
     void
@@ -858,10 +880,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     ExecTextMatch();
 
     bool
-    CanExecNgramMatch(proto::plan::OpType op_type);
-
-    bool
-    CanExecNgramMatchForJson(DataType val_type);
+    CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
     ExecNgramMatch();
@@ -874,6 +893,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
+    PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

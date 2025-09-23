@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -45,6 +46,10 @@ type alterCollectionTask struct {
 func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 	if a.Req.GetCollectionName() == "" {
 		return errors.New("alter collection failed, collection name does not exists")
+	}
+
+	if funcutil.SliceContain(a.Req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
+		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
 
 	return nil
@@ -181,10 +186,10 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
-	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldColl.Properties)
-	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldColl.Properties)
-	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newColl.Properties)
-	newResourceGroups, _ := common.DatabaseLevelResourceGroups(newColl.Properties)
+	oldReplicaNumber, _ := common.CollectionLevelReplicaNumber(oldColl.Properties)
+	oldResourceGroups, _ := common.CollectionLevelResourceGroups(oldColl.Properties)
+	newReplicaNumber, _ := common.CollectionLevelReplicaNumber(newColl.Properties)
+	newResourceGroups, _ := common.CollectionLevelResourceGroups(newColl.Properties)
 	left, right := lo.Difference(oldResourceGroups, newResourceGroups)
 	rgChanged := len(left) > 0 || len(right) > 0
 	replicaChanged := oldReplicaNumber != newReplicaNumber

@@ -440,6 +440,7 @@ DataGen(SchemaPtr schema,
         uint64_t ts_offset = 0,
         int repeat_count = 1,
         int array_len = 10,
+        int group_count = 1,
         bool random_pk = false,
         bool random_val = true,
         bool random_valid = false) {
@@ -748,13 +749,48 @@ DataGen(SchemaPtr schema,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = R"({"int":)" + std::to_string(random()) +
-                               R"(,"double":)" +
-                               std::to_string(static_cast<double>(random())) +
-                               R"(,"string":")" + std::to_string(random()) +
-                               R"(","bool": true)" + R"(, "array": [1,2,3])" +
-                               "}";
-                    data[i] = str;
+                    for (int j = 0; j < repeat_count; j++) {
+                        if (group_count > 1) {
+                            auto str =
+                                R"({"int":)" +
+                                std::to_string(random() % group_count) +
+                                R"(,"double":)" +
+                                std::to_string(static_cast<double>(random())) +
+                                R"(,"string":")" +
+                                std::to_string(random() % group_count) +
+                                R"(","bool": )" +
+                                (group_count > 1
+                                     ? (random() % 2 ? "true" : "false")
+                                     : "true") +
+                                R"(, "array": [1,2,3])" + R"(,"int8":)" +
+                                std::to_string(static_cast<int8_t>(
+                                    random() % group_count)) +
+                                R"(,"int16":)" +
+                                std::to_string(static_cast<int16_t>(
+                                    random() % group_count)) +
+                                R"(,"int32":)" +
+                                std::to_string(static_cast<int32_t>(
+                                    random() % group_count)) +
+                                R"(,"int64":)" +
+                                std::to_string(static_cast<int64_t>(
+                                    random() % group_count)) +
+                                R"(,"float":)" +
+                                std::to_string(static_cast<float>(
+                                    random() % group_count)) +
+                                R"(,"nested": {"level1": {"level2": "value"}})" +
+                                "}";
+                            data[i * repeat_count + j] = str;
+                        } else {
+                            auto str =
+                                R"({"int":)" + std::to_string(random()) +
+                                R"(,"double":)" +
+                                std::to_string(static_cast<double>(random())) +
+                                R"(,"string":")" + std::to_string(random()) +
+                                R"(","bool": true)" + R"(, "array": [1,2,3])" +
+                                "}";
+                            data[i * repeat_count + j] = str;
+                        }
+                    }
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
@@ -1168,18 +1204,21 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     int64_t dim = 1;
     FieldDataPtr field_data = nullptr;
 
-    auto createFieldData = [&field_data, &raw_count](const void* raw_data,
-                                                     DataType data_type,
-                                                     int64_t dim) {
-        field_data = storage::CreateFieldData(data_type, false, dim);
-        field_data->FillFieldData(raw_data, raw_count);
-    };
-    auto createNullableFieldData = [&field_data, &raw_count](
+    auto element_type = field_meta.get_element_type();
+    auto createFieldData =
+        [&field_data, &raw_count, &element_type](
+            const void* raw_data, DataType data_type, int64_t dim) {
+            field_data =
+                storage::CreateFieldData(data_type, element_type, false, dim);
+            field_data->FillFieldData(raw_data, raw_count);
+        };
+    auto createNullableFieldData = [&field_data, &raw_count, &element_type](
                                        const void* raw_data,
                                        const bool* raw_valid_data,
                                        DataType data_type,
                                        int64_t dim) {
-        field_data = storage::CreateFieldData(data_type, true, dim);
+        field_data =
+            storage::CreateFieldData(data_type, element_type, true, dim);
         int byteSize = (raw_count + 7) / 8;
         std::vector<uint8_t> valid_data(byteSize);
         for (int i = 0; i < raw_count; i++) {
@@ -1613,7 +1652,8 @@ gen_field_meta(int64_t collection_id = 1,
                int64_t field_id = 101,
                DataType data_type = DataType::NONE,
                DataType element_type = DataType::NONE,
-               bool nullable = false) {
+               bool nullable = false,
+               int64_t max_length = 64) {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -1625,6 +1665,12 @@ gen_field_meta(int64_t collection_id = 1,
     meta.field_schema.set_element_type(
         static_cast<proto::schema::DataType>(element_type));
     meta.field_schema.set_nullable(nullable);
+    meta.field_schema.set_fieldid(field_id);
+    if (IsStringDataType(data_type)) {
+        auto type_params = meta.field_schema.add_type_params();
+        type_params->set_key(MAX_LENGTH);
+        type_params->set_value(std::to_string(max_length));
+    }
     return meta;
 }
 

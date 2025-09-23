@@ -33,12 +33,14 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestClusteringCompactionTaskStorageV2Suite(t *testing.T) {
@@ -71,7 +73,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
 
 	for i := 0; i < len(compactionResult.GetSegments()); i++ {
 		seg := compactionResult.GetSegments()[i]
-		s.EqualValues(2, len(seg.InsertLogs))
+		s.EqualValues(3, len(seg.InsertLogs))
 	}
 
 	s.EqualValues(10239,
@@ -128,7 +130,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	totalRowNum := int64(0)
 	statsRowNum := int64(0)
 	for _, seg := range compactionResultV2.GetSegments() {
-		s.Equal(2, len(seg.GetInsertLogs()))
+		s.Equal(3, len(seg.GetInsertLogs()))
 		s.Equal(1, len(seg.GetField2StatslogPaths()))
 		totalRowNum += seg.GetNumOfRows()
 		statsRowNum += seg.GetField2StatslogPaths()[0].GetBinlogs()[0].GetEntriesNum()
@@ -231,7 +233,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestCompactionWithBM25Function(
 
 	for i := 0; i < len(compactionResult.GetSegments()); i++ {
 		seg := compactionResult.GetSegments()[i]
-		s.Equal(2, len(seg.InsertLogs))
+		s.Equal(3, len(seg.InsertLogs))
 		s.Equal(1, len(seg.Bm25Logs))
 	}
 }
@@ -252,7 +254,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormalByMem
 	s.Equal(2, len(s.task.clusterBuffers))
 	s.Equal(2, len(compactionResult.GetSegments()))
 	segment := compactionResult.GetSegments()[0]
-	s.Equal(2, len(segment.InsertLogs))
+	s.Equal(3, len(segment.InsertLogs))
 	s.Equal(1, len(segment.Field2StatslogPaths))
 }
 
@@ -281,10 +283,13 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
-	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+	sch := genCollectionSchema()
+	fields := typeutil.GetAllFieldSchemas(sch)
+	columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+	bw := syncmgr.NewBulkPackWriterV2(mc, sch, cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	})
+	}, columnGroups)
 	return bw.Write(context.Background(), pack)
 }
 

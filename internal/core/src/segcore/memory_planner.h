@@ -22,6 +22,7 @@
 #include <arrow/record_batch.h>
 #include <vector>
 #include "common/FieldData.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
 
@@ -84,6 +85,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  int64_t memory_limit,
                  std::unique_ptr<RowGroupSplitStrategy> strategy,
                  const std::vector<std::vector<int64_t>>& row_group_lists,
+                 const milvus_storage::ArrowFileSystemPtr& fs,
                  const std::shared_ptr<arrow::Schema> schema = nullptr,
                  milvus::proto::common::LoadPriority priority =
                      milvus::proto::common::LoadPriority::HIGH);

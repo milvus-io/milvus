@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -82,7 +81,7 @@ type Loader interface {
 	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
-	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
+	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadBM25Stats loads BM25 statslog for RemoteSegment
 	LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error)
@@ -113,10 +112,10 @@ type ResourceEstimate struct {
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
 	return ResourceEstimate{
-		MaxMemoryCost:   uint64(float64(estimate.max_memory_cost) * util.GB),
-		MaxDiskCost:     uint64(float64(estimate.max_disk_cost) * util.GB),
-		FinalMemoryCost: uint64(float64(estimate.final_memory_cost) * util.GB),
-		FinalDiskCost:   uint64(float64(estimate.final_disk_cost) * util.GB),
+		MaxMemoryCost:   uint64(estimate.max_memory_cost),
+		MaxDiskCost:     uint64(estimate.max_disk_cost),
+		FinalMemoryCost: uint64(estimate.final_memory_cost),
+		FinalDiskCost:   uint64(estimate.final_disk_cost),
 		HasRawData:      bool(estimate.has_raw_data),
 	}
 }
@@ -366,6 +365,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
 			return errors.Wrap(err, "At LoadDeltaLogs")
+		}
+
+		if !segment.BloomFilterExist() {
+			log.Debug("BloomFilterExist", zap.Int64("segid", segment.ID()))
+			bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+			if err != nil {
+				return errors.Wrap(err, "At LoadBloomFilter")
+			}
+			segment.SetBloomFilter(bfs)
 		}
 
 		if err = segment.FinishLoad(); err != nil {
@@ -636,7 +644,42 @@ func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int
 	return loadedStats, nil
 }
 
-func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+// load single bloom filter
+func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("segmentIDs", loadInfo.GetSegmentID()))
+
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		log.Warn("failed to get collection while loading segment", zap.Error(err))
+		return nil, err
+	}
+	pkField := GetPkField(collection.Schema())
+
+	log.Info("start loading remote...", zap.Int("segmentNum", 1))
+
+	partitionID := loadInfo.PartitionID
+	segmentID := loadInfo.SegmentID
+	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
+
+	log.Info("loading bloom filter for remote...")
+	pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
+	err := loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, logType)
+	if err != nil {
+		log.Warn("load remote segment bloom filter failed",
+			zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	return bfs, nil
+}
+
+func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("segmentIDs", lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
@@ -894,6 +937,17 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			)
 			// for scalar index's raw data, only load to mmap not memory
 			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
+				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+				return err
+			}
+		}
+
+		if !storagecommon.IsVectorDataType(field.GetDataType()) &&
+			!segment.HasFieldData(fieldID) &&
+			loadInfo.GetStorageVersion() != storage.StorageV2 {
+			// Lazy load raw data to avoid search failure after dropping index.
+			// storage v2 will load all scalar fields so we don't need to load raw data for them.
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
@@ -1741,40 +1795,72 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 2: calculate logical resource usage of binlogs
 	for fieldID, fieldBinlog := range id2Binlogs {
+		fieldIDs := fieldBinlog.GetChildFields()
+		// legacy default split
+		if len(fieldIDs) == 0 {
+			fieldIDs = []int64{fieldID}
+		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 
-		// get field schema from fieldID
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
+		var supportInterimIndexDataType bool
+		var containsTimestampField bool
+		var doubleMemoryDataField bool
+		var legacyNilSchema bool
+		mmapEnabled := true
+		isVectorType := true
+
+		for _, fieldID := range fieldIDs {
+			// get field schema from fieldID
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
+			}
+
+			// missing mapping, shall be "0" group for storage v2
+			if fieldSchema == nil {
+				legacyNilSchema = true
+				break
+			}
+
+			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
+			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			// constainSystemField = constainSystemField || common.IsSystemField(fieldSchema.GetFieldID())
+			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
+			doubleMemoryDataField = doubleMemoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
 
 		// TODO: add default-value column's resource usage to inevictable part
 		// TODO: add interim index's resource usage to inevictable part
 
-		if fieldSchema == nil {
-			// nil field schema means missing mapping, shall be "0" group for storage v2
+		if legacyNilSchema {
 			segmentEvictableMemorySize += binlogSize
-		} else if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			continue
+		}
+
+		// timestamp field double in InsertRecord & TimestampIndex
+		if containsTimestampField {
+			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetEntriesNum() * 4
+			})
+			segmentInevictableMemorySize += 2 * uint64(timestampSize)
+		}
+
+		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				segmentEvictableDiskSize += binlogSize
 			} else {
 				segmentEvictableMemorySize += binlogSize
 			}
-		} else if common.IsSystemField(fieldSchema.GetFieldID()) {
-			segmentInevictableMemorySize += binlogSize
-			if DoubleMemorySystemField(fieldSchema.GetFieldID()) {
-				segmentInevictableMemorySize += binlogSize
-			}
-		} else if !isDataMmapEnable(fieldSchema) {
+		} else if !mmapEnabled {
 			segmentEvictableMemorySize += binlogSize
-			if DoubleMemoryDataType(fieldSchema.GetDataType()) {
+			if doubleMemoryDataField {
 				segmentEvictableMemorySize += binlogSize
 			}
 		} else {
-			segmentEvictableDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			segmentEvictableDiskSize += binlogSize
 		}
 	}
 
@@ -1798,6 +1884,14 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
+
+	log.Debug("estimate logical resoure usage result",
+		zap.Int64("segmentID", loadInfo.GetSegmentID()),
+		zap.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
+		zap.Uint64("segmentEvictableMemorySize", segmentEvictableMemorySize),
+		zap.Uint64("segmentInevictableDiskSize", segmentInevictableDiskSize),
+		zap.Uint64("segmentEvictableDiskSize", segmentEvictableDiskSize),
+	)
 
 	return &ResourceUsage{
 		MemorySize: segmentInevictableMemorySize + uint64(float64(segmentEvictableMemorySize)*multiplyFactor.TieredEvictableMemoryCacheRatio),
@@ -1892,31 +1986,56 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 2: calculate size of binlogs
 	for fieldID, fieldBinlog := range id2Binlogs {
+		fieldIDs := fieldBinlog.GetChildFields()
+		// legacy default split
+		if len(fieldIDs) == 0 {
+			fieldIDs = []int64{fieldID}
+		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 
-		// get field schema from fieldID
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
-		}
+		var supportInterimIndexDataType bool
+		var containsTimestampField bool
+		var doubleMomoryDataField bool
+		var legacyNilSchema bool
+		mmapEnabled := true
+		isVectorType := true
 
-		// missing mapping, shall be "0" group for storage v2
-		if fieldSchema == nil {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += binlogSize
+		for _, fieldID := range fieldIDs {
+			// get field schema from fieldID
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
 			}
+
+			// missing mapping, shall be "0" group for storage v2
+			if fieldSchema == nil {
+				if !multiplyFactor.TieredEvictionEnabled {
+					segMemoryLoadingSize += binlogSize
+				}
+				legacyNilSchema = true
+				break
+			}
+
+			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
+			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
+			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
+		}
+		// legacy v2 segment without children
+		if legacyNilSchema {
 			continue
 		}
 
 		if !multiplyFactor.TieredEvictionEnabled {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 			if interimIndexEnable {
 				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 
-		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				if !multiplyFactor.TieredEvictionEnabled {
@@ -1930,22 +2049,18 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		// system field does not support mmap, skip mmap check
-		if common.IsSystemField(fieldSchema.GetFieldID()) {
-			// system field isn't managed by the caching layer, so its size should always be included,
-			// regardless of the tiered eviction value
-			segMemoryLoadingSize += binlogSize
-			if DoubleMemorySystemField(fieldSchema.GetFieldID()) {
-				segMemoryLoadingSize += binlogSize
-			}
-			continue
+		// timestamp field double in InsertRecord & TimestampIndex
+		if containsTimestampField {
+			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetEntriesNum() * 4
+			})
+			segMemoryLoadingSize += 2 * uint64(timestampSize)
 		}
 
-		mmapEnabled := isDataMmapEnable(fieldSchema)
 		if !mmapEnabled {
 			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
-				if DoubleMemoryDataType(fieldSchema.GetDataType()) {
+				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}

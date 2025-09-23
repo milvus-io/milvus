@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
@@ -54,9 +55,10 @@ func TestFencedError(t *testing.T) {
 
 func TestWAL(t *testing.T) {
 	initResourceForTest(t)
-	b := registry.MustGetBuilder(walimplstest.WALName,
+	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 	)
@@ -181,6 +183,10 @@ func (f *testOneWALFramework) Run() {
 }
 
 func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WAL, roWAL wal.ROWAL) {
+	cp, err := rwWAL.GetReplicateCheckpoint()
+	assert.True(f.t, status.AsStreamingError(err).IsReplicateViolation())
+	assert.Nil(f.t, cp)
+
 	f.testSendCreateCollection(ctx, rwWAL)
 	defer f.testSendDropCollection(ctx, rwWAL)
 

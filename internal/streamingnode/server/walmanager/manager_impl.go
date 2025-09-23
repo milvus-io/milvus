@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
@@ -24,10 +25,11 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 // OpenManager create a wal manager.
 func OpenManager() (Manager, error) {
 	walName := util.MustSelectWALName()
-	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
+	resource.Resource().Logger().Info("open wal manager", zap.Stringer("walName", walName))
 	opener, err := registry.MustGetBuilder(walName,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 	).Build()

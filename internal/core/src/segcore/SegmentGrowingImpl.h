@@ -131,7 +131,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
-    num_chunk_index(FieldId field_id) const final {
+    num_chunk_index(FieldId field_id) const {
         return indexing_record_.get_finished_ack();
     }
 
@@ -144,7 +144,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // deprecated
     PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
         return PinWrapper<const index::IndexBase*>(
             indexing_record_.get_field_indexing(field_id)
                 .get_chunk_indexing(chunk_id)
@@ -205,7 +205,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // for scalar vectors
     template <typename S, typename T = S>
     void
-    bulk_subscript_impl(const VectorBase* vec_raw,
+    bulk_subscript_impl(milvus::OpContext* op_ctx,
+                        const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
                         T* output) const;
@@ -213,6 +214,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     template <typename S>
     void
     bulk_subscript_ptr_impl(
+        milvus::OpContext* op_ctx,
         const VectorBase* vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
@@ -221,7 +223,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // for scalar array vectors
     template <typename T>
     void
-    bulk_subscript_array_impl(const VectorBase& vec_raw,
+    bulk_subscript_array_impl(milvus::OpContext* op_ctx,
+                              const VectorBase& vec_raw,
                               const int64_t* seg_offsets,
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst) const;
@@ -230,6 +233,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     template <typename T>
     void
     bulk_subscript_vector_array_impl(
+        milvus::OpContext* op_ctx,
         const VectorBase& vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
@@ -237,7 +241,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     template <typename T>
     void
-    bulk_subscript_impl(FieldId field_id,
+    bulk_subscript_impl(milvus::OpContext* op_ctx,
+                        FieldId field_id,
                         int64_t element_sizeof,
                         const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
@@ -246,6 +251,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     bulk_subscript_sparse_float_vector_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         const ConcurrentVector<SparseFloatVector>* vec_raw,
         const int64_t* seg_offsets,
@@ -253,25 +259,29 @@ class SegmentGrowingImpl : public SegmentGrowing {
         milvus::proto::schema::SparseFloatArray* output) const;
 
     void
-    bulk_subscript(SystemFieldType system_type,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   SystemFieldType system_type,
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override;
 
     std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id,
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
     std::unique_ptr<DataArray>
     bulk_subscript(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
     virtual void
-    BulkGetJsonData(FieldId field_id,
+    BulkGetJsonData(milvus::OpContext* op_ctx,
+                    FieldId field_id,
                     std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const override;
@@ -329,6 +339,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
+                  milvus::OpContext* op_context,
                   SearchResult& output) const override;
 
     DataType
@@ -344,7 +355,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     bool
-    HasIndex(FieldId field_id) const override {
+    HasIndex(FieldId field_id) const {
         auto& field_meta = schema_->operator[](field_id);
         if (IsVectorDataType(field_meta.get_data_type()) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
@@ -354,14 +365,20 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return false;
     }
 
-    bool
-    HasIndex(FieldId field_id,
-             const std::string& nested_path,
-             DataType data_type,
-             bool any_type = false,
-             bool is_array = false) const override {
-        return false;
-    };
+    std::vector<PinWrapper<const index::IndexBase*>>
+    PinIndex(milvus::OpContext* op_ctx,
+             FieldId field_id,
+             bool include_ngram = false) const override {
+        if (!HasIndex(field_id)) {
+            return {};
+        }
+        auto num_chunk = num_chunk_index(field_id);
+        std::vector<PinWrapper<const index::IndexBase*>> indexes;
+        for (int64_t i = 0; i < num_chunk; i++) {
+            indexes.push_back(chunk_index_impl(field_id, i));
+        }
+        return indexes;
+    }
 
     bool
     HasFieldData(FieldId field_id) const override {
@@ -399,16 +416,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const override {
+    search_pk(milvus::OpContext* op_ctx,
+              const PkType& pk,
+              Timestamp timestamp) const override {
         return insert_record_.search_pk(pk, timestamp);
     }
 
     void
-    pk_range(proto::plan::OpType op,
+    pk_range(milvus::OpContext* op_ctx,
+             proto::plan::OpType op,
              const PkType& pk,
-             Timestamp timestamp,
              BitsetTypeView& bitset) const override {
-        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        insert_record_.search_pk_range(pk, op, bitset);
     }
 
     bool
@@ -422,34 +441,41 @@ class SegmentGrowingImpl : public SegmentGrowing {
     num_chunk(FieldId field_id) const override;
 
     PinWrapper<SpanBase>
-    chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+    chunk_data_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     chunk_vector_array_view_impl(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_views_by_offsets(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override;
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_views_by_offsets(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override;

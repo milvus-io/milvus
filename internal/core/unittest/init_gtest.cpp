@@ -38,7 +38,8 @@ main(int argc, char** argv) {
          CacheWarmupPolicy::CacheWarmupPolicy_Disable},
         {1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb},
         true,
-        {10, 30});
+        true,
+        {10, true, 30});
 
     return RUN_ALL_TESTS();
 }

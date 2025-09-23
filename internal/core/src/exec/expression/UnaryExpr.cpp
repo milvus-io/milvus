@@ -37,8 +37,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     using Index = index::ScalarIndex<IndexInnerType>;
 
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-        auto index_ptr = const_cast<Index*>(pw.get());
+        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
 
         if (index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::HYBRID ||
@@ -54,7 +53,7 @@ template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
     bool res;
-    if (!is_index_mode_) {
+    if (!SegmentExpr::CanUseIndex()) {
         use_index_ = res = false;
         return res;
     }
@@ -201,8 +200,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
             auto val_type_inner = FromValCase(val_type);
-            if (CanExecNgramMatchForJson(val_type_inner) &&
-                !has_offset_input_) {
+            if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch();
                 // If nullopt is returned, it means the query cannot be
                 // optimized by ngram index. Forward it to the normal path.
@@ -585,7 +583,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 auto [chunk_idx, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
                 auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                    field_id_, chunk_idx);
+                    op_ctx_, field_id_, chunk_idx);
                 auto chunk = pw.get();
                 return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
             };
@@ -597,7 +595,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 auto chunk_idx = offset / size_per_chunk;
                 auto chunk_offset = offset % size_per_chunk;
                 auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                    field_id_, chunk_idx);
+                    op_ctx_, field_id_, chunk_idx);
                 auto chunk = pw.get();
                 auto array_view = chunk.data() + chunk_offset;
                 return array_view->is_same_array(val) ^ reverse;
@@ -991,7 +989,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1011,13 +1009,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 using ValType = decltype(ValType);
                 ShreddingExecutor<ColType, ValType> executor(
                     op_type, pointer, val);
-                index->ExecutorForShreddingData<ColType>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
+                                                         executor,
+                                                         nullptr,
+                                                         res_view,
+                                                         valid_res_view);
                 LOG_DEBUG(
-                    "using shredding data's field: {} with value {}, count {}",
+                    "using shredding data's field: {} with value {}, count {} "
+                    "for segment {}",
                     target_field,
                     val,
-                    res_view.count());
+                    res_view.count(),
+                    segment_->get_segment_id());
             }
         };
 
@@ -1088,6 +1092,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if (!target_field.empty()) {
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
                     index->ExecutorForShreddingData<std::string_view>(
+                        op_ctx_,
                         target_field,
                         executor,
                         nullptr,
@@ -1224,7 +1229,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 });
 
             if (!index->CanSkipShared(pointer, target_types)) {
-                index->ExecuteForSharedData(pointer, shared_executor);
+                index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
             }
         }
 
@@ -1250,7 +1255,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (CanExecNgramMatch(expr_->op_type_)) {
+    } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1301,31 +1306,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
         auto op_type = expr_->op_type_;
         PkType pk = value_arg_.GetValue<IndexInnerType>();
-        auto query_timestamp = context.get_exec_context()
-                                   ->get_query_context()
-                                   ->get_query_timestamp();
-
-        switch (op_type) {
-            case proto::plan::GreaterThan:
-            case proto::plan::GreaterEqual:
-            case proto::plan::LessThan:
-            case proto::plan::LessEqual:
-            case proto::plan::Equal:
-                segment_->pk_range(op_type, pk, query_timestamp, cache_view);
-                break;
-            case proto::plan::NotEqual: {
-                segment_->pk_range(
-                    proto::plan::Equal, pk, query_timestamp, cache_view);
-                cache_view.flip();
-                break;
-            }
-            default:
-                ThrowInfo(
-                    OpTypeInvalid,
-                    fmt::format("unsupported operator type for unary expr: {}",
-                                op_type));
+        if (op_type == proto::plan::NotEqual) {
+            segment_->pk_range(op_ctx_, proto::plan::Equal, pk, cache_view);
+            cache_view.flip();
+        } else {
+            segment_->pk_range(op_ctx_, op_type, pk, cache_view);
         }
     }
+
     TargetBitmap result;
     result.append(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -1443,8 +1431,9 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
             }
             auto valid =
                 (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-                    : ProcessChunksForValid<T>(is_index_mode_);
+                    ? ProcessChunksForValidByOffsets<T>(
+                          SegmentExpr::CanUseIndex(), *input)
+                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1701,20 +1690,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ =
-        is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
-        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
-        // TODO: if multiple indexes are supported, this logic should be changed
-        !segment_->HasNgramIndex(field_id_);
+    use_index_ = SegmentExpr::CanUseIndex() &&
+                 SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
     return use_index_;
 }
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    auto has_index =
-        segment_->HasIndex(field_id_,
-                           milvus::Json::pointer(expr_->column_.nested_path_),
-                           val_type);
+    bool has_index = pinned_index_.size() > 0;
     switch (val_type) {
         case DataType::STRING:
         case DataType::VARCHAR:
@@ -1792,7 +1775,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     }
 
     if (cached_match_res_ == nullptr) {
-        auto index = segment_->GetTextIndex(field_id_);
+        auto index = segment_->GetTextIndex(op_ctx_, field_id_);
         auto res = std::move(func(index, query));
         auto valid_res = index->IsNotNull();
         cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
@@ -1832,24 +1815,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 };
 
 bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
-    return (op_type == proto::plan::OpType::InnerMatch ||
-            op_type == proto::plan::OpType::Match ||
-            op_type == proto::plan::OpType::PrefixMatch ||
-            op_type == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ && CanUseNgramIndex(field_id_);
-}
-
-bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson(DataType val_type) {
-    return (val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
-           (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
-            expr_->op_type_ == proto::plan::OpType::Match ||
-            expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
-            expr_->op_type_ == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ &&
-           CanUseNgramIndexForJson(
-               field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 std::optional<VectorPtr>
@@ -1866,14 +1833,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        PinWrapper<index::NgramInvertedIndex*> pinned_index;
-        if (expr_->column_.data_type_ == DataType::JSON) {
-            pinned_index = segment_->GetNgramIndexForJson(
-                field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
-        } else {
-            pinned_index = segment_->GetNgramIndex(field_id_);
-        }
-        index::NgramInvertedIndex* index = pinned_index.get();
+        auto index = pinned_ngram_index_.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());

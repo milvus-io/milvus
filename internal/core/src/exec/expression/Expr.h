@@ -23,9 +23,9 @@
 
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
-#include "exec/expression/VectorFunction.h"
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
@@ -41,26 +41,39 @@ namespace exec {
 
 enum class FilterType { sequential = 0, random = 1 };
 
+inline std::vector<PinWrapper<const index::IndexBase*>>
+PinIndex(milvus::OpContext* op_ctx,
+         const segcore::SegmentInternalInterface* segment,
+         const FieldMeta& field_meta,
+         const std::vector<std::string>& path = {},
+         DataType data_type = DataType::NONE,
+         bool any_type = false,
+         bool is_array = false) {
+    if (field_meta.get_data_type() == DataType::JSON) {
+        auto pointer = milvus::Json::pointer(path);
+        return segment->PinJsonIndex(op_ctx,
+                                     field_meta.get_id(),
+                                     pointer,
+                                     data_type,
+                                     any_type,
+                                     is_array);
+    } else {
+        return segment->PinIndex(op_ctx, field_meta.get_id());
+    }
+}
+
 class Expr {
  public:
     Expr(DataType type,
          const std::vector<std::shared_ptr<Expr>>&& inputs,
-         const std::string& name)
+         const std::string& name,
+         milvus::OpContext* op_ctx)
         : type_(type),
           inputs_(std::move(inputs)),
           name_(name),
-          vector_func_(nullptr) {
+          op_ctx_(op_ctx) {
     }
 
-    Expr(DataType type,
-         const std::vector<std::shared_ptr<Expr>>&& inputs,
-         std::shared_ptr<VectorFunction> vec_func,
-         const std::string& name)
-        : type_(type),
-          inputs_(std::move(inputs)),
-          name_(name),
-          vector_func_(vec_func) {
-    }
     virtual ~Expr() = default;
 
     const DataType&
@@ -117,8 +130,7 @@ class Expr {
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
-    // NOTE: unused
-    std::shared_ptr<VectorFunction> vector_func_;
+    milvus::OpContext* op_ctx_;
 
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
@@ -134,6 +146,7 @@ class SegmentExpr : public Expr {
  public:
     SegmentExpr(const std::vector<ExprPtr>&& input,
                 const std::string& name,
+                milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId field_id,
                 const std::vector<std::string> nested_path,
@@ -143,7 +156,7 @@ class SegmentExpr : public Expr {
                 int32_t consistency_level,
                 bool allow_any_json_cast_type = false,
                 bool is_json_contains = false)
-        : Expr(DataType::BOOL, std::move(input), name),
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
           field_id_(field_id),
           nested_path_(nested_path),
@@ -174,20 +187,15 @@ class SegmentExpr : public Expr {
             pk_type_ = field_meta.get_data_type();
         }
 
-        if (field_meta.get_data_type() == DataType::JSON) {
-            auto pointer = milvus::Json::pointer(nested_path_);
-            if (is_index_mode_ = segment_->HasIndex(field_id_,
-                                                    pointer,
-                                                    value_type_,
-                                                    allow_any_json_cast_type_,
-                                                    is_json_contains_)) {
-                num_index_chunk_ = 1;
-            }
-        } else {
-            is_index_mode_ = segment_->HasIndex(field_id_);
-            if (is_index_mode_) {
-                num_index_chunk_ = segment_->num_chunk_index(field_id_);
-            }
+        pinned_index_ = PinIndex(op_ctx_,
+                                 segment_,
+                                 field_meta,
+                                 nested_path_,
+                                 value_type_,
+                                 allow_any_json_cast_type_,
+                                 is_json_contains_);
+        if (pinned_index_.size() > 0) {
+            num_index_chunk_ = pinned_index_.size();
         }
         // if index not include raw data, also need load data
         if (segment_->HasFieldData(field_id_)) {
@@ -280,7 +288,9 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         // when we specify input, do not maintain states
         if (!has_offset_input_) {
-            if (is_index_mode_) {
+            // CanUseIndex excludes ngram index and this is true even ngram index is used as ExecNgramMatch
+            // uses data cursor.
+            if (SegmentExpr::CanUseIndex()) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
@@ -307,15 +317,16 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
-                                                          : current_data_chunk_;
-        auto current_chunk_pos = is_index_mode_ && use_index_
+        auto current_chunk = SegmentExpr::CanUseIndex() && use_index_
+                                 ? current_index_chunk_
+                                 : current_data_chunk_;
+        auto current_chunk_pos = SegmentExpr::CanUseIndex() && use_index_
                                      ? current_index_chunk_pos_
                                      : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
             current_rows =
-                is_index_mode_ && use_index_ &&
+                SegmentExpr::CanUseIndex() && use_index_ &&
                         segment_->type() == SegmentType::Sealed
                     ? current_chunk_pos
                     : segment_->num_rows_until_chunk(field_id_, current_chunk) +
@@ -346,7 +357,7 @@ class SegmentExpr : public Expr {
 
         auto& skip_index = segment_->GetSkipIndex();
         auto pw = segment_->get_batch_views<T>(
-            field_id_, 0, current_data_chunk_pos_, need_size);
+            op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
@@ -383,7 +394,8 @@ class SegmentExpr : public Expr {
         Assert(num_data_chunk_ == 1);
 
         auto& skip_index = segment_->GetSkipIndex();
-        auto pw = segment_->get_views_by_offsets<T>(field_id_, 0, *input);
+        auto pw =
+            segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
@@ -410,8 +422,8 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         TargetBitmap valid_res(input->size());
 
-        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(pw.get());
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        auto* index_ptr = const_cast<Index*>(scalar_index);
 
         auto valid_result = index_ptr->IsNotNull();
         for (auto i = 0; i < input->size(); ++i) {
@@ -439,8 +451,8 @@ class SegmentExpr : public Expr {
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
-        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(pw.get());
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        auto* index_ptr = const_cast<Index*>(scalar_index);
         auto valid_result = index_ptr->IsNotNull();
         auto batch_size = input->size();
 
@@ -486,7 +498,7 @@ class SegmentExpr : public Expr {
         int64_t processed_size = 0;
 
         // index reverse lookup
-        if (is_index_mode_ && num_data_chunk_ == 0) {
+        if (SegmentExpr::CanUseIndex() && num_data_chunk_ == 0) {
             return ProcessIndexLookupByOffsets<T>(
                 func, skip_func, input, res, valid_res, values...);
         }
@@ -505,7 +517,10 @@ class SegmentExpr : public Expr {
                         auto [chunk_id, chunk_offset] =
                             segment_->get_chunk_by_offset(field_id_, offset);
                         auto pw = segment_->get_views_by_offsets<T>(
-                            field_id_, chunk_id, {int32_t(chunk_offset)});
+                            op_ctx_,
+                            field_id_,
+                            chunk_id,
+                            {int32_t(chunk_offset)});
                         auto [data_vec, valid_data] = pw.get();
                         if (!skip_func ||
                             !skip_func(skip_index, field_id_, chunk_id)) {
@@ -529,7 +544,8 @@ class SegmentExpr : public Expr {
                     int64_t offset = (*input)[i];
                     auto [chunk_id, chunk_offset] =
                         segment_->get_chunk_by_offset(field_id_, offset);
-                    auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                    auto pw =
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + chunk_offset;
                     const bool* valid_data = chunk.valid_data();
@@ -562,7 +578,7 @@ class SegmentExpr : public Expr {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
-                auto pw = segment_->chunk_data<T>(field_id_, 0);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, 0);
                 auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
@@ -585,7 +601,7 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const T* data = chunk.data() + chunk_offset;
                 const bool* valid_data = chunk.valid_data();
@@ -645,7 +661,7 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
 
             auto& skip_index = segment_->GetSkipIndex();
-            auto pw = segment_->chunk_data<T>(field_id_, i);
+            auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
             auto chunk = pw.get();
             const bool* valid_data = chunk.valid_data();
             if (valid_data != nullptr) {
@@ -718,7 +734,7 @@ class SegmentExpr : public Expr {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
-                            field_id_, i, data_pos, size);
+                            op_ctx_, field_id_, i, data_pos, size);
                         auto [data_vec, valid_data] = pw.get();
 
                         func(data_vec.data(),
@@ -732,7 +748,7 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (!is_seal) {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + data_pos;
                     const bool* valid_data = chunk.valid_data();
@@ -753,14 +769,14 @@ class SegmentExpr : public Expr {
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
-                        field_id_, i, data_pos, size);
+                        op_ctx_, field_id_, i, data_pos, size);
                     valid_data = pw.get().second.data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
@@ -889,8 +905,8 @@ class SegmentExpr : public Expr {
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
-                    json_pw = segment_->chunk_json_index(field_id_, pointer, i);
 
+                    json_pw = pinned_index_[i];
                     // check if it is a json flat index, if so, create a json flat index query executor
                     auto json_flat_index =
                         dynamic_cast<const index::JsonFlatIndex*>(
@@ -909,9 +925,9 @@ class SegmentExpr : public Expr {
                         index_ptr = dynamic_cast<Index*>(json_index);
                     }
                 } else {
-                    pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_,
-                                                                      i);
-                    index_ptr = const_cast<Index*>(pw.get());
+                    auto scalar_index =
+                        dynamic_cast<const Index*>(pinned_index_[i].get());
+                    index_ptr = const_cast<Index*>(scalar_index);
                 }
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(func(index_ptr, values...)));
@@ -1046,9 +1062,9 @@ class SegmentExpr : public Expr {
                                   element_type);
                 }
             }
-            auto pw =
-                segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-            auto* index_ptr = const_cast<Index*>(pw.get());
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[0].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
             const auto& res = index_ptr->IsNotNull();
             for (auto i = 0; i < batch_size; ++i) {
                 valid_result[i] = res[input[i]];
@@ -1067,7 +1083,7 @@ class SegmentExpr : public Expr {
                         return {0, offset};
                     }
                 }();
-                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data != nullptr) {
@@ -1112,7 +1128,7 @@ class SegmentExpr : public Expr {
                           std::is_same_v<T, ArrayView>) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<T>(
-                        field_id_, i, data_pos, size);
+                        op_ctx_, field_id_, i, data_pos, size);
                     auto [data_vec, valid_data] = pw.get();
                     ApplyValidData(valid_data.data(),
                                    valid_result + processed_size,
@@ -1123,7 +1139,7 @@ class SegmentExpr : public Expr {
             }
 
             if (!access_sealed_variable_column) {
-                auto pw = segment_->chunk_data<T>(field_id_, i);
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                 auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data == nullptr) {
@@ -1176,9 +1192,9 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                auto pw =
-                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                auto* index_ptr = const_cast<Index*>(pw.get());
+                auto scalar_index =
+                    dynamic_cast<const Index*>(pinned_index_[i].get());
+                auto* index_ptr = const_cast<Index*>(scalar_index);
                 auto execute_sub_batch = [](Index* index_ptr) {
                     TargetBitmap res = index_ptr->IsNotNull();
                     return res;
@@ -1215,16 +1231,23 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            auto pw =
-                segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            auto* index_ptr = const_cast<Index*>(pw.get());
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[i].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
             func(index_ptr, values...);
         }
     }
 
+    bool
+    CanUseIndex() const {
+        // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
+        // TODO: if multiple indexes are supported, this logic should be changed
+        return num_index_chunk_ != 0 && !CanUseNgramIndex();
+    }
+
     template <typename T>
     bool
-    CanUseIndex(OpType op) const {
+    CanUseIndexForOp(OpType op) const {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -1235,9 +1258,9 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         if (op == OpType::Match || op == OpType::InnerMatch ||
             op == OpType::PostfixMatch) {
-            auto pw = segment_->chunk_scalar_index<IndexInnerType>(
-                field_id_, current_index_chunk_);
-            auto* index_ptr = const_cast<Index*>(pw.get());
+            auto scalar_index = dynamic_cast<const Index*>(
+                pinned_index_[current_index_chunk_].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
             // 1, index support regex query and try use it, then index handles the query;
             // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
             return (index_ptr->TryUseRegexQuery() &&
@@ -1256,9 +1279,9 @@ class SegmentExpr : public Expr {
 
         using Index = index::ScalarIndex<IndexInnerType>;
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            auto pw =
-                segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            auto* index_ptr = const_cast<Index*>(pw.get());
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[i].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
             if (!index_ptr->HasRawData()) {
                 return false;
             }
@@ -1273,17 +1296,6 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    CanUseNgramIndex(FieldId field_id) const {
-        return segment_->HasNgramIndex(field_id);
-    }
-
-    bool
-    CanUseNgramIndexForJson(FieldId field_id,
-                            const std::string& nested_path) const {
-        return segment_->HasNgramIndexForJson(field_id, nested_path);
-    }
-
-    bool
     PlanUseJsonStats(EvalCtx& context) const {
         return context.get_exec_context()
             ->get_query_context()
@@ -1295,13 +1307,18 @@ class SegmentExpr : public Expr {
     HasJsonStats(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
                static_cast<const segcore::SegmentSealed*>(segment_)
-                       ->GetJsonStats(field_id) != nullptr;
+                       ->GetJsonStats(op_ctx_, field_id) != nullptr;
     }
 
     bool
     CanUseJsonStats(EvalCtx& context, FieldId field_id) const {
         return PlanUseJsonStats(context) && HasJsonStats(field_id);
     }
+
+    virtual bool
+    CanUseNgramIndex() const {
+        return false;
+    };
 
  protected:
     const segcore::SegmentInternalInterface* segment_;
@@ -1315,11 +1332,11 @@ class SegmentExpr : public Expr {
     DataType value_type_;
     bool allow_any_json_cast_type_{false};
     bool is_json_contains_{false};
-    bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data
     // default true means use index as much as possible
     bool use_index_{true};
+    std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};

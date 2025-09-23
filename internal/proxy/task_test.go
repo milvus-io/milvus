@@ -3530,6 +3530,11 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	paramtable.Init()
 
 	defer rc.Close()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithPartitionKey"
@@ -5092,6 +5097,11 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 // TestCreateCollectionTaskWithStructArrayField tests creating collections with StructArrayField
 func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 	mix := NewMixCoordMock()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithStructArrayField"

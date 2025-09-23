@@ -121,13 +121,12 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	cluster := session.NewMockCluster(s.T())
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:           1,
-		Type:             datapb.CompactionType_MixCompaction,
-		TimeoutInSeconds: 10086,
-		StartTime:        time.Now().Unix(),
-		Channel:          "ch-1",
-		State:            datapb.CompactionTaskState_executing,
-		NodeID:           111,
+		PlanID:    1,
+		Type:      datapb.CompactionType_MixCompaction,
+		StartTime: time.Now().Unix(),
+		Channel:   "ch-1",
+		State:     datapb.CompactionTaskState_executing,
+		NodeID:    111,
 	}, nil, s.mockMeta, newMockVersionManager())
 
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)

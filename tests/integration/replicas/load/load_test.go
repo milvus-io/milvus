@@ -191,11 +191,11 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{
-				Key:   common.DatabaseReplicaNumber,
+				Key:   common.CollectionReplicaNumber,
 				Value: "5",
 			},
 			{
-				Key:   common.DatabaseResourceGroups,
+				Key:   common.CollectionResourceGroups,
 				Value: strings.Join(rgs, ","),
 			},
 		},
@@ -216,11 +216,11 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{
-				Key:   common.DatabaseReplicaNumber,
+				Key:   common.CollectionReplicaNumber,
 				Value: "2",
 			},
 			{
-				Key:   common.DatabaseResourceGroups,
+				Key:   common.CollectionResourceGroups,
 				Value: strings.Join(rgs[:2], ","),
 			},
 		},

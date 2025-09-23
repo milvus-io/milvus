@@ -84,12 +84,14 @@ PhyVectorSearchNode::GetOutput() {
     // TODO: uniform knowhere BitsetView and milvus BitsetView
     milvus::BitsetView final_view((uint8_t*)col_input->GetRawData(),
                                   col_input->size());
+    auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,
                             src_lims,
                             num_queries,
                             query_timestamp_,
                             final_view,
+                            op_context,
                             search_result);
 
     search_result.total_data_cnt_ = final_view.size();
@@ -99,7 +101,8 @@ PhyVectorSearchNode::GetOutput() {
     double vector_cost =
         std::chrono::duration<double, std::micro>(vector_end - vector_start)
             .count();
-    monitor::internal_core_search_latency_vector.Observe(vector_cost / 1000);
+    milvus::monitor::internal_core_search_latency_vector.Observe(vector_cost /
+                                                                 1000);
     // for now, vector search store result in query_context
     // this node interface just return bitset
     return input_;

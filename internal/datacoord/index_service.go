@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -28,15 +27,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -112,39 +112,6 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 	}
 }
 
-func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return "", err
-	}
-
-	var identifierExpr *planpb.Expr
-	err = planparserv2.ParseIdentifier(helper, identifier, func(expr *planpb.Expr) error {
-		identifierExpr = expr
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	if identifierExpr.GetColumnExpr().GetInfo().GetFieldId() != fieldID {
-		return "", fmt.Errorf("field parsed from json path (%v) not match with field specified in request (%v)", identifierExpr.GetColumnExpr().GetInfo().GetFieldId(), fieldID)
-	}
-
-	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
-	// escape the nested path to avoid the path being interpreted as a JSON Pointer
-	nestedPath = lo.Map(nestedPath, func(path string, _ int) string {
-		s := strings.ReplaceAll(path, "~", "~0")
-		s = strings.ReplaceAll(s, "/", "~1")
-		return s
-	})
-	if len(nestedPath) == 0 {
-		// if nested path is empty, it means the json path is the field name.
-		// Dont return "/" here, it not a valid json path for simdjson.
-		return "", nil
-	}
-	return "/" + strings.Join(nestedPath, "/"), nil
-}
-
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
@@ -189,7 +156,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 
-		nestedPath, err := s.parseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
+		nestedPath, err := typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
 		if err != nil {
 			log.Error("parse nested path failed", zap.Error(err))
 			return merr.Status(err), nil
@@ -872,6 +839,23 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	}, nil
 }
 
+func isCollectionLoaded(ctx context.Context, mc types.MixCoord, collID int64) (bool, error) {
+	// get all loading collections
+	resp, err := mc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{collID},
+	})
+	if merr.CheckRPCCall(resp, err) != nil {
+		return false, err
+	}
+
+	for _, loadedCollID := range resp.GetCollectionIDs() {
+		if collID == loadedCollID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // DropIndex deletes indexes based on IndexName. One IndexName corresponds to the index of an entire column. A column is
 // divided into many segments, and each segment corresponds to an IndexBuildID. DataCoord uses IndexBuildID to record
 // index tasks.
@@ -892,6 +876,30 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	if len(indexes) == 0 {
 		log.Info(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
 		return merr.Success(), nil
+	}
+	// we do not support drop vector index on loaded collection
+	loaded, err := isCollectionLoaded(ctx, s.mixCoord, req.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to check if collection is loaded", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if loaded {
+		schema, err := s.getSchema(ctx, req.GetCollectionID())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		// check if there is any vector index to drop
+		for _, index := range indexes {
+			field := typeutil.GetField(schema, index.FieldID)
+			if field == nil {
+				log.Warn("field not found", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("fieldID", index.FieldID))
+				return merr.Status(merr.WrapErrFieldNotFound(index.FieldID)), nil
+			}
+			if typeutil.IsVectorType(field.GetDataType()) {
+				log.Warn("vector index cannot be dropped on loaded collection", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("fieldID", index.FieldID))
+				return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID()))), nil
+			}
+		}
 	}
 
 	if !req.GetDropAll() && len(indexes) > 1 {

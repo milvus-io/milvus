@@ -95,7 +95,7 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 		panic("should never be called if len(msgPositions) is not 1")
 	}
 	position := msgPositions[0]
-	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(WAL().WALName(), position.MsgID)
+	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(position.MsgID)
 	log.Info(
 		"delegator msgstream adaptor seeks from position with scanner",
 		zap.String("channel", position.GetChannelName()),
@@ -103,7 +103,7 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 		zap.Uint64("timestamp", position.GetTimestamp()),
 	)
 	handler := adaptor.NewMsgPackAdaptorHandler()
-	if position.GetChannelName() == message.ControlChannel {
+	if funcutil.IsControlChannel(position.GetChannelName()) {
 		panic("should never seek from control channel at delegator msgstream adaptor")
 	}
 	pchannel := funcutil.ToPhysicalChannel(position.GetChannelName())

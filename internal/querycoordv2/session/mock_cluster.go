@@ -27,6 +27,66 @@ func (_m *MockCluster) EXPECT() *MockCluster_Expecter {
 	return &MockCluster_Expecter{mock: &_m.Mock}
 }
 
+// DropIndex provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropIndex")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.DropIndexRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.DropIndexRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.DropIndexRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_DropIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropIndex'
+type MockCluster_DropIndex_Call struct {
+	*mock.Call
+}
+
+// DropIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.DropIndexRequest
+func (_e *MockCluster_Expecter) DropIndex(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_DropIndex_Call {
+	return &MockCluster_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_DropIndex_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest)) *MockCluster_DropIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.DropIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_DropIndex_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_DropIndex_Call) RunAndReturn(run func(context.Context, int64, *querypb.DropIndexRequest) (*commonpb.Status, error)) *MockCluster_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetComponentStates provides a mock function with given fields: ctx, nodeID
 func (_m *MockCluster) GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error) {
 	ret := _m.Called(ctx, nodeID)

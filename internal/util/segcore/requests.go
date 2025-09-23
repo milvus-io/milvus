@@ -2,6 +2,8 @@ package segcore
 
 /*
 #cgo pkg-config: milvus_core
+
+#include "common/type_c.h"
 #include "segcore/load_field_data_c.h"
 */
 import "C"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -40,6 +43,7 @@ type LoadFieldDataRequest struct {
 	RowCount       int64
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
+	WarmupPolicy   string
 }
 
 type LoadFieldDataInfo struct {
@@ -78,9 +82,24 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 			}
 		}
 
+		childField := field.Field.GetChildFields()
+		if len(childField) > 0 {
+			status = C.SetLoadFieldInfoChildFields(cLoadFieldDataInfo, cFieldID, (*C.int64_t)(unsafe.Pointer(&childField[0])), C.int64_t(len(childField)))
+			if err := ConsumeCStatusIntoError(&status); err != nil {
+				return nil, errors.Wrapf(err, "SetLoadFieldInfoChildFields failed at binlog, %d", field.Field.GetFieldID())
+			}
+		}
+
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
 	}
 	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
+	if len(req.WarmupPolicy) > 0 {
+		warmupPolicy, err := initcore.ConvertCacheWarmupPolicy(req.WarmupPolicy)
+		if err != nil {
+			return nil, errors.Wrapf(err, "ConvertCacheWarmupPolicy failed at warmupPolicy, %s", req.WarmupPolicy)
+		}
+		C.AppendWarmupPolicy(cLoadFieldDataInfo, C.CacheWarmupPolicy(warmupPolicy))
+	}
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil

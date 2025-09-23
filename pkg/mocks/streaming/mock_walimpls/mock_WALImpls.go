@@ -269,18 +269,18 @@ func (_c *MockWALImpls_Truncate_Call) RunAndReturn(run func(context.Context, mes
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockWALImpls) WALName() string {
+func (_m *MockWALImpls) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -303,12 +303,12 @@ func (_c *MockWALImpls_WALName_Call) Run(run func()) *MockWALImpls_WALName_Call 
 	return _c
 }
 
-func (_c *MockWALImpls_WALName_Call) Return(_a0 string) *MockWALImpls_WALName_Call {
+func (_c *MockWALImpls_WALName_Call) Return(_a0 message.WALName) *MockWALImpls_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALImpls_WALName_Call) RunAndReturn(run func() string) *MockWALImpls_WALName_Call {
+func (_c *MockWALImpls_WALName_Call) RunAndReturn(run func() message.WALName) *MockWALImpls_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

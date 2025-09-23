@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "query/Plan.h"
 
@@ -21,6 +20,8 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
+
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -28,30 +29,6 @@ using namespace milvus::storage;
 using namespace milvus::tracer;
 
 const char* METRICS_TYPE = "metric_type";
-
-int
-GetSearchResultBound(const SearchResult& search_result) {
-    int i = 0;
-    for (; i < search_result.seg_offsets_.size(); i++) {
-        if (search_result.seg_offsets_[i] == INVALID_SEG_OFFSET)
-            break;
-    }
-    return i - 1;
-}
-
-void
-CheckGroupBySearchResult(const SearchResult& search_result,
-                         int topK,
-                         int nq,
-                         bool strict) {
-    int size = search_result.group_by_values_.value().size();
-    ASSERT_EQ(search_result.seg_offsets_.size(), size);
-    ASSERT_EQ(search_result.distances_.size(), size);
-    ASSERT_TRUE(search_result.seg_offsets_[0] != INVALID_SEG_OFFSET);
-    ASSERT_TRUE(search_result.seg_offsets_[size - 1] != INVALID_SEG_OFFSET);
-    ASSERT_EQ(search_result.topk_per_nq_prefix_sum_.size(), nq + 1);
-    ASSERT_EQ(size, search_result.topk_per_nq_prefix_sum_[nq]);
-}
 
 TEST(GroupBY, SealedIndex) {
     using namespace milvus;
@@ -75,7 +52,7 @@ TEST(GroupBY, SealedIndex) {
     size_t N = 50;
 
     //2. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 1, false, false);
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     //3. load index
@@ -465,7 +442,7 @@ TEST(GroupBY, SealedData) {
     size_t N = 100;
 
     //2. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 20, 10, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, 20, 10, 1, false, false);
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     int topK = 10;
@@ -537,6 +514,11 @@ TEST(GroupBY, Reduce) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64, false);
+    auto int32_fid = schema->AddDebugField("int32", DataType::INT32, false);
+    auto int16_fid = schema->AddDebugField("int16", DataType::INT16, false);
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8, false);
+    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL, false);
+    auto string_fid = schema->AddDebugField("string", DataType::VARCHAR, false);
     auto fp16_fid = schema->AddDebugField(
         "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
     auto bf16_fid = schema->AddDebugField(
@@ -549,10 +531,10 @@ TEST(GroupBY, Reduce) {
     uint64_t ts_offset = 0;
     int repeat_count_1 = 2;
     int repeat_count_2 = 5;
-    auto raw_data1 =
-        DataGen(schema, N, seed, ts_offset, repeat_count_1, false, false);
-    auto raw_data2 =
-        DataGen(schema, N, seed, ts_offset, repeat_count_2, false, false);
+    auto raw_data1 = DataGen(
+        schema, N, seed, ts_offset, repeat_count_1, 10, 10, false, false);
+    auto raw_data2 = DataGen(
+        schema, N, seed, ts_offset, repeat_count_2, 10, 10, false, false);
 
     auto segment1 = CreateSealedWithFieldDataLoaded(schema, raw_data1);
     auto segment2 = CreateSealedWithFieldDataLoaded(schema, raw_data2);
@@ -579,11 +561,57 @@ TEST(GroupBY, Reduce) {
         CreateTestCacheIndex("test", std::move(indexing_2));
     load_index_info_2.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment2->LoadIndex(load_index_info_2);
+    CSegmentInterface c_segment_1 = segment1.release();
+    CSegmentInterface c_segment_2 = segment2.release();
 
     //4. search group by respectively
     auto num_queries = 10;
     auto topK = 10;
     int group_size = 3;
+    auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
+    auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
+
+    // Lambda function to execute search and reduce with given raw plan
+    auto executeGroupBySearchAndReduce = [&](const char* raw_plan) {
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        CPlaceholderGroup c_ph_group = ph_group.release();
+        CSearchPlan c_plan = plan.release();
+
+        CSearchResult c_search_res_1;
+        CSearchResult c_search_res_2;
+        auto status =
+            CSearch(c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
+        ASSERT_EQ(status.error_code, Success);
+        status =
+            CSearch(c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
+        ASSERT_EQ(status.error_code, Success);
+        std::vector<CSearchResult> results;
+        results.push_back(c_search_res_1);
+        results.push_back(c_search_res_2);
+
+        CSearchResultDataBlobs cSearchResultData;
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
+                                                c_plan,
+                                                results.data(),
+                                                results.size(),
+                                                slice_nqs.data(),
+                                                slice_topKs.data(),
+                                                slice_nqs.size());
+        CheckSearchResultDuplicate(results, group_size);
+        DeleteSearchResult(c_search_res_1);
+        DeleteSearchResult(c_search_res_2);
+        DeleteSearchResultDataBlobs(cSearchResultData);
+        DeleteSearchPlan(c_plan);
+        DeletePlaceholderGroup(c_ph_group);
+    };
+
+    // Execute the test with the original plan (INT64)
     const char* raw_plan = R"(vector_anns: <
                                         field_id: 100
                                         query_info: <
@@ -594,49 +622,79 @@ TEST(GroupBY, Reduce) {
                                           group_size: 3
                                         >
                                         placeholder_tag: "$0"
-
          >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-    auto plan =
-        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-    auto ph_group =
-        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    CPlaceholderGroup c_ph_group = ph_group.release();
-    CSearchPlan c_plan = plan.release();
+    executeGroupBySearchAndReduce(raw_plan);
 
-    CSegmentInterface c_segment_1 = segment1.release();
-    CSegmentInterface c_segment_2 = segment2.release();
-    CSearchResult c_search_res_1;
-    CSearchResult c_search_res_2;
-    auto status =
-        CSearch(c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
-    ASSERT_EQ(status.error_code, Success);
-    status =
-        CSearch(c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
-    ASSERT_EQ(status.error_code, Success);
-    std::vector<CSearchResult> results;
-    results.push_back(c_search_res_1);
-    results.push_back(c_search_res_2);
+    // Test Case: Group by INT32 field
+    const char* raw_plan_int32 = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    executeGroupBySearchAndReduce(raw_plan_int32);
 
-    auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
-    auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
-    CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData({},
-                                            &cSearchResultData,
-                                            c_plan,
-                                            results.data(),
-                                            results.size(),
-                                            slice_nqs.data(),
-                                            slice_topKs.data(),
-                                            slice_nqs.size());
-    CheckSearchResultDuplicate(results, group_size);
-    DeleteSearchResult(c_search_res_1);
-    DeleteSearchResult(c_search_res_2);
-    DeleteSearchResultDataBlobs(cSearchResultData);
+    // Test Case: Group by INT16 field
+    const char* raw_plan_int16 = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 103
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    executeGroupBySearchAndReduce(raw_plan_int16);
 
-    DeleteSearchPlan(c_plan);
-    DeletePlaceholderGroup(c_ph_group);
+    // Test Case: Group by INT8 field
+    const char* raw_plan_int8 = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 104
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    executeGroupBySearchAndReduce(raw_plan_int8);
+
+    // Test Case: Group by BOOL field
+    const char* raw_plan_bool = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 105
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    executeGroupBySearchAndReduce(raw_plan_bool);
+
+    // Test Case: Group by VARCHAR field
+    const char* raw_plan_string = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 106
+                                          group_size: 3
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    executeGroupBySearchAndReduce(raw_plan_string);
+
     DeleteSegment(c_segment_1);
     DeleteSegment(c_segment_2);
 }
@@ -666,7 +724,7 @@ TEST(GroupBY, GrowingRawData) {
     int n_batch = 3;
     for (int i = 0; i < n_batch; i++) {
         auto data_set =
-            DataGen(schema, rows_per_batch, 42, 0, 8, 10, false, false);
+            DataGen(schema, rows_per_batch, 42, 0, 8, 10, 1, false, false);
         auto offset = segment_growing_impl->PreInsert(rows_per_batch);
         segment_growing_impl->Insert(offset,
                                      rows_per_batch,
@@ -765,7 +823,7 @@ TEST(GroupBY, GrowingIndex) {
     int n_batch = 10;
     for (int i = 0; i < n_batch; i++) {
         auto data_set =
-            DataGen(schema, rows_per_batch, 42, 0, 8, 10, false, false);
+            DataGen(schema, rows_per_batch, 42, 0, 8, 10, 10, false, false);
         auto offset = segment_growing_impl->PreInsert(rows_per_batch);
         segment_growing_impl->Insert(offset,
                                      rows_per_batch,

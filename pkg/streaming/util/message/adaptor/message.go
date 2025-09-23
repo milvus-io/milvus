@@ -137,6 +137,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewCreateSegmentMessageBody(msg)
 	case message.MessageTypeSchemaChange:
 		tsMsg, err = NewSchemaChangeMessageBody(msg)
+	case message.MessageTypeAlterCollection:
+		tsMsg, err = NewAlterCollectionMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}
@@ -164,13 +166,13 @@ func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessag
 		}
 		// insertMsg has multiple partition and segment assignment is done by insert message header.
 		// so recover insert message from header before send it.
-		return recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage.Header(), msg.TimeTick())
+		return recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage)
 	case message.MessageTypeDelete:
 		deleteMessage, err := message.AsImmutableDeleteMessageV1(msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to convert message to delete message")
 		}
-		return recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage.Header(), msg.TimeTick())
+		return recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage)
 	case message.MessageTypeImport:
 		importMessage, err := message.AsImmutableImportMessageV1(msg)
 		if err != nil {
@@ -183,7 +185,10 @@ func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessag
 }
 
 // recoverInsertMsgFromHeader recovers insert message from header.
-func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, header *message.InsertMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, msg message.ImmutableInsertMessageV1) (msgstream.TsMsg, error) {
+	header := msg.Header()
+	timetick := msg.TimeTick()
+
 	if insertMsg.GetCollectionID() != header.GetCollectionId() {
 		panic("unreachable code, collection id is not equal")
 	}
@@ -208,10 +213,14 @@ func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, header *message.
 	}
 	insertMsg.Timestamps = timestamps
 	insertMsg.Base.Timestamp = timetick
+	insertMsg.ShardName = msg.VChannel()
 	return insertMsg, nil
 }
 
-func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.DeleteMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, msg message.ImmutableDeleteMessageV1) (msgstream.TsMsg, error) {
+	header := msg.Header()
+	timetick := msg.TimeTick()
+
 	if deleteMsg.GetCollectionID() != header.GetCollectionId() {
 		panic("unreachable code, collection id is not equal")
 	}
@@ -220,6 +229,7 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.
 		timestamps[i] = timetick
 	}
 	deleteMsg.Timestamps = timestamps
+	deleteMsg.ShardName = msg.VChannel()
 	return deleteMsg, nil
 }
 

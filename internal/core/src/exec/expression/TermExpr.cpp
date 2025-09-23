@@ -224,7 +224,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (is_index_mode_ && !has_offset_input_) {
+        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -565,7 +565,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto vals = expr_->vals_;
-        auto* index = segment->GetJsonStats(field_id);
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -599,7 +599,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                         }
                     }
                 };
-                index->ExecutorForShreddingData<ColType>(target_field,
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
                                                          shredding_executor,
                                                          nullptr,
                                                          res_view,
@@ -684,7 +685,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -814,7 +815,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
-    if (is_index_mode_ && !has_offset_input_) {
+    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
         return ExecVisitorImplForData<T>(context);

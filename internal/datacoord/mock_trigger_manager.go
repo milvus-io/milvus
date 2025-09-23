@@ -119,9 +119,9 @@ func (_c *MockTriggerManager_GetResumeCompactionChan_Call) RunAndReturn(run func
 	return _c
 }
 
-// ManualTrigger provides a mock function with given fields: ctx, collectionID, clusteringCompaction
-func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (int64, error) {
-	ret := _m.Called(ctx, collectionID, clusteringCompaction)
+// ManualTrigger provides a mock function with given fields: ctx, collectionID, clusteringCompaction, l0Compaction
+func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool) (int64, error) {
+	ret := _m.Called(ctx, collectionID, clusteringCompaction, l0Compaction)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ManualTrigger")
@@ -129,17 +129,17 @@ func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID in
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, bool) (int64, error)); ok {
-		return rf(ctx, collectionID, clusteringCompaction)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, bool, bool) (int64, error)); ok {
+		return rf(ctx, collectionID, clusteringCompaction, l0Compaction)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, bool) int64); ok {
-		r0 = rf(ctx, collectionID, clusteringCompaction)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, bool, bool) int64); ok {
+		r0 = rf(ctx, collectionID, clusteringCompaction, l0Compaction)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, bool) error); ok {
-		r1 = rf(ctx, collectionID, clusteringCompaction)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, bool, bool) error); ok {
+		r1 = rf(ctx, collectionID, clusteringCompaction, l0Compaction)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -156,13 +156,14 @@ type MockTriggerManager_ManualTrigger_Call struct {
 //   - ctx context.Context
 //   - collectionID int64
 //   - clusteringCompaction bool
-func (_e *MockTriggerManager_Expecter) ManualTrigger(ctx interface{}, collectionID interface{}, clusteringCompaction interface{}) *MockTriggerManager_ManualTrigger_Call {
-	return &MockTriggerManager_ManualTrigger_Call{Call: _e.mock.On("ManualTrigger", ctx, collectionID, clusteringCompaction)}
+//   - l0Compaction bool
+func (_e *MockTriggerManager_Expecter) ManualTrigger(ctx interface{}, collectionID interface{}, clusteringCompaction interface{}, l0Compaction interface{}) *MockTriggerManager_ManualTrigger_Call {
+	return &MockTriggerManager_ManualTrigger_Call{Call: _e.mock.On("ManualTrigger", ctx, collectionID, clusteringCompaction, l0Compaction)}
 }
 
-func (_c *MockTriggerManager_ManualTrigger_Call) Run(run func(ctx context.Context, collectionID int64, clusteringCompaction bool)) *MockTriggerManager_ManualTrigger_Call {
+func (_c *MockTriggerManager_ManualTrigger_Call) Run(run func(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool)) *MockTriggerManager_ManualTrigger_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].(bool), args[3].(bool))
 	})
 	return _c
 }
@@ -172,7 +173,7 @@ func (_c *MockTriggerManager_ManualTrigger_Call) Return(_a0 int64, _a1 error) *M
 	return _c
 }
 
-func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.Context, int64, bool) (int64, error)) *MockTriggerManager_ManualTrigger_Call {
+func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.Context, int64, bool, bool) (int64, error)) *MockTriggerManager_ManualTrigger_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -243,6 +243,51 @@ func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broa
 	return _c
 }
 
+// ControlChannel provides a mock function with no fields
+func (_m *MockWALAccesser) ControlChannel() string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ControlChannel")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockWALAccesser_ControlChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ControlChannel'
+type MockWALAccesser_ControlChannel_Call struct {
+	*mock.Call
+}
+
+// ControlChannel is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) ControlChannel() *MockWALAccesser_ControlChannel_Call {
+	return &MockWALAccesser_ControlChannel_Call{Call: _e.mock.On("ControlChannel")}
+}
+
+func (_c *MockWALAccesser_ControlChannel_Call) Run(run func()) *MockWALAccesser_ControlChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_ControlChannel_Call) Return(_a0 string) *MockWALAccesser_ControlChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_ControlChannel_Call) RunAndReturn(run func() string) *MockWALAccesser_ControlChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Local provides a mock function with no fields
 func (_m *MockWALAccesser) Local() streaming.Local {
 	ret := _m.Called()
@@ -413,6 +458,53 @@ func (_c *MockWALAccesser_Read_Call) RunAndReturn(run func(context.Context, stre
 	return _c
 }
 
+// Replicate provides a mock function with no fields
+func (_m *MockWALAccesser) Replicate() streaming.ReplicateService {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Replicate")
+	}
+
+	var r0 streaming.ReplicateService
+	if rf, ok := ret.Get(0).(func() streaming.ReplicateService); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.ReplicateService)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_Replicate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Replicate'
+type MockWALAccesser_Replicate_Call struct {
+	*mock.Call
+}
+
+// Replicate is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) Replicate() *MockWALAccesser_Replicate_Call {
+	return &MockWALAccesser_Replicate_Call{Call: _e.mock.On("Replicate")}
+}
+
+func (_c *MockWALAccesser_Replicate_Call) Run(run func()) *MockWALAccesser_Replicate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_Replicate_Call) Return(_a0 streaming.ReplicateService) *MockWALAccesser_Replicate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.ReplicateService) *MockWALAccesser_Replicate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Txn provides a mock function with given fields: ctx, opts
 func (_m *MockWALAccesser) Txn(ctx context.Context, opts streaming.TxnOption) (streaming.Txn, error) {
 	ret := _m.Called(ctx, opts)
@@ -468,51 +560,6 @@ func (_c *MockWALAccesser_Txn_Call) Return(_a0 streaming.Txn, _a1 error) *MockWA
 }
 
 func (_c *MockWALAccesser_Txn_Call) RunAndReturn(run func(context.Context, streaming.TxnOption) (streaming.Txn, error)) *MockWALAccesser_Txn_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// WALName provides a mock function with no fields
-func (_m *MockWALAccesser) WALName() string {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for WALName")
-	}
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
-// MockWALAccesser_WALName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WALName'
-type MockWALAccesser_WALName_Call struct {
-	*mock.Call
-}
-
-// WALName is a helper method to define mock.On call
-func (_e *MockWALAccesser_Expecter) WALName() *MockWALAccesser_WALName_Call {
-	return &MockWALAccesser_WALName_Call{Call: _e.mock.On("WALName")}
-}
-
-func (_c *MockWALAccesser_WALName_Call) Run(run func()) *MockWALAccesser_WALName_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockWALAccesser_WALName_Call) Return(_a0 string) *MockWALAccesser_WALName_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWALAccesser_WALName_Call) RunAndReturn(run func() string) *MockWALAccesser_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

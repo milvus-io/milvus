@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -387,7 +388,11 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
 			dtype := fieldSchema.GetDataType()
-			if dtype == schemapb.DataType_Array || dtype == schemapb.DataType_JSON || typeutil.IsVectorType(dtype) {
+			if dtype == schemapb.DataType_Array || typeutil.IsVectorType(dtype) {
+				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			if dtype == schemapb.DataType_JSON && !fieldSchema.IsDynamic {
 				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
@@ -443,6 +448,19 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if int64(defaultValueLength) > maxLength {
 					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
 					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+				}
+			case *schemapb.ValueField_BytesData:
+				if dtype != schemapb.DataType_JSON {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_SJON")
+				}
+				defVal := fieldSchema.GetDefaultValue().GetBytesData()
+				jsonData := make(map[string]interface{})
+				if err := json.Unmarshal(defVal, &jsonData); err != nil {
+					log.Info("invalid default json value, milvus only support json map",
+						zap.ByteString("data", defVal),
+						zap.Error(err),
+					)
+					return merr.WrapErrParameterInvalidMsg(err.Error())
 				}
 			default:
 				panic("default value unsupport data type")
@@ -536,4 +554,24 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		}
 	}
 	return nil
+}
+
+func nextFieldID(coll *model.Collection) int64 {
+	maxFieldID := int64(common.StartOfUserFieldID)
+	for _, field := range coll.Fields {
+		if field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+	return maxFieldID + 1
+}
+
+func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
+	for _, p := range props {
+		// used in collection or database
+		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone {
+			return true, p.Value
+		}
+	}
+	return false, ""
 }

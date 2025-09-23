@@ -20,6 +20,7 @@
 #include <boost/variant.hpp>
 
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "common/type_c.h"
@@ -131,28 +132,32 @@ class PhyCompareFilterExpr : public Expr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::CompareExpr>& expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
-        : Expr(DataType::BOOL, std::move(input), name),
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           left_field_(expr->left_field_id_),
           right_field_(expr->right_field_id_),
-          segment_chunk_reader_(segment, active_count),
+          segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        is_left_indexed_ = segment->HasIndex(left_field_);
-        is_right_indexed_ = segment->HasIndex(right_field_);
+        auto& schema = segment->get_schema();
+        auto& left_field_meta = schema[left_field_];
+        auto& right_field_meta = schema[right_field_];
+        pinned_index_left_ = PinIndex(op_ctx_, segment, left_field_meta);
+        pinned_index_right_ = PinIndex(op_ctx_, segment, right_field_meta);
+        is_left_indexed_ = pinned_index_left_.size() > 0;
+        is_right_indexed_ = pinned_index_right_.size() > 0;
         if (segment->is_chunked()) {
             left_num_chunk_ =
-                is_left_indexed_
-                    ? segment->num_chunk_index(expr_->left_field_id_)
+                is_left_indexed_ ? pinned_index_left_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(left_field_);
             right_num_chunk_ =
-                is_right_indexed_
-                    ? segment->num_chunk_index(expr_->right_field_id_)
+                is_right_indexed_ ? pinned_index_right_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
@@ -160,7 +165,7 @@ class PhyCompareFilterExpr : public Expr {
             num_chunk_ = left_num_chunk_;
         } else {
             num_chunk_ = is_left_indexed_
-                             ? segment->num_chunk_index(expr_->left_field_id_)
+                             ? pinned_index_left_.size()
                              : upper_div(segment_chunk_reader_.active_count_,
                                          segment_chunk_reader_.SizePerChunk());
         }
@@ -311,10 +316,10 @@ class PhyCompareFilterExpr : public Expr {
                     get_chunk_id_and_offset(right_field_);
 
                 auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                    left_field_, left_chunk_id);
+                    op_ctx_, left_field_, left_chunk_id);
                 auto left_chunk = pw_left.get();
                 auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                    right_field_, right_chunk_id);
+                    op_ctx_, right_field_, right_chunk_id);
                 auto right_chunk = pw_right.get();
                 const T* left_data = left_chunk.data() + left_chunk_offset;
                 const U* right_data = right_chunk.data() + right_chunk_offset;
@@ -341,11 +346,11 @@ class PhyCompareFilterExpr : public Expr {
             }
             return processed_size;
         } else {
-            auto pw_left =
-                segment_chunk_reader_.segment_->chunk_data<T>(left_field_, 0);
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
+                op_ctx_, left_field_, 0);
             auto left_chunk = pw_left.get();
-            auto pw_right =
-                segment_chunk_reader_.segment_->chunk_data<U>(right_field_, 0);
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
+                op_ctx_, right_field_, 0);
             auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
@@ -380,11 +385,11 @@ class PhyCompareFilterExpr : public Expr {
 
         const auto active_count = segment_chunk_reader_.active_count_;
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
-            auto pw_left =
-                segment_chunk_reader_.segment_->chunk_data<T>(left_field_, i);
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
+                op_ctx_, left_field_, i);
             auto left_chunk = pw_left.get();
-            auto pw_right =
-                segment_chunk_reader_.segment_->chunk_data<U>(right_field_, i);
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
+                op_ctx_, right_field_, i);
             auto right_chunk = pw_right.get();
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
             auto size =
@@ -450,11 +455,11 @@ class PhyCompareFilterExpr : public Expr {
 
         // only call this function when left and right are not indexed, so they have the same number of chunks
         for (size_t i = left_current_chunk_id_; i < left_num_chunk_; i++) {
-            auto pw_left =
-                segment_chunk_reader_.segment_->chunk_data<T>(left_field_, i);
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
+                op_ctx_, left_field_, i);
             auto left_chunk = pw_left.get();
-            auto pw_right =
-                segment_chunk_reader_.segment_->chunk_data<U>(right_field_, i);
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
+                op_ctx_, right_field_, i);
             auto right_chunk = pw_right.get();
             auto data_pos =
                 (i == left_current_chunk_id_) ? left_current_chunk_pos_ : 0;
@@ -551,6 +556,8 @@ class PhyCompareFilterExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
+    std::vector<PinWrapper<const index::IndexBase*>> pinned_index_left_;
+    std::vector<PinWrapper<const index::IndexBase*>> pinned_index_right_;
 };
 }  //namespace exec
 }  // namespace milvus

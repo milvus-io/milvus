@@ -188,6 +188,14 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
+func (s *baseSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
+	s.bloomFilterSet = bf
+}
+
+func (s *baseSegment) BloomFilterExist() bool {
+	return s.bloomFilterSet.BloomFilterExist()
+}
+
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
@@ -217,6 +225,20 @@ func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 		return true
 	}
 	return s.bloomFilterSet.MayPkExist(pk)
+}
+
+func (s *baseSegment) GetMinPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MinPK
+}
+
+func (s *baseSegment) GetMaxPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MaxPK
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
@@ -511,6 +533,43 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	return s.csegment.HasRawData(fieldID)
 }
 
+func (s *LocalSegment) HasFieldData(fieldID int64) bool {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return false
+	}
+	defer s.ptrLock.Unpin()
+	return s.csegment.HasFieldData(fieldID)
+}
+
+func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
+		field := typeutil.GetField(s.collection.schema.Load(), indexInfo.IndexInfo.FieldID)
+		if typeutil.IsJSONType(field.GetDataType()) {
+			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
+			if err != nil {
+				return err
+			}
+			err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
+			if err != nil {
+				return err
+			}
+		}
+
+		s.fieldIndexes.Remove(indexID)
+	}
+	return nil
+}
+
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
@@ -789,7 +848,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -821,6 +880,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+	}
+
+	if len(warmupPolicy) > 0 {
+		req.WarmupPolicy = warmupPolicy[0]
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -1006,6 +1069,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
 		IndexFileSize:      indexInfo.GetIndexSize(),
+		NumRows:            indexInfo.GetNumRows(),
 	}
 
 	// 2.

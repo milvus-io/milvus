@@ -38,25 +38,31 @@ using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 
 class SegmentChunkReader {
  public:
-    SegmentChunkReader(const segcore::SegmentInternalInterface* segment,
+    SegmentChunkReader(milvus::OpContext* op_ctx,
+                       const segcore::SegmentInternalInterface* segment,
                        int64_t active_count)
         : segment_(segment),
           active_count_(active_count),
-          size_per_chunk_(segment->size_per_chunk()) {
+          size_per_chunk_(segment->size_per_chunk()),
+          op_ctx_(op_ctx) {
     }
 
     MultipleChunkDataAccessor
-    GetChunkDataAccessor(DataType data_type,
-                         FieldId field_id,
-                         bool index,
-                         int64_t& current_chunk_id,
-                         int64_t& current_chunk_pos) const;
+    GetMultipleChunkDataAccessor(
+        DataType data_type,
+        FieldId field_id,
+        int64_t& current_chunk_id,
+        int64_t& current_chunk_pos,
+        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
+        const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
                          FieldId field_id,
                          int chunk_id,
-                         int data_barrier) const;
+                         int data_barrier,
+                         const std::vector<PinWrapper<const index::IndexBase*>>&
+                             pinned_index) const;
 
     void
     MoveCursorForMultipleChunk(int64_t& current_chunk_id,
@@ -118,18 +124,23 @@ class SegmentChunkReader {
  private:
     template <typename T>
     MultipleChunkDataAccessor
-    GetChunkDataAccessor(FieldId field_id,
-                         bool index,
-                         int64_t& current_chunk_id,
-                         int64_t& current_chunk_pos) const;
+    GetMultipleChunkDataAccessor(
+        FieldId field_id,
+        int64_t& current_chunk_id,
+        int64_t& current_chunk_pos,
+        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
+        const;
 
     template <typename T>
     ChunkDataAccessor
     GetChunkDataAccessor(FieldId field_id,
                          int chunk_id,
-                         int data_barrier) const;
+                         int data_barrier,
+                         const std::vector<PinWrapper<const index::IndexBase*>>&
+                             pinned_index) const;
 
     const int64_t size_per_chunk_;
+    milvus::OpContext* op_ctx_;
 };
 
 }  // namespace milvus::segcore

@@ -91,6 +91,7 @@ type ShardDelegator interface {
 	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
 	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
+	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
@@ -1210,7 +1211,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	if len(sd.isBM25Field) > 0 {
-		sd.idfOracle = NewIDFOracle(sd.collectionID, collection.Schema().GetFunctions())
+		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
 		sd.idfOracle.Start()
 	}

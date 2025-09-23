@@ -64,8 +64,10 @@ constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
 inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
     "key_layout_type_map";
 // start json stats field id for mock column
-const int64_t START_JSON_STATS_FIELD_ID = 1000;
-const int64_t END_JSON_STATS_FIELD_ID = 10000;
+// max user field id is 1024, so start json stats field id from 2000
+// new field numbers will not exceed 10000 fields
+const int64_t START_JSON_STATS_FIELD_ID = 2000;
+const int64_t END_JSON_STATS_FIELD_ID = 12000;
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
@@ -76,6 +78,8 @@ const int64_t DEFAULT_FIELD_MAX_MEMORY_LIMIT = 128 << 20;  // bytes
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 16 << 20;  // bytes
 
 const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
+
+const int64_t DEFAULT_DELETE_DUMP_BATCH_SIZE = 10000;
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
@@ -106,6 +110,7 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
@@ -115,3 +120,6 @@ const int64_t STORAGE_V2 = 2;
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
 
 const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
+
+// VectorArray related, used for fetch metadata from Arrow schema
+const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";

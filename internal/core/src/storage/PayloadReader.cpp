@@ -73,19 +73,58 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
         // dim is unused for sparse float vector
         dim_ =
             (IsVectorDataType(column_type_) &&
-             !IsSparseFloatVectorDataType(column_type_)) &&
-                    !IsVectorArrayDataType(column_type_)
+             !IsVectorArrayDataType(column_type_) &&
+             !IsSparseFloatVectorDataType(column_type_))
                 ? GetDimensionFromFileMetaData(
                       file_meta->schema()->Column(column_index), column_type_)
                 : 1;
+
+        // For VectorArray, get element type and dim from Arrow schema metadata
+        auto element_type = DataType::NONE;
+        if (IsVectorArrayDataType(column_type_)) {
+            std::shared_ptr<arrow::Schema> arrow_schema;
+            st = arrow_reader->GetSchema(&arrow_schema);
+            AssertInfo(st.ok(), "Failed to get arrow schema for VectorArray");
+            AssertInfo(arrow_schema->num_fields() == 1,
+                       "VectorArray should have exactly 1 field, got {}",
+                       arrow_schema->num_fields());
+
+            auto field = arrow_schema->field(0);
+            AssertInfo(field->HasMetadata(),
+                       "VectorArray field is missing metadata");
+
+            auto metadata = field->metadata();
+            AssertInfo(metadata != nullptr, "VectorArray metadata is null");
+
+            // Get element type
+            AssertInfo(
+                metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW),
+                "VectorArray metadata missing required 'elementType' field");
+            auto element_type_str =
+                metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
+            auto element_type_int = std::stoi(element_type_str);
+            element_type = static_cast<DataType>(element_type_int);
+
+            // Get dimension from metadata
+            AssertInfo(metadata->Contains(DIM_KEY),
+                       "VectorArray metadata missing required 'dim' field");
+            auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
+            dim_ = std::stoi(dim_str);
+            AssertInfo(
+                dim_ > 0, "VectorArray dim must be positive, got {}", dim_);
+        }
+
         std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
         st = arrow_reader->GetRecordBatchReader(&rb_reader);
         AssertInfo(st.ok(), "get record batch reader");
 
         if (is_field_data) {
             auto total_num_rows = file_meta->num_rows();
-            field_data_ =
-                CreateFieldData(column_type_, nullable_, dim_, total_num_rows);
+
+            // Create FieldData, passing element_type for VectorArray
+            field_data_ = CreateFieldData(
+                column_type_, element_type, nullable_, dim_, total_num_rows);
+
             for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
                      maybe_batch : *rb_reader) {
                 AssertInfo(maybe_batch.ok(), "get batch record success");

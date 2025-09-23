@@ -6277,7 +6277,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		assert.True(t, flag)
 	})
 
-	t.Run("check the length of ValidData when not has default value", func(t *testing.T) {
+	t.Run("all_valid_nullable_data_without_validdata", func(t *testing.T) {
 		stringData := []string{"a"}
 		data := []*schemapb.FieldData{
 			{
@@ -6292,6 +6292,44 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 						},
 					},
 				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_VarChar,
+					Nullable: true,
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.fillWithValue(data, h, 1)
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("nullable_data_size_not_match", func(t *testing.T) {
+		stringData := []string{"a"}
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: stringData,
+							},
+						},
+					},
+				},
+				ValidData: []bool{false},
 			},
 		}
 

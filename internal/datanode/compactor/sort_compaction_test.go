@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestSortCompactionTaskSuite(t *testing.T) {
@@ -72,7 +73,6 @@ func (s *SortCompactionTaskSuite) setupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_SortCompaction,
 		Schema:                 s.meta.GetSchema(),
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
@@ -84,7 +84,10 @@ func (s *SortCompactionTaskSuite) setupTest() {
 		CollectionTtl:          time.Since(getMilvusBirthday().Add(-time.Hour)).Nanoseconds(),
 	}
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	s.NoError(err)
+
+	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 }
 
 func (s *SortCompactionTaskSuite) SetupTest() {
@@ -99,9 +102,13 @@ func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {
 		PlanID:    123,
 		Type:      datapb.CompactionType_SortCompaction,
 		SlotUsage: 8,
+		Schema:    s.meta.GetSchema(),
 	}
 
-	task := NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	s.NoError(err)
+
+	task := NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 
 	s.NotNil(task)
 	s.Equal(plan.GetPlanID(), task.GetPlanID())
@@ -232,7 +239,6 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_SortCompaction,
 		Schema:                 s.meta.GetSchema(),
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
@@ -242,7 +248,10 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 		TotalRows:              3,
 	}
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	s.NoError(err)
+
+	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 }
 
 func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
@@ -367,9 +376,13 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{SegmentID: 100},
 		},
+		Schema: genTestCollectionMeta().GetSchema(),
 	}
 
-	task := NewSortCompactionTask(ctx, mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	assert.NoError(t, err)
+
+	task := NewSortCompactionTask(ctx, mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(123), task.GetPlanID())

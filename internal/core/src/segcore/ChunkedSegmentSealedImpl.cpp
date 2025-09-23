@@ -44,6 +44,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "folly/Synchronized.h"
 #include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
@@ -114,7 +115,8 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
     LOG_INFO(
-        "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
+        "Before setting field_bit for field index, fieldID:{}. "
+        "segmentID:{}, ",
         info.field_id,
         id_);
     auto& field_meta = schema_->operator[](field_id);
@@ -125,11 +127,12 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.index_engine_version,
             info.index_size,
             info.index_params,
-            info.enable_mmap);
+            info.enable_mmap,
+            info.num_rows,
+            info.dim);
 
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.wlock()->erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
+        fields_.rlock()->at(field_id)->ManualEvictCache();
     }
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
@@ -157,7 +160,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_pk && is_sorted_by_pk_) {
         LOG_INFO(
-            "segment pk sorted, skip user index loading for primary key field");
+            "segment pk sorted, skip user index loading for primary key "
+            "field");
         return;
     }
 
@@ -171,11 +175,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         if (auto it = info.index_params.find(index::INDEX_TYPE);
             it != info.index_params.end() &&
             it->second == index::NGRAM_INDEX_TYPE) {
-            if (ngram_indexings_.find(field_id) == ngram_indexings_.end()) {
-                ngram_indexings_[field_id] =
+            auto ngram_indexings = ngram_indexings_.wlock();
+            if (ngram_indexings->find(field_id) == ngram_indexings->end()) {
+                (*ngram_indexings)[field_id] =
                     std::unordered_map<std::string, index::CacheIndexBasePtr>();
             }
-            ngram_indexings_[field_id][path] =
+            (*ngram_indexings)[field_id][path] =
                 std::move(const_cast<LoadIndexInfo&>(info).cache_index);
             return;
         } else {
@@ -186,7 +191,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 std::move(const_cast<LoadIndexInfo&>(info).cache_index);
             index.cast_type =
                 JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-            json_indices.push_back(std::move(index));
+            json_indices.wlock()->push_back(std::move(index));
             return;
         }
     }
@@ -194,10 +199,17 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_fields_.insert(field_id);
+        auto [scalar_indexings, ngram_fields] =
+            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+        ngram_fields->insert(field_id);
+        scalar_indexings->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
+    } else {
+        scalar_indexings_.wlock()->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
     }
-    scalar_indexings_[field_id] =
-        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -215,8 +227,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !is_pk) {
         // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
         // need the pk field again.
-        fields_.wlock()->erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
+        fields_.rlock()->at(field_id)->ManualEvictCache();
     }
 }
 
@@ -225,34 +236,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
         case 2: {
             load_column_group_data_internal(load_info);
-            auto timestamp_proxy_column = get_column(TimestampFieldID);
-            // TODO check timestamp_index ready instead of check system_ready_count_
-            if (timestamp_proxy_column && system_ready_count_ == 0) {
-                int64_t num_rows;
-                for (auto& [_, info] : load_info.field_infos) {
-                    num_rows = info.row_count;
-                }
-                std::vector<Timestamp> timestamps(num_rows);
-                int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(i);
-                    auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
-                    auto span = fixed_chunk->Span();
-                    for (size_t j = 0; j < span.row_count(); j++) {
-                        auto ts = *(int64_t*)((char*)span.data() +
-                                              j * span.element_sizeof());
-                        timestamps[offset++] = ts;
-                    }
-                }
-                init_timestamp_index(timestamps, num_rows);
-                system_ready_count_++;
-                AssertInfo(offset == num_rows,
-                           "[StorageV2] timestamp total row count {} not equal "
-                           "to expected {}",
-                           offset,
-                           num_rows);
-            }
             break;
         }
         default:
@@ -277,8 +260,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
-        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-            column_group_id, insert_files[0], arrow_schema, fs);
+        milvus_storage::FieldIDList field_id_list;
+        if (info.child_field_ids.size() == 0) {
+            // legacy binlog meta, parse from reader
+            field_id_list = storage::GetFieldIDList(
+                column_group_id, insert_files[0], arrow_schema, fs);
+        } else {
+            field_id_list = milvus_storage::FieldIDList(info.child_field_ids);
+        }
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
@@ -300,7 +289,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "[StorageV2] segment {} loads column group {} with field ids {} "
+            "[StorageV2] segment {} loads column group {} with field ids "
+            "{} "
             "with "
             "num_rows "
             "{} mmap_dir_path={}",
@@ -334,6 +324,36 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
             load_field_data_common(
                 field_id, column, num_rows, data_type, info.enable_mmap, true);
+            if (field_id == TimestampFieldID) {
+                auto timestamp_proxy_column = get_column(TimestampFieldID);
+                AssertInfo(timestamp_proxy_column != nullptr,
+                           "timestamp proxy column is nullptr");
+                // TODO check timestamp_index ready instead of check system_ready_count_
+                int64_t num_rows;
+                for (auto& [_, info] : load_info.field_infos) {
+                    num_rows = info.row_count;
+                }
+                std::vector<Timestamp> timestamps(num_rows);
+                int64_t offset = 0;
+                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
+                    auto chunk = timestamp_proxy_column->GetChunk(nullptr, i);
+                    auto fixed_chunk =
+                        static_cast<FixedWidthChunk*>(chunk.get());
+                    auto span = fixed_chunk->Span();
+                    for (size_t j = 0; j < span.row_count(); j++) {
+                        auto ts = *(int64_t*)((char*)span.data() +
+                                              j * span.element_sizeof());
+                        timestamps[offset++] = ts;
+                    }
+                }
+                init_timestamp_index(timestamps, num_rows);
+                system_ready_count_++;
+                AssertInfo(offset == num_rows,
+                           "[StorageV2] timestamp total row count {} not equal "
+                           "to expected {}",
+                           offset,
+                           num_rows);
+            }
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
@@ -497,18 +517,6 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
     field_data_info_ = field_data_info;
 }
 
-// internal API: support scalar index only
-int64_t
-ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
-    auto& field_meta = schema_->operator[](field_id);
-
-    if (field_meta.is_vector()) {
-        return int64_t(vector_indexings_.is_ready(field_id));
-    }
-
-    return scalar_indexings_.count(field_id);
-}
-
 int64_t
 ChunkedSegmentSealedImpl::num_chunk_data(FieldId field_id) const {
     if (!get_bit(field_data_ready_bitset_, field_id)) {
@@ -568,13 +576,14 @@ ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
 }
 
 PinWrapper<SpanBase>
-ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
+ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
+                                          FieldId field_id,
                                           int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->Span(chunk_id);
+        return column->Span(op_ctx, chunk_id);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_data_impl only used for chunk column field ");
@@ -582,6 +591,7 @@ ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
 
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_array_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -590,7 +600,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->ArrayViews(chunk_id, offset_len);
+        return column->ArrayViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_array_view_impl only used for chunk column field ");
@@ -598,6 +608,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
 
 PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -606,7 +617,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->VectorArrayViews(chunk_id, offset_len);
+        return column->VectorArrayViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_vector_array_view_impl only used for chunk column field ");
@@ -614,6 +625,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_string_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -622,7 +634,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->StringViews(chunk_id, offset_len);
+        return column->StringViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_string_view_impl only used for variable column field ");
@@ -630,6 +642,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -637,7 +650,7 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->StringViewsByOffsets(chunk_id, offsets);
+        return column->StringViewsByOffsets(op_ctx, chunk_id, offsets);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_view_by_offsets only used for variable column field ");
@@ -645,6 +658,7 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
 
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -652,39 +666,33 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->ArrayViewsByOffsets(chunk_id, offsets);
+        return column->ArrayViewsByOffsets(op_ctx, chunk_id, offsets);
     }
-    ThrowInfo(
-        ErrorCode::UnexpectedError,
-        "chunk_array_views_by_offsets only used for variable column field ");
-}
-
-PinWrapper<const index::IndexBase*>
-ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
-                                           int64_t chunk_id) const {
-    std::shared_lock lck(mutex_);
-    AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
-               "Cannot find scalar_indexing with field_id: " +
-                   std::to_string(field_id.get()));
-    auto slot = scalar_indexings_.at(field_id);
-    lck.unlock();
-
-    auto ca = SemiInlineGet(slot->PinCells({0}));
-    auto index = ca->get_cell_of(0);
-    return PinWrapper<const index::IndexBase*>(ca, index);
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_views_by_offsets only used for variable column "
+              "field ");
 }
 
 PinWrapper<index::NgramInvertedIndex*>
-ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
+ChunkedSegmentSealedImpl::GetNgramIndex(milvus::OpContext* op_ctx,
+                                        FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    auto iter = scalar_indexings_.find(field_id);
-    if (iter == scalar_indexings_.end()) {
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
+
+    auto has = ngram_fields->find(field_id);
+    if (has == ngram_fields->end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto iter = scalar_indexings->find(field_id);
+    if (iter == scalar_indexings->end()) {
         return PinWrapper<index::NgramInvertedIndex*>(nullptr);
     }
     auto slot = iter->second.get();
     lck.unlock();
 
-    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto ca = SemiInlineGet(slot->PinCells(op_ctx, {0}));
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
@@ -694,25 +702,30 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
 
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndexForJson(
-    FieldId field_id, const std::string& nested_path) const {
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::string& nested_path) const {
     std::shared_lock lck(mutex_);
-    auto iter = ngram_indexings_.find(field_id);
-    if (iter == ngram_indexings_.end() ||
-        iter->second.find(nested_path) == iter->second.end()) {
-        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-    }
+    return ngram_indexings_.withRLock([&](auto& ngram_indexings) {
+        auto iter = ngram_indexings.find(field_id);
+        if (iter == ngram_indexings.end() ||
+            iter->second.find(nested_path) == iter->second.end()) {
+            return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+        }
 
-    auto slot = iter->second.at(nested_path).get();
-    lck.unlock();
+        auto slot = iter->second.at(nested_path).get();
 
-    auto ca = SemiInlineGet(slot->PinCells({0}));
-    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
-    AssertInfo(index != nullptr,
-               "ngram index cache for json is corrupted, field_id: {}, "
-               "nested_path: {}",
-               field_id.get(),
-               nested_path);
-    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+        milvus::OpContext ctx;
+        auto ca = SemiInlineGet(slot->PinCells(&ctx, {0}));
+        auto index =
+            dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+        AssertInfo(index != nullptr,
+                   "ngram index cache for json is corrupted, field_id: {}, "
+                   "nested_path: {}",
+                   field_id.get(),
+                   nested_path);
+        return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+    });
 }
 
 int64_t
@@ -746,6 +759,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
+                                        milvus::OpContext* op_context,
                                         SearchResult& output) const {
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
@@ -771,6 +785,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_lims,
                                    query_count,
                                    bitset,
+                                   op_context,
                                    output);
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
@@ -785,6 +800,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_lims,
                                    query_count,
                                    bitset,
+                                   op_context,
                                    output);
         milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
@@ -813,13 +829,15 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     query_count,
                                     row_count,
                                     bitset,
+                                    op_context,
                                     output);
         milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }
 
 std::unique_ptr<DataArray>
-ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
+ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
+                                     FieldId field_id,
                                      const int64_t* ids,
                                      int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
@@ -834,7 +852,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
-    auto ca = SemiInlineGet(cache_index->PinCells({0}));
+    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
@@ -883,13 +901,40 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
                "Field id:" + std::to_string(field_id.get()) +
                    " isn't one of system type when drop index");
     auto& field_meta = schema_->operator[](field_id);
-    AssertInfo(field_meta.is_vector(),
-               "Field meta of offset:" + std::to_string(field_id.get()) +
-                   " is not vector type");
+    AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
 
     std::unique_lock lck(mutex_);
-    vector_indexings_.drop_field_indexing(field_id);
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+    scalar_indexings->erase(field_id);
+    ngram_fields->erase(field_id);
+
     set_bit(index_ready_bitset_, field_id, false);
+}
+
+void
+ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
+                                        const std::string& nested_path) {
+    std::unique_lock lck(mutex_);
+    json_indices.withWLock([&](auto& vec) {
+        vec.erase(std::remove_if(vec.begin(),
+                                 vec.end(),
+                                 [field_id, nested_path](const auto& index) {
+                                     return index.field_id == field_id &&
+                                            index.nested_path == nested_path;
+                                 }),
+                  vec.end());
+    });
+
+    ngram_indexings_.withWLock([&](auto& ngram_indexings) {
+        auto iter = ngram_indexings.find(field_id);
+        if (iter != ngram_indexings.end()) {
+            iter->second.erase(nested_path);
+            if (iter->second.empty()) {
+                ngram_indexings.erase(iter);
+            }
+        }
+    });
 }
 
 void
@@ -932,12 +977,13 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
 }
 
 std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
+ChunkedSegmentSealedImpl::search_pk(milvus::OpContext* op_ctx,
+                                    const PkType& pk,
                                     Timestamp timestamp) const {
     if (!is_sorted_by_pk_) {
         return insert_record_.search_pk(pk, timestamp);
     }
-    return search_sorted_pk(pk, [this, timestamp](int64_t offset) {
+    return search_sorted_pk(op_ctx, pk, [this, timestamp](int64_t offset) {
         return insert_record_.timestamps_[offset] <= timestamp;
     });
 }
@@ -967,7 +1013,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     auto pk_column = get_column(pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
-    auto all_chunk_pins = pk_column->GetAllChunks();
+    auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
 
     auto timestamp_hit = include_same_ts
                              ? [](const Timestamp& ts1,
@@ -1047,7 +1093,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
 
 template <typename Condition>
 std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
+ChunkedSegmentSealedImpl::search_sorted_pk(milvus::OpContext* op_ctx,
+                                           const PkType& pk,
                                            Condition condition) const {
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
@@ -1060,7 +1107,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
             // get int64 pks
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
-                auto pw = pk_column->DataOfChunk(i);
+                auto pw = pk_column->DataOfChunk(op_ctx, i);
                 auto src = reinterpret_cast<const int64_t*>(pw.get());
                 auto chunk_row_num = pk_column->chunk_row_nums(i);
                 auto it = std::lower_bound(
@@ -1087,7 +1134,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
                 auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                auto pw = pk_column->GetChunk(i);
+                auto pw = pk_column->GetChunk(op_ctx, i);
                 auto string_chunk = static_cast<StringChunk*>(pw.get());
                 auto offset = string_chunk->binary_search_string(target);
                 for (; offset != -1 && offset < string_chunk->RowNums() &&
@@ -1113,23 +1160,23 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
 }
 
 void
-ChunkedSegmentSealedImpl::pk_range(proto::plan::OpType op,
+ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
+                                   proto::plan::OpType op,
                                    const PkType& pk,
-                                   Timestamp timestamp,
                                    BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
-        insert_record_.search_pk_range(pk, timestamp, op, bitset);
+        insert_record_.search_pk_range(pk, op, bitset);
         return;
     }
 
-    search_sorted_pk_range(op, pk, bitset, [this, timestamp](int64_t offset) {
-        return insert_record_.timestamps_[offset] <= timestamp;
-    });
+    search_sorted_pk_range(
+        op_ctx, op, pk, bitset, [](int64_t offset) { return true; });
 }
 
 template <typename Condition>
 void
-ChunkedSegmentSealedImpl::search_sorted_pk_range(proto::plan::OpType op,
+ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
+                                                 proto::plan::OpType op,
                                                  const PkType& pk,
                                                  BitsetTypeView& bitset,
                                                  Condition condition) const {
@@ -1145,7 +1192,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(proto::plan::OpType op,
 
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
-                auto pw = pk_column->DataOfChunk(i);
+                auto pw = pk_column->DataOfChunk(op_ctx, i);
                 auto src = reinterpret_cast<const int64_t*>(pw.get());
                 auto chunk_row_num = pk_column->chunk_row_nums(i);
                 if (op == proto::plan::OpType::GreaterEqual) {
@@ -1246,7 +1293,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(proto::plan::OpType op,
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                auto pw = pk_column->GetChunk(i);
+                auto pw = pk_column->GetChunk(op_ctx, i);
                 auto string_chunk = static_cast<StringChunk*>(pw.get());
 
                 if (op == proto::plan::OpType::Equal) {
@@ -1362,8 +1409,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       binlog_index_bitset_(schema->size()),
-      ngram_fields_(schema->size()),
-      scalar_indexings_(schema->size()),
+      ngram_fields_(std::unordered_set<FieldId>(schema->size())),
+      scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
+          schema->size())),
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
       id_(segment_id),
@@ -1394,7 +1442,8 @@ ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
 }
 
 void
-ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
+ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                         SystemFieldType system_type,
                                          const int64_t* seg_offsets,
                                          int64_t count,
                                          void* output) const {
@@ -1403,10 +1452,11 @@ ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                id_);
     switch (system_type) {
         case SystemFieldType::Timestamp:
-            AssertInfo(
-                insert_record_.timestamps_.num_chunk() == 1,
-                "num chunk of timestamp not equal to 1 for sealed segment");
+            AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
+                       "num chunk of timestamp not equal to 1 for "
+                       "sealed segment");
             bulk_subscript_impl<Timestamp>(
+                op_ctx,
                 this->insert_record_.timestamps_.get_chunk_data(0),
                 seg_offsets,
                 count,
@@ -1423,7 +1473,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
 
 template <typename S, typename T>
 void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
+ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
+                                              const void* src_raw,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               T* dst) {
@@ -1436,35 +1487,41 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
 }
 template <typename S, typename T>
 void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
+ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
+                                              ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               T* dst) {
     static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
     // use field->data_type_ to determine the type of dst
-    field->BulkPrimitiveValueAt(static_cast<void*>(dst), seg_offsets, count);
+    field->BulkPrimitiveValueAt(
+        op_ctx, static_cast<void*>(dst), seg_offsets, count);
 }
 
 // for dense vector
 void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
+ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
+                                              int64_t element_sizeof,
                                               ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               void* dst_raw) {
     auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    field->BulkVectorValueAt(dst_vec, seg_offsets, element_sizeof, count);
+    field->BulkVectorValueAt(
+        op_ctx, dst_vec, seg_offsets, element_sizeof, count);
 }
 
 template <typename S>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
+    milvus::OpContext* op_ctx,
     ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if constexpr (std::is_same_v<S, Json>) {
         column->BulkRawJsonAt(
+            op_ctx,
             [&](Json json, size_t offset, bool is_valid) {
                 dst->at(offset) = std::move(std::string(json.data()));
             },
@@ -1473,6 +1530,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     } else {
         static_assert(std::is_same_v<S, std::string>);
         column->BulkRawStringAt(
+            op_ctx,
             [dst](std::string_view value, size_t offset, bool is_valid) {
                 dst->at(offset) = std::move(std::string(value));
             },
@@ -1484,24 +1542,30 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
 template <typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
+    milvus::OpContext* op_ctx,
     ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
-    column->BulkArrayAt([dst](ScalarFieldProto&& array,
-                              size_t i) { dst->at(i) = std::move(array); },
-                        seg_offsets,
-                        count);
+    column->BulkArrayAt(
+        op_ctx,
+        [dst](ScalarFieldProto&& array, size_t i) {
+            dst->at(i) = std::move(array);
+        },
+        seg_offsets,
+        count);
 }
 
 template <typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
+    milvus::OpContext* op_ctx,
     const ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
     column->BulkVectorArrayAt(
+        op_ctx,
         [dst](VectorFieldProto&& array, size_t i) {
             dst->at(i) = std::move(array);
         },
@@ -1519,10 +1583,10 @@ ChunkedSegmentSealedImpl::ClearData() {
         index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
-        ngram_fields_.clear();
-        scalar_indexings_.clear();
+        ngram_fields_.wlock()->clear();
+        scalar_indexings_.wlock()->clear();
         vector_indexings_.clear();
-        ngram_indexings_.clear();
+        ngram_indexings_.wlock()->clear();
         insert_record_.clear();
         fields_.wlock()->clear();
         variable_fields_avg_size_.clear();
@@ -1571,16 +1635,22 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         auto column = get_column(field_id);
         if (column) {
             column->BulkRawStringAt(
+                nullptr,
                 [&](std::string_view value, size_t offset, bool is_valid) {
                     index->AddTextSealed(std::string(value), is_valid, offset);
                 });
         } else {  // fetch raw data from index.
-            auto field_index_iter = scalar_indexings_.find(field_id);
-            AssertInfo(field_index_iter != scalar_indexings_.end(),
-                       "failed to create text index, neither raw data nor "
-                       "index are found");
+            auto field_index_iter =
+                scalar_indexings_.withRLock([&](auto& mapping) {
+                    auto iter = mapping.find(field_id);
+                    AssertInfo(iter != mapping.end(),
+                               "failed to create text index, neither "
+                               "raw data nor "
+                               "index are found");
+                    return iter;
+                });
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells({0}));
+                SemiInlineGet(field_index_iter->second->PinCells(nullptr, {0}));
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
@@ -1624,7 +1694,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
 }
 
 std::unique_ptr<DataArray>
-ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
+ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
+                                       FieldId field_id,
                                        const FieldMeta& field_meta,
                                        const int64_t* seg_offsets,
                                        int64_t count) const {
@@ -1639,6 +1710,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
         column->BulkIsValid(
+            op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
             seg_offsets,
             count);
@@ -1648,6 +1720,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::STRING:
         case DataType::TEXT: {
             bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
@@ -1657,6 +1730,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
 
         case DataType::JSON: {
             bulk_subscript_ptr_impl<Json>(
+                op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
@@ -1666,6 +1740,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
 
         case DataType::ARRAY: {
             bulk_subscript_array_impl(
+                op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
@@ -1674,7 +1749,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
 
         case DataType::BOOL: {
-            bulk_subscript_impl<bool, bool>(column.get(),
+            bulk_subscript_impl<bool, bool>(op_ctx,
+                                            column.get(),
                                             seg_offsets,
                                             count,
                                             ret->mutable_scalars()
@@ -1684,7 +1760,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t, int32_t>(column.get(),
+            bulk_subscript_impl<int8_t, int32_t>(op_ctx,
+                                                 column.get(),
                                                  seg_offsets,
                                                  count,
                                                  ret->mutable_scalars()
@@ -1694,7 +1771,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t, int32_t>(column.get(),
+            bulk_subscript_impl<int16_t, int32_t>(op_ctx,
+                                                  column.get(),
                                                   seg_offsets,
                                                   count,
                                                   ret->mutable_scalars()
@@ -1704,7 +1782,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t, int32_t>(column.get(),
+            bulk_subscript_impl<int32_t, int32_t>(op_ctx,
+                                                  column.get(),
                                                   seg_offsets,
                                                   count,
                                                   ret->mutable_scalars()
@@ -1714,7 +1793,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t, int64_t>(column.get(),
+            bulk_subscript_impl<int64_t, int64_t>(op_ctx,
+                                                  column.get(),
                                                   seg_offsets,
                                                   count,
                                                   ret->mutable_scalars()
@@ -1724,7 +1804,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float, float>(column.get(),
+            bulk_subscript_impl<float, float>(op_ctx,
+                                              column.get(),
                                               seg_offsets,
                                               count,
                                               ret->mutable_scalars()
@@ -1734,7 +1815,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double, double>(column.get(),
+            bulk_subscript_impl<double, double>(op_ctx,
+                                                column.get(),
                                                 seg_offsets,
                                                 count,
                                                 ret->mutable_scalars()
@@ -1744,7 +1826,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::TIMESTAMPTZ: {
-            bulk_subscript_impl<int64_t>(column.get(),
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         column.get(),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1754,7 +1837,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::VECTOR_FLOAT: {
-            bulk_subscript_impl(field_meta.get_sizeof(),
+            bulk_subscript_impl(op_ctx,
+                                field_meta.get_sizeof(),
                                 column.get(),
                                 seg_offsets,
                                 count,
@@ -1766,6 +1850,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_FLOAT16: {
             bulk_subscript_impl(
+                op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
                 seg_offsets,
@@ -1775,6 +1860,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_BFLOAT16: {
             bulk_subscript_impl(
+                op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
                 seg_offsets,
@@ -1784,6 +1870,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_BINARY: {
             bulk_subscript_impl(
+                op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
                 seg_offsets,
@@ -1793,6 +1880,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_INT8: {
             bulk_subscript_impl(
+                op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
                 seg_offsets,
@@ -1804,6 +1892,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             int64_t max_dim = 0;
             column->BulkValueAt(
+                op_ctx,
                 [&](const char* value, size_t i) mutable {
                     auto offset = seg_offsets[i];
                     auto row =
@@ -1827,6 +1916,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_ARRAY: {
             bulk_subscript_vector_array_impl(
+                op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
@@ -1843,7 +1933,8 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
 }
 
 std::unique_ptr<DataArray>
-ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
+ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                         FieldId field_id,
                                          const int64_t* seg_offsets,
                                          int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
@@ -1856,7 +1947,13 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
     auto [field, exist] = GetFieldDataIfExist(field_id);
     if (exist) {
         Assert(get_bit(field_data_ready_bitset_, field_id));
-        return get_raw_data(field_id, field_meta, seg_offsets, count);
+        return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
+    }
+
+    PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
+    auto scalar_indexes = PinIndex(op_ctx, field_id);
+    if (!scalar_indexes.empty()) {
+        pin_scalar_index_ptr = std::move(scalar_indexes[0]);
     }
 
     auto index_has_raw = HasRawData(field_id.get());
@@ -1864,11 +1961,10 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // if field has load scalar index, reverse raw data from index
         if (index_has_raw) {
-            auto index = chunk_index_impl(field_id, 0);
             return ReverseDataFromIndex(
-                index.get(), seg_offsets, count, field_meta);
+                pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
         }
-        return get_raw_data(field_id, field_meta, seg_offsets, count);
+        return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
     std::chrono::high_resolution_clock::time_point get_vector_start =
@@ -1876,9 +1972,9 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
 
     std::unique_ptr<DataArray> vector{nullptr};
     if (index_has_raw) {
-        vector = get_vector(field_id, seg_offsets, count);
+        vector = get_vector(op_ctx, field_id, seg_offsets, count);
     } else {
-        vector = get_raw_data(field_id, field_meta, seg_offsets, count);
+        vector = get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
     std::chrono::high_resolution_clock::time_point get_vector_end =
@@ -1886,13 +1982,15 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
     double get_vector_cost = std::chrono::duration<double, std::micro>(
                                  get_vector_end - get_vector_start)
                                  .count();
-    monitor::internal_core_get_vector_latency.Observe(get_vector_cost / 1000);
+    milvus::monitor::internal_core_get_vector_latency.Observe(get_vector_cost /
+                                                              1000);
 
     return vector;
 }
 
 std::unique_ptr<DataArray>
 ChunkedSegmentSealedImpl::bulk_subscript(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     const int64_t* seg_offsets,
     int64_t count,
@@ -1910,12 +2008,14 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
         column->BulkIsValid(
+            op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
             seg_offsets,
             count);
     }
     auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
     column->BulkRawJsonAt(
+        op_ctx,
         [&](Json json, size_t offset, bool is_valid) {
             dst->at(offset) =
                 ExtractSubJson(std::string(json.data()), dynamic_field_names);
@@ -1988,8 +2088,10 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
-        auto scalar_index = scalar_indexings_.find(fieldID);
-        if (scalar_index != scalar_indexings_.end()) {
+        auto has_scalar_index = scalar_indexings_.withRLock([&](auto& mapping) {
+            return mapping.find(fieldID) != mapping.end();
+        });
+        if (has_scalar_index) {
             AssertInfo(
                 index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
                 "index_has_raw_data_ is not set for fieldID: " +
@@ -2265,7 +2367,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
             }
 
             LOG_INFO(
-                "replace binlog with intermin index in segment {}, field {}.",
+                "replace binlog with intermin index in segment {}, "
+                "field {}.",
                 this->get_segment_id(),
                 field_id.get());
         }
@@ -2283,7 +2386,8 @@ void
 ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
         LOG_INFO(
-            "lazy check schema segment {} found newer schema version, current "
+            "lazy check schema segment {} found newer schema version, "
+            "current "
             "schema version {}, new schema version {}",
             id_,
             schema_->get_schema_version(),
@@ -2427,10 +2531,12 @@ ChunkedSegmentSealedImpl::FinishLoad() {
 void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
-    LOG_INFO("start fill empty field {} (data type {}) for sealed segment {}",
-             field_meta.get_data_type(),
-             field_id.get(),
-             id_);
+    LOG_INFO(
+        "start fill empty field {} (data type {}) for sealed segment "
+        "{}",
+        field_meta.get_data_type(),
+        field_id.get(),
+        id_);
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(), size, "");
@@ -2470,10 +2576,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
 
     fields_.wlock()->emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
-    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
-             field_meta.get_data_type(),
-             field_id.get(),
-             id_);
+    LOG_INFO(
+        "fill empty field {} (data type {}) for growing segment {} "
+        "done",
+        field_meta.get_data_type(),
+        field_id.get(),
+        id_);
 }
 
 }  // namespace milvus::segcore

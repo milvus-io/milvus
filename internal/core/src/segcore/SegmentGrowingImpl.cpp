@@ -294,11 +294,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
-            auto field_data = storage::CreateFieldData(
-                static_cast<DataType>(field_meta.get_data_type()),
-                true,
-                1,
-                lack_num);
+            auto field_data =
+                storage::CreateFieldData(field_meta.get_data_type(),
+                                         field_meta.get_element_type(),
+                                         true,
+                                         1,
+                                         lack_num);
             field_data->FillFieldData(field_meta.default_value(), lack_num);
             channel->push(field_data);
         }
@@ -376,7 +377,7 @@ SegmentGrowingImpl::load_field_data_common(
 
     // build text match index
     if (field_meta.enable_match()) {
-        auto index = GetTextIndex(field_id);
+        auto index = GetTextIndex(nullptr, field_id);
         index->BuildIndexFromFieldData(field_data, field_meta.is_nullable());
         index->Commit();
         // Reload reader so that the index can be read immediately
@@ -455,6 +456,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
+                                    fs,
                                     nullptr,
                                     infos.load_priority);
         });
@@ -494,6 +496,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         auto data_type = field.second.get_data_type();
                         auto field_data = storage::CreateFieldData(
                             data_type,
+                            field.second.get_element_type(),
                             field.second.is_nullable(),
                             IsVectorDataType(data_type) &&
                                     !IsSparseFloatVectorDataType(data_type)
@@ -586,13 +589,16 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 }
 
 PinWrapper<SpanBase>
-SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
+SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
+                                    FieldId field_id,
+                                    int64_t chunk_id) const {
     return PinWrapper<SpanBase>(
         get_insert_record().get_span_base(field_id, chunk_id));
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -603,6 +609,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
 
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -613,6 +620,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
 
 PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -623,6 +631,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_views_by_offsets(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -632,6 +641,7 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
 
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_views_by_offsets(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -676,6 +686,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
+                                  milvus::OpContext* op_context,
                                   SearchResult& output) const {
     query::SearchOnGrowing(*this,
                            search_info,
@@ -684,11 +695,13 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                            query_count,
                            timestamp,
                            bitset,
+                           op_context,
                            output);
 }
 
 std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     const int64_t* seg_offsets,
     int64_t count,
@@ -717,7 +730,8 @@ SegmentGrowingImpl::bulk_subscript(
 }
 
 std::unique_ptr<DataArray>
-SegmentGrowingImpl::bulk_subscript(FieldId field_id,
+SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                   FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
@@ -725,7 +739,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     if (field_meta.is_vector()) {
         auto result = CreateEmptyVectorDataArray(count, field_meta);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            bulk_subscript_impl<FloatVector>(field_id,
+            bulk_subscript_impl<FloatVector>(op_ctx,
+                                             field_id,
                                              field_meta.get_sizeof(),
                                              vec_ptr,
                                              seg_offsets,
@@ -736,6 +751,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                                  ->mutable_data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
             bulk_subscript_impl<BinaryVector>(
+                op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
@@ -744,6 +760,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_vectors()->mutable_binary_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
             bulk_subscript_impl<Float16Vector>(
+                op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
@@ -752,6 +769,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_vectors()->mutable_float16_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
             bulk_subscript_impl<BFloat16Vector>(
+                op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
@@ -761,6 +779,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         } else if (field_meta.get_data_type() ==
                    DataType::VECTOR_SPARSE_U32_F32) {
             bulk_subscript_sparse_float_vector_impl(
+                op_ctx,
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
                 seg_offsets,
@@ -770,6 +789,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->vectors().sparse_float_vector().dim());
         } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
             bulk_subscript_impl<Int8Vector>(
+                op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
@@ -777,7 +797,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 count,
                 result->mutable_vectors()->mutable_int8_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-            bulk_subscript_vector_array_impl(*vec_ptr,
+            bulk_subscript_vector_array_impl(op_ctx,
+                                             *vec_ptr,
                                              seg_offsets,
                                              count,
                                              result->mutable_vectors()
@@ -803,7 +824,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
-            bulk_subscript_impl<bool>(vec_ptr,
+            bulk_subscript_impl<bool>(op_ctx,
+                                      vec_ptr,
                                       seg_offsets,
                                       count,
                                       result->mutable_scalars()
@@ -813,7 +835,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(vec_ptr,
+            bulk_subscript_impl<int8_t>(op_ctx,
+                                        vec_ptr,
                                         seg_offsets,
                                         count,
                                         result->mutable_scalars()
@@ -823,7 +846,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(vec_ptr,
+            bulk_subscript_impl<int16_t>(op_ctx,
+                                         vec_ptr,
                                          seg_offsets,
                                          count,
                                          result->mutable_scalars()
@@ -833,7 +857,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(vec_ptr,
+            bulk_subscript_impl<int32_t>(op_ctx,
+                                         vec_ptr,
                                          seg_offsets,
                                          count,
                                          result->mutable_scalars()
@@ -843,7 +868,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(vec_ptr,
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         vec_ptr,
                                          seg_offsets,
                                          count,
                                          result->mutable_scalars()
@@ -853,7 +879,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(vec_ptr,
+            bulk_subscript_impl<float>(op_ctx,
+                                       vec_ptr,
                                        seg_offsets,
                                        count,
                                        result->mutable_scalars()
@@ -863,7 +890,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(vec_ptr,
+            bulk_subscript_impl<double>(op_ctx,
+                                        vec_ptr,
                                         seg_offsets,
                                         count,
                                         result->mutable_scalars()
@@ -873,7 +901,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::TIMESTAMPTZ: {
-            bulk_subscript_impl<int64_t>(vec_ptr,
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         vec_ptr,
                                          seg_offsets,
                                          count,
                                          result->mutable_scalars()
@@ -884,7 +913,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         }
         case DataType::VARCHAR:
         case DataType::TEXT: {
-            bulk_subscript_ptr_impl<std::string>(vec_ptr,
+            bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                 vec_ptr,
                                                  seg_offsets,
                                                  count,
                                                  result->mutable_scalars()
@@ -894,6 +924,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         }
         case DataType::JSON: {
             bulk_subscript_ptr_impl<Json>(
+                op_ctx,
                 vec_ptr,
                 seg_offsets,
                 count,
@@ -902,7 +933,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         }
         case DataType::ARRAY: {
             // element
-            bulk_subscript_array_impl(*vec_ptr,
+            bulk_subscript_array_impl(op_ctx,
+                                      *vec_ptr,
                                       seg_offsets,
                                       count,
                                       result->mutable_scalars()
@@ -921,6 +953,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
 
 void
 SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     const ConcurrentVector<SparseFloatVector>* vec_raw,
     const int64_t* seg_offsets,
@@ -962,6 +995,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
 template <typename S>
 void
 SegmentGrowingImpl::bulk_subscript_ptr_impl(
+    milvus::OpContext* op_ctx,
     const VectorBase* vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
@@ -980,7 +1014,8 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
 
 template <typename T>
 void
-SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
+SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
+                                        FieldId field_id,
                                         int64_t element_sizeof,
                                         const VectorBase* vec_raw,
                                         const int64_t* seg_offsets,
@@ -1029,7 +1064,8 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
 
 template <typename S, typename T>
 void
-SegmentGrowingImpl::bulk_subscript_impl(const VectorBase* vec_raw,
+SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
+                                        const VectorBase* vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
                                         T* output) const {
@@ -1046,6 +1082,7 @@ SegmentGrowingImpl::bulk_subscript_impl(const VectorBase* vec_raw,
 template <typename T>
 void
 SegmentGrowingImpl::bulk_subscript_array_impl(
+    milvus::OpContext* op_ctx,
     const VectorBase& vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
@@ -1064,6 +1101,7 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
 template <typename T>
 void
 SegmentGrowingImpl::bulk_subscript_vector_array_impl(
+    milvus::OpContext* op_ctx,
     const VectorBase& vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
@@ -1080,13 +1118,15 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
 }
 
 void
-SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
+SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                   SystemFieldType system_type,
                                    const int64_t* seg_offsets,
                                    int64_t count,
                                    void* output) const {
     switch (system_type) {
         case SystemFieldType::Timestamp:
-            bulk_subscript_impl<Timestamp>(&this->insert_record_.timestamps_,
+            bulk_subscript_impl<Timestamp>(op_ctx,
+                                           &this->insert_record_.timestamps_,
                                            seg_offsets,
                                            count,
                                            static_cast<Timestamp*>(output));
@@ -1207,6 +1247,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
 
 void
 SegmentGrowingImpl::BulkGetJsonData(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     std::function<void(milvus::Json, size_t, bool)> fn,
     const int64_t* offsets,

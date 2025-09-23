@@ -102,12 +102,13 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                     return {0, offset};
                 }
             }();
-            auto chunk_data = segment_chunk_reader_.GetChunkDataAccessor(
+            auto cda = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier);
-            auto chunk_data_by_offset = chunk_data(chunk_offset);
+                data_barrier,
+                pinned_index_);
+            auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
                 valid_res[processed_rows] = false;
             } else {
@@ -131,14 +132,14 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         T* res_value = res_vec->RawAsValues<T>();
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
-        auto chunk_data = segment_chunk_reader_.GetChunkDataAccessor(
+        auto cda = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->GetColumn().data_type_,
             expr_->GetColumn().field_id_,
-            is_indexed_,
             current_chunk_id_,
-            current_chunk_pos_);
+            current_chunk_pos_,
+            pinned_index_);
         for (int i = 0; i < real_batch_size; ++i) {
-            auto data = chunk_data();
+            auto data = cda();
             if (!data.has_value()) {
                 valid_res[i] = false;
                 continue;
@@ -169,20 +170,20 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                     ? segment_chunk_reader_.active_count_ -
                           chunk_id * segment_chunk_reader_.SizePerChunk()
                     : segment_chunk_reader_.SizePerChunk();
-            auto chunk_data = segment_chunk_reader_.GetChunkDataAccessor(
+            auto cda = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier);
+                data_barrier,
+                pinned_index_);
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
                  ++i) {
-                if (!chunk_data(i).has_value()) {
+                if (!cda(i).has_value()) {
                     valid_res[processed_rows] = false;
                 } else {
-                    res_value[processed_rows] =
-                        boost::get<T>(chunk_data(i).value());
+                    res_value[processed_rows] = boost::get<T>(cda(i).value());
                 }
                 processed_rows++;
 

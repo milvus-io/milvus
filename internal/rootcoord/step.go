@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -188,6 +189,22 @@ func (s *changeCollectionStateStep) Execute(ctx context.Context) ([]nestedStep, 
 func (s *changeCollectionStateStep) Desc() string {
 	return fmt.Sprintf("change collection state, collection: %d, ts: %d, state: %s",
 		s.collectionID, s.ts, s.state.String())
+}
+
+type cleanupMetricsStep struct {
+	baseStep
+	dbName         string
+	collectionName string
+}
+
+func (s *cleanupMetricsStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	metrics.CleanupRootCoordCollectionMetrics(s.dbName, s.collectionName)
+	return nil, nil
+}
+
+func (s *cleanupMetricsStep) Desc() string {
+	return fmt.Sprintf("change collection state, db: %s, collectionstate: %s",
+		s.dbName, s.collectionName)
 }
 
 type expireCacheStep struct {
@@ -550,6 +567,25 @@ func (a *AlterDatabaseStep) Execute(ctx context.Context) ([]nestedStep, error) {
 
 func (a *AlterDatabaseStep) Desc() string {
 	return fmt.Sprintf("alter database, databaseID: %d, databaseName: %s, ts: %d", a.oldDB.ID, a.oldDB.Name, a.ts)
+}
+
+type renameCollectionStep struct {
+	baseStep
+	dbName    string
+	oldName   string
+	newDBName string
+	newName   string
+	ts        Timestamp
+}
+
+func (s *renameCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := s.core.meta.RenameCollection(ctx, s.dbName, s.oldName, s.newDBName, s.newName, s.ts)
+	return nil, err
+}
+
+func (s *renameCollectionStep) Desc() string {
+	return fmt.Sprintf("rename collection from %s.%s to %s.%s, ts: %d",
+		s.dbName, s.oldName, s.newDBName, s.newName, s.ts)
 }
 
 var (

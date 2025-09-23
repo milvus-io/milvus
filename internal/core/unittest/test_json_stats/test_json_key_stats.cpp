@@ -85,7 +85,8 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
             segment_id, field_id, index_build_id, index_version};
 
         data_ = std::move(GenerateJsons(size));
-        auto field_data = storage::CreateFieldData(DataType::JSON, nullable_);
+        auto field_data =
+            storage::CreateFieldData(DataType::JSON, DataType::NONE, nullable_);
         if (nullable_) {
             valid_data.reserve(size_);
             for (size_t i = 0; i < size_; i++) {
@@ -226,8 +227,9 @@ TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
     std::string path = "/int_shared";
     int count = 0;
     index_->ExecuteForSharedData(
-        path,
-        [&](BsonView bson, uint32_t row_id, uint32_t offset) { count++; });
+        nullptr, path, [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            count++;
+        });
     std::cout << "count: " << count << std::endl;
     if (nullable_) {
         EXPECT_EQ(count, 100);
@@ -257,7 +259,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
     auto shredding_fields = index_->GetShreddingFields(path);
     for (const auto& field : shredding_fields) {
         auto processed_size =
-            index_->ExecutorForGettingValid(field, valid_res_view);
+            index_->ExecutorForGettingValid(nullptr, field, valid_res_view);
         EXPECT_EQ(processed_size, size_);
     }
     if (!index_->CanSkipShared(path)) {
@@ -295,7 +297,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     auto field_name = *(index_->GetShreddingFields(path).begin());
     std::cout << "field_name: " << field_name << std::endl;
     int processed_size = index_->ExecutorForShreddingData<int64_t>(
-        field_name, func, nullptr, res_view, valid_res_view);
+        nullptr, field_name, func, nullptr, res_view, valid_res_view);
     std::cout << "processed_size: " << processed_size << std::endl;
     EXPECT_EQ(processed_size, size_);
 
@@ -377,7 +379,8 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
 
     void
     BuildAndUpload() {
-        auto field_data = storage::CreateFieldData(DataType::JSON, false);
+        auto field_data =
+            storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
         field_data->FillFieldData(data_.data(), data_.size());
 
         auto payload_reader =

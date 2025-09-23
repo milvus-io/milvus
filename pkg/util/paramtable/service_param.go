@@ -896,8 +896,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
 		Version:      "2.6.0",
-		DefaultValue: "/var/lib/milvus/woodpecker",
-		Doc:          "The root path of the storage provider.",
+		DefaultValue: "default",
+		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
 		Export:       true,
 	}
 	p.RootPath.Init(base.mgr)
@@ -1511,7 +1511,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,
-		Doc:          "Whether use virtual host mode for bucket",
+		Doc:          "Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default",
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)

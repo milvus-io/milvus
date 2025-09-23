@@ -54,6 +54,10 @@ PhyRescoresNode::GetOutput() {
     if (input_ == nullptr) {
         return nullptr;
     }
+
+    std::chrono::high_resolution_clock::time_point scalar_start =
+        std::chrono::high_resolution_clock::now();
+
     ExecContext* exec_context = operator_context_->get_exec_context();
     auto query_context_ = exec_context->get_query_context();
     auto query_info = exec_context->get_query_config();
@@ -142,6 +146,14 @@ PhyRescoresNode::GetOutput() {
     bool large_is_better = PositivelyRelated(metric_type);
     sort_search_result(search_result, large_is_better);
     query_context_->set_search_result(std::move(search_result));
+
+    std::chrono::high_resolution_clock::time_point scalar_end =
+        std::chrono::high_resolution_clock::now();
+    double scalar_cost =
+        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+            .count();
+    milvus::monitor::internal_core_search_latency_rescore.Observe(scalar_cost /
+                                                                  1000);
     return input_;
 };
 

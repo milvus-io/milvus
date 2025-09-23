@@ -81,6 +81,9 @@ message QueryInfo {
   int64 query_field_id =11;
   string hints = 12;
   optional SearchIteratorV2Info search_iterator_v2_info = 13;
+  string json_path = 14;
+  schema.DataType json_type = 15;
+  bool strict_cast = 16;
 }
 
 message ColumnInfo {
@@ -221,6 +224,24 @@ message RandomSampleExpr {
 
 message AlwaysTrueExpr {}
 
+message Interval {
+  int64 years = 1;
+  int64 months = 2;
+  int64 days = 3;
+  int64 hours = 4;
+  int64 minutes = 5;
+  int64 seconds = 6;
+}
+
+// New expression type for the operation: (timestamp_col + interval) OP iso_string
+message TimestamptzArithCompareExpr {
+  ColumnInfo timestamptz_column = 1;
+  ArithOpType arith_op = 2; // ADD or SUB
+  Interval interval = 3;
+  OpType compare_op = 4;
+  GenericValue compare_value = 5;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -239,6 +260,7 @@ message Expr {
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
     RandomSampleExpr random_sample_expr = 16;
+    TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 17;
   };
   bool is_template = 20;
 }

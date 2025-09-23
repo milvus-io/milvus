@@ -7,6 +7,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -49,8 +50,8 @@ func (id pulsarID) PulsarID() pulsar.MessageID {
 	return id.MessageID
 }
 
-func (id pulsarID) WALName() string {
-	return walName
+func (id pulsarID) WALName() message.WALName {
+	return message.WALNamePulsar
 }
 
 func (id pulsarID) LT(other message.MessageID) bool {
@@ -84,6 +85,13 @@ func (id pulsarID) EQ(other message.MessageID) bool {
 
 func (id pulsarID) Marshal() string {
 	return base64.StdEncoding.EncodeToString(id.Serialize())
+}
+
+func (id pulsarID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      id.Marshal(),
+		WALName: commonpb.WALName(id.WALName()),
+	}
 }
 
 func (id pulsarID) String() string {

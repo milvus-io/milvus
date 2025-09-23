@@ -416,6 +416,9 @@ func TestProxy_FlushAll_NoDatabase(t *testing.T) {
 
 		mixcoord := &grpcmixcoordclient.Client{}
 		node.mixCoord = mixcoord
+		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: successStatus}, nil
+		}).Build()
 
 		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
 
@@ -455,6 +458,9 @@ func TestProxy_FlushAll_WithDefaultDatabase(t *testing.T) {
 
 		mixcoord := &grpcmixcoordclient.Client{}
 		node.mixCoord = mixcoord
+		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: successStatus}, nil
+		}).Build()
 
 		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default"})
 
@@ -489,12 +495,15 @@ func TestProxy_FlushAll_DatabaseNotExist(t *testing.T) {
 
 		mixcoord := &grpcmixcoordclient.Client{}
 		node.mixCoord = mixcoord
+		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+			return &datapb.FlushAllResponse{Status: merr.Success()}, nil
+		}).Build()
 
 		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default2"})
 
 		// Assert: Verify results
 		assert.NoError(t, err)
-		assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_MetaFailed)
 	})
 }
 

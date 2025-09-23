@@ -48,11 +48,12 @@ type BulkPackWriterV2 struct {
 	multiPartUploadSize int64
 
 	storageConfig *indexpb.StorageConfig
+	columnGroups  []storagecommon.ColumnGroup
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
-	storageConfig *indexpb.StorageConfig, writeRetryOpts ...retry.Option,
+	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
@@ -66,6 +67,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 		storageConfig:       storageConfig,
+		columnGroups:        columnGroups,
 	}
 }
 
@@ -126,8 +128,8 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	allFields := typeutil.GetAllFieldSchemas(bw.schema)
-	columnGroups := storagecommon.SplitBySchema(allFields)
+
+	columnGroups := bw.columnGroups
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
@@ -179,13 +181,18 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err = w.Write(rec); err != nil {
 		return nil, err
 	}
+	// close first to get compressed size
+	if err = w.Close(); err != nil {
+		return nil, err
+	}
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
-			FieldID: columnGroupID,
+			FieldID:     columnGroupID,
+			ChildFields: columnGroup.Fields,
 			Binlogs: []*datapb.Binlog{
 				{
-					LogSize:       int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+					LogSize:       int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
 					MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
 					LogPath:       w.GetWrittenPaths(columnGroupID),
 					EntriesNum:    w.GetWrittenRowNum(),
@@ -194,9 +201,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				},
 			},
 		}
-	}
-	if err = w.Close(); err != nil {
-		return nil, err
 	}
 	return logs, nil
 }

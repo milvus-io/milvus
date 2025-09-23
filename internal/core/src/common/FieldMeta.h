@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Consts.h"
 #include "common/Types.h"
 
 namespace milvus {
@@ -143,6 +144,23 @@ class FieldMeta {
         Assert(IsVectorDataType(element_type_));
     }
 
+    // for json stats shredding column field meta,
+    // we need to pass in the main field id
+    FieldMeta(FieldName name,
+              FieldId id,
+              int64_t main_field_id,
+              DataType type,
+              bool nullable,
+              std::optional<DefaultValueType> default_value)
+        : name_(std::move(name)),
+          id_(id),
+          main_field_id_(main_field_id),
+          type_(type),
+          nullable_(nullable),
+          default_value_(std::move(default_value)) {
+        Assert(!IsVectorDataType(type_));
+    }
+
     int64_t
     get_dim() const {
         Assert(IsVectorDataType(type_));
@@ -157,6 +175,11 @@ class FieldMeta {
         Assert(IsStringDataType(type_));
         Assert(string_info_.has_value());
         return string_info_->max_length;
+    }
+
+    int64_t
+    get_main_field_id() const {
+        return main_field_id_;
     }
 
     bool
@@ -274,6 +297,9 @@ class FieldMeta {
     std::optional<DefaultValueType> default_value_;
     std::optional<VectorInfo> vector_info_;
     std::optional<StringInfo> string_info_;
+    // for json stats, the main field id is the real field id
+    // of collection schema, the field id is the json shredding field id
+    int64_t main_field_id_ = INVALID_FIELD_ID;
 };
 
 }  // namespace milvus

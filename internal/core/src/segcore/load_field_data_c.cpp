@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "log/Log.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "segcore/load_field_data_c.h"
@@ -67,6 +68,30 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
 }
 
 CStatus
+SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
+                            int64_t field_id,
+                            const int64_t* child_field_ids,
+                            const int64_t child_field_num) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto load_field_data_info =
+            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+        auto iter = load_field_data_info->field_infos.find(field_id);
+        if (iter == load_field_data_info->field_infos.end()) {
+            ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
+                      "please append field info first");
+        }
+        load_field_data_info->field_infos[field_id].child_field_ids =
+            std::vector<int64_t>(child_field_ids,
+                                 child_field_ids + child_field_num);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
                         int64_t entries_num,
@@ -93,6 +118,14 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+void
+AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                   CacheWarmupPolicy warmup_policy) {
+    auto load_field_data_info =
+        static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    load_field_data_info->warmup_policy = warmup_policy;
 }
 
 void

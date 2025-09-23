@@ -13,11 +13,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -138,6 +140,10 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		return nil, nil, err
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
+	if len(vchannels) == 0 && checkpoint == nil {
+		impl.logger.Info("no vchannel to recover, use the snapshot checkpoint", zap.Stringer("checkpoint", snapshot.Checkpoint.MessageID))
+		checkpoint = snapshot.Checkpoint.MessageID
+	}
 
 	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
@@ -151,11 +157,11 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	chunkManager := resource.Resource().ChunkManager()
 
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID)
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(mp.MsgID)
 		impl.RecoveryStorage.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
 			MessageID: messageID,
 			TimeTick:  mp.Timestamp,
-			Magic:     recovery.RecoveryMagicStreamingInitialized,
+			Magic:     utility.RecoveryMagicStreamingInitialized,
 		})
 	})
 	go cpUpdater.Start()
@@ -207,6 +213,11 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 		}
 	}()
+
+	// wal flusher will not handle the control channel message.
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
 
 	// Do the data sync service management here.
 	switch msg.MessageType() {

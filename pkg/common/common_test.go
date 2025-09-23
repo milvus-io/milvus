@@ -258,3 +258,42 @@ func TestReplicateProperty(t *testing.T) {
 		}
 	})
 }
+
+func TestIsEnableDynamicSchema(t *testing.T) {
+	type testCase struct {
+		tag         string
+		input       []*commonpb.KeyValuePair
+		expectFound bool
+		expectValue bool
+		expectError bool
+	}
+
+	cases := []testCase{
+		{tag: "no_params", expectFound: false},
+		{tag: "dynamicfield_true", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "true"}}, expectFound: true, expectValue: true},
+		{tag: "dynamicfield_false", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "false"}}, expectFound: true, expectValue: false},
+		{tag: "bad_kv_value", input: []*commonpb.KeyValuePair{{Key: EnableDynamicSchemaKey, Value: "abc"}}, expectFound: true, expectError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			found, value, err := IsEnableDynamicSchema(tc.input)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tc.expectFound, found)
+			assert.Equal(t, tc.expectValue, value)
+		})
+	}
+}
+
+func TestAllocAutoID(t *testing.T) {
+	start, end, err := AllocAutoID(func(n uint32) (int64, int64, error) {
+		return 100, 110, nil
+	}, 10, 1)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0b0100, start>>60)
+	assert.EqualValues(t, 0b0100, end>>60)
+}

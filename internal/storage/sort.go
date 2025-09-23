@@ -24,11 +24,11 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
-	rw RecordWriter, predicate func(r Record, ri, i int) bool,
+	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
 ) (int, error) {
 	records := make([]Record, 0)
 
@@ -69,24 +69,55 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return 0, nil
 	}
 
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return 0, err
-	}
-	pkFieldId := pkField.FieldID
+	if len(sortByFieldIDs) > 0 {
+		type keyCmp func(x, y *index) int
+		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
+		for _, fid := range sortByFieldIDs {
+			switch records[0].Column(fid).(type) {
+			case *array.Int64:
+				f := func(x, y *index) int {
+					xVal := records[x.ri].Column(fid).(*array.Int64).Value(x.i)
+					yVal := records[y.ri].Column(fid).(*array.Int64).Value(y.i)
+					if xVal < yVal {
+						return -1
+					}
+					if xVal > yVal {
+						return 1
+					}
+					return 0
+				}
+				comparators = append(comparators, f)
+			case *array.String:
+				f := func(x, y *index) int {
+					xVal := records[x.ri].Column(fid).(*array.String).Value(x.i)
+					yVal := records[y.ri].Column(fid).(*array.String).Value(y.i)
+					if xVal < yVal {
+						return -1
+					}
+					if xVal > yVal {
+						return 1
+					}
+					return 0
+				}
+				comparators = append(comparators, f)
+			default:
+				return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+			}
+		}
 
-	switch records[0].Column(pkFieldId).(type) {
-	case *array.Int64:
 		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkFieldId).(*array.Int64).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkFieldId).(*array.Int64).Value(indices[j].i)
-			return pki < pkj
-		})
-	case *array.String:
-		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkFieldId).(*array.String).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkFieldId).(*array.String).Value(indices[j].i)
-			return pki < pkj
+			x := indices[i]
+			y := indices[j]
+			for _, cmp := range comparators {
+				c := cmp(x, y)
+				if c < 0 {
+					return true
+				}
+				if c > 0 {
+					return false
+				}
+			}
+			return false
 		})
 	}
 
@@ -170,7 +201,7 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 }
 
 func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
-	rw RecordWriter, predicate func(r Record, ri, i int) bool,
+	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortedByFieldIDs []int64,
 ) (numRows int, err error) {
 	// Fast path: no readers provided
 	if len(rr) == 0 {
@@ -199,43 +230,53 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 	}
 
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return 0, err
+	comparators := make([]func(x, y *index) int, 0, len(sortedByFieldIDs))
+	for _, fid := range sortedByFieldIDs {
+		switch recs[0].Column(fid).(type) {
+		case *array.Int64:
+			comparators = append(comparators, func(x, y *index) int {
+				xVal := recs[x.ri].Column(fid).(*array.Int64).Value(x.i)
+				yVal := recs[y.ri].Column(fid).(*array.Int64).Value(y.i)
+				if xVal < yVal {
+					return -1
+				}
+				if xVal > yVal {
+					return 1
+				}
+				return 0
+			})
+		case *array.String:
+			comparators = append(comparators, func(x, y *index) int {
+				xVal := recs[x.ri].Column(fid).(*array.String).Value(x.i)
+				yVal := recs[y.ri].Column(fid).(*array.String).Value(y.i)
+				if xVal < yVal {
+					return -1
+				}
+				if xVal > yVal {
+					return 1
+				}
+				return 0
+			})
+		default:
+			return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+		}
 	}
-	pkFieldId := pkField.FieldID
 
-	var pq *PriorityQueue[index]
-	switch recs[0].Column(pkFieldId).(type) {
-	case *array.Int64:
-		pq = NewPriorityQueue(func(x, y *index) bool {
-			xVal := recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i)
-			yVal := recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
-
-			if xVal != yVal {
-				return xVal < yVal
+	pq := NewPriorityQueue(func(x, y *index) bool {
+		for _, cmp := range comparators {
+			c := cmp(x, y)
+			if c < 0 {
+				return true
 			}
-
-			if x.ri != y.ri {
-				return x.ri < y.ri
+			if c > 0 {
+				return false
 			}
-			return x.i < y.i
-		})
-	case *array.String:
-		pq = NewPriorityQueue(func(x, y *index) bool {
-			xVal := recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i)
-			yVal := recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
-
-			if xVal != yVal {
-				return xVal < yVal
-			}
-
-			if x.ri != y.ri {
-				return x.ri < y.ri
-			}
-			return x.i < y.i
-		})
-	}
+		}
+		if x.ri != y.ri {
+			return x.ri < y.ri
+		}
+		return x.i < y.i
+	})
 
 	endPositions := make([]int, len(recs))
 	var enqueueAll func(ri int) error

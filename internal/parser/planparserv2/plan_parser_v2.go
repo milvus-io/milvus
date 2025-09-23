@@ -98,7 +98,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	return
 }
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+func handleExprInternal(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (result interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = fmt.Errorf("unsupported expression: %s", exprStr)
@@ -113,12 +113,16 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface
 		return err
 	}
 
-	visitor := NewParserVisitor(schema)
+	visitor := NewParserVisitor(schema, visitorArgs)
 	return ast.Accept(visitor)
 }
 
-func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
-	ret := handleExpr(schema, exprStr)
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+	return handleExprInternal(schema, exprStr, &ParserVisitorArgs{})
+}
+
+func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
 		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
@@ -144,8 +148,12 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues
 	return predicate.expr, nil
 }
 
-func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error) error {
-	ret := handleExpr(schema, identifier)
+func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
+	return parseExprInner(schema, exprStr, exprTemplateValues, &ParserVisitorArgs{})
+}
+
+func parseIdentifierInner(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error, visitorArgs *ParserVisitorArgs) error {
+	ret := handleExprInternal(schema, identifier, visitorArgs)
 
 	if err := getError(ret); err != nil {
 		return fmt.Errorf("cannot parse identifier: %s, error: %s", identifier, err)
@@ -162,8 +170,13 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 	return checkFunc(predicate.expr)
 }
 
-func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
-	expr, err := ParseExpr(schema, exprStr, exprTemplateValues)
+func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error) error {
+	visitorArgs := &ParserVisitorArgs{}
+	return parseIdentifierInner(schema, identifier, checkFunc, visitorArgs)
+}
+
+func CreateRetrievePlanArgs(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.PlanNode, error) {
+	expr, err := parseExprInner(schema, exprStr, exprTemplateValues, visitorArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +196,17 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 	return planNode, nil
 }
 
-func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
+func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+	visitorArgs := &ParserVisitorArgs{}
+	return CreateRetrievePlanArgs(schema, exprStr, exprTemplateValues, visitorArgs)
+}
+
+func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore, visitorArgs *ParserVisitorArgs) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
 		}
-		return ParseExpr(schema, exprStr, exprTemplateValues)
+		return parseExprInner(schema, exprStr, exprTemplateValues, visitorArgs)
 	}
 
 	expr, err := parse()
@@ -315,6 +333,11 @@ func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.
 		return nil, nil
 	}
 	return scorers, nil
+}
+
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
+	visitorArgs := &ParserVisitorArgs{}
+	return CreateSearchPlanArgs(schema, exprStr, vectorFieldName, queryInfo, exprTemplateValues, functionScorer, visitorArgs)
 }
 
 func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {

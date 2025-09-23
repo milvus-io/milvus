@@ -236,7 +236,7 @@ func (t *SearchTask) Execute() error {
 		metrics.BatchReduce).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
-		blob, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
+		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
 			return err
 		}
@@ -267,6 +267,8 @@ func (t *SearchTask) Execute() error {
 				ServiceTime:          tr.ElapseSpan().Milliseconds(),
 				TotalRelatedDataSize: relatedDataSize,
 			},
+			ScannedRemoteBytes: cost.ScannedRemoteBytes,
+			ScannedTotalBytes:  cost.ScannedTotalBytes,
 		}
 	}
 
@@ -516,7 +518,7 @@ func (t *StreamingSearchTask) Execute() error {
 
 	// 2. reorganize blobs to original search request
 	for i := range t.originNqs {
-		blob, err := segcore.GetSearchResultDataBlob(t.ctx, t.resultBlobs, i)
+		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, t.resultBlobs, i)
 		if err != nil {
 			return err
 		}
@@ -547,6 +549,8 @@ func (t *StreamingSearchTask) Execute() error {
 				ServiceTime:          tr.ElapseSpan().Milliseconds(),
 				TotalRelatedDataSize: relatedDataSize,
 			},
+			ScannedRemoteBytes: cost.ScannedRemoteBytes,
+			ScannedTotalBytes:  cost.ScannedTotalBytes,
 		}
 	}
 
@@ -578,6 +582,8 @@ func (t *StreamingSearchTask) maybeReturnForEmptyResults(results []*segments.Sea
 				CostAggregation: &internalpb.CostAggregation{
 					ServiceTime: tr.ElapseSpan().Milliseconds(),
 				},
+				ScannedRemoteBytes: 0,
+				ScannedTotalBytes:  0,
 			}
 		}
 		return true

@@ -42,6 +42,11 @@ type (
 	StreamSearchReducer   = C.CSearchStreamReducer
 )
 
+type StorageCost struct {
+	ScannedRemoteBytes int64
+	ScannedTotalBytes  int64
+}
+
 func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *SliceInfo {
 	sInfo := &SliceInfo{
 		SliceNQs:   make([]int64, 0),
@@ -152,13 +157,15 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	return cSearchResultDataBlobs, nil
 }
 
-func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchResultDataBlobs, blobIndex int) ([]byte, error) {
+func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchResultDataBlobs, blobIndex int) ([]byte, StorageCost, error) {
 	var blob C.CProto
-	status := C.GetSearchResultDataBlob(&blob, cSearchResultDataBlobs, C.int32_t(blobIndex))
+	var scannedRemoteBytes C.int64_t
+	var scannedTotalBytes C.int64_t
+	status := C.GetSearchResultDataBlob(&blob, &scannedRemoteBytes, &scannedTotalBytes, cSearchResultDataBlobs, C.int32_t(blobIndex))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
+		return nil, StorageCost{ScannedRemoteBytes: 0, ScannedTotalBytes: 0}, errors.Wrap(err, "marshal failed")
 	}
-	return getCProtoBlob(&blob), nil
+	return getCProtoBlob(&blob), StorageCost{ScannedRemoteBytes: int64(scannedRemoteBytes), ScannedTotalBytes: int64(scannedTotalBytes)}, nil
 }
 
 func DeleteSearchResultDataBlobs(cSearchResultDataBlobs SearchResultDataBlobs) {

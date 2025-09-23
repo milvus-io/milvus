@@ -10,4 +10,5 @@ var (
 	ErrCanceledOrDeadlineExceed = errors.New("canceled or deadline exceed")
 	ErrUnrecoverable            = errors.New("unrecoverable")
 	ErrFenced                   = errors.New("fenced")
+	ErrIgnoredOperation         = errors.New("ignored operation")
 )

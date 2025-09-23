@@ -34,6 +34,8 @@ type CompactionView interface {
 	String() string
 	Trigger() (CompactionView, string)
 	ForceTrigger() (CompactionView, string)
+	ForceTriggerAll() ([]CompactionView, string)
+	GetTriggerID() int64
 }
 
 type FullViews struct {

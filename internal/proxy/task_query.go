@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -75,14 +76,18 @@ type queryTask struct {
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
+
+	storageCost segcore.StorageCost
 }
 
 type queryParams struct {
-	limit        int64
-	offset       int64
-	reduceType   reduce.IReduceType
-	isIterator   bool
-	collectionID int64
+	limit             int64
+	offset            int64
+	reduceType        reduce.IReduceType
+	isIterator        bool
+	collectionID      int64
+	timezone          string
+	extractTimeFields []string
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -165,6 +170,8 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		isIterator        bool
 		err               error
 		collectionID      int64
+		timezone          string
+		extractTimeFields []string
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
 	// if reduce_stop_for_best is provided
@@ -223,17 +230,31 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	timezoneStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimezoneKey, queryParamsPair)
+	if err == nil {
+		timezone = timezoneStr
+	}
+
+	extractTimeFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, queryParamsPair)
+	if err == nil {
+		extractTimeFields = strings.FieldsFunc(extractTimeFieldsStr, func(r rune) bool {
+			return r == ',' || r == ' '
+		})
+	}
+
 	// validate max result window.
 	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 
 	return &queryParams{
-		limit:        limit,
-		offset:       offset,
-		reduceType:   reduceType,
-		isIterator:   isIterator,
-		collectionID: collectionID,
+		limit:             limit,
+		offset:            offset,
+		reduceType:        reduceType,
+		isIterator:        isIterator,
+		collectionID:      collectionID,
+		timezone:          timezone,
+		extractTimeFields: extractTimeFields,
 	}, nil
 }
 
@@ -265,6 +286,10 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 }
 
 func (t *queryTask) createPlan(ctx context.Context) error {
+	return t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{})
+}
+
+func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv2.ParserVisitorArgs) error {
 	schema := t.schema
 
 	cntMatch := matchCountRule(t.request.GetOutputFields())
@@ -278,7 +303,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	var err error
 	if t.plan == nil {
 		start := time.Now()
-		t.plan, err = planparserv2.CreateRetrievePlan(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues())
+		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
 			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
@@ -357,6 +382,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	t.CollectionID = collID
+
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	if err != nil {
+		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
+			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
@@ -418,7 +450,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
-	if err := t.createPlan(ctx); err != nil {
+	_, colTimezone := getColTimezone(colInfo)
+	timezonePreference := []string{t.queryParams.timezone, colTimezone}
+	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}); err != nil {
 		return err
 	}
 	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
@@ -624,6 +658,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	toReduceResults := make([]*internalpb.RetrieveResults, 0)
 	t.allQueryCnt = 0
 	t.totalRelatedDataSize = 0
+	t.storageCost = segcore.StorageCost{}
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -633,6 +668,8 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
 			toReduceResults = append(toReduceResults, res)
 			t.allQueryCnt += res.GetAllRetrieveCount()
+			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
+			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
@@ -665,6 +702,37 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
+	}
+	// Translate timestamp to ISO string
+	collName := t.request.GetCollectionName()
+	dbName := t.request.GetDbName()
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	_, colTimezone := getColTimezone(colInfo)
+	if !t.reQuery {
+		if len(t.queryParams.extractTimeFields) > 0 {
+			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
+			err = extractFieldsFromResults(t.result.GetFieldsData(), []string{t.queryParams.timezone, colTimezone}, t.queryParams.extractTimeFields)
+			if err != nil {
+				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+				return err
+			}
+		} else {
+			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
+			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone)
+			if err != nil {
+				log.Warn("fail to translate timestamp", zap.Error(err))
+				return err
+			}
+		}
 	}
 	log.Debug("Query PostExecute done")
 	return nil

@@ -31,6 +31,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	currentTime time.Time,
 	collectionTtl int64,
 	compactionParams compaction.Params,
+	sortByFields []int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -106,7 +107,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn("compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate); err != nil {
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate, sortByFields); err != nil {
 		writer.Close()
 		return nil, err
 	}

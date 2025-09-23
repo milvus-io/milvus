@@ -156,6 +156,7 @@ type packedRecordWriter struct {
 	rowNum                  int64
 	writtenUncompressed     uint64
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
+	columnGroupCompressed   map[typeutil.UniqueID]uint64
 	storageConfig           *indexpb.StorageConfig
 }
 
@@ -199,6 +200,13 @@ func (pw *packedRecordWriter) GetColumnGroupWrittenUncompressed(columnGroup type
 	return 0
 }
 
+func (pw *packedRecordWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
+	if size, ok := pw.columnGroupCompressed[columnGroup]; ok {
+		return size
+	}
+	return 0
+}
+
 func (pw *packedRecordWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
 	if path, ok := pw.pathsMap[columnGroup]; ok {
 		return path
@@ -212,7 +220,18 @@ func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 
 func (pw *packedRecordWriter) Close() error {
 	if pw.writer != nil {
-		return pw.writer.Close()
+		err := pw.writer.Close()
+		if err != nil {
+			return err
+		}
+		for id, fpath := range pw.pathsMap {
+			truePath := path.Join(pw.bucketName, fpath)
+			size, err := packed.GetFileSize(truePath, pw.storageConfig)
+			if err != nil {
+				return err
+			}
+			pw.columnGroupCompressed[id] = uint64(size)
+		}
 	}
 	return nil
 }
@@ -242,6 +261,7 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
+	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
 	pathsMap := make(map[typeutil.UniqueID]string)
 	if len(paths) != len(columnGroups) {
 		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
@@ -249,6 +269,7 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 	}
 	for i, columnGroup := range columnGroups {
 		columnGroupUncompressed[columnGroup.GroupID] = 0
+		columnGroupCompressed[columnGroup.GroupID] = 0
 		pathsMap[columnGroup.GroupID] = paths[i]
 	}
 	return &packedRecordWriter{
@@ -260,6 +281,7 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 		pathsMap:                pathsMap,
 		columnGroups:            columnGroups,
 		columnGroupUncompressed: columnGroupUncompressed,
+		columnGroupCompressed:   columnGroupCompressed,
 		storageConfig:           storageConfig,
 	}, nil
 }
@@ -357,6 +379,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
 	}
+	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
 }
 
@@ -364,7 +387,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
-			pw.columnGroups = storagecommon.SplitBySchema(allFields)
+			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {
@@ -384,22 +407,34 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	return nil
 }
 
+func (pw *PackedBinlogRecordWriter) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
+	result := make(map[int64]storagecommon.ColumnStats)
+	for _, field := range allFields {
+		if arr := r.Column(field.FieldID); arr != nil {
+			result[field.FieldID] = storagecommon.ColumnStats{
+				AvgSize: int64(arr.Data().SizeInBytes()) / int64(arr.Len()),
+			}
+		}
+	}
+	return result
+}
+
 func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
+	if pw.writer != nil {
+		if err := pw.writer.Close(); err != nil {
+			return err
+		}
+	}
 	pw.finalizeBinlogs()
 	if err := pw.writeStats(); err != nil {
 		return err
 	}
 	if err := pw.writeBm25Stats(); err != nil {
 		return err
-	}
-	if pw.writer != nil {
-		if err := pw.writer.Close(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -409,7 +444,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
-	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
@@ -417,11 +451,12 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		columnGroupID := columnGroup.GroupID
 		if _, exists := pw.fieldBinlogs[columnGroupID]; !exists {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
-				FieldID: columnGroupID,
+				FieldID:     columnGroupID,
+				ChildFields: columnGroup.Fields,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
-			LogSize:       int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
+			LogSize:       int64(pw.writer.GetColumnGroupWrittenCompressed(columnGroupID)),
 			MemorySize:    int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
 			LogPath:       pw.writer.GetWrittenPaths(columnGroupID),
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
