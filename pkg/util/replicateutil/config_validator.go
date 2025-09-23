@@ -82,6 +82,7 @@ func (v *ReplicateConfigValidator) Validate() error {
 func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.MilvusCluster) error {
 	var expectedPchannelCount int
 	var firstClusterID string
+	uriSet := make(map[string]string)
 	for i, cluster := range clusters {
 		if cluster == nil {
 			return fmt.Errorf("cluster at index %d is nil", i)
@@ -107,6 +108,11 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.Mil
 		if err != nil {
 			return fmt.Errorf("cluster '%s' has invalid URI format: '%s'", clusterID, uri)
 		}
+		// Check URI uniqueness
+		if existingClusterID, exists := uriSet[uri]; exists {
+			return fmt.Errorf("duplicate URI found: '%s' is used by both cluster '%s' and cluster '%s'", uri, existingClusterID, clusterID)
+		}
+		uriSet[uri] = clusterID
 		// pchannels validation: non-empty
 		pchannels := cluster.GetPchannels()
 		if len(pchannels) == 0 {
@@ -120,10 +126,6 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.Mil
 			}
 			if pchannelSet[pchannel] {
 				return fmt.Errorf("cluster '%s' has duplicate pchannel: '%s'", clusterID, pchannel)
-			}
-			// Validate that pchannel starts with clusterID as prefix
-			if !strings.HasPrefix(pchannel, clusterID) {
-				return fmt.Errorf("cluster '%s' has pchannel '%s' that does not start with clusterID as prefix", clusterID, pchannel)
 			}
 			pchannelSet[pchannel] = true
 		}
