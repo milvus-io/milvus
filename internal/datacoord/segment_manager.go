@@ -74,6 +74,7 @@ type AllocNewGrowingSegmentRequest struct {
 	ChannelName          string
 	StorageVersion       int64
 	IsCreatedByStreaming bool
+	SchemaVersion        int32
 }
 
 // Manager manages segment related operations.
@@ -427,6 +428,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		LastExpireTime:       0,
 		StorageVersion:       req.StorageVersion,
 		IsCreatedByStreaming: req.IsCreatedByStreaming,
+		SchemaVersion:        req.SchemaVersion,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
@@ -440,6 +442,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.String("Channel", segmentInfo.InsertChannel),
 		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
+		zap.Int32("SchemaVersion", segmentInfo.SchemaVersion),
 	)
 
 	return segment, s.helper.afterCreateSegment(segmentInfo)

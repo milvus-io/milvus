@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel"
@@ -37,6 +38,7 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	schemaVersion   int32
 }
 
 // TraceCtx returns insertTask context
@@ -140,23 +142,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
-	if err != nil {
-		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
-		return err
-	}
-	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
-			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
-			log.Ctx(ctx).Info("collection schema mismatch",
-				zap.String("collectionName", collectionName),
-				zap.Uint64("requestSchemaTs", it.schemaTimestamp),
-				zap.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
-				zap.Error(err))
-			return err
-		}
-	}
-
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
@@ -220,6 +205,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
+	if it.insertMsg.NRows() <= 0 {
+		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.insertMsg.NRows()), "num_rows should be greater than 0")
+	}
+	if err := checkFieldsDataBySchema(allFields, it.schema, it.insertMsg, true); err != nil {
+		return err
+	}
 	it.result.IDs, err = checkPrimaryFieldData(allFields, it.schema, it.insertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {

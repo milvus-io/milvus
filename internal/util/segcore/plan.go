@@ -105,7 +105,6 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		plan.delete()
 		return nil, errors.Wrap(err, "parser searchRequest failed")
 	}
-
 	metricTypeInPlan := plan.GetMetricType()
 	if len(metricType) != 0 && metricType != metricTypeInPlan {
 		plan.delete()
@@ -118,7 +117,6 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		plan.delete()
 		return nil, errors.Wrap(err, "get fieldID from plan failed")
 	}
-
 	return &SearchRequest{
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
