@@ -117,6 +117,11 @@ func executeDropCollectionTaskSteps(ctx context.Context,
 		state:        pb.CollectionState_CollectionDropping,
 		ts:           ts,
 	})
+	redoTask.AddSyncStep(&cleanupMetricsStep{
+		baseStep:       baseStep{core: core},
+		dbName:         dbName,
+		collectionName: col.Name,
+	})
 
 	redoTask.AddAsyncStep(&releaseCollectionStep{
 		baseStep:     baseStep{core: core},
