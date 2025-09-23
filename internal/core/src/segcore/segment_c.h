@@ -176,6 +176,12 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
+
+CStatus
+SyncSchema(CSegmentInterface c_segment,
+           const uint8_t* schema_blob,
+           const int64_t schema_length);
+
 CStatus
 DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
                            int64_t field_id,

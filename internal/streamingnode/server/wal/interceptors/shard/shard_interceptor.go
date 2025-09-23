@@ -27,6 +27,7 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 type shardInterceptor struct {
 	shardManager shards.ShardManager
 	ops          map[message.MessageType]interceptors.AppendInterceptorCall
+	postOps      map[message.MessageType]interceptors.PostAppendInterceptorCall
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -44,6 +45,10 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
 	}
+	impl.postOps = map[message.MessageType]interceptors.PostAppendInterceptorCall{
+		message.MessageTypeAlterCollection:  impl.postHandleAlterCollection,
+		message.MessageTypeCreateCollection: impl.postHandleCreateCollection,
+	}
 }
 
 // Name returns the name of the interceptor.
@@ -60,7 +65,35 @@ func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableM
 		// perform no effect on the shard manager, so skip it.
 		return op(ctx, msg, appendOp)
 	}
-	return appendOp(ctx, msg)
+	msgID, err = appendOp(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+	postOp, ok := impl.postOps[msg.MessageType()]
+	if ok {
+		err = postOp(ctx, msg, msgID)
+	}
+	return msgID, err
+}
+
+func (impl *shardInterceptor) postHandleAlterCollection(ctx context.Context, msg message.MutableMessage, msgID message.MessageID) error {
+	alterCollectionMsg := message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID))
+	if err := impl.shardManager.AppendNewCollectionSchema(alterCollectionMsg); err != nil {
+		// Panic because postHandle should not fail after WAL append succeeds.
+		// This indicates a critical system inconsistency.
+		panic(errors.Wrapf(err, "failed to append collection schema after WAL append succeeded, collectionID: %d", alterCollectionMsg.Header().CollectionId))
+	}
+	return nil
+}
+
+func (impl *shardInterceptor) postHandleCreateCollection(ctx context.Context, msg message.MutableMessage, msgID message.MessageID) error {
+	createCollectionMsg := message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID))
+	if err := impl.shardManager.AppendNewCollectionSchemaFromCreateCollection(createCollectionMsg); err != nil {
+		// Panic because postHandle should not fail after WAL append succeeds.
+		// This indicates a critical system inconsistency.
+		panic(errors.Wrapf(err, "failed to append collection schema from create collection after WAL append succeeded, collectionID: %d", createCollectionMsg.Header().CollectionId))
+	}
+	return nil
 }
 
 // handleCreateCollection handles the create collection message.
@@ -143,6 +176,12 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+	schemaVersion := header.GetSchemaVerison()
+	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header.GetCollectionId(), schemaVersion); err != nil {
+		log.Warn("insertMessage schema version mismatch", zap.Error(err))
+		return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
+			schemaVersion, correctSchemaVersion)
+	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
@@ -156,7 +195,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 				Rows:       partition.GetRows(),
 				BinarySize: partition.GetBinarySize(),
 			},
-			TimeTick: msg.TimeTick(),
+			TimeTick:      msg.TimeTick(),
+			SchemaVersion: schemaVersion,
 		}
 		if session := txn.GetTxnSessionFromContext(ctx); session != nil {
 			// because the shard manager use the interface, txn is a struct,
@@ -241,7 +281,6 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 	// Modify the header of schema change message, carry with the all flushed segment ids.
 	header.FlushedSegmentIds = segmentIDs
 	schemaChangeMsg.OverwriteHeader(header)
-
 	return appendOp(ctx, msg)
 }
 

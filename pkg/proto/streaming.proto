@@ -336,6 +336,7 @@ enum StreamingCode {
     STREAMING_CODE_UNRECOVERABLE          = 11; // unrecoverable error
     STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
     STREAMING_CODE_REPLICATE_VIOLATION    = 13; // replicate violation
+    STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 14; // wrong schema version
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
