@@ -213,7 +213,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	// check analyzer was vailed
+	// check analyzer was vaild
 	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
 	for _, field := range schema.GetFields() {
 		err := validateAnalyzer(schema, field, &analyzerInfos)
@@ -870,12 +870,12 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !wasBm25FunctionInputField(collSchema, fieldSchema) {
+	if !h.EnableMatch() && !typeutil.IsBm25FunctionInputField(collSchema, fieldSchema) {
 		return nil
 	}
 
 	if !h.EnableAnalyzer() {
-		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
+		return fmt.Errorf("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
@@ -899,13 +899,4 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	}
 	// return nil when use default analyzer
 	return nil
-}
-
-func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	for _, fun := range coll.GetFunctions() {
-		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
-			return true
-		}
-	}
-	return false
 }
