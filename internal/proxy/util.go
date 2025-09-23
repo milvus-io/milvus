@@ -2422,6 +2422,9 @@ func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
 	}
 	if status.ExtraInfo == nil {
 		status.ExtraInfo = make(map[string]string)
+		// set report_value to 0 for compatibility, when extra info is not nil, there are always the default report_value
+		// see https://github.com/milvus-io/pymilvus/pull/2999, pymilvus didn't check the report_value is set and use the value
+		status.ExtraInfo["report_value"] = strconv.Itoa(0)
 	}
 
 	status.ExtraInfo["scanned_remote_bytes"] = strconv.FormatInt(storageCost.ScannedRemoteBytes, 10)
