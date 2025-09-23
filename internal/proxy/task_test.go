@@ -400,8 +400,8 @@ func constructCollectionSchemaWithAllType(
 func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 	ctx := context.Background()
 
-	buildRoot := func(autoID bool) *mocks.MockMixCoordClient {
-		root := mocks.NewMockMixCoordClient(t)
+	buildRoot := func(autoID bool) *mocks.MockRootCoordClient {
+		root := mocks.NewMockRootCoordClient(t)
 		// InitMetaCache requires ListPolicy
 		root.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
 		// Meta cache update path fetches partitions info
@@ -427,8 +427,10 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		cache := globalMetaCache
 		defer func() { globalMetaCache = cache }()
 		root := buildRoot(true)
+		query := mocks.NewMockQueryCoordClient(t)
+		query.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, root, mgr)
+		err := InitMetaCache(ctx, root, query, mgr)
 		assert.NoError(t, err)
 
 		task := &alterCollectionFieldTask{
@@ -449,8 +451,10 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		cache := globalMetaCache
 		defer func() { globalMetaCache = cache }()
 		root := buildRoot(false)
+		query := mocks.NewMockQueryCoordClient(t)
+		query.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, root, mgr)
+		err := InitMetaCache(ctx, root, query, mgr)
 		assert.NoError(t, err)
 
 		task := &alterCollectionFieldTask{
@@ -4766,12 +4770,21 @@ func TestAlterCollectionField1(t *testing.T) {
 }
 
 func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
-	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	rc := NewRootCoordMock()
+	qc := mocks.NewMockQueryCoordClient(t)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	InitMetaCache(context.Background(), rc, qc, nil)
 	ctx := context.Background()
 	collectionName := "test_alter_allow_insert_autoid_autoid_false"
 
-	schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+	// fallback: use existing helper to build schema with array field if needed; here use simple schema
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: false},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
 	schemaBytes, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -4786,18 +4799,18 @@ func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 		Schema:         schemaBytes,
 		ShardsNum:      1,
 	}
-	qc.CreateCollection(ctx, createColReq)
+	_, _ = rc.CreateCollection(ctx, createColReq)
 
-	task := &alterCollectionFieldTask{
-		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
-			FieldName:      "",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: common.AllowInsertAutoIDKey, Value: "true"},
 			},
 		},
-		mixCoord: qc,
+		rootCoord:  rc,
+		queryCoord: qc,
 	}
 
 	err = task.PreExecute(ctx)

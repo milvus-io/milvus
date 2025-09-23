@@ -977,6 +977,10 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -993,6 +997,16 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+			}
+		}
+		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
+		if enabled {
+			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
+			if err != nil {
+				return err
+			}
+			if !primaryFieldSchema.AutoID {
+				return merr.WrapErrParameterInvalidMsg("the value for %s must be false when autoID is false", common.AllowInsertAutoIDKey)
 			}
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
@@ -1292,18 +1306,6 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
-			}
-		case common.AllowInsertAutoIDKey:
-			allowInsertAutoID, err := strconv.ParseBool(prop.Value)
-			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s must be a boolean", common.AllowInsertAutoIDKey)
-			}
-			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
-			if err != nil {
-				return err
-			}
-			if allowInsertAutoID && !primaryFieldSchema.AutoID {
-				return merr.WrapErrParameterInvalidMsg("the value for %s must be false when autoID is false", common.AllowInsertAutoIDKey)
 			}
 		}
 	}
