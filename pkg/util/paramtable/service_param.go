@@ -1551,11 +1551,7 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := base.Get("localStorage.path")
-				if len(localStoragePath) == 0 {
-					localStoragePath = defaultLocalStoragePath
-					log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
-				}
+				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "pprof")
 			}
 			return v

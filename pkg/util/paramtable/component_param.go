@@ -3700,11 +3700,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := base.Get("localStorage.path")
-				if len(localStoragePath) == 0 {
-					localStoragePath = defaultLocalStoragePath
-					log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
-				}
+				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "mmap")
 			}
 			return v
@@ -3978,11 +3974,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
-				localStoragePath := base.Get("localStorage.path")
-				if len(localStoragePath) == 0 {
-					localStoragePath = defaultLocalStoragePath
-					log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
-				}
+				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
@@ -6516,4 +6508,13 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
+}
+
+func getLocalStoragePath(base *BaseTable) string {
+	localStoragePath := base.Get("localStorage.path")
+	if len(localStoragePath) == 0 {
+		localStoragePath = defaultLocalStoragePath
+		log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
+	}
+	return localStoragePath
 }
