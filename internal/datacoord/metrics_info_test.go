@@ -43,19 +43,9 @@ import (
 )
 
 func TestGetDataNodeMetrics(t *testing.T) {
-	svr := newTestServer(t)
-	defer closeTestServer(t, svr)
-
 	ctx := context.Background()
-	req := &milvuspb.GetMetricsRequest{}
-	// nil node
-	_, err := svr.getDataNodeMetrics(ctx, req, nil)
-	assert.Error(t, err)
 
-	// nil client node
-	_, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, nil))
-	assert.Error(t, err)
-
+	mockNodeManager := session.NewMockNodeManager(t)
 	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.GetMetricsRequest, option ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
@@ -86,48 +76,59 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		return dn, nil
 	}
 
+	mockNodeManager.EXPECT().Startup(mock.Anything, mock.Anything).Return(nil)
+	mockNodeManager.EXPECT().GetClient(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, error) {
+		switch nodeID {
+		case 100:
+			return creator(ctx, "127.0.0.1:10086", nodeID)
+		case 101:
+			dn := mocks.NewMockDataNodeClient(t)
+			dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked fail"))
+			return dn, nil
+		case 102:
+			dn := mocks.NewMockDataNodeClient(t)
+			dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+				Status: merr.Status(errors.New("mocked error")),
+			}, nil)
+			return dn, nil
+		case 103:
+			dn := mocks.NewMockDataNodeClient(t)
+			dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+				Status:   merr.Success(),
+				Response: `{"error_reason": 1}`,
+			}, nil)
+			return dn, nil
+
+		default:
+			return nil, errors.New("node not found")
+		}
+	})
+
+	svr := newTestServer(t, func(svr *Server) {
+		svr.nodeManager = mockNodeManager
+	})
+	defer closeTestServer(t, svr)
+	// nil node
+	req := &milvuspb.GetMetricsRequest{}
+	_, err := svr.getDataNodeMetrics(ctx, req, 0)
+	assert.Error(t, err)
+
 	// mock datanode client
-	sess := session.NewSession(&session.NodeInfo{}, creator)
-	info, err := svr.getDataNodeMetrics(ctx, req, sess)
+	info, err := svr.getDataNodeMetrics(ctx, req, 100)
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
-	mockFailClientCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		dn := mocks.NewMockDataNodeClient(t)
-		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked fail"))
-		return dn, nil
-	}
-
-	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, 101)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
-	// mock status not success
-	mockFailClientCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		dn := mocks.NewMockDataNodeClient(t)
-		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status: merr.Status(errors.New("mocked error")),
-		}, nil)
-		return dn, nil
-	}
-
-	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, 102)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, "mocked error", info.ErrorReason)
 
-	// mock parse error
-	mockFailClientCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		dn := mocks.NewMockDataNodeClient(t)
-		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: `{"error_reason": 1}`,
-		}, nil)
-		return dn, nil
-	}
-
-	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
+	info, err = svr.getDataNodeMetrics(ctx, req, 103)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 }
@@ -235,13 +236,10 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getSyncTaskJSON(ctx, req)
 		assert.NoError(t, err)
@@ -255,13 +253,10 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getSyncTaskJSON(ctx, req)
 		assert.Error(t, err)
@@ -280,13 +275,10 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getSyncTaskJSON(ctx, req)
 		assert.Error(t, err)
@@ -305,13 +297,10 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		expectedJSON := "null"
 		actualJSON, err := svr.getSyncTaskJSON(ctx, req)
@@ -347,13 +336,10 @@ func TestGetSegmentsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getDataNodeSegmentsJSON(ctx, req)
 		assert.NoError(t, err)
@@ -367,13 +353,10 @@ func TestGetSegmentsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getDataNodeSegmentsJSON(ctx, req)
 		assert.Error(t, err)
@@ -392,13 +375,10 @@ func TestGetSegmentsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		actualJSON, err := svr.getDataNodeSegmentsJSON(ctx, req)
 		assert.Error(t, err)
@@ -417,13 +397,10 @@ func TestGetSegmentsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		expectedJSON := "null"
 		actualJSON, err := svr.getDataNodeSegmentsJSON(ctx, req)
@@ -456,13 +433,10 @@ func TestGetChannelsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		svr.meta = &meta{channelCPs: newChannelCps()}
 		svr.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 1000}
@@ -492,13 +466,10 @@ func TestGetChannelsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		svr.meta = &meta{channelCPs: newChannelCps()}
 
@@ -519,13 +490,10 @@ func TestGetChannelsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
 		svr.meta = &meta{channelCPs: newChannelCps()}
 
@@ -546,13 +514,11 @@ func TestGetChannelsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		svr.nodeManager = nodeManager
 
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		svr.cluster = mockCluster
 		svr.meta = &meta{channelCPs: newChannelCps()}
 
 		expectedJSON := "null"
@@ -589,20 +555,6 @@ func TestGetDistJSON(t *testing.T) {
 			},
 		}
 
-		cm := NewMockChannelManager(t)
-		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{
-			1: {
-				"channel1": {
-					State: datapb.ChannelWatchState_ToWatch,
-					Vchan: &datapb.VchannelInfo{
-						ChannelName: "channel1",
-					},
-				},
-			},
-		})
-
-		svr.channelManager = cm
-
 		segments := []*metricsinfo.Segment{
 			{
 				SegmentID:    1,
@@ -614,16 +566,8 @@ func TestGetDistJSON(t *testing.T) {
 				NodeID:       1,
 			},
 		}
-		channels := []*metricsinfo.DmChannel{
-			{
-				ChannelName: "channel1",
-				NodeID:      1,
-				WatchState:  datapb.ChannelWatchState_ToWatch.String(),
-			},
-		}
 		dist := &metricsinfo.DataCoordDist{
-			Segments:   segments,
-			DMChannels: channels,
+			Segments: segments,
 		}
 		distBytes, err := json.Marshal(dist)
 		assert.NoError(t, err)
@@ -638,10 +582,6 @@ func TestGetDistJSON(t *testing.T) {
 		ctx := context.Background()
 
 		svr.meta = &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}}}
-		cm := NewMockChannelManager(t)
-		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{})
-
-		svr.channelManager = cm
 		expectedJSON := "{}"
 		actualJSON := svr.getDistJSON(ctx, req)
 		assert.Equal(t, expectedJSON, actualJSON)
@@ -737,13 +677,10 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 		dn := mocks.NewMockDataNodeClient(t)
 		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
-		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return dn, nil
-		}
-
-		mockCluster := NewMockCluster(t)
-		mockCluster.EXPECT().GetSessions().Return([]*session.Session{session.NewSession(&session.NodeInfo{NodeID: 1}, dataNodeCreator)})
-		s.cluster = mockCluster
+		nodeManager := session.NewMockNodeManager(t)
+		nodeManager.EXPECT().GetClient(mock.Anything).Return(dn, nil)
+		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
+		s.nodeManager = nodeManager
 
 		jsonReq := gjson.Parse(`{"in": "dn"}`)
 		result, err := s.getSegmentsJSON(ctx, req, jsonReq)
