@@ -34,6 +34,10 @@ ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
+# Change user to milvus
+RUN groupadd milvus && useradd -m -g milvus milvus && chown -R milvus:milvus /milvus
+USER milvus
+
 ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus
