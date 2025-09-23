@@ -633,7 +633,7 @@ func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
 
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	if !strings.HasPrefix(snapshotKey, ss.snapshotPrefix) {
-		return "", fmt.Errorf("get original key failed, invailed snapshot key:%s", snapshotKey)
+		return "", fmt.Errorf("get original key failed, invaild snapshot key:%s", snapshotKey)
 	}
 	// collect keys that parent node is snapshot node if the corresponding the latest ts is expired.
 	idx := strings.LastIndex(snapshotKey, ss.separator)

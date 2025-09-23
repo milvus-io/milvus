@@ -1296,6 +1296,12 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 
 	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
 
+	if len(nodeIDs) == 0 {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(errors.New("failed to validate analyzer, no delegator")),
+		}, nil
+	}
+
 	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
 	resp, err := s.cluster.RunAnalyzer(ctx, nodeIDs[idx], req)
 	if err != nil {
@@ -1314,7 +1320,7 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
 
 	if len(nodeIDs) == 0 {
-		return merr.Status(errors.New("faield to validate analyzer, no delegator")), nil
+		return merr.Status(errors.New("failed to validate analyzer, no delegator")), nil
 	}
 
 	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))

@@ -1116,7 +1116,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
-		if !IsBM25FunctionOutputField(field, schema) {
+		if !typeutil.IsBM25FunctionOutputField(field, schema) {
 			expectColumnNum++
 		}
 	}
@@ -1722,12 +1722,12 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -1938,7 +1938,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
-				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) ||
 				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
 				// autoGenField
 				continue
@@ -2599,24 +2599,6 @@ func GetReplicateID(ctx context.Context, database, collectionName string) (strin
 	}
 	replicateID, _ := common.GetReplicateID(dbInfo.properties)
 	return replicateID, nil
-}
-
-func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
-		return false
-	}
-
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
-				return true
-			}
-			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {

@@ -1662,9 +1662,9 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 		err := analyzer.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			if info.GetName() != "" {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %d, name: %d, error: %v", info.GetField(), info.GetName(), err)), nil
+				return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err)), nil
 			}
-			return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %d, error: %v", info.GetField(), err)), nil
+			return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err)), nil
 		}
 	}
 
