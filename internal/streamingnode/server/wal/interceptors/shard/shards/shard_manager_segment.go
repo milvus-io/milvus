@@ -16,6 +16,7 @@ type AssignSegmentRequest struct {
 	PartitionID     int64
 	ModifiedMetrics stats.ModifiedMetrics
 	TimeTick        uint64
+	SchemaVersion   int32
 	TxnSession      TxnSession
 }
 

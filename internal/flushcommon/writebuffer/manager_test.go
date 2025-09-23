@@ -119,7 +119,7 @@ func (s *ManagerSuite) TestFlushSegments() {
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
-	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 0)
 	s.Error(err)
 
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
@@ -131,14 +131,14 @@ func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	s.NoError(err)
 
 	s.manager.buffers.Insert(s.channelName, wb)
-	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 0)
 	s.NoError(err)
 }
 
 func (s *ManagerSuite) TestBufferData() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {
-		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
+		err := manager.BufferData(s.channelName, nil, nil, nil, nil, 0)
 		s.Error(err, "BufferData shall return error when channel not found")
 	})
 
@@ -146,9 +146,9 @@ func (s *ManagerSuite) TestBufferData() {
 		wb := NewMockWriteBuffer(s.T())
 
 		s.manager.buffers.Insert(s.channelName, wb)
-		wb.EXPECT().BufferData(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		wb.EXPECT().BufferData(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
+		err := manager.BufferData(s.channelName, nil, nil, nil, nil, 0)
 		s.NoError(err)
 	})
 }

@@ -73,6 +73,7 @@ func NewCheckerController(
 		// todo temporary work around must fix
 		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
 		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
+		// todo add field data checker for backfill function
 	}
 
 	manualCheckChs := map[utils.CheckerType]chan struct{}{

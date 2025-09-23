@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -513,6 +514,207 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
 			suite.NotEmpty(seg.GetDroppedAt())
 		}
+	})
+
+	suite.Run("test complete backfill compaction mutation", func() {
+		getBackfillSegments := func() *SegmentsInfo {
+			segments := NewSegmentsInfo()
+			segment := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             101,
+					CollectionID:   100,
+					PartitionID:    10,
+					State:          commonpb.SegmentState_Flushed,
+					Level:          datapb.SegmentLevel_L1,
+					Binlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
+					Statslogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
+					Deltalogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000)},
+					NumOfRows:      1000,
+					SchemaVersion:  1,
+					StorageVersion: storage.StorageV1,
+				},
+			}
+			segments.SetSegment(101, segment)
+			return segments
+		}
+
+		latestSegments := getBackfillSegments()
+		schema := &schemapb.CollectionSchema{
+			Name:    "test_collection",
+			Version: 2, // New schema version
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector},
+			},
+		}
+
+		// Result segment with new InsertLogs and Bm25Logs
+		resultSegment := &datapb.CompactionSegment{
+			SegmentID:           101, // Same as input segment ID
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000, 50001)},
+			Bm25Logs:            []*datapb.FieldBinlog{getFieldBinlogIDs(102, 60000)},
+			Field2StatslogPaths: []*datapb.FieldBinlog{},
+			NumOfRows:           1000,
+			StorageVersion:      storage.StorageV2,
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{resultSegment},
+		}
+		task := &datapb.CompactionTask{
+			PlanID:        1,
+			InputSegments: []UniqueID{101},
+			Type:          datapb.CompactionType_BackfillCompaction,
+			CollectionID:  100,
+			PartitionID:   10,
+			Channel:       "ch-1",
+			Schema:        schema,
+		}
+		m := &meta{
+			ctx:          context.Background(),
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		assert.NoError(suite.T(), err)
+		suite.Equal(1, len(infos))
+		info := infos[0]
+		suite.NoError(err)
+		suite.NotNil(info)
+		suite.NotNil(mutation)
+
+		// Check updated segment (same ID, not dropped)
+		suite.EqualValues(101, info.GetID())
+		suite.Equal(datapb.SegmentLevel_L1, info.GetLevel())
+		suite.Equal(commonpb.SegmentState_Flushed, info.GetState()) // Should remain Flushed
+		suite.Equal(int32(2), info.GetSchemaVersion())              // Schema version should be updated
+		suite.Equal(storage.StorageV2, info.GetStorageVersion())    // Storage version should be updated
+
+		// Check new InsertLogs replaced old binlogs
+		binlogs := info.GetBinlogs()
+		suite.Equal(1, len(binlogs))
+		suite.EqualValues(0, binlogs[0].GetFieldID())
+		suite.Equal(2, len(binlogs[0].GetBinlogs()))
+		suite.EqualValues(50000, binlogs[0].GetBinlogs()[0].GetLogID())
+		suite.EqualValues(50001, binlogs[0].GetBinlogs()[1].GetLogID())
+
+		// Check new Bm25Logs
+		bm25Logs := info.GetBm25Statslogs()
+		suite.Equal(1, len(bm25Logs))
+		suite.EqualValues(102, bm25Logs[0].GetFieldID())
+		suite.Equal(1, len(bm25Logs[0].GetBinlogs()))
+		suite.EqualValues(60000, bm25Logs[0].GetBinlogs()[0].GetLogID())
+
+		// Check that input segment is updated in meta (not dropped)
+		seg := m.GetSegment(context.TODO(), 101)
+		suite.NotNil(seg)
+		suite.Equal(commonpb.SegmentState_Flushed, seg.GetState())
+		suite.Equal(int32(2), seg.GetSchemaVersion())
+		suite.Equal(storage.StorageV2, seg.GetStorageVersion())
+	})
+
+	suite.Run("test backfill compaction mutation errors", func() {
+		mockChMgr := mocks.NewChunkManager(suite.T())
+		segments := NewSegmentsInfo()
+		m := &meta{
+			ctx:          context.Background(),
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     segments,
+			chunkManager: mockChMgr,
+		}
+
+		suite.Run("error: multiple input segments", func() {
+			task := &datapb.CompactionTask{
+				InputSegments: []UniqueID{101, 102},
+				Type:          datapb.CompactionType_BackfillCompaction,
+			}
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{{SegmentID: 101}},
+			}
+			_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+			suite.Error(err)
+			suite.Contains(err.Error(), "exactly one input segment")
+		})
+
+		suite.Run("error: multiple result segments", func() {
+			task := &datapb.CompactionTask{
+				InputSegments: []UniqueID{101},
+				Type:          datapb.CompactionType_BackfillCompaction,
+			}
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{
+					{SegmentID: 101},
+					{SegmentID: 102},
+				},
+			}
+			_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+			suite.Error(err)
+			suite.Contains(err.Error(), "exactly one segment")
+		})
+
+		suite.Run("error: segment not found", func() {
+			task := &datapb.CompactionTask{
+				InputSegments: []UniqueID{101},
+				Type:          datapb.CompactionType_BackfillCompaction,
+			}
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{{SegmentID: 101}},
+			}
+			_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+			suite.Error(err)
+			suite.Contains(err.Error(), "segment not found")
+		})
+
+		suite.Run("error: result segment ID mismatch", func() {
+			segment := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           101,
+					CollectionID: 100,
+					PartitionID:  10,
+					State:        commonpb.SegmentState_Flushed,
+					Level:        datapb.SegmentLevel_L1,
+				},
+			}
+			segments.SetSegment(101, segment)
+
+			task := &datapb.CompactionTask{
+				InputSegments: []UniqueID{101},
+				Type:          datapb.CompactionType_BackfillCompaction,
+			}
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{{SegmentID: 102}}, // Different ID
+			}
+			_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+			suite.Error(err)
+			suite.Contains(err.Error(), "does not match input segment ID")
+		})
+
+		suite.Run("error: segment dropped", func() {
+			segment := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           101,
+					CollectionID: 100,
+					PartitionID:  10,
+					State:        commonpb.SegmentState_Dropped, // Dropped segment
+					Level:        datapb.SegmentLevel_L1,
+				},
+			}
+			segments.SetSegment(101, segment)
+
+			task := &datapb.CompactionTask{
+				InputSegments: []UniqueID{101},
+				Type:          datapb.CompactionType_BackfillCompaction,
+			}
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{{SegmentID: 101}},
+			}
+			_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+			suite.Error(err)
+			suite.Contains(err.Error(), "input segment was dropped")
+		})
 	})
 }
 
@@ -1677,7 +1879,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, errors.New("describe collection failed, mocked"))
 		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
 		assert.Error(t, err)
 	})
@@ -1695,7 +1897,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{}, nil)
 		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
 		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
 		assert.Error(t, err)
@@ -1714,7 +1916,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(&milvuspb.DescribeCollectionResponse{
 			CollectionID: 1000,
 		}, nil)
 		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)

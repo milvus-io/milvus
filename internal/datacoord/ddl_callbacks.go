@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -46,7 +47,7 @@ func (c *DDLCallbacks) registerIndexCallbacks() {
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
 func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}

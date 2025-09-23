@@ -1385,6 +1385,10 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	return nil
 }
 
+func (s *LocalSegment) SyncSchema(colSchmea *schemapb.CollectionSchema) error {
+	return s.csegment.SyncSchema(colSchmea)
+}
+
 type ReleaseScope int
 
 const (

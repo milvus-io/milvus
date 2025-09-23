@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -332,6 +333,19 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 
 	status := C.ReopenSegment(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
 	return ConsumeCStatusIntoError(&status)
+}
+
+// SyncSchema syncs the schema of the segment.
+func (s *cSegmentImpl) SyncSchema(colSchmea *schemapb.CollectionSchema) error {
+	schemaBlob, err := proto.Marshal(colSchmea)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal schema")
+	}
+	status := C.SyncSchema(s.ptr, (*C.uint8_t)(unsafe.Pointer(&schemaBlob[0])), (C.int64_t)(len(schemaBlob)))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "failed to sync schema")
+	}
+	return nil
 }
 
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {

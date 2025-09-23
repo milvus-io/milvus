@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -118,4 +119,89 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
+}
+
+func (m *shardManagerImpl) AppendNewCollectionSchema(msg message.ImmutableAlterCollectionMessageV2) error {
+	header := msg.Header()
+	collectionID := header.CollectionId
+	schema := msg.MustBody().Updates.Schema
+	timetick := msg.TimeTick()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		log.Warn("collection not found when appending schema", zap.Int64("collectionID", collectionID))
+		return ErrCollectionNotFound
+	}
+	if collectionInfo.Schemas == nil {
+		log.Warn("collection schemas is nil when appending schema", zap.Int64("collectionID", collectionID))
+		return ErrCollectionSchemaNotFound
+	}
+
+	newCollectionSchema := &streamingpb.CollectionSchemaOfVChannel{
+		Schema:             schema,
+		CheckpointTimeTick: timetick,
+		State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+	}
+	collectionInfo.Schemas = append(collectionInfo.Schemas, newCollectionSchema)
+	log.Info("AppendedNewCollectionSchema", zap.Any("schema", schema), zap.Int32("schemaVersion", schema.GetVersion()))
+	return nil
+}
+
+func (m *shardManagerImpl) AppendNewCollectionSchemaFromCreateCollection(msg message.ImmutableCreateCollectionMessageV1) error {
+	header := msg.Header()
+	collectionID := header.CollectionId
+	schema := msg.MustBody().GetCollectionSchema()
+	timetick := msg.TimeTick()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		log.Warn("collection not found when appending schema from create collection", zap.Int64("collectionID", collectionID))
+		return ErrCollectionNotFound
+	}
+	if collectionInfo.Schemas == nil {
+		log.Warn("collection schemas is nil when appending schema from create collection", zap.Int64("collectionID", collectionID))
+		return ErrCollectionSchemaNotFound
+	}
+
+	newCollectionSchema := &streamingpb.CollectionSchemaOfVChannel{
+		Schema:             schema,
+		CheckpointTimeTick: timetick,
+		State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+	}
+	collectionInfo.Schemas = append(collectionInfo.Schemas, newCollectionSchema)
+	log.Info("Appended NewCollectionSchema for creating collection", zap.Int32("schemaVersion", schema.GetVersion()), zap.Any("schema", schema))
+	return nil
+}
+
+func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.checkIfCollectionSchemaVersionMatch(collectionID, schemaVersion)
+}
+
+func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+	if _, ok := m.collections[collectionID]; !ok {
+		log.Warn("collection not found", zap.Int64("collectionID", collectionID))
+		return -1, ErrCollectionNotFound
+	}
+	if len(m.collections[collectionID].Schemas) == 0 {
+		log.Warn("collection schema not found", zap.Int64("collectionID", collectionID))
+		return -1, nil
+	}
+	collectionSchemaVersion := m.collections[collectionID].Schemas[len(m.collections[collectionID].Schemas)-1].GetSchema().GetVersion()
+	if collectionSchemaVersion != schemaVersion {
+		log.Warn("collection schema version not match", zap.Int64("collectionID", collectionID),
+			zap.Int32("schemaVersion", schemaVersion),
+			zap.Any("collectionSchemaVersion", collectionSchemaVersion),
+			zap.Int("schemas.length", len(m.collections[collectionID].Schemas)))
+		return -1, ErrCollectionSchemaVersionNotMatch
+	}
+	log.Info("collection schema version match", zap.Int64("collectionID", collectionID), zap.Int32("schemaVersion", schemaVersion), zap.Any("collectionSchemaVersion", collectionSchemaVersion))
+	return collectionSchemaVersion, nil
 }

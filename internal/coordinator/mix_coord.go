@@ -542,6 +542,10 @@ func (c *mixCoordImpl) AddCollectionField(ctx context.Context, in *milvuspb.AddC
 	return c.rootcoordServer.AddCollectionField(ctx, in)
 }
 
+func (c *mixCoordImpl) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return c.rootcoordServer.AlterCollectionSchema(ctx, in)
+}
+
 func (s *mixCoordImpl) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	return s.rootcoordServer.CreateCredential(ctx, req)
 }

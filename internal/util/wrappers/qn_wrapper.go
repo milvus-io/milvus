@@ -156,6 +156,10 @@ func (qn *qnServerWrapper) UpdateSchema(ctx context.Context, in *querypb.UpdateS
 	return qn.QueryNode.UpdateSchema(ctx, in)
 }
 
+func (qn *qnServerWrapper) UpdateIndex(ctx context.Context, in *querypb.UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.UpdateIndex(ctx, in)
+}
+
 func (qn *qnServerWrapper) RunAnalyzer(ctx context.Context, in *querypb.RunAnalyzerRequest, _ ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
 	return qn.QueryNode.RunAnalyzer(ctx, in)
 }

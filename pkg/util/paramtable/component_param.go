@@ -4635,6 +4635,7 @@ type dataCoordConfig struct {
 	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
 	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
 	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
+	BackfillCompactionTriggerInterval         ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5177,6 +5178,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CompactionExpiryTolerance.Init(base.mgr)
+
+	p.BackfillCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.backfill.triggerInterval",
+		Version:      "2.6.2",
+		Doc:          "The time interval in seconds for trigger backfill compaction",
+		DefaultValue: "20",
+		Export:       true,
+	}
+	p.BackfillCompactionTriggerInterval.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
