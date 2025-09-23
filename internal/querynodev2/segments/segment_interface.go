@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -88,9 +89,15 @@ type Segment interface {
 	Release(ctx context.Context, opts ...releaseOption)
 
 	// Bloom filter related
+	SetBloomFilter(bf *pkoracle.BloomFilterSet)
+	BloomFilterExist() bool
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
+
+	// Get min/max
+	GetMinPk() *storage.PrimaryKey
+	GetMaxPk() *storage.PrimaryKey
 
 	// BM25 stats
 	UpdateBM25Stats(stats map[int64]*storage.BM25Stats)
