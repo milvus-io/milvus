@@ -38,6 +38,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     In(size_t n, const T* values) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::In",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
@@ -47,6 +49,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     IsNull() override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNull",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_exist_query(json_path_, &bitset);
         bitset.flip();
@@ -55,6 +59,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     TargetBitmap
     IsNotNull() override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNotNull",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_exist_query(json_path_, &bitset);
         return bitset;
@@ -65,6 +71,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         size_t n,
         const T* values,
         const std::function<bool(size_t /* offset */)>& filter) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyFilter",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
@@ -78,6 +86,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         size_t n,
         const T* values,
         const std::function<void(size_t /* offset */)>& callback) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyCallback",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
@@ -87,6 +97,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::NotIn",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
@@ -104,6 +116,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     const TargetBitmap
     Range(T value, OpType op) override {
         LOG_INFO("[executor] JsonFlatIndexQueryExecutor Range");
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Range",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         switch (op) {
             case OpType::LessThan: {
@@ -139,6 +153,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
           bool lb_inclusive,
           T upper_bound_value,
           bool ub_inclusive) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RangeWithBounds",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_range_query(json_path_,
                                          lower_bound_value,
@@ -153,6 +169,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     PrefixMatch(const std::string_view prefix) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::PrefixMatch",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_prefix_query(
             json_path_, std::string(prefix), &bitset);
@@ -161,6 +179,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     RegexQuery(const std::string& pattern) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RegexQuery",
+                              tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_regex_query(json_path_, pattern, &bitset);
         return bitset;

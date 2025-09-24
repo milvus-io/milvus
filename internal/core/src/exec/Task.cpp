@@ -15,12 +15,13 @@
 // limitations under the License.
 
 #include "Task.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include "log/Log.h"
-
 namespace milvus {
 namespace exec {
 
@@ -146,6 +147,7 @@ Task::Next(ContinueFuture* future) {
     AssertInfo(state_ == TaskState::kRunning,
                "Task has already finished processing.");
 
+    tracer::AutoSpan span("Task::Next", tracer::GetRootSpan(), true);
     if (driver_factories_.empty()) {
         AssertInfo(
             consumer_supplier_ == nullptr,
@@ -199,10 +201,15 @@ Task::Next(ContinueFuture* future) {
             auto result = drivers_[i]->Next(blocking_state);
 
             if (result) {
+                tracer::AddEvent(
+                    fmt::format("driver_result_produced: driver_id={}, rows={}",
+                                i,
+                                result->childrens()[0]->size()));
                 return result;
             }
 
             if (blocking_state) {
+                tracer::AddEvent(fmt::format("driver_{}_blocked", i));
                 futures[i] = blocking_state->future();
             }
 
@@ -210,6 +217,10 @@ Task::Next(ContinueFuture* future) {
                 std::rethrow_exception(error());
             }
         }
+
+        tracer::AddEvent(fmt::format("iteration: runnable={}, blocked={}",
+                                     runnable_drivers,
+                                     blocked_drivers));
 
         if (runnable_drivers == 0) {
             if (blocked_drivers > 0) {

@@ -303,6 +303,7 @@ TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
 
 TargetBitmap
 TextMatchIndex::MatchQuery(const std::string& query) {
+    tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
     if (shouldTriggerCommit()) {
         Commit();
         Reload();
@@ -318,6 +319,8 @@ TextMatchIndex::MatchQuery(const std::string& query) {
 
 TargetBitmap
 TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
+    tracer::AutoSpan span("TextMatchIndex::PhraseMatchQuery",
+                          tracer::GetRootSpan());
     if (shouldTriggerCommit()) {
         Commit();
         Reload();
