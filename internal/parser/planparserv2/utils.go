@@ -159,7 +159,7 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 		}
 	}
 	if typeutil.IsGeometryType(lDataType) {
-		if typeutil.IsGeometryType(rDataType) || typeutil.IsJSONType(rDataType) {
+		if typeutil.IsGeometryType(rDataType) {
 			return schemapb.DataType_Geometry, nil
 		}
 	}

@@ -30,11 +30,6 @@ class Geometry {
         }
     }
 
-    // Constructor from raw GEOS geometry (lightweight wrapper)
-    explicit Geometry(GEOSContextHandle_t ctx, GEOSGeometry* geom)
-        : geometry_(geom), ctx_(ctx) {
-    }
-
     // Constructor from WKB data
     explicit Geometry(GEOSContextHandle_t ctx, const void* wkb, size_t size)
         : ctx_(ctx) {
@@ -61,10 +56,6 @@ class Geometry {
         AssertInfo(geom != nullptr,
                    "Failed to construct geometry from WKT data");
         geometry_ = geom;
-    }
-
-    Geometry(GEOSContextHandle_t ctx, const Geometry& other)
-        : geometry_(other.geometry_), ctx_(other.ctx_) {
     }
 
     // Copy assignment
