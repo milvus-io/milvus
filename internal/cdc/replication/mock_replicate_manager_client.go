@@ -85,35 +85,35 @@ func (_c *MockReplicateManagerClient_CreateReplicator_Call) RunAndReturn(run fun
 	return _c
 }
 
-// RemoveOutOfTargetReplicators provides a mock function with given fields: targetReplicatePChannels
-func (_m *MockReplicateManagerClient) RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta) {
-	_m.Called(targetReplicatePChannels)
+// RemoveReplicator provides a mock function with given fields: replicateInfo
+func (_m *MockReplicateManagerClient) RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
+	_m.Called(replicateInfo)
 }
 
-// MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveOutOfTargetReplicators'
-type MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call struct {
+// MockReplicateManagerClient_RemoveReplicator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveReplicator'
+type MockReplicateManagerClient_RemoveReplicator_Call struct {
 	*mock.Call
 }
 
-// RemoveOutOfTargetReplicators is a helper method to define mock.On call
-//   - targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta
-func (_e *MockReplicateManagerClient_Expecter) RemoveOutOfTargetReplicators(targetReplicatePChannels interface{}) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
-	return &MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call{Call: _e.mock.On("RemoveOutOfTargetReplicators", targetReplicatePChannels)}
+// RemoveReplicator is a helper method to define mock.On call
+//   - replicateInfo *streamingpb.ReplicatePChannelMeta
+func (_e *MockReplicateManagerClient_Expecter) RemoveReplicator(replicateInfo interface{}) *MockReplicateManagerClient_RemoveReplicator_Call {
+	return &MockReplicateManagerClient_RemoveReplicator_Call{Call: _e.mock.On("RemoveReplicator", replicateInfo)}
 }
 
-func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) Run(run func(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+func (_c *MockReplicateManagerClient_RemoveReplicator_Call) Run(run func(replicateInfo *streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveReplicator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*streamingpb.ReplicatePChannelMeta))
+		run(args[0].(*streamingpb.ReplicatePChannelMeta))
 	})
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) Return() *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+func (_c *MockReplicateManagerClient_RemoveReplicator_Call) Return() *MockReplicateManagerClient_RemoveReplicator_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) RunAndReturn(run func([]*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+func (_c *MockReplicateManagerClient_RemoveReplicator_Call) RunAndReturn(run func(*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveReplicator_Call {
 	_c.Run(run)
 	return _c
 }

@@ -18,70 +18,125 @@ package controllerimpl
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
-	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-const checkInterval = 10 * time.Second
-
 type controller struct {
-	ctx      context.Context
-	wg       sync.WaitGroup
-	stopOnce sync.Once
-	stopChan chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 func NewController() *controller {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &controller{
-		ctx:      context.Background(),
-		stopChan: make(chan struct{}),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
-func (c *controller) Start() {
-	log.Ctx(c.ctx).Info("CDC controller started")
+func (c *controller) Start() error {
+	if err := c.recoverReplicatePChannelMeta(); err != nil {
+		return err
+	}
+	c.startWatchLoop()
+	return nil
+}
+
+func (c *controller) recoverReplicatePChannelMeta() error {
+	replicataMetas, err := resource.Resource().ReplicationCatalog().ListReplicatePChannels(c.ctx)
+	if err != nil {
+		return err
+	}
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	for _, replicate := range replicataMetas {
+		if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
+			// current cluster is not source cluster, skip create replicator
+			continue
+		}
+		log.Info("recover replicate pchannel meta",
+			zap.String("sourceChannel", replicate.GetSourceChannelName()),
+			zap.String("targetChannel", replicate.GetTargetChannelName()),
+		)
+		resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
+	}
+	return nil
+}
+
+func (c *controller) startWatchLoop() {
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	prefix := streamingcoord.ReplicatePChannelMetaPrefix
+	eventCh := resource.Resource().WatchKV().WatchWithPrefix(c.ctx, prefix)
+
 	c.wg.Add(1)
 	go func() {
+		log.Info("start to watch replicate pchannel meta", zap.String("prefix", prefix))
 		defer c.wg.Done()
-		timer := time.NewTicker(checkInterval)
-		defer timer.Stop()
 		for {
 			select {
-			case <-c.stopChan:
+			case <-c.ctx.Done():
 				return
-			case <-timer.C:
-				c.run()
+			case event, ok := <-eventCh:
+				if !ok {
+					panic("etcd event channel closed")
+				}
+				if err := event.Err(); err != nil {
+					if err == rpctypes.ErrCompacted {
+						c.startWatchLoop() // restart watch loop if etcd compacted
+						return
+					}
+					panic(fmt.Sprintf("failed to handle etcd event: %v", err))
+				}
+				for _, e := range event.Events {
+					replicate := c.mustParseReplicatePChannelMeta(e)
+					log.Info("handle replicate pchannel event",
+						zap.String("sourceChannel", replicate.GetSourceChannelName()),
+						zap.String("targetChannel", replicate.GetTargetChannelName()),
+						zap.String("eventType", e.Type.String()),
+					)
+					switch e.Type {
+					case mvccpb.PUT:
+						if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
+							// current cluster is not source cluster, skip create replicator
+							continue
+						}
+						resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
+					case mvccpb.DELETE:
+						resource.Resource().ReplicateManagerClient().RemoveReplicator(replicate)
+					}
+				}
 			}
 		}
 	}()
 }
 
-func (c *controller) Stop() {
-	c.stopOnce.Do(func() {
-		log.Ctx(c.ctx).Info("CDC controller stopping...")
-		close(c.stopChan)
-		c.wg.Wait()
-		resource.Resource().ReplicateManagerClient().Close()
-		log.Ctx(c.ctx).Info("CDC controller stopped")
-	})
+func (c *controller) mustParseReplicatePChannelMeta(e *clientv3.Event) *streamingpb.ReplicatePChannelMeta {
+	meta := &streamingpb.ReplicatePChannelMeta{}
+	err := proto.Unmarshal(e.Kv.Value, meta)
+	if err != nil {
+		panic(fmt.Sprintf("failed to unmarshal replicate pchannel meta: %v", err))
+	}
+	return meta
 }
 
-func (c *controller) run() {
-	targetReplicatePChannels, err := resource.Resource().ReplicationCatalog().ListReplicatePChannels(c.ctx)
-	if err != nil {
-		log.Ctx(c.ctx).Error("failed to get replicate pchannels", zap.Error(err))
-		return
-	}
-	// create replicators for all replicate pchannels
-	for _, replicatePChannel := range targetReplicatePChannels {
-		resource.Resource().ReplicateManagerClient().CreateReplicator(replicatePChannel)
-	}
-
-	// remove out of target replicators
-	resource.Resource().ReplicateManagerClient().RemoveOutOfTargetReplicators(targetReplicatePChannels)
+func (c *controller) Stop() {
+	log.Ctx(c.ctx).Info("stop CDC controller...")
+	c.cancel()
+	c.wg.Wait()
+	resource.Resource().ReplicateManagerClient().Close()
+	log.Ctx(c.ctx).Info("CDC controller stopped")
 }

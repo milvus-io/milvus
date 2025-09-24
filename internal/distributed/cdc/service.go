@@ -32,14 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,7 +46,7 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	metaKV    kv.MetaKv
+	watchKV   kv.WatchKV
 	cdcServer *cdc.CDCServer
 
 	etcdCli *clientv3.Client
@@ -146,7 +144,7 @@ func (s *Server) init() (err error) {
 	// Create CDC service.
 	s.cdcServer = cdc.NewCDCServer(s.ctx)
 	resource.Init(
-		resource.OptMetaKV(s.metaKV),
+		resource.OptWatchKV(s.watchKV),
 		resource.OptReplicateManagerClient(replicatemanager.NewReplicateManager()),
 		resource.OptController(controllerimpl.NewController()),
 	)
@@ -176,18 +174,11 @@ func (s *Server) initMeta() error {
 	log.Info("cdc connecting to metadata store", zap.String("metaType", metaType))
 	metaRootPath := ""
 	if metaType == util.MetaStoreTypeTiKV {
-		var err error
-		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
-		if err != nil {
-			log.Warn("cdc init tikv client failed", zap.Error(err))
-			return err
-		}
-		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
-		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
-			tikvkv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+		// TODO: sheep, support watch operation for tikv
+		panic("tikv is not supported for cdc")
 	} else if metaType == util.MetaStoreTypeEtcd {
 		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
-		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
+		s.watchKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
 			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	}
 	return nil
