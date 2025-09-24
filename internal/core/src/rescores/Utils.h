@@ -48,7 +48,7 @@ function_score_merge(const float& a,
 
 double
 hash_to_double(const uint64_t& h) {
-    auto double_bytes = (MAGIC_BITS | (h & 0x1FFFFFFFFFFFFF));
+    auto double_bytes = (MAGIC_BITS | (h & 0xFFFFFFFFFFFFF));
     double result;
     memcpy(&result, &double_bytes, sizeof(result));
     return result - 1.0;

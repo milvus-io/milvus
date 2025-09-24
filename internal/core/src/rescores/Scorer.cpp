@@ -87,6 +87,8 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
     Assert(bitmap.size() == offsets.size());
     FixedVector<int64_t> target_offsets;
     FixedVector<int> idx;
+    target_offsets.reserve(offsets.size());
+    idx.reserve(offsets.size());
 
     for (auto i = 0; i < offsets.size(); i++) {
         if (bitmap[i] > 0) {
@@ -112,6 +114,8 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
                           std::vector<std::optional<float>>& boost_scores) {
     FixedVector<int64_t> target_offsets;
     FixedVector<int> idx;
+    target_offsets.reserve(offsets.size());
+    idx.reserve(offsets.size());
 
     for (auto i = 0; i < offsets.size(); i++) {
         if (bitmap[offsets[i]] > 0) {
