@@ -171,9 +171,11 @@ DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
-
+    auto fs = fs_;
+    if (!fs) {
+        fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                 .GetArrowFileSystem();
+    }
     auto remote_file = fs->OpenInputFile(remote_file_path);
     AssertInfo(remote_file.ok(), "failed to open remote file");
     return std::static_pointer_cast<milvus::InputStream>(
@@ -186,9 +188,11 @@ DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
-
+    auto fs = fs_;
+    if (!fs) {
+        fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                 .GetArrowFileSystem();
+    }
     auto remote_stream = fs->OpenOutputStream(remote_file_path);
     AssertInfo(remote_stream.ok(),
                "failed to open remote stream, reason: {}",

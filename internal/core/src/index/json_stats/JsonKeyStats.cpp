@@ -22,6 +22,7 @@
 #include "index/json_stats/bson_builder.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "storage/MmapManager.h"
 #include "storage/Util.h"
 #include "common/bson_view.h"
@@ -76,8 +77,12 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
         // TODO: add params to modify batch size and max file size
         auto conf = milvus_storage::StorageConfig();
         conf.part_size = DEFAULT_PART_UPLOAD_SIZE;
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+        auto trueFs = ctx.fs;
+        // try singleton if possible
+        if (!trueFs) {
+            trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                         .GetArrowFileSystem();
+        }
         if (!trueFs) {
             ThrowInfo(ErrorCode::UnexpectedError, "Failed to get filesystem");
         }
