@@ -16,6 +16,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+const (
+	BoostRandomScoreKey    = "random_score"
+	BoostModeKey           = "boost_mode"
+	BoostFunctionModeKey   = "function_mode"
+	RandomScoreSeedKey     = "seed"
+	RandomScoreFileNameKey = "field"
+	RandomScoreFileIdKey   = "field_id"
+)
+
 func IsBool(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:
