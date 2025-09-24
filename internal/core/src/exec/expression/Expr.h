@@ -1306,8 +1306,7 @@ class SegmentExpr : public Expr {
     bool
     HasJsonStats(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
-               static_cast<const segcore::SegmentSealed*>(segment_)
-                       ->GetJsonStats(op_ctx_, field_id) != nullptr;
+               segment_->GetJsonStats(op_ctx_, field_id).get() != nullptr;
     }
 
     bool

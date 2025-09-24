@@ -41,6 +41,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "exec/expression/ExprCache.h"
 #include "monitor/Monitor.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -509,6 +510,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
     try {
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        auto span = milvus::tracer::StartSpan("SegCoreLoadJsonStats", &ctx);
+        milvus::tracer::SetRootSpan(span);
+
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment =
@@ -544,28 +548,25 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
         }
 
+        milvus::segcore::storagev2translator::JsonStatsLoadInfo load_info{
+            info_proto->enable_mmap(),
+            info_proto->mmap_dir_path(),
+            segment->get_segment_id(),
+            info_proto->fieldid(),
+            info_proto->stats_size()};
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
-        auto index =
-            std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
-        {
-            milvus::ScopedTimer timer(
-                "json_stats_load",
-                [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_load.Observe(
-                        ms);
-                },
-                milvus::ScopedTimer::LogLevel::Info);
-            index->Load(ctx, config);
-        }
+        std::unique_ptr<
+            milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
+            translator = std::make_unique<
+                milvus::segcore::storagev2translator::JsonStatsTranslator>(
+                load_info, ctx, file_ctx, config);
 
-        segment->LoadJsonStats(milvus::FieldId(info_proto->fieldid()),
-                               std::move(index));
-
-        LOG_INFO("load json stats success for field:{} of segment:{}",
-                 info_proto->fieldid(),
-                 segment->get_segment_id());
+        segment->LoadJsonStats(
+            milvus::FieldId(info_proto->fieldid()),
+            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+                std::move(translator)));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

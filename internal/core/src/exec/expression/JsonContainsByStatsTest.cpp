@@ -19,6 +19,8 @@
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "cachinglayer/Manager.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -34,7 +36,7 @@ using namespace milvus::index;
 
 namespace {
 
-std::shared_ptr<JsonKeyStats>
+milvus::index::CacheJsonKeyStatsPtr
 BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                          const milvus::FieldId json_fid,
                          const std::string& root_path,
@@ -108,9 +110,22 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     load_config[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
 
-    auto reader = std::make_shared<JsonKeyStats>(ctx, true);
-    reader->Load(milvus::tracer::TraceContext{}, load_config);
-    return reader;
+    milvus::segcore::storagev2translator::JsonStatsLoadInfo load_info{
+        /* enable_mmap */ false,
+        /* mmap_dir_path */ "",
+        /* segment_id */ segment_id,
+        /* field_id */ field_id,
+        /* stats_size */ 0};
+
+    std::unique_ptr<
+        milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
+        base_translator = std::make_unique<
+            milvus::segcore::storagev2translator::JsonStatsTranslator>(
+            load_info, milvus::tracer::TraceContext{}, ctx, load_config);
+
+    auto slot = milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+        std::move(base_translator));
+    return slot;
 }
 
 }  // namespace

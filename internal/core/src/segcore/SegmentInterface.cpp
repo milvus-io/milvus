@@ -588,15 +588,4 @@ SegmentInternalInterface::GetNgramIndexForJson(
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
-index::JsonKeyStats*
-SegmentInternalInterface::GetJsonStats(milvus::OpContext* op_ctx,
-                                       FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = json_stats_.find(field_id);
-    if (iter == json_stats_.end()) {
-        return nullptr;
-    }
-    return iter->second.get();
-}
-
 }  // namespace milvus::segcore
