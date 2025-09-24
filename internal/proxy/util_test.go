@@ -4138,7 +4138,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{
 				FieldName: "test_struct[sub_field]",
-				FieldId:   1021,  // Use the correct field ID that matches the schema
+				FieldId:   1021, // Use the correct field ID that matches the schema
 				Type:      schemapb.DataType_Array,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
