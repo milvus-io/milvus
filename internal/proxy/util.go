@@ -2765,7 +2765,7 @@ func getDbTimezone(dbInfo *databaseInfo) (bool, string) {
 	return getDefaultTimezoneVal(dbInfo.properties...)
 }
 
-func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, dbTimezone string) error {
+func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string) error {
 	naiveLayouts := []string{
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02T15:04:05",
@@ -2799,8 +2799,6 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 			defaultTZ := "UTC"
 			if colTimezone != "" {
 				defaultTZ = colTimezone
-			} else if dbTimezone != "" {
-				defaultTZ = dbTimezone
 			}
 
 			location, err := time.LoadLocation(defaultTZ)

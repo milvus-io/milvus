@@ -256,7 +256,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	// trans timestamptz data
 	_, colTimezone := getColTimezone(colInfo)
-	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone, "")
+	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone)
 	if err != nil {
 		return err
 	}
