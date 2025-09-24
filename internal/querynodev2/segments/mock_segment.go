@@ -179,6 +179,39 @@ func (_c *MockSegment_CASVersion_Call) RunAndReturn(run func(int64, int64) bool)
 	return _c
 }
 
+// ChargeLogicalResourceUsage provides a mock function with given fields: usage
+func (_m *MockSegment) ChargeLogicalResourceUsage(usage ResourceUsage) {
+	_m.Called(usage)
+}
+
+// MockSegment_ChargeLogicalResourceUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChargeLogicalResourceUsage'
+type MockSegment_ChargeLogicalResourceUsage_Call struct {
+	*mock.Call
+}
+
+// ChargeLogicalResourceUsage is a helper method to define mock.On call
+//   - usage ResourceUsage
+func (_e *MockSegment_Expecter) ChargeLogicalResourceUsage(usage interface{}) *MockSegment_ChargeLogicalResourceUsage_Call {
+	return &MockSegment_ChargeLogicalResourceUsage_Call{Call: _e.mock.On("ChargeLogicalResourceUsage", usage)}
+}
+
+func (_c *MockSegment_ChargeLogicalResourceUsage_Call) Run(run func(usage ResourceUsage)) *MockSegment_ChargeLogicalResourceUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ResourceUsage))
+	})
+	return _c
+}
+
+func (_c *MockSegment_ChargeLogicalResourceUsage_Call) Return() *MockSegment_ChargeLogicalResourceUsage_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_ChargeLogicalResourceUsage_Call) RunAndReturn(run func(ResourceUsage)) *MockSegment_ChargeLogicalResourceUsage_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Collection provides a mock function with no fields
 func (_m *MockSegment) Collection() int64 {
 	ret := _m.Called()
@@ -1468,6 +1501,39 @@ func (_c *MockSegment_PinIfNotReleased_Call) Return(_a0 error) *MockSegment_PinI
 
 func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *MockSegment_PinIfNotReleased_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RefundLogicalResourceUsage provides a mock function with given fields: usage
+func (_m *MockSegment) RefundLogicalResourceUsage(usage ResourceUsage) {
+	_m.Called(usage)
+}
+
+// MockSegment_RefundLogicalResourceUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefundLogicalResourceUsage'
+type MockSegment_RefundLogicalResourceUsage_Call struct {
+	*mock.Call
+}
+
+// RefundLogicalResourceUsage is a helper method to define mock.On call
+//   - usage ResourceUsage
+func (_e *MockSegment_Expecter) RefundLogicalResourceUsage(usage interface{}) *MockSegment_RefundLogicalResourceUsage_Call {
+	return &MockSegment_RefundLogicalResourceUsage_Call{Call: _e.mock.On("RefundLogicalResourceUsage", usage)}
+}
+
+func (_c *MockSegment_RefundLogicalResourceUsage_Call) Run(run func(usage ResourceUsage)) *MockSegment_RefundLogicalResourceUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ResourceUsage))
+	})
+	return _c
+}
+
+func (_c *MockSegment_RefundLogicalResourceUsage_Call) Return() *MockSegment_RefundLogicalResourceUsage_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_RefundLogicalResourceUsage_Call) RunAndReturn(run func(ResourceUsage)) *MockSegment_RefundLogicalResourceUsage_Call {
+	_c.Run(run)
 	return _c
 }
 

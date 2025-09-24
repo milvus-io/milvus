@@ -380,6 +380,18 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At FinishLoad")
 		}
 
+		reqLogicalUsage, err := estimateLogicalResourceUsageOfSegment(collection.Schema(), loadInfo, resourceEstimateFactor{
+			deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+			TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+			TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+			TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
+		})
+		if err != nil {
+			return errors.Wrap(err, "At estimateLogicalResourceUsageOfSegment")
+		}
+
+		segment.ChargeLogicalResourceUsage(*reqLogicalUsage)
+
 		if segment.Level() != datapb.SegmentLevel_L0 {
 			loader.manager.Segment.Put(ctx, segmentType, segment)
 		}
@@ -2209,7 +2221,22 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 		loader.notifyLoadFinish(loadInfo)
 	}
 
-	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
+	err = loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
+	if err != nil {
+		return err
+	}
+
+	reqLogicalUsage, err := estimateLogicalResourceUsageOfSegment(segment.GetCollection().Schema(), loadInfo, resourceEstimateFactor{
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
+	})
+	if err != nil {
+		return err
+	}
+	segment.ChargeLogicalResourceUsage(*reqLogicalUsage)
+	return nil
 }
 
 func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
