@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -171,6 +172,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			log.Warn("failed to get partition ids", zap.Error(err))
 			return err
 		}
+	}
+	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
+	if err != nil {
+		return err
 	}
 
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
@@ -454,6 +459,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		plan.OutputFieldIds = nil
 		plan.DynamicFields = nil
+		plan.Namespace = t.request.Namespace
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
@@ -565,6 +571,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
 	}
+	plan.Namespace = t.request.Namespace
 
 	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
 	if err != nil {

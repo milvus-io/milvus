@@ -170,6 +170,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		OutputFields:          []string{"*"},
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    t.BeginTs(),
+		Namespace:             t.req.Namespace,
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
 	if err != nil {
@@ -200,6 +201,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	}
 
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+	plan.Namespace = t.req.Namespace
 	qt := &queryTask{
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
@@ -956,6 +958,11 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+
+	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
+	if err != nil {
+		return err
+	}
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
