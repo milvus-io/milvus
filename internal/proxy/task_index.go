@@ -287,7 +287,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
 				// override int vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+				for k, v := range Params.AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap() {
 					indexParamsMap[k] = v
 				}
 			}
@@ -361,7 +361,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsIntVectorType(cit.fieldSchema.ElementType)) {
 				// override int vector index params by autoindex
-				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+				config = Params.AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap()
 			}
 			if !exist {
 				if err := handle(0, config); err != nil {

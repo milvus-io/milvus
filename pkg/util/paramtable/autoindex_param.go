@@ -36,6 +36,7 @@ type AutoIndexConfig struct {
 	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
 	IndexParams            ParamItem  `refreshable:"true"`
+	IntVectorIndexParams   ParamItem  `refreshable:"true"`
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
@@ -100,6 +101,15 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
+
+	p.IntVectorIndexParams = ParamItem{
+		Key:          "autoIndex.params.int8.build",
+		Version:      "2.6.4",
+		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
+		Formatter:    GetBuildParamFormatter(IntVectorDefaultMetricType, "autoIndex.params.int.build"),
+		Export:       true,
+	}
+	p.IntVectorIndexParams.Init(base.mgr)
 
 	p.BinaryIndexParams = ParamItem{
 		Key:          "autoIndex.params.binary.build",

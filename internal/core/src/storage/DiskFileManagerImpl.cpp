@@ -1026,6 +1026,8 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<int8_t>(const Config& config);
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {

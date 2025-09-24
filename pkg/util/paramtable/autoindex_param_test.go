@@ -65,6 +65,24 @@ func TestAutoIndexParams_build(t *testing.T) {
 		assert.Equal(t, strconv.Itoa(map2["nlist"].(int)), CParams.AutoIndexConfig.IndexParams.GetAsJSONMap()["nlist"])
 	})
 
+	t.Run("test parseIntVectorBuildParams success", func(t *testing.T) {
+		var err error
+		map1 := map[string]any{
+			IndexTypeKey:     "HNSW",
+			"M":              24,
+			"efConstruction": 200,
+			"metric_type":    "COSINE",
+		}
+		var jsonStrBytes []byte
+		jsonStrBytes, err = json.Marshal(map1)
+		assert.NoError(t, err)
+		bt.Save(CParams.AutoIndexConfig.IntVectorIndexParams.Key, string(jsonStrBytes))
+		intVectorParams := CParams.AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap()
+		assert.Equal(t, "HNSW", intVectorParams[IndexTypeKey])
+		assert.Equal(t, strconv.Itoa(map1["M"].(int)), intVectorParams["M"])
+		assert.Equal(t, strconv.Itoa(map1["efConstruction"].(int)), intVectorParams["efConstruction"])
+		assert.Equal(t, "COSINE", intVectorParams["metric_type"])
+	})
 	t.Run("test parseSparseBuildParams success", func(t *testing.T) {
 		// Params := CParams.AutoIndexConfig
 		// buildParams := make([string]interface)
