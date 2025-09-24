@@ -82,7 +82,7 @@ const (
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
-func concatStructFieldName(structName string, fieldName string) string {
+func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
 }
 
@@ -93,7 +93,7 @@ func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
 		structName := structArrayField.Name
 		for _, field := range structArrayField.Fields {
 			// Create transformed name: structName[fieldName]
-			newName := concatStructFieldName(structName, field.Name)
+			newName := ConcatStructFieldName(structName, field.Name)
 			field.Name = newName
 		}
 	}
@@ -1934,7 +1934,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 
-			transformedFieldName := concatStructFieldName(structName, subField.FieldName)
+			transformedFieldName := ConcatStructFieldName(structName, subField.FieldName)
 			subFieldCopy := &schemapb.FieldData{
 				FieldName: transformedFieldName,
 				FieldId:   subField.FieldId,
