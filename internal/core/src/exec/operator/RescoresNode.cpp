@@ -89,7 +89,7 @@ PhyRescoresNode::GetOutput() {
     }
 
     std::vector<std::optional<float>> boost_scores(offsets.size());
-    auto function_mode = option_.function_mode();
+    auto function_mode = option_->function_mode();
 
     for (auto& scorer : scorers_) {
         auto filter = scorer->filter();
@@ -144,24 +144,28 @@ PhyRescoresNode::GetOutput() {
     }
 
     // calculate final score
-    auto boost_mode = option_.boost_mode();
-    for (auto i = 0; i < offsets.size(); i++) {
-        if (boost_scores[i].has_value()) {
-            switch (boost_mode) {
-                case proto::plan::BoostModeMultiply:
+    auto boost_mode = option_->boost_mode();
+    switch (boost_mode) {
+        case proto::plan::BoostModeMultiply:
+            for (auto i = 0; i < offsets.size(); i++) {
+                if (boost_scores[i].has_value()) {
                     search_result.distances_[offset_idx[i]] *=
                         boost_scores[i].value();
-                    break;
-                case proto::plan::BoostModeSum:
+                }
+            }
+            break;
+        case proto::plan::BoostModeSum:
+            for (auto i = 0; i < offsets.size(); i++) {
+                if (boost_scores[i].has_value()) {
                     search_result.distances_[offset_idx[i]] +=
                         boost_scores[i].value();
-                    break;
-                default:
-                    ThrowInfo(ErrorCode::UnexpectedError,
-                              fmt::format("unknown boost function mode: {}",
-                                          boost_mode));
+                }
             }
-        }
+
+            break;
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      fmt::format("unknown boost boost mode: {}", boost_mode));
     }
 
     knowhere::MetricType metric_type = query_context_->get_metric_type();

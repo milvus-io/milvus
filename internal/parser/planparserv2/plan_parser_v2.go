@@ -409,7 +409,7 @@ func ParseFunctionMode(s string) (planpb.FunctionMode, error) {
 	case "sum":
 		return planpb.FunctionMode_FunctionModeSum, nil
 	default:
-		return 0, merr.WrapErrParameterInvalidMsg("unknown boost mode: %s", s)
+		return 0, merr.WrapErrParameterInvalidMsg("unknown function mode: %s", s)
 	}
 }
 

@@ -462,9 +462,9 @@ class RescoresNode : public PlanNode {
         return sources_;
     }
 
-    const proto::plan::ScoreOption
+    const proto::plan::ScoreOption*
     option() const {
-        return option_;
+        return &option_;
     }
 
     const std::vector<std::shared_ptr<rescores::Scorer>>&
