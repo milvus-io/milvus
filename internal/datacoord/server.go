@@ -438,6 +438,7 @@ func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
 	s.fileManager.Start()
+	s.fileManager.Notify()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -1085,6 +1086,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
+	s.fileManager.Close()
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
