@@ -135,17 +135,18 @@ func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 			return err, false
 		}
 
+		defer file.Close()
 		writer := bufio.NewWriter(file)
 
 		err = stats.SerializeToWriter(writer)
 		if err != nil {
 			return err, false
 		}
+
 		err = writer.Flush()
 		if err != nil {
 			return err, false
 		}
-		file.Close()
 	}
 
 	return nil, false
