@@ -461,6 +461,14 @@ class InsertRecordSealed {
         }
     }
 
+    ~InsertRecordSealed() {
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
+    }
+
     bool
     contain(const PkType& pk) const {
         return pk2offset_->contain(pk);
@@ -587,9 +595,11 @@ class InsertRecordSealed {
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         reserved = 0;
-        cachinglayer::Manager::GetInstance().RefundLoadedResource(
-            {static_cast<int64_t>(estimated_memory_size_), 0});
-        estimated_memory_size_ = 0;
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
     }
 
  public:
