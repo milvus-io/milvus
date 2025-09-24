@@ -2491,6 +2491,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	})
 	SetReportValue(dr.result.GetStatus(), v)
 
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()))
+	metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()))
+	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
+		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
+		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
+	})
+
 	if merr.Ok(dr.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
 	}
@@ -2621,6 +2628,9 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.FailCntKey:         len(it.result.ErrIndex),
 	})
 	SetReportValue(it.result.GetStatus(), v)
+	SetStorageCost(it.result.GetStatus(), it.storageCost)
+	metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes))
+	metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes))
 	if merr.Ok(it.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
