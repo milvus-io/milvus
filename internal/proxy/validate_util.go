@@ -64,13 +64,16 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		}
 		geomT, err := wkb.Unmarshal(data)
 		if err != nil {
-			log.Error("translate the wkb format search result into geometry failed")
+			log.Error("translate the wkb format search result into geometry failed",
+				zap.String("data", string(data)),
+				zap.Int("index", i),
+				zap.Error(err))
 			return err
 		}
 		// now remove MaxDecimalDigits limit
 		wktStr, err := wkt.Marshal(geomT)
 		if err != nil {
-			log.Error("translate the geomery  into its wkt failed")
+			log.Error("translate the geomery  into its wkt failed", zap.Error(err))
 			return err
 		}
 		wktArray[i] = wktStr
@@ -733,6 +736,10 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
 			return merr.WrapErrIoFailedReason(err.Error())
 		}
+		log.Debug("insert Geometry data!! Transform to wkb success",
+			zap.Int("index", index),
+			zap.String("wkt", string(wktdata)),
+			zap.String("wkb", string(wkbArray[index])))
 	}
 	// replace the field data with wkb data array
 	*field = schemapb.FieldData{
