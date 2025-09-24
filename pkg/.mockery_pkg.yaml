@@ -8,6 +8,7 @@ packages:
   github.com/milvus-io/milvus/pkg/v2/kv:
     interfaces:
       MetaKv:
+      WatchKV:
   github.com/milvus-io/milvus/pkg/v2/streaming/util/message:
     interfaces:
       MessageID:
