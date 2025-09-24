@@ -101,7 +101,7 @@ type meta struct {
 	statsTaskMeta      *statsTaskMeta
 
 	// File Resource Meta
-	resourceMeta    map[string]*internalpb.FileResourceInfo
+	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
 }
