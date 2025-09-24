@@ -45,6 +45,10 @@ type FileResourceManager struct {
 	notifyCh chan struct{}
 	sf       conc.Singleflight[any]
 	once     sync.Once
+
+	// close
+	closeCh chan struct{}
+	wg      sync.WaitGroup
 }
 
 func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session.NodeManager) *FileResourceManager {
@@ -54,13 +58,15 @@ func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session
 		nodeManager:  nodeManager,
 		distribution: map[int64]uint64{},
 
-		notifyCh: make(chan struct{}, 1),
-		sf:       conc.Singleflight[any]{},
+		closeCh: make(chan struct{}),
+		sf:      conc.Singleflight[any]{},
 	}
 }
 
 func (m *FileResourceManager) syncLoop() {
-	for range m.notifyCh {
+	defer m.wg.Done()
+	select {
+	case <-m.notifyCh:
 		err := m.sync()
 		if err != nil {
 			// retry if error exist
@@ -70,19 +76,33 @@ func (m *FileResourceManager) syncLoop() {
 				return nil, nil
 			})
 		}
+	case <-m.closeCh:
+		return
 	}
 }
 
 func (m *FileResourceManager) Start() {
 	if fileresource.IsSyncMode(paramtable.Get().DataCoordCfg.FileResourceMode.GetValue()) {
 		m.once.Do(func() {
+			m.notifyCh = make(chan struct{}, 1)
+			m.wg.Add(1)
 			go m.syncLoop()
-			m.Notify()
 		})
 	}
 }
 
+func (m *FileResourceManager) Close() {
+	close(m.closeCh)
+	m.wg.Wait()
+}
+
+// notify sync file resource to datanode
+// if file resource mode was Sync
 func (m *FileResourceManager) Notify() {
+	if m.notifyCh == nil {
+		return
+	}
+
 	select {
 	case m.notifyCh <- struct{}{}:
 	default:
