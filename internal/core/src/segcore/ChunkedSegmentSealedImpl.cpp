@@ -557,6 +557,10 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                     std::make_shared<ChunkedVariableColumn<std::string>>(
                         field_meta, chunks);
                 // var_column->Seal(std::move(indices));
+
+                // Construct GeometryCache for the entire field
+                LoadGeometryCache(field_id, *var_column);
+
                 column = std::move(var_column);
                 break;
             }
@@ -1314,8 +1318,14 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
-    // Clean up geometry cache for all fields in this segment using global function
-    milvus::RemoveSegmentGeometryCaches(get_segment_id());
+    // Clean up geometry cache for all fields in this segment
+    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
+    cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
+
+    if (ctx_) {
+        GEOS_finish_r(ctx_);
+        ctx_ = nullptr;
+    }
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
@@ -2235,17 +2245,20 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
         auto num_chunks = var_column.num_chunks();
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             // Get all string views from this chunk
-            auto [string_views, valid_data] = var_column.StringViews(chunk_id);
+            auto [string_views, valid_data] =
+                static_cast<const ChunkedColumnBase&>(var_column)
+                    .StringViews(chunk_id, std::nullopt);
 
             // Add each string view to the geometry cache
             for (size_t i = 0; i < string_views.size(); ++i) {
                 if (valid_data.empty() || valid_data[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(wkb_data.data(), wkb_data.size());
+                    geometry_cache.AppendData(
+                        ctx_, wkb_data.data(), wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(nullptr, 0);
+                    geometry_cache.AppendData(ctx_, nullptr, 0);
                 }
             }
         }

@@ -21,6 +21,8 @@
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "common/Types.h"
+#include "geos_c.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -36,7 +38,7 @@ class SimpleGeometryCache {
  public:
     // Append WKB data during field loading
     void
-    AppendData(const char* wkb_data, size_t size) {
+    AppendData(GEOSContextHandle_t ctx, const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
 
         if (size == 0 || wkb_data == nullptr) {
@@ -44,8 +46,8 @@ class SimpleGeometryCache {
             geometries_.emplace_back();
         } else {
             try {
-                // Create geometry directly in the vector
-                geometries_.emplace_back(wkb_data, size);
+                // Create geometry with cache's context
+                geometries_.emplace_back(ctx, wkb_data, size);
             } catch (const std::exception& e) {
                 PanicInfo(UnexpectedError,
                           "Failed to construct geometry from WKB data: {}",
@@ -64,7 +66,10 @@ class SimpleGeometryCache {
     const Geometry*
     GetByOffsetUnsafe(size_t offset) const {
         if (offset >= geometries_.size()) {
-            return nullptr;
+            PanicInfo(UnexpectedError,
+                      "Offset {} out of range: {}",
+                      offset,
+                      geometries_.size());
         }
 
         const auto& geometry = geometries_[offset];
@@ -83,13 +88,6 @@ class SimpleGeometryCache {
     Size() const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         return geometries_.size();
-    }
-
-    // Clear all cached geometries
-    void
-    Clear() {
-        std::lock_guard<std::shared_mutex> lock(mutex_);
-        geometries_.clear();
     }
 
     // Check if cache is loaded
@@ -131,7 +129,7 @@ class SimpleGeometryCacheManager {
     }
 
     void
-    RemoveCache(int64_t segment_id, FieldId field_id) {
+    RemoveCache(GEOSContextHandle_t ctx, int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto key = MakeCacheKey(segment_id, field_id);
         caches_.erase(key);
@@ -139,7 +137,7 @@ class SimpleGeometryCacheManager {
 
     // Remove all caches for a segment (useful when segment is destroyed)
     void
-    RemoveSegmentCaches(int64_t segment_id) {
+    RemoveSegmentCaches(GEOSContextHandle_t ctx, int64_t segment_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto segment_prefix = std::to_string(segment_id) + "_";
         auto it = caches_.begin();
@@ -195,15 +193,17 @@ GetGeometryByOffset(int64_t segment_id, FieldId field_id, size_t offset) {
 }
 
 inline void
-RemoveGeometryCache(int64_t segment_id, FieldId field_id) {
-    exec::SimpleGeometryCacheManager::Instance().RemoveCache(segment_id,
-                                                             field_id);
+RemoveGeometryCache(GEOSContextHandle_t ctx,
+                    int64_t segment_id,
+                    FieldId field_id) {
+    exec::SimpleGeometryCacheManager::Instance().RemoveCache(
+        ctx, segment_id, field_id);
 }
 
 inline void
-RemoveSegmentGeometryCaches(int64_t segment_id) {
+RemoveSegmentGeometryCaches(GEOSContextHandle_t ctx, int64_t segment_id) {
     exec::SimpleGeometryCacheManager::Instance().RemoveSegmentCaches(
-        segment_id);
+        ctx, segment_id);
 }
 
 }  // namespace milvus

@@ -17,7 +17,7 @@
 #include <vector>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
-#include "ogr_geometry.h"
+#include <geos_c.h>
 #include "pb/plan.pb.h"
 
 // Forward declaration to avoid pulling heavy field data headers here
@@ -86,7 +86,8 @@ class RTreeIndexWrapper {
      */
     void
     query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
-                     const OGRGeometry* query_geom,
+                     const GEOSGeometry* query_geom,
+                     GEOSContextHandle_t ctx,
                      std::vector<int64_t>& candidate_offsets);
 
     /**
@@ -101,15 +102,17 @@ class RTreeIndexWrapper {
 
  private:
     /**
-     * @brief Get bounding box from OGR geometry
+     * @brief Get bounding box from GEOS geometry
      * @param geom Input geometry
+     * @param ctx GEOS context handle
      * @param minX Output minimum X coordinate
      * @param minY Output minimum Y coordinate
      * @param maxX Output maximum X coordinate
      * @param maxY Output maximum Y coordinate
      */
     void
-    get_bounding_box(const OGRGeometry* geom,
+    get_bounding_box(const GEOSGeometry* geom,
+                     GEOSContextHandle_t ctx,
                      double& minX,
                      double& minY,
                      double& maxX,

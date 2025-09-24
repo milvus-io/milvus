@@ -23,8 +23,6 @@
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "log/Log.h"
-#include "ogr_core.h"
-#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
@@ -487,11 +485,10 @@ ProtoParser::ParseGISFunctionFilterExprs(
     auto field_id = FieldId(columnInfo.field_id());
     auto data_type = schema[field_id].get_data_type();
     Assert(data_type == (DataType)columnInfo.data_type());
-    const std::string& str = expr_pb.wkt_string();
-    Geometry geometry(str.data());
 
-    return std::make_shared<expr::GISFunctionFilterExpr>(
-        columnInfo, expr_pb.op(), geometry, expr_pb.distance());
+    auto expr = std::make_shared<expr::GISFunctionFilterExpr>(
+        columnInfo, expr_pb.op(), expr_pb.wkt_string(), expr_pb.distance());
+    return expr;
 }
 
 expr::TypedExprPtr

@@ -491,11 +491,12 @@ TEST(chunk, test_geometry_field) {
     std::string point1_wkt = "POINT(0 0)";
     std::string point2_wkt = "POINT(1 1)";
     std::string point3_wkt = "POINT(2 2)";
+    auto ctx = GEOS_init_r();
 
     // Convert WKT to WKB format
-    data.push_back(Geometry(point1_wkt.data()).to_wkb_string());
-    data.push_back(Geometry(point2_wkt.data()).to_wkb_string());
-    data.push_back(Geometry(point3_wkt.data()).to_wkb_string());
+    data.push_back(Geometry(ctx, point1_wkt.data()).to_wkb_string());
+    data.push_back(Geometry(ctx, point2_wkt.data()).to_wkb_string());
+    data.push_back(Geometry(ctx, point3_wkt.data()).to_wkb_string());
 
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::GEOMETRY);
@@ -532,15 +533,17 @@ TEST(chunk, test_geometry_field) {
     for (size_t i = 0; i < data.size(); ++i) {
         EXPECT_EQ(views.first[i], data[i]);
     }
+    GEOS_finish_r(ctx);
 }
 
 TEST(chunk, test_geometry_field_nullable_all_valid) {
     // Prepare geometry data (WKB strings) – all rows valid but nullable flag enabled
+    auto ctx = GEOS_init_r();
     FixedVector<std::string> data;
     data.reserve(3);
-    data.push_back(Geometry("POINT(0 0)").to_wkb_string());
-    data.push_back(Geometry("POINT(1 1)").to_wkb_string());
-    data.push_back(Geometry("POINT(2 2)").to_wkb_string());
+    data.push_back(Geometry(ctx, "POINT(0 0)").to_wkb_string());
+    data.push_back(Geometry(ctx, "POINT(1 1)").to_wkb_string());
+    data.push_back(Geometry(ctx, "POINT(2 2)").to_wkb_string());
 
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::GEOMETRY, true);
@@ -578,16 +581,19 @@ TEST(chunk, test_geometry_field_nullable_all_valid) {
     }
 
     delete[] valid_bitmap_all;
+
+    GEOS_finish_r(ctx);
 }
 
 TEST(chunk, test_geometry_field_mmap_with_nulls) {
     // Prepare geometry data with one NULL row (middle)
+    auto ctx = GEOS_init_r();
     FixedVector<std::string> data;
     data.reserve(3);
-    data.push_back(Geometry("POINT(0 0)").to_wkb_string());
+    data.push_back(Geometry(ctx, "POINT(0 0)").to_wkb_string());
     data.push_back(
-        Geometry("POINT(1 1)").to_wkb_string());  // will be marked NULL
-    data.push_back(Geometry("POINT(2 2)").to_wkb_string());
+        Geometry(ctx, "POINT(1 1)").to_wkb_string());  // will be marked NULL
+    data.push_back(Geometry(ctx, "POINT(2 2)").to_wkb_string());
 
     // Validity bitmap: 0b00000101 -> rows 0 and 2 valid, row 1 invalid
     uint8_t* valid_bitmap = new uint8_t[1]{0x05};
@@ -634,12 +640,14 @@ TEST(chunk, test_geometry_field_mmap_with_nulls) {
     }
     file.Close();
     delete[] valid_bitmap;
+    GEOS_finish_r(ctx);
 }
 
 TEST(array, test_geometry_array_output_data) {
     // Prepare two simple geometries (WKB strings)
-    std::string wkb1 = Geometry("POINT(10 10)").to_wkb_string();
-    std::string wkb2 = Geometry("POINT(20 20)").to_wkb_string();
+    auto ctx = GEOS_init_r();
+    std::string wkb1 = Geometry(ctx, "POINT(10 10)").to_wkb_string();
+    std::string wkb2 = Geometry(ctx, "POINT(20 20)").to_wkb_string();
 
     // Build raw buffer and offsets for two variable-length geometry elements
     // Need to support kGeometry in construct Array(const ScalarArray& field_data)
@@ -658,4 +666,5 @@ TEST(array, test_geometry_array_output_data) {
     ASSERT_EQ(serialized.geometry_data().data_size(), 2);
     EXPECT_EQ(serialized.geometry_data().data(0), wkb1);
     EXPECT_EQ(serialized.geometry_data().data(1), wkb2);
+    GEOS_finish_r(ctx);
 }

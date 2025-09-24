@@ -11,7 +11,6 @@
 
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 #include <filesystem>
 #include <fstream>
@@ -47,19 +46,32 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     AssertInfo(is_build_mode_, "Cannot add geometry in load mode");
 
-    // Parse WKB data to OGR geometry
-    OGRGeometry* geom = nullptr;
-    OGRErr err =
-        OGRGeometryFactory::createFromWkb(wkb_data, nullptr, &geom, len);
+    // Parse WKB data using GEOS for consistency
+    GEOSContextHandle_t ctx = GEOS_init_r();
+    if (ctx == nullptr) {
+        LOG_ERROR("Failed to initialize GEOS context for row {}", row_offset);
+        return;
+    }
 
-    if (err != OGRERR_NONE || geom == nullptr) {
+    GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
+    if (reader == nullptr) {
+        GEOS_finish_r(ctx);
+        LOG_ERROR("Failed to create GEOS WKB reader for row {}", row_offset);
+        return;
+    }
+
+    GEOSGeometry* geom = GEOSWKBReader_read_r(ctx, reader, wkb_data, len);
+    GEOSWKBReader_destroy_r(ctx, reader);
+
+    if (geom == nullptr) {
+        GEOS_finish_r(ctx);
         LOG_ERROR("Failed to parse WKB data for row {}", row_offset);
         return;
     }
 
     // Get bounding box
     double minX, minY, maxX, maxY;
-    get_bounding_box(geom, minX, minY, maxX, maxY);
+    get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
 
     // Create Boost box and insert
     Box box(Point(minX, minY), Point(maxX, maxY));
@@ -68,7 +80,8 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     rtree_.insert(val);
 
     // Clean up
-    OGRGeometryFactory::destroyGeometry(geom);
+    GEOSGeom_destroy_r(ctx, geom);
+    GEOS_finish_r(ctx);
 }
 
 // No IDataStream; bulk-load implemented directly for Boost R-tree
@@ -81,6 +94,20 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
 
     AssertInfo(is_build_mode_, "Cannot bulk load in load mode");
+
+    // Initialize GEOS context for bulk operations
+    GEOSContextHandle_t ctx = GEOS_init_r();
+    if (ctx == nullptr) {
+        LOG_ERROR("Failed to initialize GEOS context for bulk load");
+        return;
+    }
+
+    GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
+    if (reader == nullptr) {
+        GEOS_finish_r(ctx);
+        LOG_ERROR("Failed to create GEOS WKB reader for bulk load");
+        return;
+    }
 
     std::vector<Value> local_values;
     local_values.reserve(1024);
@@ -97,22 +124,28 @@ RTreeIndexWrapper::bulk_load_from_field_data(
             if (wkb_str == nullptr || wkb_str->empty()) {
                 continue;
             }
-            OGRGeometry* geom = nullptr;
-            auto err = OGRGeometryFactory::createFromWkb(
-                reinterpret_cast<const uint8_t*>(wkb_str->data()),
-                nullptr,
-                &geom,
+
+            GEOSGeometry* geom = GEOSWKBReader_read_r(
+                ctx,
+                reader,
+                reinterpret_cast<const unsigned char*>(wkb_str->data()),
                 wkb_str->size());
-            if (err != OGRERR_NONE || geom == nullptr) {
+            if (geom == nullptr) {
                 continue;
             }
-            OGREnvelope env;
-            geom->getEnvelope(&env);
-            OGRGeometryFactory::destroyGeometry(geom);
-            Box box(Point(env.MinX, env.MinY), Point(env.MaxX, env.MaxY));
+
+            double minX, minY, maxX, maxY;
+            get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
+            GEOSGeom_destroy_r(ctx, geom);
+
+            Box box(Point(minX, minY), Point(maxX, maxY));
             local_values.emplace_back(box, absolute_offset);
         }
     }
+
+    // Clean up GEOS resources
+    GEOSWKBReader_destroy_r(ctx, reader);
+    GEOS_finish_r(ctx);
     values_.swap(local_values);
     rtree_ = RTree(values_.begin(), values_.end());
     LOG_INFO("R-Tree bulk load (Boost) completed with {} entries",
@@ -202,13 +235,14 @@ RTreeIndexWrapper::load() {
 
 void
 RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
-                                    const OGRGeometry* query_geom,
+                                    const GEOSGeometry* query_geom,
+                                    GEOSContextHandle_t ctx,
                                     std::vector<int64_t>& candidate_offsets) {
     candidate_offsets.clear();
 
     // Get bounding box of query geometry
     double minX, minY, maxX, maxY;
-    get_bounding_box(query_geom, minX, minY, maxX, maxY);
+    get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY);
 
     // Create query box
     Box query_box(Point(minX, minY), Point(maxX, maxY));
@@ -231,20 +265,19 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
 }
 
 void
-RTreeIndexWrapper::get_bounding_box(const OGRGeometry* geom,
+RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
+                                    GEOSContextHandle_t ctx,
                                     double& minX,
                                     double& minY,
                                     double& maxX,
                                     double& maxY) {
     AssertInfo(geom != nullptr, "Geometry is null");
+    AssertInfo(ctx != nullptr, "GEOS context is null");
 
-    OGREnvelope env;
-    geom->getEnvelope(&env);
-
-    minX = env.MinX;
-    minY = env.MinY;
-    maxX = env.MaxX;
-    maxY = env.MaxY;
+    GEOSGeom_getXMin_r(ctx, geom, &minX);
+    GEOSGeom_getXMax_r(ctx, geom, &maxX);
+    GEOSGeom_getYMin_r(ctx, geom, &minY);
+    GEOSGeom_getYMax_r(ctx, geom, &maxY);
 }
 
 int64_t

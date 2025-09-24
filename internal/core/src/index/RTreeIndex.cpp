@@ -449,8 +449,13 @@ RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
                                const Geometry query_geometry,
                                std::vector<int64_t>& candidate_offsets) {
     AssertInfo(wrapper_ != nullptr, "R-Tree index wrapper is null");
+
+    // Create GEOS context and ensure it's properly released
+    GEOSContextHandle_t ctx = GEOS_init_r();
+
     wrapper_->query_candidates(
-        op, query_geometry.GetGeometry(), candidate_offsets);
+        op, query_geometry.GetGeometry(), ctx, candidate_offsets);
+    GEOS_finish_r(ctx);
 }
 
 template <typename T>

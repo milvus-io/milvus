@@ -17133,16 +17133,12 @@ TEST_P(ExprTest, TestGISFunction) {
         {"POLYGON((-10 -10, 10 -10, 10 10, -10 10, -10 -10))",
          proto::plan::GISFunctionFilterExpr_GISOp_Within}};
 
-    // Execute tests
     for (const auto& testcase : testcases) {
-        // Create Geometry object from WKT string
-        milvus::Geometry geometry(testcase.wkt_string.c_str());
-
         // Create GIS expression
         auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
             milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
             testcase.op,
-            geometry);
+            testcase.wkt_string);
 
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            gis_expr);
@@ -17200,12 +17196,9 @@ TEST(ExprTest, SealedSegmentAllOperators) {
         };
 
     for (const auto& [op, wkt] : test_cases) {
-        // Build constant geometry used on right side of comparison
-        milvus::Geometry right_source(wkt.c_str());
-
         // Create expression & plan node
         auto gis_expr = std::make_shared<expr::GISFunctionFilterExpr>(
-            expr::ColumnInfo(geo_fid, DataType::GEOMETRY), op, right_source);
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY), op, wkt);
         auto plan_node = std::make_shared<plan::FilterBitsNode>(
             DEFAULT_PLANNODE_ID, gis_expr);
 
@@ -17253,55 +17246,37 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
             ->clear_data();
 
         // Create some controlled geometry data for testing
+        auto ctx = GEOS_init_r();
         for (int i = 0; i < N; ++i) {
-            OGRGeometry* geometry = nullptr;
+            const char* wkt = nullptr;
 
             if (i % 4 == 0) {
                 // Create point (0, 0)
-                OGRPoint point(0.0, 0.0);
-                geometry = point.clone();
+                wkt = "POINT (0.0 0.0)";
             } else if (i % 4 == 1) {
                 // Create polygon containing (0, 0)
-                OGRPolygon polygon;
-                OGRLinearRing ring;
-                ring.addPoint(-1.0, -1.0);
-                ring.addPoint(1.0, -1.0);
-                ring.addPoint(1.0, 1.0);
-                ring.addPoint(-1.0, 1.0);
-                ring.addPoint(-1.0, -1.0);
-                polygon.addRing(&ring);
-                geometry = polygon.clone();
+                wkt =
+                    "POLYGON ((-1.0 -1.0, 1.0 -1.0, 1.0 1.0, -1.0 1.0, -1.0 "
+                    "-1.0))";
             } else if (i % 4 == 2) {
                 // Create polygon not containing (0, 0)
-                OGRPolygon polygon;
-                OGRLinearRing ring;
-                ring.addPoint(10.0, 10.0);
-                ring.addPoint(20.0, 10.0);
-                ring.addPoint(20.0, 20.0);
-                ring.addPoint(10.0, 20.0);
-                ring.addPoint(10.0, 10.0);
-                polygon.addRing(&ring);
-                geometry = polygon.clone();
+                wkt =
+                    "POLYGON ((10.0 10.0, 20.0 10.0, 20.0 20.0, 10.0 20.0, "
+                    "10.0 10.0))";
             } else {
                 // Create line passing through (0, 0)
-                OGRLineString lineString;
-                lineString.addPoint(-1.0, 0.0);
-                lineString.addPoint(1.0, 0.0);
-                geometry = lineString.clone();
+                wkt = "LINESTRING (-1.0 0.0, 1.0 0.0)";
             }
 
-            // Convert to WKB format
-            size_t size = geometry->WkbSize();
-            std::vector<unsigned char> wkb(size);
-            geometry->exportToWkb(wkbNDR, wkb.data());
+            // Create Geometry and convert to WKB format
+            Geometry geom(ctx, wkt);
+            std::string wkb_string = geom.to_wkb_string();
 
             geometry_field_data->mutable_scalars()
                 ->mutable_geometry_data()
-                ->add_data(
-                    std::string(reinterpret_cast<char*>(wkb.data()), size));
-
-            OGRGeometryFactory::destroyGeometry(geometry);
+                ->add_data(wkb_string);
         }
+        GEOS_finish_r(ctx);
 
         seg->PreInsert(N);
         seg->Insert(iter * N,
@@ -17317,14 +17292,9 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
     auto test_gis_operation = [&](const std::string& wkt,
                                   proto::plan::GISFunctionFilterExpr_GISOp op,
                                   std::function<bool(int)> expected_func) {
-        // Create Geometry object from WKT string
-        milvus::Geometry geometry(wkt.c_str());
-
         // Create GIS expression directly
         auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
-            milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
-            op,
-            geometry);
+            milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY), op, wkt);
 
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            gis_expr);
@@ -17402,43 +17372,36 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
             ->clear_data();
 
         // Create test points at known distances from origin (0,0)
+        auto ctx = GEOS_init_r();
         for (int i = 0; i < N; ++i) {
-            OGRGeometry* geometry = nullptr;
+            const char* wkt = nullptr;
 
             if (i % 5 == 0) {
                 // Distance 0: Point at origin
-                OGRPoint point(0.0, 0.0);
-                geometry = point.clone();
+                wkt = "POINT (0.0 0.0)";
             } else if (i % 5 == 1) {
                 // Distance 1: Point at (1,0)
-                OGRPoint point(1.0, 0.0);
-                geometry = point.clone();
+                wkt = "POINT (1.0 0.0)";
             } else if (i % 5 == 2) {
                 // Distance 5: Point at (3,4) - Pythagorean triple
-                OGRPoint point(3.0, 4.0);
-                geometry = point.clone();
+                wkt = "POINT (3.0 4.0)";
             } else if (i % 5 == 3) {
                 // Distance 10: Point at (6,8)
-                OGRPoint point(6.0, 8.0);
-                geometry = point.clone();
+                wkt = "POINT (6.0 8.0)";
             } else {
                 // Distance 13: Point at (5,12)
-                OGRPoint point(5.0, 12.0);
-                geometry = point.clone();
+                wkt = "POINT (5.0 12.0)";
             }
 
-            // Convert to WKB format
-            size_t size = geometry->WkbSize();
-            std::vector<unsigned char> wkb(size);
-            geometry->exportToWkb(wkbNDR, wkb.data());
+            // Create Geometry and convert to WKB format
+            Geometry geom(ctx, wkt);
+            std::string wkb_string = geom.to_wkb_string();
 
             geometry_field_data->mutable_scalars()
                 ->mutable_geometry_data()
-                ->add_data(
-                    std::string(reinterpret_cast<char*>(wkb.data()), size));
-
-            OGRGeometryFactory::destroyGeometry(geometry);
+                ->add_data(wkb_string);
         }
+        GEOS_finish_r(ctx);
 
         seg->PreInsert(N);
         seg->Insert(iter * N,
@@ -17454,15 +17417,12 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
     auto test_dwithin_operation = [&](const std::string& center_wkt,
                                       double distance,
                                       std::function<bool(int)> expected_func) {
-        // Create Geometry object from WKT string
-        milvus::Geometry center_geometry(center_wkt.c_str());
-
         // Create ST_DWITHIN expression
         auto dwithin_expr =
             std::make_shared<milvus::expr::GISFunctionFilterExpr>(
                 milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
                 proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
-                center_geometry,
+                center_wkt,
                 distance);
 
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
