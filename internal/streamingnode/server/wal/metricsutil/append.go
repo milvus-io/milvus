@@ -81,6 +81,7 @@ func (m *AppendMetrics) IntoLogFields() []zap.Field {
 		fields = append(fields, zap.Error(m.err))
 	} else {
 		fields = append(fields, zap.String("messageID", m.result.MessageID.String()))
+		fields = append(fields, zap.String("lcMessageID", m.result.LastConfirmedMessageID.String()))
 		fields = append(fields, zap.Uint64("timetick", m.result.TimeTick))
 		if m.result.TxnCtx != nil {
 			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))

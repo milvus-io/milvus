@@ -36,7 +36,7 @@ import (
 // │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 

@@ -42,9 +42,10 @@ func TestAppendResult_IntoProto(t *testing.T) {
 	msgID := mock_message.NewMockMessageID(t)
 	msgID.EXPECT().IntoProto().Return(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameTest), Id: "1"})
 	result := &AppendResult{
-		MessageID: msgID,
-		TimeTick:  12345,
-		TxnCtx:    &message.TxnContext{TxnID: 1},
+		MessageID:              msgID,
+		TimeTick:               12345,
+		TxnCtx:                 &message.TxnContext{TxnID: 1},
+		LastConfirmedMessageID: msgID,
 	}
 
 	protoResult := result.IntoProto()
@@ -52,6 +53,7 @@ func TestAppendResult_IntoProto(t *testing.T) {
 	assert.Equal(t, "1", protoResult.Id.Id)
 	assert.Equal(t, uint64(12345), protoResult.Timetick)
 	assert.Equal(t, int64(1), protoResult.TxnContext.TxnId)
+	assert.Equal(t, "1", protoResult.LastConfirmedId.Id)
 }
 
 func TestAppendResponses_MaxTimeTick(t *testing.T) {

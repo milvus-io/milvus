@@ -6147,7 +6147,10 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
 
 	// broadcaster
-	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
+	WALBroadcasterTombstoneCheckInternal ParamItem `refreshable:"true"`
+	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
+	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
@@ -6326,6 +6329,39 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneCheckInternal = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.checkInternal",
+		Version: "2.6.0",
+		Doc: `The interval of garbage collection of tombstone, 5m by default.
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "5m",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneCheckInternal.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneMaxCount = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.maxCount",
+		Version: "2.6.0",
+		Doc: `The max count of tombstone, 256 by default. 
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneMaxCount.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
+		Version: "2.6.0",
+		Doc: `The max lifetime of tombstone, 30m by default.
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "30m",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
