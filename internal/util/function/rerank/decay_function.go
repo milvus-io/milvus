@@ -178,7 +178,8 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	srcScores := decay.scoreFunc(cols)
 	decayScores := map[T]float32{}
-	for _, col := range cols {
+	idLocations := make(map[T]IDLoc)
+	for i, col := range cols {
 		if col.size == 0 {
 			continue
 		}
@@ -186,6 +187,7 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := decayScores[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
 				decayScores[id] = float32(decay.reScorer(decay.origin, decay.scale, decay.decay, decay.offset, float64(nums[idx])))
 			}
 		}
@@ -194,13 +196,13 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 		decayScores[id] = decayScores[id] * srcScores[id]
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(decayScores, searchParams, idGroup)
+		return newGroupingIDScores(decayScores, idLocations, searchParams, idGroup)
 	}
-	return newIDScores(decayScores, searchParams, true), nil
+	return newIDScores(decayScores, idLocations, searchParams, true), nil
 }
 
 func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for _, cols := range inputs.data {
 		for i, col := range cols {
 			normFunc := getNormalizeFunc(decay.needNorm, searchParams.searchMetrics[i], true)
@@ -212,7 +214,7 @@ func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *Sea
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -382,12 +383,28 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	t.needRequery = len(t.request.OutputFields) > 0 || len(t.functionScore.GetAllInputFieldNames()) > 0
+	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
 	}
+
+	switch strings.ToLower(paramtable.Get().CommonCfg.HybridSearchRequeryPolicy.GetValue()) {
+	case "always":
+		t.needRequery = true
+	case "outputvector":
+		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
+		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
+	case "outputfields":
+		fallthrough
+	default:
+		t.needRequery = len(t.request.GetOutputFields()) > 0
+	}
+	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
 
 	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
 		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
@@ -452,8 +469,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
 		}
 
-		plan.OutputFieldIds = nil
-		plan.DynamicFields = nil
+		if t.needRequery {
+			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+		} else {
+			primaryFieldSchema, err := t.schema.GetPkField()
+			if err != nil {
+				return err
+			}
+			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
+			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+			allFieldIDs.Insert(primaryFieldSchema.FieldID)
+			plan.OutputFieldIds = allFieldIDs.Collect()
+			plan.DynamicFields = t.userDynamicFields
+		}
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
