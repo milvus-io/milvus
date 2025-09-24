@@ -560,6 +560,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
 		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
+
+		assert.Equal(t, 100, Params.FlushAllMaxParallelTasks.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

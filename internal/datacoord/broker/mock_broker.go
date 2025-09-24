@@ -198,9 +198,16 @@ func (_c *MockBroker_ListDatabases_Call) RunAndReturn(run func(context.Context) 
 	return _c
 }
 
-// ShowCollectionIDs provides a mock function with given fields: ctx
-func (_m *MockBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error) {
-	ret := _m.Called(ctx)
+// ShowCollectionIDs provides a mock function with given fields: ctx, dbNames
+func (_m *MockBroker) ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	_va := make([]interface{}, len(dbNames))
+	for _i := range dbNames {
+		_va[_i] = dbNames[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ShowCollectionIDs")
@@ -208,19 +215,19 @@ func (_m *MockBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowC
 
 	var r0 *rootcoordpb.ShowCollectionIDsResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)); ok {
+		return rf(ctx, dbNames...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) *rootcoordpb.ShowCollectionIDsResponse); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, ...string) *rootcoordpb.ShowCollectionIDsResponse); ok {
+		r0 = rf(ctx, dbNames...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*rootcoordpb.ShowCollectionIDsResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, ...string) error); ok {
+		r1 = rf(ctx, dbNames...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -235,13 +242,21 @@ type MockBroker_ShowCollectionIDs_Call struct {
 
 // ShowCollectionIDs is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockBroker_Expecter) ShowCollectionIDs(ctx interface{}) *MockBroker_ShowCollectionIDs_Call {
-	return &MockBroker_ShowCollectionIDs_Call{Call: _e.mock.On("ShowCollectionIDs", ctx)}
+//   - dbNames ...string
+func (_e *MockBroker_Expecter) ShowCollectionIDs(ctx interface{}, dbNames ...interface{}) *MockBroker_ShowCollectionIDs_Call {
+	return &MockBroker_ShowCollectionIDs_Call{Call: _e.mock.On("ShowCollectionIDs",
+		append([]interface{}{ctx}, dbNames...)...)}
 }
 
-func (_c *MockBroker_ShowCollectionIDs_Call) Run(run func(ctx context.Context)) *MockBroker_ShowCollectionIDs_Call {
+func (_c *MockBroker_ShowCollectionIDs_Call) Run(run func(ctx context.Context, dbNames ...string)) *MockBroker_ShowCollectionIDs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		variadicArgs := make([]string, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -251,7 +266,7 @@ func (_c *MockBroker_ShowCollectionIDs_Call) Return(_a0 *rootcoordpb.ShowCollect
 	return _c
 }
 
-func (_c *MockBroker_ShowCollectionIDs_Call) RunAndReturn(run func(context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)) *MockBroker_ShowCollectionIDs_Call {
+func (_c *MockBroker_ShowCollectionIDs_Call) RunAndReturn(run func(context.Context, ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)) *MockBroker_ShowCollectionIDs_Call {
 	_c.Call.Return(run)
 	return _c
 }
