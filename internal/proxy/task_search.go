@@ -472,7 +472,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
 		if err != nil {
 			return err
 		}
@@ -591,7 +591,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
 		if err != nil {
 			return err
 		}

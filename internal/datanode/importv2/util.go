@@ -411,10 +411,11 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
-	if err := RunBm25Function(task, data); err != nil {
+	if err := RunDenseEmbedding(task, data); err != nil {
 		return err
 	}
-	if err := RunDenseEmbedding(task, data); err != nil {
+
+	if err := RunBm25Function(task, data); err != nil {
 		return err
 	}
 	return nil
@@ -422,8 +423,14 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 
 func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 	schema := task.GetSchema()
+	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
+	fieldIDs := lo.Keys(data.Data)
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
+	if err != nil {
+		return err
+	}
 	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
-		exec, err := embedding.NewFunctionExecutor(schema)
+		exec, err := embedding.NewFunctionExecutor(schema, needProcessFunctions)
 		if err != nil {
 			return err
 		}

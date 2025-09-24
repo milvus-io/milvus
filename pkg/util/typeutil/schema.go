@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"unsafe"
@@ -2304,4 +2305,52 @@ func SparseFloatRowDim(row []byte) int64 {
 func EstimateSparseVectorNNZFromPlaceholderGroup(placeholderGroup []byte, nq int) int {
 	overheadBytes := math.Max(10, float64(nq*3))
 	return (len(placeholderGroup) - int(overheadBytes)) / 8
+}
+
+func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSchema, allowNonBM25Outputs bool, partialUpdate bool) ([]*schemapb.FunctionSchema, error) {
+	if len(functions) == 0 {
+		return functions, nil
+	}
+
+	fieldIDFuncMapping := map[int64]*schemapb.FunctionSchema{}
+	funCandidate := map[string]*schemapb.FunctionSchema{}
+
+	for _, functionSchema := range functions {
+		funCandidate[functionSchema.Name] = functionSchema
+		for _, fieldID := range functionSchema.OutputFieldIds {
+			fieldIDFuncMapping[fieldID] = functionSchema
+		}
+	}
+
+	for _, fieldID := range fieldIDs {
+		if f, exists := fieldIDFuncMapping[fieldID]; exists {
+			if f.Type == schemapb.FunctionType_BM25 {
+				return nil, fmt.Errorf("Attempt to insert bm25 function output field")
+			}
+			if !allowNonBM25Outputs {
+				return nil, fmt.Errorf("Insert data has function output field, but collection's property `collection.function.allowInsertNonBM25FunctionOutputs` is not enable")
+			}
+			delete(funCandidate, f.Name)
+		}
+	}
+
+	needProcessFunctions := []*schemapb.FunctionSchema{}
+	for _, functionSchema := range funCandidate {
+		if partialUpdate {
+			// If some input exists, push it down to the function for processing
+			allInputNotExist := true
+			for _, inputID := range functionSchema.InputFieldIds {
+				if slices.Contains(fieldIDs, inputID) {
+					allInputNotExist = false
+					break
+				}
+			}
+			if !allInputNotExist {
+				needProcessFunctions = append(needProcessFunctions, functionSchema)
+			}
+		} else {
+			needProcessFunctions = append(needProcessFunctions, functionSchema)
+		}
+	}
+	return needProcessFunctions, nil
 }

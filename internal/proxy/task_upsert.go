@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -354,6 +353,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	// 2. merge field data on update semantic
 	it.deletePKs = &schemapb.IDs{}
 	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
+
 	if len(updateIdxInUpsert) > 0 {
 		// Note: For fields containing default values, default values need to be set according to valid data during insertion,
 		// but query results fields do not set valid data when returning default value fields,
@@ -738,33 +738,19 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(it.schema.CollectionSchema)...)
-	// Calculate embedding fields
-
-	if embedding.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
-		if it.req.PartialUpdate {
-			// remove the old bm25 fields
-			ret := make([]*schemapb.FieldData, 0)
-			for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
-				if bm25Fields.Contain(fieldData.GetFieldName()) {
-					continue
-				}
-				ret = append(ret, fieldData)
+	bm25Fields := typeutil.NewSet[string](GetBM25FunctionOutputFields(it.schema.CollectionSchema)...)
+	if it.req.PartialUpdate {
+		// remove the old bm25 fields
+		ret := make([]*schemapb.FieldData, 0)
+		for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
+			if bm25Fields.Contain(fieldData.GetFieldName()) {
+				continue
 			}
-			it.upsertMsg.InsertMsg.FieldsData = ret
+			ret = append(ret, fieldData)
 		}
-		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
-		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(it.schema.CollectionSchema)
-		if err != nil {
-			return err
-		}
-		sp.AddEvent("Create-function-udf")
-		if err := exec.ProcessInsert(ctx, it.upsertMsg.InsertMsg); err != nil {
-			return err
-		}
-		sp.AddEvent("Call-function-udf")
+		it.upsertMsg.InsertMsg.FieldsData = ret
 	}
+
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
@@ -808,8 +794,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-	if err != nil {
+	if err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
 		return err
 	}
 
@@ -817,6 +802,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
+	var err error
 	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
@@ -1042,6 +1028,10 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	// check if num_rows is valid
 	if it.req.NumRows <= 0 {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
+	}
+
+	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, it.req.GetPartialUpdate()); err != nil {
+		return err
 	}
 
 	if it.req.GetPartialUpdate() {
