@@ -208,7 +208,7 @@ INSTANTIATE_TEST_SUITE_P(
              {"mmap", "false"},
              {"field_type", "string"}},
             {2UL * 1024 * 1024 * 1024,
-             0UL,
+             1UL * 1024 * 1024 * 1024,
              1UL * 1024 * 1024 * 1024,
              0UL,
              true}),
