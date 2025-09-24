@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -2213,7 +2214,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	})
 	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(1, true)
 
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
+	balance.Register(b)
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 
 	t.Run("UpdateChannelCheckpoint_Success", func(t *testing.T) {
