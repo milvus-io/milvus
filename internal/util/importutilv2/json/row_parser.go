@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -37,11 +38,12 @@ type RowParser interface {
 }
 
 type rowParser struct {
-	id2Dim       map[int64]int
-	id2Field     map[int64]*schemapb.FieldSchema
-	name2FieldID map[string]int64
-	pkField      *schemapb.FieldSchema
-	dynamicField *schemapb.FieldSchema
+	id2Dim            map[int64]int
+	id2Field          map[int64]*schemapb.FieldSchema
+	name2FieldID      map[string]int64
+	pkField           *schemapb.FieldSchema
+	dynamicField      *schemapb.FieldSchema
+	allowInsertAutoID bool
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
@@ -66,9 +68,10 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	}
 	dynamicField := typeutil.GetDynamicField(schema)
 
+	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
 	name2FieldID := lo.SliceToMap(
 		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+			return !field.GetIsFunctionOutput() && (!typeutil.IsAutoPKField(field) || allowInsertAutoID) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
@@ -76,11 +79,12 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	)
 
 	return &rowParser{
-		id2Dim:       id2Dim,
-		id2Field:     id2Field,
-		name2FieldID: name2FieldID,
-		pkField:      pkField,
-		dynamicField: dynamicField,
+		id2Dim:            id2Dim,
+		id2Field:          id2Field,
+		name2FieldID:      name2FieldID,
+		pkField:           pkField,
+		dynamicField:      dynamicField,
+		allowInsertAutoID: allowInsertAutoID,
 	}, nil
 }
 
@@ -106,7 +110,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid JSON format, each row should be a key-value map, but got type %T", raw)
 	}
-	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() {
+	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() && !r.allowInsertAutoID {
 		return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", r.pkField.GetName())
 	}
 	dynamicValues := make(map[string]any)
