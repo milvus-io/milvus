@@ -41,11 +41,11 @@ type RowsSuite struct {
 
 func (s *RowsSuite) TestRowsToColumns() {
 	s.Run("valid_cases", func() {
-		columns, err := AnyToColumns([]any{&ValidStruct{}})
+		columns, err := AnyToColumns([]any{&ValidStruct{}}, false)
 		s.Nil(err)
 		s.Equal(10, len(columns))
 
-		columns, err = AnyToColumns([]any{&ValidStruct2{}})
+		columns, err = AnyToColumns([]any{&ValidStruct2{}}, false)
 		s.Nil(err)
 		s.Equal(3, len(columns))
 	})
@@ -55,7 +55,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 			ID     int64     `milvus:"primary_key;auto_id"`
 			Vector []float32 `milvus:"dim:32"`
 		}
-		columns, err := AnyToColumns([]any{&AutoPK{}})
+		columns, err := AnyToColumns([]any{&AutoPK{}}, false)
 		s.Nil(err)
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
@@ -66,7 +66,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 			ID     int64  `milvus:"primary_key;auto_id"`
 			Vector []byte `milvus:"dim:16;vector_type:bf16"`
 		}
-		columns, err := AnyToColumns([]any{&BF16Struct{}})
+		columns, err := AnyToColumns([]any{&BF16Struct{}}, false)
 		s.Nil(err)
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
@@ -78,7 +78,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 			ID     int64  `milvus:"primary_key;auto_id"`
 			Vector []byte `milvus:"dim:16;vector_type:fp16"`
 		}
-		columns, err := AnyToColumns([]any{&FP16Struct{}})
+		columns, err := AnyToColumns([]any{&FP16Struct{}}, false)
 		s.Nil(err)
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
@@ -87,15 +87,15 @@ func (s *RowsSuite) TestRowsToColumns() {
 
 	s.Run("invalid_cases", func() {
 		// empty input
-		_, err := AnyToColumns([]any{})
+		_, err := AnyToColumns([]any{}, false)
 		s.NotNil(err)
 
 		// incompatible rows
-		_, err = AnyToColumns([]any{&ValidStruct{}, &ValidStruct2{}})
+		_, err = AnyToColumns([]any{&ValidStruct{}, &ValidStruct2{}}, false)
 		s.NotNil(err)
 
 		// schema & row not compatible
-		_, err = AnyToColumns([]any{&ValidStruct{}}, &entity.Schema{
+		_, err = AnyToColumns([]any{&ValidStruct{}}, false, &entity.Schema{
 			Fields: []*entity.Field{
 				{
 					Name:     "Attr1",
@@ -109,7 +109,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 
 func (s *RowsSuite) TestDynamicSchema() {
 	s.Run("all_fallback_dynamic", func() {
-		columns, err := AnyToColumns([]any{&ValidStruct{}},
+		columns, err := AnyToColumns([]any{&ValidStruct{}}, false,
 			entity.NewSchema().WithDynamicFieldEnabled(true),
 		)
 		s.NoError(err)
@@ -117,7 +117,7 @@ func (s *RowsSuite) TestDynamicSchema() {
 	})
 
 	s.Run("dynamic_not_found", func() {
-		_, err := AnyToColumns([]any{&ValidStruct{}},
+		_, err := AnyToColumns([]any{&ValidStruct{}}, false,
 			entity.NewSchema().WithField(
 				entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true),
 			).WithDynamicFieldEnabled(true),
