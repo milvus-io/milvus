@@ -302,7 +302,8 @@ func NewColumnBasedInsertOption(collName string, columns ...column.Column) *colu
 
 type rowBasedDataOption struct {
 	*columnBasedDataOption
-	rows []any
+	rows         []any
+	keepAutoIDPk bool // keep user passed auto id pk field
 }
 
 func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
@@ -310,12 +311,13 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 		columnBasedDataOption: &columnBasedDataOption{
 			collName: collName,
 		},
-		rows: rows,
+		rows:         rows,
+		keepAutoIDPk: false,
 	}
 }
 
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, coll.Schema)
+	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +335,7 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, coll.Schema)
+	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +373,11 @@ func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Colum
 	}
 
 	return nil
+}
+
+func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption {
+	opt.keepAutoIDPk = keepPk
+	return opt
 }
 
 type DeleteOption interface {
