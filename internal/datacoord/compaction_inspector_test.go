@@ -49,18 +49,14 @@ type CompactionPlanHandlerSuite struct {
 
 	mockMeta    *MockCompactionMeta
 	mockAlloc   *allocator.MockAllocator
-	mockCm      *MockChannelManager
 	handler     *compactionInspector
 	mockHandler *NMockHandler
-	cluster     *MockCluster
 }
 
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	s.mockCm = NewMockChannelManager(s.T())
-	s.cluster = NewMockCluster(s.T())
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, newMockVersionManager())
 	s.mockHandler = NewNMockHandler(s.T())

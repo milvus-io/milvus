@@ -39,14 +39,12 @@ func TestL0CompactionTaskSuite(t *testing.T) {
 type L0CompactionTaskSuite struct {
 	suite.Suite
 
-	mockAlloc   *allocator.MockAllocator
-	mockMeta    *MockCompactionMeta
-	mockSessMgr *session.MockDataNodeManager
+	mockAlloc *allocator.MockAllocator
+	mockMeta  *MockCompactionMeta
 }
 
 func (s *L0CompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
-	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	// s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
 }

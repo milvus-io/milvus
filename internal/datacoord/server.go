@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -120,11 +119,8 @@ type Server struct {
 	allocator      allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
-	cluster          Cluster
-	sessionManager   session.DataNodeManager // TODO: sheep, remove sessionManager and cluster
 	nodeManager      session.NodeManager
 	cluster2         session.Cluster
-	channelManager   ChannelManager
 	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
@@ -181,13 +177,6 @@ type Option func(svr *Server)
 func WithMixCoordCreator(creator mixCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.mixCoordCreator = creator
-	}
-}
-
-// WithCluster returns an `Option` setting Cluster with provided parameter
-func WithCluster(cluster Cluster) Option {
-	return func(svr *Server) {
-		svr.cluster = cluster
 	}
 }
 
@@ -448,24 +437,12 @@ func (s *Server) GetServerID() int64 {
 func (s *Server) afterStart() {}
 
 func (s *Server) initCluster() error {
-	if s.cluster != nil {
-		return nil
+	if s.nodeManager == nil {
+		s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
 	}
-
-	s.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(s.dataNodeCreator))
-
-	var err error
-	channelManagerOpts := []ChannelmanagerOpt{withCheckerV2()}
-	if streamingutil.IsStreamingServiceEnabled() {
-		channelManagerOpts = append(channelManagerOpts, withEmptyPolicyFactory())
+	if s.cluster2 == nil {
+		s.cluster2 = session.NewCluster(s.nodeManager)
 	}
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.idAllocator, channelManagerOpts...)
-	if err != nil {
-		return err
-	}
-	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
-	s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
-	s.cluster2 = session.NewCluster(s.nodeManager)
 	return nil
 }
 
@@ -597,13 +574,6 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		log.Warn("DataCoord failed to add datanode", zap.Error(err))
 		return err
 	}
-
-	log.Info("DataCoord Cluster Manager start up")
-	if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
-		log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
-		return err
-	}
-	log.Info("DataCoord Cluster Manager start up successfully")
 	return nil
 }
 
@@ -865,19 +835,11 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			Version:  event.Session.ServerID,
 			Channels: []*datapb.ChannelStatus{},
 		}
-		node := &session.NodeInfo{
-			NodeID:  event.Session.ServerID,
-			Address: event.Session.Address,
-		}
 		switch event.EventType {
 		case sessionutil.SessionAddEvent:
 			log.Info("received datanode register",
 				zap.String("address", info.Address),
 				zap.Int64("serverID", info.Version))
-			if err := s.cluster.Register(node); err != nil {
-				log.Warn("failed to register node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-				return err
-			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
 				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
@@ -891,10 +853,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
 				zap.Int64("serverID", info.Version))
-			if err := s.cluster.UnRegister(node); err != nil {
-				log.Warn("failed to deregister node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-				return err
-			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
 				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
@@ -1088,9 +1046,6 @@ func (s *Server) Stop() error {
 
 	s.analyzeInspector.Stop()
 	log.Info("datacoord analyze inspector stopped")
-
-	s.cluster.Close()
-	log.Info("datacoord cluster stopped")
 
 	if s.session != nil {
 		s.session.Stop()

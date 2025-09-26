@@ -42,7 +42,6 @@ type ImportInspectorSuite struct {
 
 	catalog    *mocks.DataCoordCatalog
 	alloc      *allocator.MockAllocator
-	cluster    *MockCluster
 	meta       *meta
 	importMeta ImportMeta
 	inspector  *importInspector
@@ -66,7 +65,6 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
 
-	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
