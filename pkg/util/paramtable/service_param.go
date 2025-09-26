@@ -1314,6 +1314,7 @@ type MinioConfig struct {
 	SecretAccessKey    ParamItem `refreshable:"false"`
 	UseSSL             ParamItem `refreshable:"false"`
 	SslCACert          ParamItem `refreshable:"false"`
+	SkipSSLVerify      ParamItem `refreshable:"false"`
 	BucketName         ParamItem `refreshable:"false"`
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
@@ -1406,6 +1407,15 @@ The default value applies to MinIO or S3 service that started with the default d
 		Export:  true,
 	}
 	p.SslCACert.Init(base.mgr)
+
+	p.SkipSSLVerify = ParamItem{
+		DefaultValue: "true",
+		Key:          "minio.skipSSLVerify",
+		Version:      "2.3.12",
+		Doc:          "skip SSL verification when UseSSL is true",
+		Export:       true,
+	}
+	p.SkipSSLVerify.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",
