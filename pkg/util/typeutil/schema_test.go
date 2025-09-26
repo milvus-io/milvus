@@ -167,12 +167,6 @@ func TestSchema(t *testing.T) {
 					},
 				},
 			},
-			{
-				FieldID:      113,
-				Name:         "field_geometry",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_Geometry,
-			},
 			// Do not test on sparse float vector field.
 			{
 				FieldID:      113,
@@ -187,12 +181,18 @@ func TestSchema(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldID:      114,
+				Name:         "field_geometry",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Geometry,
+			},
 		},
 	}
 
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
 		size, err := EstimateSizePerRecord(schema)
-		assert.Equal(t, 2219, size)
+		assert.Equal(t, 2731, size)
 		assert.NoError(t, err)
 	})
 
@@ -1107,7 +1107,7 @@ func TestAppendFieldData(t *testing.T) {
 		SparseFloatVectorFieldID   = common.StartOfUserFieldID + 11
 		Int8VectorFieldID          = common.StartOfUserFieldID + 12
 		VectorArrayFieldID         = common.StartOfUserFieldID + 13
-		GeometryFieldID            = common.StartOfUserFieldID + 12
+		GeometryFieldID            = common.StartOfUserFieldID + 14
 	)
 	BoolArray := []bool{true, false}
 	Int32Array := []int32{1, 2}
@@ -1169,14 +1169,13 @@ func TestAppendFieldData(t *testing.T) {
 		},
 	}
 
-	result := make([]*schemapb.FieldData, 13)
+	result := make([]*schemapb.FieldData, 14)
 	// POINT (30.123 -10.456) and LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)
 	GeometryArray := [][]byte{
 		{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 		{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 	}
 
-	result := make([]*schemapb.FieldData, 12)
 	var fieldDataArray1 []*schemapb.FieldData
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[0:1], 1))
@@ -1225,7 +1224,7 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, SparseFloatVector, result[10].GetVectors().GetSparseFloatVector())
 	assert.Equal(t, Int8Vector, result[11].GetVectors().Data.(*schemapb.VectorField_Int8Vector).Int8Vector)
 	assert.Equal(t, VectorArray, result[12].GetVectors().GetVectorArray().Data)
-	assert.Equal(t, GeometryArray, result[11].GetScalars().GetGeometryData().Data)
+	assert.Equal(t, GeometryArray, result[13].GetScalars().GetGeometryData().Data)
 }
 
 func TestDeleteFieldData(t *testing.T) {
@@ -1293,8 +1292,8 @@ func TestDeleteFieldData(t *testing.T) {
 		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
 	}
 
-	result1 := make([]*schemapb.FieldData, 12)
-	result2 := make([]*schemapb.FieldData, 12)
+	result1 := make([]*schemapb.FieldData, 13)
+	result2 := make([]*schemapb.FieldData, 13)
 	var fieldDataArray1 []*schemapb.FieldData
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[0:1], 1))
@@ -1930,7 +1929,7 @@ func TestMergeFieldData(t *testing.T) {
 			genFieldData("float16_vector", 111, schemapb.DataType_Float16Vector, []byte("12345678"), 4),
 			genFieldData("bfloat16_vector", 112, schemapb.DataType_BFloat16Vector, []byte("12345678"), 4),
 			genFieldData("int8_vector", 113, schemapb.DataType_Int8Vector, []byte("12345678"), 4),
-			genFieldData("geometry", 113, schemapb.DataType_Geometry, [][]byte{
+			genFieldData("geometry", 114, schemapb.DataType_Geometry, [][]byte{
 				{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 				{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 			}, 1),
@@ -1996,7 +1995,7 @@ func TestMergeFieldData(t *testing.T) {
 			genFieldData("float16_vector", 111, schemapb.DataType_Float16Vector, []byte("abcdefgh"), 4),
 			genFieldData("bfloat16_vector", 112, schemapb.DataType_BFloat16Vector, []byte("ABCDEFGH"), 4),
 			genFieldData("int8_vector", 113, schemapb.DataType_Int8Vector, []byte("abcdefgh"), 4),
-			genFieldData("geometry", 113, schemapb.DataType_Geometry, [][]byte{
+			genFieldData("geometry", 114, schemapb.DataType_Geometry, [][]byte{
 				{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 				{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 			}, 1),
@@ -2070,7 +2069,7 @@ func TestMergeFieldData(t *testing.T) {
 			genFieldData("float16_vector", 111, schemapb.DataType_Float16Vector, []byte("12345678"), 4),
 			genFieldData("bfloat16_vector", 112, schemapb.DataType_BFloat16Vector, []byte("12345678"), 4),
 			genFieldData("int8_vector", 113, schemapb.DataType_Int8Vector, []byte("12345678"), 4),
-			genFieldData("geometry", 113, schemapb.DataType_Geometry, [][]byte{
+			genFieldData("geometry", 114, schemapb.DataType_Geometry, [][]byte{
 				{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 				{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 			}, 1),
@@ -2085,7 +2084,7 @@ func TestMergeFieldData(t *testing.T) {
 			{Type: schemapb.DataType_Float16Vector, FieldName: "float16_vector", Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{}}}, FieldId: 111},
 			{Type: schemapb.DataType_BFloat16Vector, FieldName: "bfloat16_vector", Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{}}}, FieldId: 112},
 			{Type: schemapb.DataType_Int8Vector, FieldName: "int8_vector", Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{}}}, FieldId: 113},
-			{Type: schemapb.DataType_Geometry, FieldName: "geometry", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_GeometryData{}}}, FieldId: 113},
+			{Type: schemapb.DataType_Geometry, FieldName: "geometry", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_GeometryData{}}}, FieldId: 114},
 		}
 
 		err := MergeFieldData(dstFields, srcFields)
