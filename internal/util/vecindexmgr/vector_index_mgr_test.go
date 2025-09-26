@@ -67,7 +67,7 @@ func Test_VecIndex_DataType_Support(t *testing.T) {
 				schemapb.DataType_Float16Vector,
 				schemapb.DataType_SparseFloatVector,
 			},
-			wants: []bool{true, false, true, true, false},
+			wants: []bool{true, true, true, true, false},
 		},
 		{
 			indexType: "DISKANN",
