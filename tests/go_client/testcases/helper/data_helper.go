@@ -605,7 +605,14 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		return column.NewColumnJSONBytes(fieldName, jsonValues)
 
 	case entity.FieldTypeGeometry:
-		geometryValues := GenDefaultGeometryData(nb, option)
+		geometryValues := GenDefaultGeometryData(validDataLen, option)
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnGeometryWKT(fieldName, geometryValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnGeometryWKT failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnGeometryWKT(fieldName, geometryValues)
 
 	case entity.FieldTypeFloatVector:
