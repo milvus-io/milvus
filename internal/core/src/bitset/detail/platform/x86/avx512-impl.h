@@ -50,6 +50,35 @@ get_mask(const size_t count) {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <size_t data_bits>
+size_t
+idx_decompose_u32_avx512(const uint32_t* idxs,
+                         const size_t n,
+                         uint32_t* elems,
+                         uint32_t* bits) {
+    constexpr int kShift = []() constexpr {
+        int s = 0;
+        size_t v = data_bits;
+        while (v > 1) {
+            v >>= 1;
+            ++s;
+        }
+        return s;
+    }
+    ();
+    const __m512i mask_vec = _mm512_set1_epi32((int)(data_bits - 1));
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512i v = _mm512_loadu_si512((const void*)(idxs + i));
+        __m512i e = _mm512_srli_epi32(v, kShift);
+        __m512i b = _mm512_and_si512(v, mask_vec);
+        _mm512_storeu_si512((void*)(elems + i), e);
+        _mm512_storeu_si512((void*)(bits + i), b);
+    }
+    return i;
+}
+
 constexpr size_t N_BLOCKS = 8;
 constexpr size_t PAGE_SIZE = 4096;
 constexpr size_t BLOCKS_PREFETCH_AHEAD = 4;

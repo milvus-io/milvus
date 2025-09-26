@@ -311,6 +311,14 @@ ALL_FORWARD_TYPES_1(DECLARE_PARTIAL_FORWARD_OPS)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose (32-bit indices)
+template <size_t data_bits>
+size_t
+idx_decompose_u32_neon(const uint32_t* idxs,
+                       const size_t n,
+                       uint32_t* elems,
+                       uint32_t* bits);
+
 #undef ALL_DATATYPES_1
 #undef ALL_FORWARD_TYPES_1
 

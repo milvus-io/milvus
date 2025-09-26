@@ -446,6 +446,36 @@ struct CmpHelper<CompareOpType::NE> {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <size_t data_bits>
+size_t
+idx_decompose_u32_neon(const uint32_t* idxs,
+                       const size_t n,
+                       uint32_t* elems,
+                       uint32_t* bits) {
+    constexpr int kShift = []() constexpr {
+        int s = 0;
+        size_t v = data_bits;
+        while (v > 1) {
+            v >>= 1;
+            ++s;
+        }
+        return s;
+    }
+    ();
+    const uint32x4_t mask_vec =
+        vdupq_n_u32(static_cast<uint32_t>(data_bits - 1));
+
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        const uint32x4_t v = vld1q_u32(idxs + i);
+        const uint32x4_t e = vshrq_n_u32(v, kShift);
+        const uint32x4_t b = vandq_u32(v, mask_vec);
+        vst1q_u32(elems + i, e);
+        vst1q_u32(bits + i, b);
+    }
+    return i;
+}
+
 //
 template <CompareOpType Op>
 bool

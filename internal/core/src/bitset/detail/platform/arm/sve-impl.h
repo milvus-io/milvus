@@ -37,6 +37,38 @@ namespace detail {
 namespace arm {
 namespace sve {
 
+///////////////////////////////////////////////////////////////////////////
+
+template <size_t data_bits>
+void
+idx_decompose_u32_sve(const uint32_t* idxs,
+                      const size_t n,
+                      uint32_t* elems,
+                      uint32_t* bits) {
+    constexpr int kShift = []() constexpr {
+        int s = 0;
+        size_t v = data_bits;
+        while (v > 1) {
+            v >>= 1;
+            ++s;
+        }
+        return s;
+    }
+    ();
+    const uint32_t mask = static_cast<uint32_t>(data_bits - 1);
+
+    size_t i = 0;
+    while (i < n) {
+        svbool_t pg = svwhilelt_b32(i, n);
+        svuint32_t v = svld1_u32(pg, idxs + i);
+        svuint32_t e = svlsr_n_u32_z(pg, v, kShift);
+        svuint32_t b = svand_u32_z(pg, v, svdup_n_u32(mask));
+        svst1_u32(pg, elems + i, e);
+        svst1_u32(pg, bits + i, b);
+        i += svcntw();
+    }
+}
+
 namespace {
 
 //

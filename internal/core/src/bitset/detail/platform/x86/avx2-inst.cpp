@@ -185,6 +185,10 @@ ALL_ARITH_CMP_OPS(INSTANTIATE_ARITH_COMPARE_AVX2, double)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// idx decompose instantiation
+template size_t
+idx_decompose_u32_avx2<64>(const uint32_t*, const size_t, uint32_t*, uint32_t*);
+
 //
 #undef ALL_COMPARE_OPS
 #undef ALL_RANGE_OPS

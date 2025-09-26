@@ -28,6 +28,14 @@ namespace detail {
 namespace dynamic {
 
 ///////////////////////////////////////////////////////////////////////////
+
+template <size_t data_bits>
+void
+idx_decompose_u32(const uint32_t* idxs,
+                  const size_t n,
+                  uint32_t* elems,
+                  uint32_t* bits);
+
 // a facility to run through all acceptable data types
 #define ALL_DATATYPES_1(FUNC) \
     FUNC(int8_t);             \

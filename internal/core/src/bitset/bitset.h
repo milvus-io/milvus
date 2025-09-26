@@ -20,10 +20,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <type_traits>
 
 #include "common.h"
 #include "detail/maybe_vector.h"
+
+#include "detail/platform/dynamic.h"
 
 namespace milvus {
 namespace bitset {
@@ -114,6 +117,14 @@ class BitsetBase {
     using const_proxy_type = typename policy_type::const_proxy_type;
 
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
+    static constexpr size_t data_bits = sizeof(data_type) * 8U;
+    static constexpr size_t kBatchSize = 1280;
+    static constexpr int
+    log2_constexpr(size_t v, int acc = 0) {
+        return (v <= 1) ? acc : log2_constexpr(v >> 1, acc + 1);
+    }
+    static constexpr int kShift = log2_constexpr(data_bits);
+    static constexpr size_t kMask = (data_bits - 1);
 
     //
     inline data_type*
@@ -193,6 +204,52 @@ class BitsetBase {
 
         policy_type::op_fill(
             this->data(), this->offset() + bit_idx_start, size, value);
+    }
+
+    inline void
+    set_sorted(const uint32_t* idxs, const size_t n, bool overwrite = false) {
+        int current_element = -1;
+        data_type mask = 0;
+        auto data_ptr_ = this->data();
+
+        auto flush_mask = [&]() {
+            if (current_element != -1 && mask != 0) {
+                overwrite ? data_ptr_[current_element] = mask
+                          : data_ptr_[current_element] |= mask;
+            }
+        };
+
+        alignas(64) uint32_t elems[kBatchSize];
+        alignas(64) uint32_t bits[kBatchSize];
+        auto num_batches = n / kBatchSize;
+        for (size_t i = 0; i < num_batches * kBatchSize; i += kBatchSize) {
+            detail::dynamic::idx_decompose_u32<data_bits>(
+                idxs + i, kBatchSize, elems, bits);
+
+            for (size_t j = 0; j < kBatchSize; ++j) {
+                auto element_index = elems[j];
+                auto bit_in_element = bits[j];
+                if (element_index != current_element) {
+                    flush_mask();
+                    current_element = element_index;
+                    mask = 0;
+                }
+                mask |= (static_cast<data_type>(1) << bit_in_element);
+            }
+        }
+
+        for (size_t i = num_batches * kBatchSize; i < n; ++i) {
+            auto element_index = idxs[i] >> kShift;
+            auto bit_in_element = idxs[i] & kMask;
+            if (element_index != current_element) {
+                flush_mask();
+                current_element = element_index;
+                mask = 0;
+            }
+            mask |= (static_cast<data_type>(1) << bit_in_element);
+        }
+
+        flush_mask();
     }
 
     // Set all bits to false.
