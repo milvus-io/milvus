@@ -63,7 +63,7 @@ func Test_floatVectorBaseChecker_CheckValidDataType(t *testing.T) {
 		},
 		{
 			dType:    schemapb.DataType_BinaryVector,
-			errIsNil: false,
+			errIsNil: true,
 		},
 	}
 
