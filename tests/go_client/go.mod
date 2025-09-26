@@ -3,14 +3,9 @@ module github.com/milvus-io/milvus/tests/go_client
 go 1.24.4
 
 require (
-<<<<<<< HEAD
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.0.0-20250319085209-5a6b4e56d59e
-=======
-	github.com/milvus-io/milvus/client/v2 v2.5.4
-	github.com/milvus-io/milvus/pkg/v2 v2.5.7
 	github.com/peterstace/simplefeatures v0.54.0
->>>>>>> 877e68f851 (enhance: Support R-Tree index for geometry datatype (#44069))
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
 	github.com/stretchr/testify v1.10.0
