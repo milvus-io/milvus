@@ -179,7 +179,7 @@ GeometryChunkWriter::write(const arrow::ArrayVector& array_vec) {
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
             null_bitmaps.emplace_back(
-                data->null_bitmap_data(), null_bitmap_n, data->offset());
+                data->null_bitmap_data(), data->length(), data->offset());
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
@@ -222,7 +222,11 @@ GeometryChunkWriter::finish() {
     char padding[MMAP_GEOMETRY_PADDING];
     target_->write(padding, MMAP_GEOMETRY_PADDING);
     auto [data, size] = target_->get();
-    return std::make_unique<GeometryChunk>(row_nums_, data, size, nullable_);
+    auto mmap_file_raii = file_path_.empty()
+                              ? nullptr
+                              : std::make_unique<MmapFileRAII>(file_path_);
+    return std::make_unique<GeometryChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 void

@@ -675,7 +675,11 @@ class FieldDataGeometryImpl : public FieldDataImpl<std::string, true> {
             auto valid_data = array->null_bitmap_data();
             if (valid_data != nullptr) {
                 bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
-                    valid_data, 0, valid_data_.data(), length_, n);
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
             }
         }
         length_ += n;

@@ -378,8 +378,7 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr
-CreateTestSchema() {
+inline SchemaPtr CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     auto bool_field =
         schema->AddDebugField("bool", milvus::DataType::BOOL, true);
@@ -1537,8 +1536,10 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
-                    createNullableFieldData(
-                        data_raw.data(), raw_valid_data, DataType::GEOMETRY, dim);
+                    createNullableFieldData(data_raw.data(),
+                                            raw_valid_data,
+                                            DataType::GEOMETRY,
+                                            dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
                 }

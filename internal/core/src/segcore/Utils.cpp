@@ -1007,6 +1007,26 @@ ReverseDataFromIndex(const index::IndexBase* index,
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
+        case DataType::GEOMETRY: {
+            using IndexType = index::ScalarIndex<std::string>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<std::string> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
+            }
+            auto obj = scalar_array->mutable_geometry_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));

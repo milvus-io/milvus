@@ -24,6 +24,7 @@
 #include "pb/plan.pb.h"
 #include "common/Geometry.h"
 #include "common/EasyAssert.h"
+#include "index/IndexFactory.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -33,6 +34,7 @@
 #include "test_utils/storage_test_utils.h"
 #include "index/Utils.h"
 #include "storage/ThreadPools.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 // Helper: create simple POINT(x,y) WKB (little-endian)
 static std::string
@@ -122,7 +124,44 @@ class RTreeIndexTest : public ::testing::Test {
 
     void
     TearDown() override {
-        // clean chunk manager files if any (TmpPath destructor will also remove)
+        // Clean up chunk manager files and index directories
+        try {
+            // Remove all files in the storage root path
+            if (chunk_manager_) {
+                auto root_path = storage_config_.root_path;
+                if (boost::filesystem::exists(root_path)) {
+                    for (auto& entry :
+                         boost::filesystem::directory_iterator(root_path)) {
+                        if (boost::filesystem::is_regular_file(entry)) {
+                            boost::filesystem::remove(entry);
+                        } else if (boost::filesystem::is_directory(entry)) {
+                            boost::filesystem::remove_all(entry);
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            // Log error but don't fail the test
+            std::cout << "Warning: Failed to clean up test files: " << e.what()
+                      << std::endl;
+        }
+        // TmpPath destructor will also remove the temp directory
+    }
+
+    // Helper method to clean up index files
+    void
+    CleanupIndexFiles(const std::vector<std::string>& index_files,
+                      const std::string& test_name = "") {
+        try {
+            for (const auto& file : index_files) {
+                if (chunk_manager_->Exist(file)) {
+                    chunk_manager_->Remove(file);
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cout << "Warning: Failed to clean up " << test_name
+                      << " index files: " << e.what() << std::endl;
+        }
     }
 
     milvus::storage::StorageConfig storage_config_;
@@ -328,6 +367,9 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
     ASSERT_TRUE(ifs.good());
     nlohmann::json meta = nlohmann::json::parse(ifs);
     ASSERT_EQ(meta["dimension"], 2);
+
+    // Clean up config and meta test files
+    CleanupIndexFiles(stats->GetIndexFiles(), "config test");
 }
 
 TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
@@ -444,6 +486,9 @@ TEST_F(RTreeIndexTest, Build_Upload_Load_LargeDataset) {
     rtree_load.Load(trace_ctx, cfg_load);
 
     ASSERT_EQ(rtree_load.Count(), static_cast<int64_t>(N));
+
+    // Clean up large dataset index files to avoid conflicts
+    CleanupIndexFiles(stats->GetIndexFiles(), "large dataset");
 }
 
 TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
@@ -717,13 +762,14 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     // build index files by invoking RTreeIndex::Build
     milvus::storage::FileManagerContext fm_ctx(
         field_meta_, index_meta_, chunk_manager_);
-    milvus::index::RTreeIndex<std::string> rtree_build(fm_ctx);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
     nlohmann::json build_cfg;
     build_cfg["insert_files"] = std::vector<std::string>{remote_file};
     build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
 
-    rtree_build.Build(build_cfg);
-    auto stats = rtree_build.Upload({});
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->Upload({});
 
     // load geometry index into sealed segment
     milvus::segcore::LoadIndexInfo info{};
@@ -737,18 +783,15 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     info.index_version = 1;
     info.schema = proto::schema::FieldSchema();
     info.schema.set_data_type(proto::schema::DataType::Geometry);
-    // Prepare a loaded RTree index instance and assign to info.index for scalar index loading path
-    milvus::storage::FileManagerContext fm_ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
-    fm_ctx_load.set_for_loading_index(true);
-    auto rtree_loaded =
-        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx_load);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+
     nlohmann::json cfg_load;
     cfg_load["index_files"] = stats->GetIndexFiles();
-    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
     milvus::tracer::TraceContext trace_ctx_load;
-    rtree_loaded->Load(trace_ctx_load, cfg_load);
-    info.index = std::move(rtree_loaded);
+    rtree_index->Load(trace_ctx_load, cfg_load);
+
+    info.cache_index =
+        CreateTestCacheIndex("rtree_index_key", std::move(rtree_index));
     sealed->LoadIndex(info);
 
     // 3) Build a GIS filter expression and run exact filtering via segcore
@@ -781,4 +824,10 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     test_op("POINT(0 0)",
             proto::plan::GISFunctionFilterExpr_GISOp_Equals,
             [](int i) { return (i % 4 == 0); });
+
+    // Explicit cleanup for this test to avoid conflicts
+    sealed.reset();  // Release the sealed segment first
+
+    // Clean up any remaining index files
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
 }
