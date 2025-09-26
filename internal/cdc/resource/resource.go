@@ -32,10 +32,10 @@ var r *resourceImpl // singleton resource instance
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
 
-// OptMetaKV provides the meta kv to the resource.
-func OptMetaKV(metaKV kv.MetaKv) optResourceInit {
+// OptWatchKV provides the meta kv to the resource.
+func OptWatchKV(watchKV kv.WatchKV) optResourceInit {
 	return func(r *resourceImpl) {
-		r.metaKV = metaKV
+		r.watchKV = watchKV
 	}
 }
 
@@ -74,10 +74,10 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 
-	newR.catalog = streamingcoord.NewReplicationCatalog(newR.MetaKV())
+	newR.catalog = streamingcoord.NewReplicationCatalog(newR.WatchKV())
 	newR.clusterClient = cluster.NewClusterClient()
 
-	assertNotNil(newR.MetaKV())
+	assertNotNil(newR.WatchKV())
 	assertNotNil(newR.ReplicationCatalog())
 	assertNotNil(newR.ClusterClient())
 	assertNotNil(newR.ReplicateManagerClient())
@@ -96,16 +96,16 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	metaKV                 kv.MetaKv
+	watchKV                kv.WatchKV
 	catalog                metastore.ReplicationCatalog
 	clusterClient          cluster.ClusterClient
 	replicateManagerClient replication.ReplicateManagerClient
 	controller             controller.Controller
 }
 
-// MetaKV returns the meta kv.
-func (r *resourceImpl) MetaKV() kv.MetaKv {
-	return r.metaKV
+// WatchKV returns the meta kv.
+func (r *resourceImpl) WatchKV() kv.WatchKV {
+	return r.watchKV
 }
 
 // ReplicationCatalog returns the replication catalog.
