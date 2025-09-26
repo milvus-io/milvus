@@ -56,6 +56,14 @@ func withMaxCapCheck() validateOption {
 }
 
 func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
+	// Check if the field data already contains GeometryWktData
+	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_GeometryWktData)
+	if ok {
+		// Already in WKT format, no conversion needed
+		log.Debug("Geometry field data already contains WKT data, skipping conversion",
+			zap.String("fieldName", (*fieldData).GetFieldName()))
+		return nil
+	}
 	wkbArray := (*fieldData).GetScalars().GetGeometryData().GetData()
 	wktArray := make([]string, len(wkbArray))
 	validData := (*fieldData).GetValidData()
