@@ -46,6 +46,7 @@ func RecoverBalancer(
 	if err != nil {
 		return nil, errors.Wrap(err, "fail to recover channel manager")
 	}
+	manager.SetLogger(resource.Resource().Logger().With(log.FieldComponent("channel-manager")))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	b := &balancerImpl{
 		ctx:                    ctx,
@@ -122,7 +123,7 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 }
 
 // UpdateReplicateConfiguration updates the replicate configuration.
-func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}
@@ -131,7 +132,7 @@ func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ..
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
 
-	if err := b.channelMetaManager.UpdateReplicateConfiguration(ctx, msgs...); err != nil {
+	if err := b.channelMetaManager.UpdateReplicateConfiguration(ctx, result); err != nil {
 		return err
 	}
 	return nil
