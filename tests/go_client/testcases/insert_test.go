@@ -601,6 +601,41 @@ func TestInsertDefaultRows(t *testing.T) {
 	}
 }
 
+func TestInsertDefaultRowsWithKeepAutoIDPk(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
+	log.Info("fields", zap.Any("FieldNames", schema.Fields))
+	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty("allow_insert_auto_id", true))
+	common.CheckErr(t, err, true)
+
+	// insert rows
+	rows := hp.GenInt64VecRows(common.DefaultNb, false, false, *hp.TNewDataOption())
+	log.Info("rows data", zap.Any("rows[8]", rows[8]))
+	ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...).WithKeepAutoIDPk(true))
+	common.CheckErr(t, err, true)
+	int64Values := make([]int64, 0, common.DefaultNb)
+	for i := 0; i < common.DefaultNb; i++ {
+		int64Values = append(int64Values, int64(i+1))
+	}
+	common.CheckInsertResult(t, column.NewColumnInt64(common.DefaultInt64FieldName, int64Values), ids)
+	require.Equal(t, ids.InsertCount, int64(common.DefaultNb))
+
+	// flush and check row count
+	flushTask, errFlush := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
+	common.CheckErr(t, errFlush, true)
+	errFlush = flushTask.Await(ctx)
+	common.CheckErr(t, errFlush, true)
+
+	// check collection stats
+	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
+}
+
 // test insert rows enable or disable dynamic field
 func TestInsertAllFieldsRows(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/33459")
