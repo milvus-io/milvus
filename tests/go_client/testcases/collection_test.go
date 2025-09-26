@@ -595,8 +595,8 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// duplicate field
-	pkField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)
-	pkField2 := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar)
+	pkField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true).WithMaxLength(1000)
+	pkField2 := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1000)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 
 	// two vector fields have same name
