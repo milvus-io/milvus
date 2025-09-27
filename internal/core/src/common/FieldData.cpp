@@ -603,7 +603,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
         case DataType::GEOMETRY:
-            return std::make_shared<FieldData<std::string>>(
+            return std::make_shared<FieldData<Geometry>>(
                 type, nullable, cap_rows);
         default:
             ThrowInfo(DataTypeInvalid,

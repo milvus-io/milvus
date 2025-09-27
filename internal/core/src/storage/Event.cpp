@@ -322,11 +322,11 @@ BaseEventData::Serialize() {
             case DataType::GEOMETRY: {
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
-                    auto geo_ptr = static_cast<const std::string*>(
+                    auto str = static_cast<const std::string*>(
                         field_data->RawValue(offset));
+                    auto size = field_data->is_valid(offset) ? str->size() : -1;
                     payload_writer->add_one_binary_payload(
-                        reinterpret_cast<const uint8_t*>(geo_ptr->data()),
-                        geo_ptr->size());
+                        reinterpret_cast<const uint8_t*>(str->c_str()), size);
                 }
                 break;
             }

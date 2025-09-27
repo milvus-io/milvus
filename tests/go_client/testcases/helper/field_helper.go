@@ -438,7 +438,7 @@ func (ff FieldsFactory) createAllFields(fieldOpts FieldOptions) []*entity.Field 
 	// Add scalar fields and array fields
 	for _, fieldType := range GetAllScalarFieldType() {
 		switch fieldType {
-		case entity.FieldTypeInt64:
+		case entity.FieldTypeInt64, entity.FieldTypeGeometry:
 			continue
 		case entity.FieldTypeArray:
 			for _, eleType := range GetAllArrayElementType() {
