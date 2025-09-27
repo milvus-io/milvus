@@ -9,6 +9,8 @@ import (
 	"unicode"
 
 	"github.com/cockroachdb/errors"
+	"github.com/twpayne/go-geom"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -164,6 +166,11 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 		}
 		if typeutil.IsIntegerType(rDataType) {
 			return schemapb.DataType_Int64, nil
+		}
+	}
+	if typeutil.IsGeometryType(lDataType) {
+		if typeutil.IsGeometryType(rDataType) {
+			return schemapb.DataType_Geometry, nil
 		}
 	}
 	if typeutil.IsFloatingType(lDataType) {
@@ -796,6 +803,22 @@ func decodeUnicode(input string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
+}
+
+func checkValidWKT(wktStr string) error {
+	_, err := wkt.Unmarshal(wktStr)
+	return err
+}
+
+func checkValidPoint(wktStr string) error {
+	g, err := wkt.Unmarshal(wktStr)
+	if err != nil {
+		return err
+	}
+	if g.(*geom.Point) == nil {
+		return fmt.Errorf("only supports POINT geometry: %s", wktStr)
+	}
+	return nil
 }
 
 func parseISODuration(durationStr string) (*planpb.Interval, error) {

@@ -579,6 +579,11 @@ class SegmentInternalInterface : public SegmentInterface {
              const PkType& pk,
              BitsetTypeView& bitset) const = 0;
 
+    virtual GEOSContextHandle_t
+    get_ctx() const {
+        return ctx_;
+    };
+
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
@@ -597,6 +602,8 @@ class SegmentInternalInterface : public SegmentInterface {
     mutable folly::Synchronized<
         std::unordered_map<FieldId, index::CacheJsonKeyStatsPtr>>
         json_stats_;
+
+    GEOSContextHandle_t ctx_ = GEOS_init_r();
 };
 
 }  // namespace milvus::segcore

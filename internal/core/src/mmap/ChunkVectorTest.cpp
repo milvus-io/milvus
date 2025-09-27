@@ -54,6 +54,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -123,6 +124,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
             nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result = segment->bulk_subscript(
             nullptr, json_field, ids_ds->GetIds(), num_inserted);
+        auto geometry_result = segment->bulk_subscript(
+            nullptr, geometry_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
             nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
@@ -161,6 +164,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+                  num_inserted);
         EXPECT_EQ(fp32_vec_result->vectors().float_vector().data_size(),
                   num_inserted * dim);
         EXPECT_EQ(fp16_vec_result->vectors().float16_vector().size(),

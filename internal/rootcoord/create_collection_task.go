@@ -22,6 +22,8 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -152,6 +154,21 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 
 	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
 	return check(maxColNumPerDB)
+}
+
+func checkGeometryDefaultValue(value string) error {
+	geomT, err := wkt.Unmarshal(value)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+	_, err = wkb.Marshal(geomT, wkb.NDR)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+
+	return nil
 }
 
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {

@@ -73,6 +73,7 @@ const (
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
 	testStructArrayField = "structArray"
+	testGeometryField    = "geometry"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -89,6 +90,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testFloat16VecField,
 		testBFloat16VecField,
 		testStructArrayField,
+		testGeometryField,
 		testVecDim,
 		collectionName)
 }
@@ -237,6 +239,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
 	floatVecField, binaryVecField, float16VecField, bfloat16VecField, structArrayField string,
+	geometryField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -350,6 +353,16 @@ func constructCollectionSchemaWithAllType(
 		IndexParams: nil,
 		AutoID:      false,
 	}
+	g := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         geometryField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Geometry,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
 
 	// StructArrayField schema for testing
 	structArrayFields := []*schemapb.StructArrayFieldSchema{
@@ -412,6 +425,7 @@ func constructCollectionSchemaWithAllType(
 			bVec,
 			f16Vec,
 			bf16Vec,
+			g,
 		}
 	} else {
 		schema.Fields = []*schemapb.FieldSchema{
@@ -422,6 +436,7 @@ func constructCollectionSchemaWithAllType(
 			d,
 			fVec,
 			// bVec,
+			g,
 		}
 	}
 

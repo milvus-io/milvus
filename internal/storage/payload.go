@@ -39,6 +39,7 @@ type PayloadWriterInterface interface {
 	AddOneStringToPayload(string, bool) error
 	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
 	AddOneJSONToPayload([]byte, bool) error
+	AddOneGeometryToPayload(msg []byte, isValid bool) error
 	AddBinaryVectorToPayload([]byte, int) error
 	AddFloatVectorToPayload([]float32, int) error
 	AddFloat16VectorToPayload([]byte, int) error
@@ -70,6 +71,7 @@ type PayloadReaderInterface interface {
 	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
 	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)
 	GetJSONFromPayload() ([][]byte, []bool, error)
+	GetGeometryFromPayload() ([][]byte, []bool, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloat16VectorFromPayload() ([]byte, int, error)
 	GetBFloat16VectorFromPayload() ([]byte, int, error)

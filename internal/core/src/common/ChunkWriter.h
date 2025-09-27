@@ -26,6 +26,7 @@
 
 #include "storage/FileWriter.h"
 
+#include "common/Geometry.h"
 namespace milvus {
 class ChunkWriterBase {
  public:
@@ -216,6 +217,16 @@ class JSONChunkWriter : public ChunkWriterBase {
  public:
     using ChunkWriterBase::ChunkWriterBase;
 
+    void
+    write(const arrow::ArrayVector& array_vec) override;
+
+    std::unique_ptr<Chunk>
+    finish() override;
+};
+
+class GeometryChunkWriter : public ChunkWriterBase {
+ public:
+    using ChunkWriterBase::ChunkWriterBase;
     void
     write(const arrow::ArrayVector& array_vec) override;
 

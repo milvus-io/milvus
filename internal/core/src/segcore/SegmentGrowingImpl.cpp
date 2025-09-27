@@ -225,6 +225,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_id, num_rows, field_data_size);
         }
 
+        // Build geometry cache for GEOMETRY fields
+        if (field_meta.get_data_type() == DataType::GEOMETRY) {
+            BuildGeometryCacheForInsert(
+                field_id,
+                &insert_record_proto->fields_data(data_offset),
+                num_rows);
+        }
+
         stats_.mem_size += field_data_size;
 
         try_remove_chunks(field_id);
@@ -516,12 +524,17 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                    field_data,
                                    primary_field_id,
                                    num_rows);
+            // Build geometry cache for GEOMETRY fields
+            if (schema_->operator[](field_id).get_data_type() ==
+                DataType::GEOMETRY) {
+                BuildGeometryCacheForLoad(field_id, field_data);
+            }
         }
-    }
 
-    // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
+        // step 5: update small indexes
+        insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                                 reserved_offset + num_rows);
+    }
 }
 
 SegcoreError
@@ -931,6 +944,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 result->mutable_scalars()->mutable_json_data()->mutable_data());
             break;
         }
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                 vec_ptr,
+                                                 seg_offsets,
+                                                 count,
+                                                 result->mutable_scalars()
+                                                     ->mutable_geometry_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             // element
             bulk_subscript_array_impl(op_ctx,
@@ -1274,7 +1297,8 @@ void
 SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
         LOG_INFO(
-            "lazy check schema segment {} found newer schema version, current "
+            "lazy check schema segment {} found newer schema version, "
+            "current "
             "schema version {}, new schema version {}",
             id_,
             schema_->get_schema_version(),
@@ -1340,6 +1364,101 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
              field_meta.get_data_type(),
              field_id.get(),
              id_);
+}
+
+void
+SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
+                                                const DataArray* data_array,
+                                                int64_t num_rows) {
+    try {
+        // Get geometry cache for this segment+field
+        auto& geometry_cache =
+            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+                get_segment_id(), field_id);
+
+        // Process geometry data from DataArray
+        const auto& geometry_data = data_array->scalars().geometry_data();
+        const auto& valid_data = data_array->valid_data();
+
+        for (int64_t i = 0; i < num_rows; ++i) {
+            if (valid_data.empty() ||
+                (i < valid_data.size() && valid_data[i])) {
+                // Valid geometry data
+                const auto& wkb_data = geometry_data.data(i);
+                geometry_cache.AppendData(
+                    ctx_, wkb_data.data(), wkb_data.size());
+            } else {
+                // Null/invalid geometry
+                geometry_cache.AppendData(ctx_, nullptr, 0);
+            }
+        }
+
+        LOG_INFO(
+            "Successfully appended {} geometries to cache for growing "
+            "segment "
+            "{} field {}",
+            num_rows,
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        ThrowInfo(UnexpectedError,
+                  "Failed to build geometry cache for growing segment {} field "
+                  "{} insert: {}",
+                  get_segment_id(),
+                  field_id.get(),
+                  e.what());
+    }
+}
+
+void
+SegmentGrowingImpl::BuildGeometryCacheForLoad(
+    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    try {
+        // Get geometry cache for this segment+field
+        auto& geometry_cache =
+            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+                get_segment_id(), field_id);
+
+        // Process each field data chunk
+        for (const auto& data : field_data) {
+            auto num_rows = data->get_num_rows();
+
+            for (int64_t i = 0; i < num_rows; ++i) {
+                if (data->is_valid(i)) {
+                    // Valid geometry data
+                    auto wkb_data =
+                        static_cast<const std::string*>(data->RawValue(i));
+                    geometry_cache.AppendData(
+                        ctx_, wkb_data->data(), wkb_data->size());
+                } else {
+                    // Null/invalid geometry
+                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                }
+            }
+        }
+
+        size_t total_rows = 0;
+        for (const auto& data : field_data) {
+            total_rows += data->get_num_rows();
+        }
+
+        LOG_INFO(
+            "Successfully loaded {} geometries to cache for growing "
+            "segment {} "
+            "field {}",
+            total_rows,
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        ThrowInfo(UnexpectedError,
+                  "Failed to build geometry cache for growing segment {} field "
+                  "{} load: {}",
+                  get_segment_id(),
+                  field_id.get(),
+                  e.what());
+    }
 }
 
 }  // namespace milvus::segcore

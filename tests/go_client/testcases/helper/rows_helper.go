@@ -28,6 +28,7 @@ type BaseRow struct {
 	Double    float64                `json:"double,omitempty" milvus:"name:double"`
 	Varchar   string                 `json:"varchar,omitempty" milvus:"name:varchar"`
 	JSON      *JSONStruct            `json:"json,omitempty" milvus:"name:json"`
+	Geometry  string                 `json:"geometry,omitempty" milvus:"name:geometry"`
 	FloatVec  []float32              `json:"floatVec,omitempty" milvus:"name:floatVec"`
 	Fp16Vec   []byte                 `json:"fp16Vec,omitempty" milvus:"name:fp16Vec"`
 	Bf16Vec   []byte                 `json:"bf16Vec,omitempty" milvus:"name:bf16Vec"`
@@ -101,6 +102,19 @@ func GenJSONRow(index int) *JSONStruct {
 		}
 	}
 	return &jsonStruct
+}
+
+func GenGeometryRow(i int) string {
+	const (
+		point           = "POINT (30.123 -10.456)"
+		linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+		polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+		multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+		multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+		multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+	)
+	wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+	return wktArray[i%6]
 }
 
 func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
@@ -177,6 +191,7 @@ func GenAllFieldsRows(nb int, enableDynamicField bool, option GenDataOption) []i
 			Double:     float64(i + 1),
 			Varchar:    strconv.Itoa(i + 1),
 			JSON:       GenJSONRow(i + 1),
+			Geometry:   GenGeometryRow(i + 1),
 			FloatVec:   common.GenFloatVector(dim),
 			Fp16Vec:    common.GenFloat16Vector(dim),
 			Bf16Vec:    common.GenBFloat16Vector(dim),

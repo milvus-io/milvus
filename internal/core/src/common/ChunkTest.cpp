@@ -27,6 +27,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/File.h"
+#include "common/Geometry.h"
 #include "common/Types.h"
 #include "storage/Event.h"
 #include "storage/Util.h"
@@ -227,7 +228,8 @@ TEST(chunk, test_json_field) {
     auto ser_data = event_data.Serialize();
 
     auto get_record_batch_reader =
-        [&]() -> std::shared_ptr<::arrow::RecordBatchReader> {
+        [&]() -> std::pair<std::shared_ptr<::arrow::RecordBatchReader>,
+                           std::unique_ptr<parquet::arrow::FileReader>> {
         auto buffer = std::make_shared<arrow::io::BufferReader>(
             ser_data.data() + 2 * sizeof(milvus::Timestamp),
             ser_data.size() - 2 * sizeof(milvus::Timestamp));
@@ -242,11 +244,11 @@ TEST(chunk, test_json_field) {
         std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
         s = arrow_reader->GetRecordBatchReader(&rb_reader);
         EXPECT_TRUE(s.ok());
-        return rb_reader;
+        return {rb_reader, std::move(arrow_reader)};
     };
 
     {
-        auto rb_reader = get_record_batch_reader();
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
         // nullable=false
         FieldMeta field_meta(FieldName("a"),
                              milvus::FieldId(1),
@@ -276,7 +278,7 @@ TEST(chunk, test_json_field) {
         }
     }
     {
-        auto rb_reader = get_record_batch_reader();
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
         // nullable=true
         FieldMeta field_meta(FieldName("a"),
                              milvus::FieldId(1),

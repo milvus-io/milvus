@@ -375,6 +375,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return insert_record_.timestamps_;
     }
 
+    // Load Geometry cache for a field
+    void
+    LoadGeometryCache(FieldId field_id,
+                      const std::shared_ptr<ChunkedColumnInterface>& column);
+
  private:
     void
     load_system_field_internal(FieldId field_id, FieldDataInfo& data);

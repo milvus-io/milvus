@@ -67,4 +67,5 @@ const (
 	Sorted   IndexType = "STL_SORT"
 	Inverted IndexType = "INVERTED"
 	BITMAP   IndexType = "BITMAP"
+	RTREE    IndexType = "RTREE"
 )

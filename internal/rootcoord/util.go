@@ -396,6 +396,9 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
+			if dtype == schemapb.DataType_Geometry {
+				return checkGeometryDefaultValue(fieldSchema.GetDefaultValue().GetStringData())
+			}
 			errTypeMismatch := func(fieldName, fieldType, defaultValueType string) error {
 				msg := fmt.Sprintf("type (%s) of field (%s) is not equal to the type(%s) of default_value", fieldType, fieldName, defaultValueType)
 				return merr.WrapErrParameterInvalidMsg(msg)

@@ -34,6 +34,7 @@ const (
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
 	IndexNGRAM    IndexType = "NGRAM"
+	IndexRTREE    IndexType = "RTREE"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )

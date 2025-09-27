@@ -254,6 +254,16 @@ struct GeneratedData {
                                 src_data.begin(), src_data.end(), ret_data);
                             break;
                         }
+                        case DataType::GEOMETRY: {
+                            auto ret_data =
+                                reinterpret_cast<std::string*>(ret.data());
+                            auto src_data = target_field_data.scalars()
+                                                .geometry_data()
+                                                .data();
+                            std::copy(
+                                src_data.begin(), src_data.end(), ret_data);
+                            break;
+                        }
                         default: {
                             ThrowInfo(Unsupported, "unsupported");
                         }
@@ -431,6 +441,95 @@ InsertCol(InsertRecordProto* insert_data,
     auto array = milvus::segcore::CreateDataArrayFrom(
         data.data(), valid_data.data(), data.size(), field_meta);
     insert_data->mutable_fields_data()->AddAllocated(array.release());
+}
+
+inline std::string
+generateRandomPoint() {
+    return "POINT(" +
+           std::to_string(static_cast<double>(rand()) / RAND_MAX * 360.0 -
+                          180.0) +
+           " " +
+           std::to_string(static_cast<double>(rand()) / RAND_MAX * 180.0 -
+                          90.0) +
+           ")";
+}
+
+inline std::string
+generateRandomValidLineString(int numPoints) {
+    // Generate a simple line string that doesn't self-intersect
+    double startX = static_cast<double>(rand()) / RAND_MAX * 300.0 - 150.0;
+    double startY = static_cast<double>(rand()) / RAND_MAX * 160.0 - 80.0;
+
+    std::string wkt = "LINESTRING (";
+    wkt += std::to_string(startX) + " " + std::to_string(startY);
+
+    for (int i = 1; i < numPoints; ++i) {
+        // Generate next point with some distance from previous point
+        double deltaX = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 20.0;
+        double deltaY = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 20.0;
+
+        startX += deltaX;
+        startY += deltaY;
+
+        wkt += ", " + std::to_string(startX) + " " + std::to_string(startY);
+    }
+
+    wkt += ")";
+    return wkt;
+}
+
+inline std::string
+generateRandomValidPolygon(int numPoints) {
+    // Generate a simple convex polygon to avoid self-intersection
+    if (numPoints < 3)
+        numPoints = 3;
+
+    // Generate center point
+    double centerX = static_cast<double>(rand()) / RAND_MAX * 300.0 - 150.0;
+    double centerY = static_cast<double>(rand()) / RAND_MAX * 160.0 - 80.0;
+
+    // Generate radius
+    double radius = 5.0 + static_cast<double>(rand()) / RAND_MAX * 15.0;
+
+    std::string wkt = "POLYGON ((";
+
+    // Generate points in a circle to form a convex polygon
+    for (int i = 0; i < numPoints; ++i) {
+        double angle = 2.0 * M_PI * i / numPoints;
+        double x = centerX + radius * cos(angle);
+        double y = centerY + radius * sin(angle);
+
+        if (i > 0)
+            wkt += ", ";
+        wkt += std::to_string(x) + " " + std::to_string(y);
+    }
+
+    // Close the ring by repeating the first point
+    double angle = 0.0;
+    double x = centerX + radius * cos(angle);
+    double y = centerY + radius * sin(angle);
+    wkt += ", " + std::to_string(x) + " " + std::to_string(y);
+
+    wkt += "))";
+    return wkt;
+}
+
+inline std::string
+GenRandomGeometry() {
+    int geomType = rand() % 3;  // Randomly select a geometry type (0 to 2)
+    switch (geomType) {
+        case 0: {
+            return generateRandomPoint();
+        }
+        case 1: {
+            return generateRandomValidLineString(5);
+        }
+        case 2: {
+            return generateRandomValidPolygon(5);
+        }
+        default:
+            return generateRandomPoint();
+    }
 }
 
 inline GeneratedData
@@ -792,6 +891,21 @@ DataGen(SchemaPtr schema,
                         }
                     }
                 }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::GEOMETRY: {
+                vector<std::string> data(N);
+                auto ctx = GEOS_init_r();
+                for (int i = 0; i < N / repeat_count; i++) {
+                    std::string wkt = GenRandomGeometry();
+                    Geometry geom(ctx, wkt.c_str());
+                    std::string wkb = geom.to_wkb_string();
+                    for (int j = 0; j < repeat_count; j++) {
+                        data[i * repeat_count + j] = wkb;
+                    }
+                }
+                GEOS_finish_r(ctx);
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
@@ -1410,6 +1524,24 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                         data_raw.data(), raw_valid_data, DataType::JSON, dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::JSON, dim);
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                auto src_data = data->scalars().geometry_data().data();
+                std::vector<std::string> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = std::move(std::string(str));
+                }
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(data_raw.data(),
+                                            raw_valid_data,
+                                            DataType::GEOMETRY,
+                                            dim);
+                } else {
+                    createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
                 }
                 break;
             }

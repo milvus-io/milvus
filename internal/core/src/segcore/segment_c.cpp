@@ -42,6 +42,7 @@
 #include "exec/expression/ExprCache.h"
 #include "monitor/Monitor.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
+#include "common/GeometryCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus

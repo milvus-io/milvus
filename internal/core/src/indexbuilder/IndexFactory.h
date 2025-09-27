@@ -62,6 +62,7 @@ class IndexFactory {
             case DataType::STRING:
             case DataType::ARRAY:
             case DataType::JSON:
+            case DataType::GEOMETRY:
             case DataType::TIMESTAMPTZ:
                 return CreateScalarIndex(type, config, context);
 

@@ -840,6 +840,24 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
+
+	fieldsData := t.result.GetResults().GetFieldsData()
+	for i, fieldData := range fieldsData {
+		if fieldData.Type == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&fieldsData[i]); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
+		}
+	}
+	if t.result.GetResults().GetGroupByFieldValue() != nil &&
+		t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Geometry {
+		if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
+			log.Warn("fail to validate geometry field search result", zap.Error(err))
+			return err
+		}
+	}
+
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
