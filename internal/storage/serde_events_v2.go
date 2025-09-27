@@ -221,19 +221,18 @@ func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 func (pw *packedRecordWriter) enableSkipIndex(fields []*schemapb.FieldSchema) error {
 	groups := make([]typeutil.UniqueID, 0)
 	for _, columnGroup := range pw.columnGroups {
-		flag := false
-		for _, idx := range columnGroup.Fields {
+		for _, idx := range columnGroup.Columns {
 			field := fields[idx]
 			if field.GetFieldID() < common.StartOfUserFieldID || field.GetIsPrimaryKey() || storagecommon.IsVectorDataType(field.GetDataType()) {
 				break
 			}
-			flag = true
-		}
-		if flag {
-			groups = append(groups, columnGroup.GroupID)
+			if storagecommon.CanSkipDataType(field.GetDataType()) {
+				groups = append(groups, columnGroup.GroupID)
+				break
+			}
 		}
 	}
-	return pw.writer.EnableSkipIndex(groups)
+	return pw.writer.EnableSkipIndex(groups, pw.schema)
 }
 
 func (pw *packedRecordWriter) Close() error {
@@ -332,7 +331,7 @@ type PackedBinlogRecordWriter struct {
 	arrowSchema          *arrow.Schema
 	bufferSize           int64
 	multiPartUploadSize  int64
-	enableSkipIndex      bool
+	isSorted      bool
 	columnGroups         []storagecommon.ColumnGroup
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
@@ -419,7 +418,12 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 			logIdStart++
 		}
 		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
-		err = pw.writer.enableSkipIndex(allFields)
+		if pw.isSorted {
+			err = pw.writer.enableSkipIndex(allFields)
+			if err != nil {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("enable skip index error: %s", err.Error()))
+			}
+		}
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}
@@ -601,7 +605,7 @@ func (pw *PackedBinlogRecordWriter) GetBufferUncompressed() uint64 {
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
-	enableSkipIndex bool,
+	isSorted bool,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
@@ -639,7 +643,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		maxRowNum:            maxRowNum,
 		bufferSize:           bufferSize,
 		multiPartUploadSize:  multiPartUploadSize,
-		enableSkipIndex:      enableSkipIndex,
+		isSorted:      isSorted,
 		columnGroups:         columnGroups,
 		pkstats:              stats,
 		bm25Stats:            bm25Stats,

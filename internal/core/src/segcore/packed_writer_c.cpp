@@ -248,9 +248,11 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 }
 
 CStatus
-EnableSkipIndex(const int64_t* group_ids,
-                const int64_t length,
-                CPackedWriter c_packed_writer) {
+EnableSkipIndex(CPackedWriter c_packed_writer,
+                const void* proto_blob,
+                const int64_t schema_length,
+                const int64_t* group_ids,
+                const int64_t gids_length) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -259,13 +261,20 @@ EnableSkipIndex(const int64_t* group_ids,
                 c_packed_writer);
 
         auto group_id_list =
-            std::vector<int64_t>(group_ids, group_ids + length);
+            std::vector<int64_t>(group_ids, group_ids + gids_length);
+
+        milvus::proto::schema::CollectionSchema collection_schema;
+        auto suc = collection_schema.ParseFromArray(proto_blob, schema_length);
+        if (!suc) {
+            LOG_WARN("unmarshal schema string failed");
+        }
+        auto schema = milvus::Schema::ParseFrom(collection_schema);
 
         for (const auto& group_id : group_id_list) {
             packed_writer->AddMetadataAppender(
                 group_id,
                 milvus::ChunkSkipIndex::KEY,
-                std::make_unique<milvus::ChunkSkipIndexAppender>());
+                std::make_unique<milvus::ChunkSkipIndexAppender>(schema));
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

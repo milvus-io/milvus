@@ -353,7 +353,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     LoadSkipIndex(std::vector<std::unique_ptr<ChunkSkipIndex>> skip_index) {
-        skip_index_.LoadSkip(std::move(skip_index));
+        skip_index_.LoadSkipIndex(std::move(skip_index));
     }
 
     virtual DataType

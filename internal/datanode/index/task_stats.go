@@ -198,7 +198,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		}),
 		storage.WithVersion(st.req.GetStorageVersion()),
 		storage.WithStorageConfig(st.req.GetStorageConfig()),
-		storage.WithEnableSkipIndex(true),
+		storage.WithIsSorted(true),
 	)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
