@@ -23,7 +23,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -34,18 +33,15 @@ import (
 )
 
 const (
-	maxTaskQueueNum    = 1024
-	maxParallelTaskNum = 10
+	maxTaskQueueNum = 1024
 )
 
 type Executor interface {
 	Start(ctx context.Context)
-	Execute(task Compactor) (bool, error)
+	Enqueue(task Compactor) (bool, error)
 	Slots() int64
 	RemoveTask(planID int64)
 	GetResults(planID int64) []*datapb.CompactionPlanResult
-	DiscardByDroppedChannel(channel string)
-	DiscardPlan(channel string)
 }
 
 type executor struct {
@@ -53,7 +49,6 @@ type executor struct {
 	completedCompactor *typeutil.ConcurrentMap[int64, Compactor]                    // planID to compactor
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
 	taskCh             chan Compactor
-	taskSem            *semaphore.Weighted             // todo remove this, unify with slot logic
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 	usingSlots         int64
 	slotMu             sync.RWMutex
@@ -69,13 +64,12 @@ func NewExecutor() *executor {
 		completedCompactor: typeutil.NewConcurrentMap[int64, Compactor](),
 		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
 		taskCh:             make(chan Compactor, maxTaskQueueNum),
-		taskSem:            semaphore.NewWeighted(maxParallelTaskNum),
 		dropped:            typeutil.NewConcurrentSet[string](),
 		usingSlots:         0,
 	}
 }
 
-func (e *executor) Execute(task Compactor) (bool, error) {
+func (e *executor) Enqueue(task Compactor) (bool, error) {
 	e.slotMu.Lock()
 	defer e.slotMu.Unlock()
 	newSlotUsage := task.GetSlotUsage()
@@ -143,14 +137,10 @@ func (e *executor) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-e.taskCh:
-			err := e.taskSem.Acquire(ctx, 1)
-			if err != nil {
-				return
-			}
-			go func() {
-				defer e.taskSem.Release(1)
+			GetExecPool().Submit(func() (any, error) {
 				e.executeTask(task)
-			}()
+				return nil, nil
+			})
 		}
 	}
 }
@@ -211,39 +201,6 @@ func (e *executor) stopTask(planID int64) {
 		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.GetChannelName()))
 		task.Stop()
 	}
-}
-
-func (e *executor) isValidChannel(channel string) bool {
-	// if vchannel marked dropped, compaction should not proceed
-	return !e.dropped.Contain(channel)
-}
-
-func (e *executor) DiscardByDroppedChannel(channel string) {
-	e.dropped.Insert(channel)
-	e.DiscardPlan(channel)
-}
-
-func (e *executor) DiscardPlan(channel string) {
-	e.resultGuard.Lock()
-	defer e.resultGuard.Unlock()
-
-	e.executing.Range(func(planID int64, task Compactor) bool {
-		if task.GetChannelName() == channel {
-			e.stopTask(planID)
-		}
-		return true
-	})
-
-	// remove all completed plans of channel
-	e.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
-		if result.GetChannel() == channel {
-			e.RemoveTask(planID)
-			log.Info("remove compaction plan and results",
-				zap.String("channel", channel),
-				zap.Int64("planID", planID))
-		}
-		return true
-	})
 }
 
 func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {

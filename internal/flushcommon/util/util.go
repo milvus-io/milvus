@@ -23,7 +23,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	compactor "github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -40,8 +39,7 @@ type PipelineParams struct {
 	Ctx                context.Context
 	Broker             broker.Broker
 	SyncMgr            syncmgr.SyncManager
-	TimeTickSender     StatsUpdater       // reference to TimeTickSender
-	CompactionExecutor compactor.Executor // reference to compaction executor
+	TimeTickSender     StatsUpdater // reference to TimeTickSender
 	MsgStreamFactory   dependency.Factory
 	DispClient         msgdispatcher.Client
 	ChunkManager       storage.ChunkManager

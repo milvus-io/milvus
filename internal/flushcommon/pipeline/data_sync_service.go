@@ -24,7 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -64,8 +63,7 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender util.StatsUpdater  // reference to TimeTickSender
-	compactor      compactor.Executor // reference to compaction executor
+	timetickSender util.StatsUpdater // reference to TimeTickSender
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
@@ -260,7 +258,6 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		serverID:     config.serverID,
 
 		chunkManager:   params.ChunkManager,
-		compactor:      params.CompactionExecutor,
 		timetickSender: params.TimeTickSender,
 		syncMgr:        params.SyncMgr,
 
@@ -281,7 +278,6 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		info.GetVchan().GetDroppedSegmentIds(),
 		flushed,
 		unflushed,
-		params.CompactionExecutor,
 		params.MsgHandler,
 	)
 	nodeList = append(nodeList, ddNode)

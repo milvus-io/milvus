@@ -38,7 +38,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().GetSlotUsage().Return(8)
 		executor := NewExecutor()
-		succeed, err := executor.Execute(mockC)
+		succeed, err := executor.Enqueue(mockC)
 		assert.Equal(t, true, succeed)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(executor.taskCh))
@@ -56,11 +56,11 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().GetSlotUsage().Return(8)
 		executor := NewExecutor()
-		succeed, err := executor.Execute(mockC)
+		succeed, err := executor.Enqueue(mockC)
 		assert.Equal(t, true, succeed)
 		assert.NoError(t, err)
 
-		succeed2, err2 := executor.Execute(mockC)
+		succeed2, err2 := executor.Enqueue(mockC)
 		assert.Equal(t, false, succeed2)
 		assert.Error(t, err2)
 		assert.True(t, errors.Is(err2, merr.ErrDuplicatedCompactionTask))
@@ -82,7 +82,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(0)
 		executor := NewExecutor()
 
-		succeed, err := executor.Execute(mockC)
+		succeed, err := executor.Enqueue(mockC)
 		assert.Equal(t, true, succeed)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(4), executor.Slots())
@@ -140,42 +140,6 @@ func TestCompactionExecutor(t *testing.T) {
 				}
 			})
 		}
-	})
-
-	t.Run("Test channel valid check", func(t *testing.T) {
-		tests := []struct {
-			expected bool
-			channel  string
-			desc     string
-		}{
-			{expected: true, channel: "ch1", desc: "no in dropped"},
-			{expected: false, channel: "ch2", desc: "in dropped"},
-		}
-		ex := NewExecutor()
-		ex.DiscardByDroppedChannel("ch2")
-		for _, test := range tests {
-			t.Run(test.desc, func(t *testing.T) {
-				assert.Equal(t, test.expected, ex.isValidChannel(test.channel))
-			})
-		}
-	})
-
-	t.Run("test stop vchannel tasks", func(t *testing.T) {
-		ex := NewExecutor()
-		mc := NewMockCompactor(t)
-		mc.EXPECT().GetPlanID().Return(int64(1))
-		mc.EXPECT().GetChannelName().Return("mock")
-		mc.EXPECT().Compact().Return(&datapb.CompactionPlanResult{PlanID: 1}, nil).Maybe()
-		mc.EXPECT().GetSlotUsage().Return(8)
-		mc.EXPECT().Stop().Return().Once()
-
-		ex.Execute(mc)
-
-		require.True(t, ex.executing.Contain(int64(1)))
-
-		ex.DiscardByDroppedChannel("mock")
-		assert.True(t, ex.dropped.Contain("mock"))
-		assert.False(t, ex.executing.Contain(int64(1)))
 	})
 
 	t.Run("test GetAllCompactionResults", func(t *testing.T) {

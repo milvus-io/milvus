@@ -638,6 +638,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
 
+		// compaction
+		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
