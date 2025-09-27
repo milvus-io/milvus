@@ -147,7 +147,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableQueryNode = true
 		role.EnableDataNode = true
 		role.EnableStreamingNode = true
-		role.EnableCDC = true
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
 	case typeutil.MixCoordRole:
