@@ -1409,7 +1409,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
-               res->size(), 
+               res->size(),
                real_batch_size);
     return res;
 }
