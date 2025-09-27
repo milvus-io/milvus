@@ -175,7 +175,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		}),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithEnableSkipIndex(true),
+		storage.WithIsSorted(true),
 	)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",

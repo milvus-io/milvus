@@ -31,8 +31,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -151,16 +153,17 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return nil
 }
 
-func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID) error {
+func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID, schema *schemapb.CollectionSchema) error {
 	if len(groups) == 0 {
 		return nil
 	}
-	cGroups := make([]C.int64_t, len(groups))
-	for i, col := range groups {
-		cGroups[i] = C.int64_t(col)
+
+	schemaBlob, err := proto.Marshal(schema)
+	if err != nil {
+		return err
 	}
 
-	status := C.EnableSkipIndex(&cGroups[0], C.int(len(groups)), pw.cPackedWriter)
+	status := C.EnableSkipIndex(pw.cPackedWriter, unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), (*C.int64_t)(unsafe.Pointer(&groups[0])), C.int64_t(len(groups)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}

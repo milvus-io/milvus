@@ -53,7 +53,11 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowSchema* schema);
 
 CStatus
-EnableSkipIndex(const int64_t* group_ids, const int64_t length, CPackedWriter c_packed_writer);
+EnableSkipIndex(CPackedWriter c_packed_writer,
+                const void* proto_blob,
+                const int64_t schema_length,
+                const int64_t* group_ids,
+                const int64_t gids_length);
 
 CStatus
 CloseWriter(CPackedWriter c_packed_writer);

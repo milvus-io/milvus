@@ -67,7 +67,7 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
-	enableSkipIndex     bool
+	isSorted            bool
 }
 
 func (o *rwOptions) validate() error {
@@ -164,9 +164,9 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	}
 }
 
-func WithEnableSkipIndex(enable bool) RwOption {
+func WithIsSorted(isSorted bool) RwOption {
 	return func(options *rwOptions) {
-		options.enableSkipIndex = enable
+		options.isSorted = isSorted
 	}
 }
 
@@ -363,7 +363,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
-			rwOptions.enableSkipIndex,
+			rwOptions.isSorted,
 			pluginContext,
 		)
 	}

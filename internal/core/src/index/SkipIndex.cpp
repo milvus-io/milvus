@@ -11,64 +11,23 @@
 
 #include <algorithm>
 #include "SkipIndex.h"
+#include "common/FieldDataInterface.h"
 
 namespace milvus {
 
-FieldChunkMetrics::FieldChunkMetrics(
-    arrow::Type::type data_type,
-    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-    int col_idx)
-    : data_type_(data_type) {
-    Load(batches, col_idx);
-}
-
-void
-FieldChunkMetrics::Load(
-    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-    int col_idx) {
-    switch (data_type_) {
-        case arrow::Type::BOOL:
-            LoadBooleanMetrics(batches, col_idx);
-            break;
-        case arrow::Type::INT8:
-            LoadMetrics<int8_t, arrow::Int8Array>(batches, col_idx);
-            break;
-        case arrow::Type::INT16:
-            LoadMetrics<int16_t, arrow::Int16Array>(batches, col_idx);
-            break;
-        case arrow::Type::INT32:
-            LoadMetrics<int32_t, arrow::Int32Array>(batches, col_idx);
-            break;
-        case arrow::Type::INT64:
-            LoadMetrics<int64_t, arrow::Int64Array>(batches, col_idx);
-            break;
-        case arrow::Type::FLOAT:
-            LoadMetrics<float, arrow::FloatArray>(batches, col_idx);
-            break;
-        case arrow::Type::DOUBLE:
-            LoadMetrics<double, arrow::DoubleArray>(batches, col_idx);
-            break;
-        case arrow::Type::STRING:
-            LoadStringMetrics(batches, col_idx);
-            break;
-        default:
-            return;
-    }
-}
-
 std::unique_ptr<FieldChunkMetric>
-FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
+FieldChunkMetrics::LoadMetric(DataType data_type,
                               FieldChunkMetricType metric_type,
                               const std::string& data) {
     switch (data_type) {
-        case arrow::Type::BOOL:
+        case DataType::BOOL:
             switch (metric_type) {
                 case FieldChunkMetricType::SET:
                     return std::make_unique<SetFieldChunkMetric<bool>>(data);
                 default:
                     return nullptr;
             }
-        case arrow::Type::INT8:
+        case DataType::INT8:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int8_t>>(
@@ -81,7 +40,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::INT16:
+        case DataType::INT16:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int16_t>>(
@@ -94,7 +53,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::INT32:
+        case DataType::INT32:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int32_t>>(
@@ -107,7 +66,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::INT64:
+        case DataType::INT64:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int64_t>>(
@@ -120,7 +79,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::FLOAT:
+        case DataType::FLOAT:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<float>>(
@@ -133,7 +92,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::DOUBLE:
+        case DataType::DOUBLE:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<double>>(
@@ -146,7 +105,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 default:
                     return nullptr;
             }
-        case arrow::Type::STRING:
+        case DataType::STRING:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<
@@ -160,7 +119,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                 case FieldChunkMetricType::NGRAM_FILTER:
                     return std::make_unique<NgramFieldChunkMetric>(data);
                 case FieldChunkMetricType::TOKEN_FILTER:
-                    return std::make_unique<TokenFieldChunkMetric>(data);
+                    // return std::make_unique<TokenFieldChunkMetric>(data);
                 default:
                     return nullptr;
             }
@@ -209,28 +168,4 @@ FieldChunkMetrics::Deserialize(const std::string& data) {
         }
     }
 }
-
-ChunkSkipIndex::ChunkSkipIndex(
-    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
-    if (batches.empty()) {
-        return;
-    }
-    auto schema = batches[0]->schema();
-    for (int col_idx = 0; col_idx < schema->num_fields(); ++col_idx) {
-        auto field_id = std::stoll(schema->field(col_idx)
-                                       ->metadata()
-                                       ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
-                                       ->data());
-        auto fid = milvus::FieldId(field_id);
-        auto type = schema->field(col_idx)->type()->id();
-
-        if (fid == RowFieldID || !FieldChunkMetrics::CanSkipField(type)) {
-            continue;
-        }
-
-        field_chunk_metrics_.emplace_back(
-            fid, std::make_unique<FieldChunkMetrics>(type, batches, col_idx));
-    }
-}
-
 }  // namespace milvus
