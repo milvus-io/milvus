@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
@@ -23,6 +24,7 @@
 #include "arrow/type_fwd.h"
 #include "common/type_c.h"
 #include "fmt/format.h"
+#include "index/SkipIndex.h"
 #include "index/Utils.h"
 #include "log/Log.h"
 

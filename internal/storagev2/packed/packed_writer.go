@@ -31,10 +31,13 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -147,6 +150,23 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 		return err
 	}
 
+	return nil
+}
+
+func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID, schema *schemapb.CollectionSchema) error {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	schemaBlob, err := proto.Marshal(schema)
+	if err != nil {
+		return err
+	}
+
+	status := C.EnableSkipIndex(pw.cPackedWriter, unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), (*C.int64_t)(unsafe.Pointer(&groups[0])), C.int64_t(len(groups)))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
 	return nil
 }
 

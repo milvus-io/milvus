@@ -18,8 +18,10 @@
 #include "parquet/types.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
+#include "segcore/Collection.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
@@ -31,8 +33,11 @@
 #include <arrow/record_batch.h>
 #include <arrow/memory_pool.h>
 #include <arrow/device.h>
+#include <cstdint>
+#include <cstring>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "index/SkipIndex.h"
 #include "monitor/scope_metric.h"
 
 CStatus
@@ -235,6 +240,41 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
         if (!status.ok()) {
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
                                           status.ToString());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+EnableSkipIndex(CPackedWriter c_packed_writer,
+                const void* proto_blob,
+                const int64_t schema_length,
+                const int64_t* group_ids,
+                const int64_t gids_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto packed_writer =
+            static_cast<milvus_storage::PackedRecordBatchWriter*>(
+                c_packed_writer);
+
+        auto group_id_list =
+            std::vector<int64_t>(group_ids, group_ids + gids_length);
+
+        milvus::proto::schema::CollectionSchema collection_schema;
+        auto suc = collection_schema.ParseFromArray(proto_blob, schema_length);
+        if (!suc) {
+            LOG_WARN("unmarshal schema string failed");
+        }
+        auto schema = milvus::Schema::ParseFrom(collection_schema);
+
+        for (const auto& group_id : group_id_list) {
+            packed_writer->AddMetadataAppender(
+                group_id,
+                milvus::ChunkSkipIndex::KEY,
+                std::make_unique<milvus::ChunkSkipIndexAppender>(schema));
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

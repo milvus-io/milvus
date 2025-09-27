@@ -44,7 +44,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
-		storage.WithStorageConfig(compactionParams.StorageConfig))
+		storage.WithStorageConfig(compactionParams.StorageConfig), storage.WithIsSorted(true))
 	if err != nil {
 		return nil, err
 	}

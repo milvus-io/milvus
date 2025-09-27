@@ -356,6 +356,9 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             }
         }
 
+        LoadSkipIndex(
+            chunked_column_group->GetSkipIndex(insert_files, arrow_schema, fs));
+
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += chunked_column_group->memory_size();
         }
@@ -2430,9 +2433,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             is_proxy_column &&
                 field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
-        }
-        if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
-            LoadSkipIndex(field_id, data_type, column);
         }
         if (IsVariableDataType(data_type)) {
             // update average row data size
