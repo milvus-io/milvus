@@ -135,7 +135,8 @@ FieldChunkMetrics::Serialize() const {
     uint32_t count = metrics_.size();
     ss.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
-    for (const auto& [type, metric] : metrics_) {
+    for (const auto& metric : metrics_) {
+        auto type = metric->GetType();
         ss.write(reinterpret_cast<const char*>(&type), sizeof(type));
 
         std::string data = metric->Serialize();
@@ -164,7 +165,7 @@ FieldChunkMetrics::Deserialize(const std::string& data) {
 
         auto metric = LoadMetric(data_type_, metric_type, metric_data);
         if (metric && metric->hasValue_) {
-            metrics_.emplace_back(metric_type, std::move(metric));
+            metrics_.emplace_back(std::move(metric));
         }
     }
 }

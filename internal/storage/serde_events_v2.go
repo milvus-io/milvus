@@ -331,7 +331,7 @@ type PackedBinlogRecordWriter struct {
 	arrowSchema          *arrow.Schema
 	bufferSize           int64
 	multiPartUploadSize  int64
-	isSorted      bool
+	isSorted             bool
 	columnGroups         []storagecommon.ColumnGroup
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
@@ -643,7 +643,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		maxRowNum:            maxRowNum,
 		bufferSize:           bufferSize,
 		multiPartUploadSize:  multiPartUploadSize,
-		isSorted:      isSorted,
+		isSorted:             isSorted,
 		columnGroups:         columnGroups,
 		pkstats:              stats,
 		bm25Stats:            bm25Stats,

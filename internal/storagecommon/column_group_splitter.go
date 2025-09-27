@@ -84,16 +84,16 @@ func IsVectorDataType(dataType schemapb.DataType) bool {
 
 func CanSkipDataType(dataType schemapb.DataType) bool {
 	switch dataType {
-		case schemapb.DataType_Bool,
-			 schemapb.DataType_Int8,
-			 schemapb.DataType_Int16,
-			 schemapb.DataType_Int32,
-			 schemapb.DataType_Int64,
-			 schemapb.DataType_Float,
-			 schemapb.DataType_Double,
-			 schemapb.DataType_String,
-			 schemapb.DataType_VarChar:
-			return true
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_String,
+		schemapb.DataType_VarChar:
+		return true
 	}
 	return false
 }
