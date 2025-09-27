@@ -96,7 +96,8 @@ type baseSegment struct {
 
 	bm25Stats map[int64]*storage.BM25Stats
 
-	resourceUsageCache *atomic.Pointer[ResourceUsage]
+	resourceUsageCache   *atomic.Pointer[ResourceUsage]
+	logicalResourceUsage *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
 }
@@ -117,8 +118,9 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		isLazyLoad:     isLazyLoad(collection, segmentType),
 		skipGrowingBF:  segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
-		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
-		needUpdatedVersion: atomic.NewInt64(0),
+		resourceUsageCache:   atomic.NewPointer[ResourceUsage](nil),
+		logicalResourceUsage: atomic.NewPointer[ResourceUsage](nil),
+		needUpdatedVersion:   atomic.NewInt64(0),
 	}
 	return bs, nil
 }
@@ -1351,9 +1353,41 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 }
 
 func (s *LocalSegment) FinishLoad() error {
-	usage := s.ResourceUsageEstimate()
-	s.manager.AddLogicalResource(usage)
 	return s.csegment.FinishLoad()
+}
+
+func (s *LocalSegment) ChargeLogicalResourceUsage(usage ResourceUsage) {
+	oldvalue := s.logicalResourceUsage.Load()
+	newvalue := ResourceUsage{
+		MemorySize: usage.MemorySize,
+		DiskSize:   usage.DiskSize,
+	}
+	if oldvalue != nil {
+		newvalue.MemorySize += oldvalue.MemorySize
+		newvalue.DiskSize += oldvalue.DiskSize
+	}
+	// update self logical resource usage
+	s.logicalResourceUsage.Store(&newvalue)
+	// update manager logical resource usage
+	s.manager.AddLogicalResource(usage)
+}
+
+func (s *LocalSegment) RefundLogicalResourceUsage(usage ResourceUsage) {
+	oldvalue := s.logicalResourceUsage.Load()
+	if oldvalue == nil {
+		log.Warn("logical resource usage is nil when refunding, should not happen", zap.Int64("segmentID", s.ID()))
+		return
+	}
+	newvalue := ResourceUsage{
+		MemorySize: oldvalue.MemorySize,
+		DiskSize:   oldvalue.DiskSize,
+	}
+	newvalue.MemorySize = oldvalue.MemorySize - usage.MemorySize
+	newvalue.DiskSize = oldvalue.DiskSize - usage.DiskSize
+	// update self logical resource usage
+	s.logicalResourceUsage.Store(&newvalue)
+	// update manager logical resource usage
+	s.manager.SubLogicalResource(usage)
 }
 
 type ReleaseScope int
@@ -1418,9 +1452,12 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return nil, nil
 	}).Await()
 
-	// release reserved resource after the segment resource is really released.
-	usage := s.ResourceUsageEstimate()
-	s.manager.SubLogicalResource(usage)
+	// release reserved logical resource after the segment resource is really released.
+	usage := s.logicalResourceUsage.Load()
+	if usage != nil {
+		s.manager.SubLogicalResource(*usage)
+		s.logicalResourceUsage.Store(nil)
+	}
 
 	log.Info("delete segment from memory")
 }

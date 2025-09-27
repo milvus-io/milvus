@@ -182,6 +182,12 @@ func (s *L0Segment) FinishLoad() error {
 	return nil
 }
 
+func (s *L0Segment) ChargeLogicalResourceUsage(usage ResourceUsage) {
+}
+
+func (s *L0Segment) RefundLogicalResourceUsage(usage ResourceUsage) {
+}
+
 func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
