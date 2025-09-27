@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <azure/identity/managed_identity_credential.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
 #include "AzureBlobChunkManager.h"
 
@@ -66,13 +68,23 @@ AzureBlobChunkManager::AzureBlobChunkManager(
     bool useIAM) {
     requestTimeoutMs_ = requestTimeoutMs;
     if (useIAM) {
-        Azure::Identity::WorkloadIdentityCredentialOptions options;
-        auto workloadIdentityCredential =
-            std::make_shared<Azure::Identity::WorkloadIdentityCredential>(
-                options);
-        client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
-            "https://" + access_key_id + ".blob." + address + "/",
-            workloadIdentityCredential);
+        if (std::getenv("AZURE_FEDERATED_TOKEN_FILE") &&
+            std::string(std::getenv("AZURE_FEDERATED_TOKEN_FILE")).length() > 0) {
+            Azure::Identity::WorkloadIdentityCredentialOptions options;
+            auto workloadIdentityCredential =
+                std::make_shared<Azure::Identity::WorkloadIdentityCredential>(
+                    options);
+            client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
+                "https://" + access_key_id + ".blob." + address + "/",
+                workloadIdentityCredential);
+        } else {
+            std::string clientId(std::getenv("AZURE_CLIENT_ID"));
+            auto credential = std::make_shared<Azure::Identity::ManagedIdentityCredential>(clientId);
+
+            client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
+                "https://" + access_key_id + ".blob." + address + "/",
+                credential);
+        }
     } else {
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
             Azure::Storage::Blobs::BlobServiceClient::
