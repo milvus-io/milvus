@@ -90,7 +90,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 			ID     int64  `milvus:"primary_key;auto_id"`
 			Vector []int8 `milvus:"dim:16;vector_type:int8"`
 		}
-		columns, err := AnyToColumns([]any{&Int8Struct{}})
+		columns, err := AnyToColumns([]any{&Int8Struct{}}, false)
 		s.Nil(err)
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
