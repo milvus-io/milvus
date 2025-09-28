@@ -42,12 +42,15 @@ type Catalog struct {
 	Txn      kv.TxnKV
 	Snapshot kv.SnapShotKV
 
+	maxTxnNum int
+
 	pool *conc.Pool[any]
 }
 
 func NewCatalog(metaKV kv.TxnKV, ss kv.SnapShotKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
-	return &Catalog{Txn: metaKV, Snapshot: ss, pool: ioPool}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxTxnNum.GetAsInt()
+	return &Catalog{Txn: metaKV, Snapshot: ss, pool: ioPool, maxTxnNum: maxTxnNum}
 }
 
 func BuildCollectionKey(dbID typeutil.UniqueID, collectionID typeutil.UniqueID) string {
@@ -244,7 +247,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	// Recovering from failure, if we found collection is creating, we should remove all these related meta.
 	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
 	// MaxEtcdTxnNum need to divided by 2
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+	return etcd.SaveByBatchWithLimit(kvs, kc.maxTxnNum/2, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
 	})
 }
@@ -668,7 +671,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// However, if we remove collection first, we cannot remove other metas.
 	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
 	// MaxEtcdTxnNum need to divided by 2
-	if err := batchMultiSaveAndRemove(ctx, kc.Snapshot, util.MaxEtcdTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
+	if err := batchMultiSaveAndRemove(ctx, kc.Snapshot, kc.maxTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
 		return err
 	}
 
@@ -730,7 +733,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		}
 	}
 
-	return etcd.SaveByBatchWithLimit(saves, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+	return etcd.SaveByBatchWithLimit(saves, kc.maxTxnNum/2, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
 	})
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewCataLog creates a new catalog instance
@@ -42,13 +42,15 @@ func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 
 func NewReplicationCatalog(metaKV kv.MetaKv) metastore.ReplicationCatalog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV:    metaKV,
+		maxTxnNum: paramtable.Get().MetaStoreCfg.MaxTxnNum.GetAsInt(),
 	}
 }
 
 // catalog is a kv based catalog.
 type catalog struct {
-	metaKV kv.MetaKv
+	metaKV    kv.MetaKv
+	maxTxnNum int
 }
 
 // GetCChannel returns the control channel
@@ -134,7 +136,7 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	return etcd.SaveByBatchWithLimit(kvs, c.maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
@@ -195,7 +197,7 @@ func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *stream
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	return etcd.SaveByBatchWithLimit(kvs, c.maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
