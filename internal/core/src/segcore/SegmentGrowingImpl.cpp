@@ -530,11 +530,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 BuildGeometryCacheForLoad(field_id, field_data);
             }
         }
-
-        // step 5: update small indexes
-        insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                                 reserved_offset + num_rows);
     }
+
+    // step 5: update small indexes
+    insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                             reserved_offset + num_rows);
 }
 
 SegcoreError
