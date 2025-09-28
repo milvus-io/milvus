@@ -114,10 +114,10 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 		var c *PChannelMeta
 		if streamingVersion == nil {
 			// if streaming service has never been enabled, we treat all channels as read-only.
-			c = newPChannelMeta(newChannel, types.AccessModeRO)
+			c = NewPChannelMeta(newChannel, types.AccessModeRO)
 		} else {
 			// once the streaming service is enabled, we treat all channels as read-write.
-			c = newPChannelMeta(newChannel, types.AccessModeRW)
+			c = NewPChannelMeta(newChannel, types.AccessModeRW)
 		}
 		if _, ok := channels[c.ChannelID()]; !ok {
 			channels[c.ChannelID()] = c
