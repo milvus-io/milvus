@@ -313,11 +313,6 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(index_.Dim());
 }
 
-bool
-is_embedding_list_index(const IndexType& index_type) {
-    return index_type == knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
-}
-
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
@@ -347,9 +342,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             // todo(SapdeA): now, vector arrays (embedding list) are serialized
             // to parquet by using binary format which does not provide dim
             // information so we use this temporary solution.
-            if (is_embedding_list_index(index_type_)) {
-                AssertInfo(elem_type_ != DataType::NONE,
-                           "embedding list index must have elem_type");
+            if (elem_type_ != DataType::NONE) {
                 dim = config[DIM_KEY].get<int64_t>();
             } else {
                 AssertInfo(dim == 0 || dim == data->get_dim(),
@@ -367,7 +360,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         lims.push_back(lim_offset);
 
         int64_t offset = 0;
-        if (!is_embedding_list_index(index_type_)) {
+        if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
             for (auto data : field_datas) {
                 std::memcpy(buf.get() + offset, data->Data(), data->Size());
@@ -412,7 +405,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
         if (!lims.empty()) {
-            dataset->SetLims(lims.data());
+            dataset->Set(knowhere::meta::EMB_LIST_OFFSET, lims.data());
         }
         BuildWithDataset(dataset, build_config);
     } else {

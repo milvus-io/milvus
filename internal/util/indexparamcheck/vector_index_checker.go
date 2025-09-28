@@ -58,8 +58,16 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], IntVectorMetrics)
 		}
 	} else if typeutil.IsArrayOfVectorType(dataType) {
-		if !CheckStrByValues(params, Metric, EmbListMetrics) {
-			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], EmbListMetrics)
+		if typeutil.IsBinaryVectorType(elementType) {
+			if !CheckStrByValues(params, Metric, BinaryEmbListMetrics) {
+				return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinaryEmbListMetrics)
+			}
+		} else if typeutil.IsSparseFloatVectorType(elementType) {
+			return fmt.Errorf("Sparse float vector is not supported for embedding list index")
+		} else if typeutil.IsDenseFloatVectorType(elementType) {
+			if !CheckStrByValues(params, Metric, EmbListMetrics) {
+				return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], EmbListMetrics)
+			}
 		}
 	}
 
