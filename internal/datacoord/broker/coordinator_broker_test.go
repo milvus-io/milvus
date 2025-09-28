@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -263,6 +264,67 @@ func (s *BrokerSuite) TestHasCollection() {
 
 		_, err := s.broker.HasCollection(context.Background(), collID)
 		s.Error(err)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestShowCollectionIDs() {
+	s.Run("normal", func() {
+		s.SetupTest()
+		dbName := "test_db"
+		expectedIDs := []int64{1, 2, 3}
+
+		s.rootCoordClient.EXPECT().ShowCollectionIDs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest, options ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+			s.Equal([]string{dbName}, req.GetDbNames())
+			return &rootcoordpb.ShowCollectionIDsResponse{
+				Status: merr.Success(),
+				DbCollections: []*rootcoordpb.DBCollections{
+					{
+						DbName:        dbName,
+						CollectionIDs: expectedIDs,
+					},
+				},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowCollectionIDs(context.Background(), dbName)
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Len(resp.GetDbCollections(), 1)
+		s.Equal(dbName, resp.GetDbCollections()[0].GetDbName())
+		s.ElementsMatch(expectedIDs, resp.GetDbCollections()[0].GetCollectionIDs())
+
+		s.TearDownTest()
+	})
+
+	s.Run("rpc_error", func() {
+		s.SetupTest()
+		dbName := "test_db"
+		expectedErr := errors.New("mock rpc error")
+
+		s.rootCoordClient.EXPECT().ShowCollectionIDs(mock.Anything, mock.Anything).Return(nil, expectedErr)
+
+		resp, err := s.broker.ShowCollectionIDs(context.Background(), dbName)
+		s.Error(err)
+		s.Equal(expectedErr, err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+
+	s.Run("milvus_error", func() {
+		s.SetupTest()
+		dbName := "test_db"
+		expectedErr := merr.ErrDatabaseNotFound
+		s.rootCoordClient.EXPECT().ShowCollectionIDs(mock.Anything, mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+			Status: merr.Status(expectedErr),
+		}, nil)
+
+		resp, err := s.broker.ShowCollectionIDs(context.Background(), dbName)
+		s.Error(err)
+		s.ErrorIs(err, expectedErr)
+		s.Nil(resp)
 
 		s.TearDownTest()
 	})

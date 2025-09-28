@@ -116,7 +116,6 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		coll2FlushTs[collName] = resp.GetFlushTs()
 		channelCps = resp.GetChannelCps()
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
 		Status:          merr.Success(),
 		DbName:          t.GetDbName(),

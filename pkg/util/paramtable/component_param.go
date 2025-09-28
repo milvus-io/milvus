@@ -3919,6 +3919,8 @@ type dataCoordConfig struct {
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+
+	FlushAllMaxParallelTasks ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4965,6 +4967,15 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
+
+	p.FlushAllMaxParallelTasks = ParamItem{
+		Key:          "dataCoord.flushAllMaxParallelTasks",
+		Version:      "2.6.3",
+		DefaultValue: "100",
+		Doc:          "The maximum number of parallel tasks for flushing all segments",
+		Export:       false,
+	}
+	p.FlushAllMaxParallelTasks.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
