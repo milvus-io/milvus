@@ -14,6 +14,7 @@ const (
 	DefaultTextFieldName          = "text"
 	DefaultVarcharFieldName       = "varchar"
 	DefaultJSONFieldName          = "json"
+	DefaultGeometryFieldName      = "geometry"
 	DefaultArrayFieldName         = "array"
 	DefaultFloatVecFieldName      = "floatVec"
 	DefaultBinaryVecFieldName     = "binaryVec"
@@ -42,7 +43,7 @@ const (
 // cost for test cases
 const (
 	RowCount       = "row_count"
-	DefaultTimeout = 120
+	DefaultTimeout = 600
 	DefaultDim     = 128
 	DefaultShards  = int32(2)
 	DefaultNb      = 3000
