@@ -287,8 +287,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     // Create index using storage v2 config
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM_IP;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -299,8 +299,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
 
     // Build index with storage v2 configuration
     Config config;
-    config[milvus::index::INDEX_TYPE] =
-        knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
@@ -334,12 +333,13 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         query_vec_lims.push_back(0);
         query_vec_lims.push_back(3);
         query_vec_lims.push_back(10);
-        query_dataset->SetLims(query_vec_lims.data());
+        query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                           query_vec_lims.data());
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
         searchInfo.topk_ = 5;
-        searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
+        searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         milvus::OpContext op_context;

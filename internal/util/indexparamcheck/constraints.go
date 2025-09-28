@@ -56,7 +56,8 @@ var (
 	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}                                                                       // const
 	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD} // const
 	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
-	EmbListMetrics           = []string{metric.MaxSim}                                                                                // const
+	EmbListMetrics           = []string{metric.MaxSimIP, metric.MaxSimL2, metric.MaxSimCosine}                                        // const
+	BinaryEmbListMetrics     = []string{metric.MaxSimHamming, metric.MaxSimJaccard}                                                   // const
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.

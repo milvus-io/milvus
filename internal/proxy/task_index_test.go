@@ -1116,11 +1116,11 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: "EMB_LIST_HNSW",
+						Value: "HNSW",
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: metric.MaxSim,
+						Value: metric.MaxSimIP,
 					},
 				},
 				IndexName: "",
@@ -1147,7 +1147,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: "EMB_LIST_HNSW",
+						Value: "HNSW",
 					},
 					{
 						Key:   common.MetricTypeKey,
@@ -1182,7 +1182,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: metric.MaxSim,
+						Value: metric.MaxSimIP,
 					},
 				},
 				IndexName: "",
@@ -1198,38 +1198,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 			},
 		}
 		err := cit.parseIndexParams(context.TODO())
-		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM"))
-	})
-
-	t.Run("data type wrong", func(t *testing.T) {
-		cit := &createIndexTask{
-			Condition: nil,
-			req: &milvuspb.CreateIndexRequest{
-				ExtraParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "EMB_LIST_HNSW",
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.L2,
-					},
-				},
-				IndexName: "",
-			},
-			fieldSchema: &schemapb.FieldSchema{
-				FieldID:      101,
-				Name:         "FieldFloat",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.DimKey, Value: "128"},
-				},
-			},
-		}
-
-		err := cit.parseIndexParams(context.TODO())
-		assert.True(t, strings.Contains(err.Error(), "data type FloatVector can't build with this index EMB_LIST_HNSW"))
+		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM_IP"))
 	})
 }
 

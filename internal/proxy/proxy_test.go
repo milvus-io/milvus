@@ -550,11 +550,11 @@ func constructTestCreateIndexRequest(dbName, collectionName string, dataType sch
 				},
 				{
 					Key:   common.MetricTypeKey,
-					Value: metric.MaxSim,
+					Value: metric.MaxSimIP,
 				},
 				{
 					Key:   common.IndexTypeKey,
-					Value: "EMB_LIST_HNSW",
+					Value: "HNSW",
 				},
 				{
 					Key:   "nlist",
