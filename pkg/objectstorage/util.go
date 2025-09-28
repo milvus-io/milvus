@@ -2,8 +2,10 @@ package objectstorage
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -123,6 +125,17 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		Secure:       c.UseSSL,
 		Region:       c.Region,
 	}
+
+	// Add custom Transport configuration for skipping SSL verification when UseSSL is true and SkipSSLVerify is true
+	if c.UseSSL && c.SkipSSLVerify {
+		customTransport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		}
+		minioOpts.Transport = customTransport
+	}
+
 	minIOClient, err := newMinioFn(c.Address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
