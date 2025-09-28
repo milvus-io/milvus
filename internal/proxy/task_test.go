@@ -462,8 +462,8 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		err := InitMetaCache(ctx, root, mgr)
 		assert.NoError(t, err)
 
-		task := &alterCollectionFieldTask{
-			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
 				CollectionName: "allow_autoid_test",
@@ -484,8 +484,8 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		err := InitMetaCache(ctx, root, mgr)
 		assert.NoError(t, err)
 
-		task := &alterCollectionFieldTask{
-			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
 				CollectionName: "allow_autoid_test",
@@ -5341,7 +5341,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 	})
 }
 
-func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
+func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc, nil)
 	ctx := context.Background()
@@ -5364,11 +5364,10 @@ func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	}
 	qc.CreateCollection(ctx, createColReq)
 
-	task := &alterCollectionFieldTask{
-		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
-			FieldName:      "",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: common.AllowInsertAutoIDKey, Value: "true"},
 			},
