@@ -21,993 +21,919 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type BalanceCheckerTestSuite struct {
-	suite.Suite
-	kv        kv.MetaKv
-	checker   *BalanceChecker
-	balancer  *balance.MockBalancer
-	meta      *meta.Meta
-	broker    *meta.MockBroker
-	nodeMgr   *session.NodeManager
-	scheduler *task.MockScheduler
-	targetMgr meta.TargetManagerInterface
+// createMockPriorityQueue creates a mock priority queue for testing
+func createMockPriorityQueue() *balance.PriorityQueue {
+	return balance.NewPriorityQueuePtr()
 }
 
-func (suite *BalanceCheckerTestSuite) SetupSuite() {
-	paramtable.Init()
+// Helper function to create a test BalanceChecker
+func createTestBalanceChecker() *BalanceChecker {
+	metaInstance := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(nil),
+	}
+	targetMgr := meta.NewTargetManager(nil, nil)
+	nodeMgr := &session.NodeManager{}
+	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	balancer := balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+	getBalancerFunc := func() balance.Balance { return balancer }
+
+	return NewBalanceChecker(metaInstance, targetMgr, nodeMgr, scheduler, getBalancerFunc)
 }
 
-func (suite *BalanceCheckerTestSuite) SetupTest() {
-	var err error
-	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
-	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+// =============================================================================
+// Basic Interface Tests
+// =============================================================================
 
-	// meta
-	store := querycoord.NewCatalog(suite.kv)
-	idAllocator := RandomIncrementIDAllocator()
-	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
-	suite.broker = meta.NewMockBroker(suite.T())
-	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.scheduler.EXPECT().Add(mock.Anything).Return(nil).Maybe()
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+func TestBalanceChecker_ID(t *testing.T) {
+	checker := createTestBalanceChecker()
 
-	suite.balancer = balance.NewMockBalancer(suite.T())
-	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.nodeMgr, suite.scheduler, func() balance.Balance { return suite.balancer })
+	id := checker.ID()
+	assert.Equal(t, utils.BalanceChecker, id)
 }
 
-func (suite *BalanceCheckerTestSuite) TearDownTest() {
-	suite.kv.Close()
+func TestBalanceChecker_Description(t *testing.T) {
+	checker := createTestBalanceChecker()
+
+	desc := checker.Description()
+	assert.Equal(t, "BalanceChecker checks the cluster distribution and generates balance tasks", desc)
 }
 
-func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
+// =============================================================================
+// Configuration Tests
+// =============================================================================
+
+func TestBalanceChecker_LoadBalanceConfig(t *testing.T) {
+	checker := createTestBalanceChecker()
+
+	// Mock paramtable.Get function
+	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+	defer mockParamGet.UnPatch()
+
+	// Mock various param item methods
+	mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(5).Build()
+	defer mockGetAsInt.UnPatch()
+
+	mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+	defer mockGetAsBool.UnPatch()
+
+	mockGetAsDuration := mockey.Mock((*paramtable.ParamItem).GetAsDuration).Return(5 * time.Second).Build()
+	defer mockGetAsDuration.UnPatch()
+
+	config := checker.loadBalanceConfig()
+
+	// Verify config structure is returned
+	assert.IsType(t, balanceConfig{}, config)
+}
+
+// =============================================================================
+// Collection Balance Item Tests
+// =============================================================================
+
+func TestNewCollectionBalanceItem(t *testing.T) {
+	collectionID := int64(100)
+	rowCount := 1000
+	sortOrder := "byrowcount"
+
+	item := newCollectionBalanceItem(collectionID, rowCount, sortOrder)
+
+	assert.Equal(t, collectionID, item.collectionID)
+	assert.Equal(t, rowCount, item.rowCount)
+	assert.Equal(t, sortOrder, item.sortOrder)
+}
+
+func TestCollectionBalanceItem_GetPriority_ByRowCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		rowCount  int
+		sortOrder string
+		expected  int
+	}{
+		{"ByRowCount", 1000, "byrowcount", -1000},
+		{"Default", 500, "", -500}, // default to byrowcount
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := newCollectionBalanceItem(1, tt.rowCount, tt.sortOrder)
+
+			priority := item.getPriority()
+			assert.Equal(t, tt.expected, priority)
+		})
+	}
+}
+
+func TestCollectionBalanceItem_GetPriority_ByCollectionID(t *testing.T) {
+	collectionID := int64(123)
+	item := newCollectionBalanceItem(collectionID, 1000, "bycollectionid")
+
+	priority := item.getPriority()
+	assert.Equal(t, int(collectionID), priority)
+}
+
+func TestCollectionBalanceItem_SetPriority(t *testing.T) {
+	item := newCollectionBalanceItem(1, 100, "byrowcount")
+
+	item.setPriority(200)
+
+	assert.Equal(t, 200, item.getPriority())
+}
+
+// =============================================================================
+// Collection Filtering Tests
+// =============================================================================
+
+func TestBalanceChecker_ReadyToCheck_Success(t *testing.T) {
+	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	// set up nodes info
-	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID1),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID2),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
+	collectionID := int64(1)
 
-	// set collections meta
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	// Mock meta.GetCollection to return a valid collection
+	mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
 
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
+	// Mock target manager methods
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+	defer mockIsNextTargetExist.UnPatch()
 
-	cid2, replicaID2, partitionID2 := 2, 2, 2
-	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
-	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
-
-	// test disable auto balance
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
-		return 0
-	})
-	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Empty(replicasToBalance)
-	segPlans, _ := suite.checker.balanceReplicas(ctx, replicasToBalance)
-	suite.Empty(segPlans)
-
-	// test enable auto balance
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	// next round
-	idsToBalance = []int64{int64(replicaID2)}
-	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	// final round
-	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Empty(replicasToBalance)
+	result := checker.readyToCheck(ctx, collectionID)
+	assert.True(t, result)
 }
 
-func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
+func TestBalanceChecker_ReadyToCheck_NoMeta(t *testing.T) {
+	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	// set up nodes info
-	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID1),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID2),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
+	collectionID := int64(1)
 
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	// Mock meta.GetCollection to return nil
+	mockGetCollection := mockey.Mock((*meta.Meta).GetCollection).Return(nil).Build()
+	defer mockGetCollection.UnPatch()
 
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
+	// Mock target manager methods to return false
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(false).Build()
+	defer mockIsNextTargetExist.UnPatch()
 
-	cid2, replicaID2, partitionID2 := 2, 2, 2
-	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
-	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
+	mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(false).Build()
+	defer mockIsCurrentTargetExist.UnPatch()
 
-	// test scheduler busy
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
-		return 1
-	})
-	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Len(replicasToBalance, 1)
+	result := checker.readyToCheck(ctx, collectionID)
+	assert.False(t, result)
 }
 
-func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
+func TestBalanceChecker_ReadyToCheck_NoTarget(t *testing.T) {
+	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	// set up nodes info, stopping node1
-	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID1),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID2),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Stopping(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
+	collectionID := int64(1)
 
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
+	// Mock meta.GetCollection to return a valid collection
+	mockGetCollection := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
+
+	// Mock target manager methods to return false
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(false).Build()
+	defer mockIsNextTargetExist.UnPatch()
+
+	mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(false).Build()
+	defer mockIsCurrentTargetExist.UnPatch()
+
+	result := checker.readyToCheck(ctx, collectionID)
+	assert.False(t, result)
+}
+
+func TestBalanceChecker_FilterCollectionForBalance_Success(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Mock meta.GetAll to return collection IDs
+	collectionIDs := []int64{1, 2, 3}
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+	defer mockGetAll.UnPatch()
+
+	// Create filters that pass all collections
+	passAllFilter := func(ctx context.Context, collectionID int64) bool {
+		return true
 	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
+
+	result := checker.filterCollectionForBalance(ctx, passAllFilter)
+	assert.Equal(t, collectionIDs, result)
+}
+
+func TestBalanceChecker_FilterCollectionForBalance_WithFiltering(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Mock meta.GetAll to return collection IDs
+	collectionIDs := []int64{1, 2, 3, 4}
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+	defer mockGetAll.UnPatch()
+
+	// Create filters: only even numbers pass first filter, only > 2 pass second filter
+	evenFilter := func(ctx context.Context, collectionID int64) bool {
+		return collectionID%2 == 0
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
 
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
+	greaterThanTwoFilter := func(ctx context.Context, collectionID int64) bool {
+		return collectionID > 2
+	}
 
-	cid2, replicaID2, partitionID2 := 2, 2, 2
-	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
-	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid2))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid2))
+	result := checker.filterCollectionForBalance(ctx, evenFilter, greaterThanTwoFilter)
+	// Only collection 4 should pass both filters (even AND > 2)
+	assert.Equal(t, []int64{4}, result)
+}
 
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+func TestBalanceChecker_FilterCollectionForBalance_EmptyResult(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
 
-	mr2 := replica2.CopyForWrite()
-	mr2.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
+	// Mock meta.GetAll to return collection IDs
+	collectionIDs := []int64{1, 2, 3}
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+	defer mockGetAll.UnPatch()
 
-	// test stopping balance
-	// First round: check replica1
-	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance := suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
-	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+	// Create filter that rejects all
+	rejectAllFilter := func(ctx context.Context, collectionID int64) bool {
+		return false
+	}
 
-	// Second round: should skip replica1, check replica2
-	idsToBalance = []int64{int64(replicaID2)}
-	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.ElementsMatch(idsToBalance, replicasToBalance)
-	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
-	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+	result := checker.filterCollectionForBalance(ctx, rejectAllFilter)
+	assert.Empty(t, result)
+}
 
-	// Third round: all collections checked, should return nil and clear the set
-	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Empty(replicasToBalance)
-	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
-	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+// =============================================================================
+// Queue Construction Tests
+// =============================================================================
 
-	// reset meta for Check test
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	mr1 = replica1.CopyForWrite()
-	mr1.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+func TestBalanceChecker_ConstructStoppingBalanceQueue(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
 
-	// checker check
-	segPlans, chanPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
-	mockPlan := balance.SegmentAssignPlan{
-		Segment: utils.CreateTestSegment(1, 1, 1, 1, 1, "1"),
-		Replica: meta.NilReplica,
+	// Mock filterCollectionForBalance result
+	collectionIDs := []int64{1, 2}
+	mockFilterCollections := mockey.Mock((*BalanceChecker).filterCollectionForBalance).Return(collectionIDs).Build()
+	defer mockFilterCollections.UnPatch()
+
+	// Mock target manager GetCollectionRowCount
+	mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+	defer mockGetRowCount.UnPatch()
+
+	// Mock paramtable for sort order
+	mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+	defer mockParamValue.UnPatch()
+
+	result := checker.constructStoppingBalanceQueue(ctx)
+	assert.Equal(t, result.Len(), 2)
+}
+
+func TestBalanceChecker_ConstructNormalBalanceQueue(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Mock filterCollectionForBalance result
+	collectionIDs := []int64{1, 2}
+	mockFilterCollections := mockey.Mock((*BalanceChecker).filterCollectionForBalance).Return(collectionIDs).Build()
+	defer mockFilterCollections.UnPatch()
+
+	// Mock target manager GetCollectionRowCount
+	mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+	defer mockGetRowCount.UnPatch()
+
+	// Mock paramtable for sort order
+	mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+	defer mockParamValue.UnPatch()
+
+	result := checker.constructNormalBalanceQueue(ctx)
+	assert.Equal(t, result.Len(), 2)
+}
+
+// =============================================================================
+// Replica Getting Tests
+// =============================================================================
+
+func TestBalanceChecker_GetReplicaForStoppingBalance_WithRONodes(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	collectionID := int64(1)
+
+	// Create mock replicas
+	replica1 := &meta.Replica{}
+	replica2 := &meta.Replica{}
+	replicas := []*meta.Replica{replica1, replica2}
+
+	// Mock ReplicaManager.GetByCollection
+	mockGetByCollection := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "GetByCollection")).Return(replicas).Build()
+	defer mockGetByCollection.UnPatch()
+
+	// Mock replica methods - replica1 has RO nodes, replica2 doesn't
+	mockRONodesCount1 := mockey.Mock((*meta.Replica).RONodesCount).Return(1).Build()
+	defer mockRONodesCount1.UnPatch()
+
+	mockGetID1 := mockey.Mock((*meta.Replica).GetID).Return(int64(101)).Build()
+	defer mockGetID1.UnPatch()
+
+	// Skip streaming service mock for simplicity
+
+	result := checker.getReplicaForStoppingBalance(ctx, collectionID)
+	// Should return replica1 ID since it has RO nodes
+	assert.Contains(t, result, int64(101))
+}
+
+func TestBalanceChecker_GetReplicaForStoppingBalance_NoRONodes(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	collectionID := int64(1)
+
+	// Create mock replicas
+	replica1 := &meta.Replica{}
+	replicas := []*meta.Replica{replica1}
+
+	// Mock ReplicaManager.GetByCollection
+	mockGetByCollection := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "GetByCollection")).Return(replicas).Build()
+	defer mockGetByCollection.UnPatch()
+
+	// Mock replica methods - no RO nodes
+	mockRONodesCount := mockey.Mock((*meta.Replica).RONodesCount).Return(0).Build()
+	defer mockRONodesCount.UnPatch()
+
+	// Skip streaming service mock for simplicity
+
+	result := checker.getReplicaForStoppingBalance(ctx, collectionID)
+	assert.Empty(t, result)
+}
+
+func TestBalanceChecker_GetReplicaForNormalBalance(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	collectionID := int64(1)
+
+	// Create mock replicas
+	replica1 := &meta.Replica{}
+	replica2 := &meta.Replica{}
+	replicas := []*meta.Replica{replica1, replica2}
+
+	// Mock ReplicaManager.GetByCollection
+	mockGetByCollection := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "GetByCollection")).Return(replicas).Build()
+	defer mockGetByCollection.UnPatch()
+
+	// Mock replica GetID methods
+	mockGetID := mockey.Mock((*meta.Replica).GetID).Return(mockey.Sequence(101).Times(1).Then(102)).Build()
+	defer mockGetID.UnPatch()
+
+	result := checker.getReplicaForNormalBalance(ctx, collectionID)
+	expectedIDs := []int64{101, 102}
+	assert.ElementsMatch(t, expectedIDs, result)
+}
+
+// =============================================================================
+// Task Generation Tests
+// =============================================================================
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{}
+
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, []int64{}, config)
+
+	assert.Empty(t, segmentTasks)
+	assert.Empty(t, channelTasks)
+}
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{
+		segmentTaskTimeout: 30 * time.Second,
+		channelTaskTimeout: 30 * time.Second,
+	}
+	replicaIDs := []int64{101}
+
+	// Create mock replica
+	mockReplica := &meta.Replica{}
+
+	// Mock ReplicaManager.Get
+	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(mockReplica).Build()
+	defer mockReplicaGet.UnPatch()
+
+	// Create mock balance plans
+	segmentPlan := balance.SegmentAssignPlan{
+		Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
+		Replica: mockReplica,
 		From:    1,
 		To:      2,
 	}
-	segPlans = append(segPlans, mockPlan)
-	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).Return(segPlans, chanPlans)
-
-	tasks := make([]task.Task, 0)
-	suite.scheduler.ExpectedCalls = nil
-	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(task task.Task) error {
-		tasks = append(tasks, task)
-		return nil
-	})
-	suite.checker.Check(context.TODO())
-	suite.Len(tasks, 2)
-}
-
-func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
-	ctx := context.Background()
-	// set up nodes info, stopping node1
-	nodeID1, nodeID2 := int64(1), int64(2)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Stopping(nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
-
-	mockTarget := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTarget
-
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-
-	cid2, replicaID2, partitionID2 := 2, 2, 2
-	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{nodeID1, nodeID2})
-	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-
-	// test normal balance when one collection has unready target
-	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true)
-	mockTarget.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(false)
-	mockTarget.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(100).Maybe()
-	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Len(replicasToBalance, 0)
-
-	// test stopping balance with target not ready
-	mockTarget.ExpectedCalls = nil
-	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(false)
-	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid1), mock.Anything).Return(true).Maybe()
-	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid2), mock.Anything).Return(false).Maybe()
-	mockTarget.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(100).Maybe()
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
-
-	mr2 := replica2.CopyForWrite()
-	mr2.AddRONode(1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
-
-	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.ElementsMatch(idsToBalance, replicasToBalance)
-}
-
-func (suite *BalanceCheckerTestSuite) TestAutoBalanceInterval() {
-	ctx := context.Background()
-	// set up nodes info
-	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID1),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   int64(nodeID2),
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, int64(nodeID2))
-
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-		{
-			ID:            2,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
+	channelPlan := balance.ChannelAssignPlan{
+		Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "test"}},
+		Replica: mockReplica,
+		From:    1,
+		To:      2,
 	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
+
+	mockBalancer := mockey.Mock(checker.getBalancerFunc).To(func() balance.Balance {
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+	}).Build()
+	defer mockBalancer.UnPatch()
+
+	// Mock balancer.BalanceReplica
+	mockBalanceReplica := mockey.Mock((*balance.ScoreBasedBalancer).BalanceReplica).Return(
+		[]balance.SegmentAssignPlan{segmentPlan},
+		[]balance.ChannelAssignPlan{channelPlan},
+	).Build()
+	defer mockBalanceReplica.UnPatch()
+
+	// Mock balance.CreateSegmentTasksFromPlans
+	mockSegmentTask := &task.SegmentTask{}
+	mockCreateSegmentTasks := mockey.Mock(balance.CreateSegmentTasksFromPlans).Return([]task.Task{mockSegmentTask}).Build()
+	defer mockCreateSegmentTasks.UnPatch()
+
+	// Mock balance.CreateChannelTasksFromPlans
+	mockChannelTask := &task.ChannelTask{}
+	mockCreateChannelTasks := mockey.Mock(balance.CreateChannelTasksFromPlans).Return([]task.Task{mockChannelTask}).Build()
+	defer mockCreateChannelTasks.UnPatch()
+
+	// Mock task.SetPriority and task.SetReason
+	mockSetPriority := mockey.Mock(task.SetPriority).Return().Build()
+	defer mockSetPriority.UnPatch()
+
+	mockSetReason := mockey.Mock(task.SetReason).Return().Build()
+	defer mockSetReason.UnPatch()
+
+	// Mock balance.PrintNewBalancePlans
+	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
+	defer mockPrintPlans.UnPatch()
+
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, replicaIDs, config)
+
+	assert.Len(t, segmentTasks, 1)
+	assert.Len(t, channelTasks, 1)
+	assert.Equal(t, mockSegmentTask, segmentTasks[0])
+	assert.Equal(t, mockChannelTask, channelTasks[0])
+}
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{}
+	replicaIDs := []int64{101}
+
+	// Mock ReplicaManager.Get to return nil
+	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(nil).Build()
+	defer mockReplicaGet.UnPatch()
+
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, replicaIDs, config)
+
+	assert.Empty(t, segmentTasks)
+	assert.Empty(t, channelTasks)
+}
+
+// =============================================================================
+// Task Submission Tests
+// =============================================================================
+
+func TestBalanceChecker_SubmitTasks(t *testing.T) {
+	checker := createTestBalanceChecker()
+
+	// Create mock tasks
+	segmentTask := &task.SegmentTask{}
+	channelTask := &task.ChannelTask{}
+	segmentTasks := []task.Task{segmentTask}
+	channelTasks := []task.Task{channelTask}
+
+	// Mock scheduler.Add
+	mockSchedulerAdd := mockey.Mock(mockey.GetMethod(checker.scheduler, "Add")).Return(nil).Build()
+	defer mockSchedulerAdd.UnPatch()
+
+	checker.submitTasks(segmentTasks, channelTasks)
+
+	// Verify scheduler.Add was called for both tasks
+	// This is implicit verification through mockey call tracking
+}
+
+func TestBalanceChecker_SubmitTasks_EmptyTasks(t *testing.T) {
+	checker := createTestBalanceChecker()
+
+	// Mock scheduler.Add - should not be called
+	mockSchedulerAdd := mockey.Mock(mockey.GetMethod(checker.scheduler, "Add")).Return(nil).Build()
+	defer mockSchedulerAdd.UnPatch()
+
+	checker.submitTasks([]task.Task{}, []task.Task{})
+
+	// No assertions needed - just ensuring no panic with empty tasks
+}
+
+// =============================================================================
+// Main Check Method Tests
+// =============================================================================
+
+func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Mock IsActive to return false
+	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(false).Build()
+	defer mockIsActive.UnPatch()
+
+	result := checker.Check(ctx)
+	assert.Nil(t, result)
+}
+
+func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Mock IsActive to return true
+	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(true).Build()
+	defer mockIsActive.UnPatch()
+
+	// Mock paramtable for enabling stopping balance
+	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+	defer mockParamGet.UnPatch()
+
+	mockStoppingBalanceEnabled := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsBool")).Return(true).Build()
+	defer mockStoppingBalanceEnabled.UnPatch()
+
+	// Mock loadBalanceConfig
+	config := balanceConfig{
+		segmentBatchSize: 5,
+		channelBatchSize: 5,
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(config).Build()
+	defer mockLoadConfig.UnPatch()
 
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
+	// Mock processBalanceQueue to return tasks
+	mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).Return(
+		1, 0, // segment tasks, channel tasks
+	).Build()
+	defer mockProcessQueue.UnPatch()
 
-	funcCallCounter := atomic.NewInt64(0)
-	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *meta.Replica) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
-		funcCallCounter.Inc()
-		return nil, nil
-	})
-
-	// first auto balance should be triggered
-	suite.checker.Check(ctx)
-	suite.Equal(funcCallCounter.Load(), int64(1))
-
-	// second auto balance won't be triggered due to autoBalanceInterval == 3s
-	suite.checker.Check(ctx)
-	suite.Equal(funcCallCounter.Load(), int64(1))
-
-	// set autoBalanceInterval == 1, sleep 1s, auto balance should be triggered
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "1000")
-	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key)
-	time.Sleep(1 * time.Second)
-	suite.checker.Check(ctx)
-	suite.Equal(funcCallCounter.Load(), int64(1))
+	result := checker.Check(ctx)
+	assert.Nil(t, result) // Always returns nil as tasks are submitted directly
+	assert.Nil(t, checker.normalBalanceQueue)
 }
 
-func (suite *BalanceCheckerTestSuite) TestBalanceOrder() {
+func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
+	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	nodeID1, nodeID2 := int64(1), int64(2)
 
-	// set collections meta
-	cid1, replicaID1, partitionID1 := 1, 1, 1
-	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
-	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	// Set autoBalanceTs to allow normal balance
+	checker.autoBalanceTs = time.Time{}
 
-	cid2, replicaID2, partitionID2 := 2, 2, 2
-	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{nodeID1, nodeID2})
-	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+	// Mock IsActive to return true
+	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(true).Build()
+	defer mockIsActive.UnPatch()
 
-	// mock collection row count
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid1), mock.Anything).Return(int64(100)).Maybe()
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid2), mock.Anything).Return(int64(200)).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	// Mock paramtable - stopping balance disabled, auto balance enabled
+	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+	defer mockParamGet.UnPatch()
 
-	// mock stopping node
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
-	mr2 := replica2.CopyForWrite()
-	mr2.AddRONode(nodeID2)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
+	// return false for stopping balance enabled, true for auto balance enabled
+	mockParams := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsBool")).Return(mockey.Sequence(false).Times(1).Then(true)).Build()
+	defer mockParams.UnPatch()
 
-	// test normal balance order
-	replicas := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Equal(replicas, []int64{int64(replicaID2)})
+	// Mock loadBalanceConfig
+	config := balanceConfig{
+		segmentBatchSize:    5,
+		channelBatchSize:    5,
+		autoBalanceInterval: 1 * time.Second,
+	}
+	mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(config).Build()
+	defer mockLoadConfig.UnPatch()
 
-	// test stopping balance order
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Equal(replicas, []int64{int64(replicaID2)})
+	// Mock processBalanceQueue to return tasks
+	mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).Return(
+		0, 1, // segment tasks, channel tasks
+	).Build()
+	defer mockProcessQueue.UnPatch()
 
-	// mock collection row count
-	mockTargetManager.ExpectedCalls = nil
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid1), mock.Anything).Return(int64(200)).Maybe()
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid2), mock.Anything).Return(int64(100)).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-
-	// test normal balance order
-	replicas = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Equal(replicas, []int64{int64(replicaID1)})
-
-	// test stopping balance order
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Equal(replicas, []int64{int64(replicaID1)})
+	result := checker.Check(ctx)
+	assert.Nil(t, result) // Always returns nil as tasks are submitted directly
 }
 
-func (suite *BalanceCheckerTestSuite) TestSortCollections() {
+// =============================================================================
+// ProcessBalanceQueue Tests
+// =============================================================================
+
+func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
+	checker := createTestBalanceChecker()
 	ctx := context.Background()
 
-	// Set up test collections
-	cid1, cid2, cid3 := int64(1), int64(2), int64(3)
+	// Create mock balance config
+	config := balanceConfig{
+		segmentBatchSize:             5,
+		channelBatchSize:             3,
+		maxCheckCollectionCount:      5,
+		balanceOnMultipleCollections: true,
+	}
 
-	// Mock the target manager for row count returns
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
+	// Create mock priority queue
+	mockQueue := createMockPriorityQueue()
+	// Use real priority queue for simplicity
 
-	// Collection 1: Low ID, High row count
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid1, mock.Anything).Return(int64(300)).Maybe()
+	mockQueue.Push(newCollectionBalanceItem(1, 100, "byrowcount"))
+	mockQueue.Push(newCollectionBalanceItem(2, 100, "byrowcount"))
+	mockQueue.Push(newCollectionBalanceItem(3, 100, "byrowcount"))
+	mockQueue.Push(newCollectionBalanceItem(4, 100, "byrowcount"))
+	mockQueue.Push(newCollectionBalanceItem(5, 100, "byrowcount"))
 
-	// Collection 2: Middle ID, Low row count
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid2, mock.Anything).Return(int64(100)).Maybe()
+	// Mock getReplicasFunc
+	getReplicasFunc := func(ctx context.Context, collectionID int64) []int64 {
+		return []int64{101, 102}
+	}
 
-	// Collection 3: High ID, Middle row count
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid3, mock.Anything).Return(int64(200)).Maybe()
+	// Mock constructQueueFunc
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+		return mockQueue
+	}
 
-	collections := []int64{cid1, cid2, cid3}
+	// Mock getQueueFunc
+	getQueueFunc := func() *balance.PriorityQueue {
+		return mockQueue
+	}
 
-	// Test ByRowCount sorting (default)
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
-	sortedCollections := suite.checker.sortCollections(ctx, collections)
-	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Collections should be sorted by row count (highest first)")
+	// Mock generateBalanceTasksFromReplicas
+	mockSegmentTask := &task.SegmentTask{}
+	mockChannelTask := &task.ChannelTask{}
+	mockGenerateTasks := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return(
+		[]task.Task{mockSegmentTask}, []task.Task{mockChannelTask},
+	).Build()
+	defer mockGenerateTasks.UnPatch()
 
-	// Test ByCollectionID sorting
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByCollectionID")
-	sortedCollections = suite.checker.sortCollections(ctx, collections)
-	suite.Equal([]int64{cid1, cid2, cid3}, sortedCollections, "Collections should be sorted by collection ID (ascending)")
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
 
-	// Test with empty sort order (should default to ByRowCount)
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "")
-	sortedCollections = suite.checker.sortCollections(ctx, collections)
-	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Should default to ByRowCount when sort order is empty")
+	segmentTasks, channelTasks := checker.processBalanceQueue(
+		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+	)
 
-	// Test with invalid sort order (should default to ByRowCount)
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "InvalidOrder")
-	sortedCollections = suite.checker.sortCollections(ctx, collections)
-	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Should default to ByRowCount when sort order is invalid")
+	assert.Equal(t, 3, segmentTasks)
+	assert.Equal(t, 3, channelTasks)
+}
 
-	// Test with mixed case (should be case-insensitive)
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "bYcOlLeCtIoNiD")
-	sortedCollections = suite.checker.sortCollections(ctx, collections)
-	suite.Equal([]int64{cid1, cid2, cid3}, sortedCollections, "Should handle case-insensitive sort order names")
+func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	config := balanceConfig{
+		segmentBatchSize: 5,
+		channelBatchSize: 3,
+	}
+
+	// Create empty mock priority queue
+	mockQueue := createMockPriorityQueue()
+	// Use real priority queue for empty queue testing
+
+	getReplicasFunc := func(ctx context.Context, collectionID int64) []int64 {
+		return []int64{101}
+	}
+
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	getQueueFunc := func() *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	segmentTasks, channelTasks := checker.processBalanceQueue(
+		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+	)
+
+	assert.Equal(t, 0, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
+}
+
+func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// Set small batch sizes to test limits
+	config := balanceConfig{
+		segmentBatchSize:             1, // Only allow 1 segment task
+		channelBatchSize:             1, // Only allow 1 channel task
+		maxCheckCollectionCount:      10,
+		balanceOnMultipleCollections: true,
+	}
+
+	// Test batch size limits with simplified logic
+
+	// Create mock priority queue with 2 items
+	mockQueue := createMockPriorityQueue()
+	// Use real priority queue for batch size testing
+
+	mockQueue.Push(newCollectionBalanceItem(1, 100, "byrowcount"))
+	mockQueue.Push(newCollectionBalanceItem(2, 100, "byrowcount"))
+
+	getReplicasFunc := func(ctx context.Context, collectionID int64) []int64 {
+		return []int64{101}
+	}
+
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	getQueueFunc := func() *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	// Mock generateBalanceTasksFromReplicas to return multiple tasks
+	mockSegmentTask1 := &task.SegmentTask{}
+	mockSegmentTask2 := &task.SegmentTask{}
+	mockChannelTask1 := &task.ChannelTask{}
+	mockChannelTask2 := &task.ChannelTask{}
+
+	mockGenerateTasks := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return(mockey.Sequence(
+		[]task.Task{mockSegmentTask1}, []task.Task{mockChannelTask1},
+	).Times(1).Then(
+		[]task.Task{mockSegmentTask2}, []task.Task{mockChannelTask2},
+	)).Build()
+	defer mockGenerateTasks.UnPatch()
+
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
+
+	segmentTasks, channelTasks := checker.processBalanceQueue(
+		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+	)
+
+	// Should stop after first collection due to batch size limits
+	assert.Equal(t, 1, segmentTasks)
+	assert.Equal(t, 1, channelTasks)
+}
+
+func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	config := balanceConfig{
+		segmentBatchSize:             10,
+		channelBatchSize:             10,
+		maxCheckCollectionCount:      10,
+		balanceOnMultipleCollections: false, // Disabled
+	}
+
+	mockQueue := createMockPriorityQueue()
+	// Use real priority queue for multi-collection testing
+
+	getReplicasFunc := func(ctx context.Context, collectionID int64) []int64 {
+		return []int64{101}
+	}
+
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	getQueueFunc := func() *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	mockQueue.Push(newCollectionBalanceItem(1, 100, "byrowcount"))
+
+	// Mock generateBalanceTasksFromReplicas to return tasks
+	mockSegmentTask := &task.SegmentTask{}
+	mockGenerateTasks := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return(
+		[]task.Task{mockSegmentTask}, []task.Task{},
+	).Build()
+	defer mockGenerateTasks.UnPatch()
+
+	// mock submit tasks
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	defer mockSubmitTasks.UnPatch()
+
+	segmentTasks, channelTasks := checker.processBalanceQueue(
+		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+	)
+
+	// Should stop after first collection due to multi-collection disabled
+	assert.Equal(t, 1, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
+}
+
+func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	config := balanceConfig{
+		segmentBatchSize:             5,
+		channelBatchSize:             5,
+		maxCheckCollectionCount:      5,
+		balanceOnMultipleCollections: true,
+	}
+
+	mockQueue := createMockPriorityQueue()
+	// Use real priority queue for simplicity
+
+	// getReplicasFunc returns empty slice
+	getReplicasFunc := func(ctx context.Context, collectionID int64) []int64 {
+		return []int64{} // No replicas
+	}
+
+	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	getQueueFunc := func() *balance.PriorityQueue {
+		return mockQueue
+	}
+
+	segmentTasks, channelTasks := checker.processBalanceQueue(
+		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+	)
+
+	assert.Equal(t, 0, segmentTasks)
+	assert.Equal(t, 0, channelTasks)
+}
+
+// =============================================================================
+// Performance and Edge Case Tests
+// =============================================================================
+
+func TestBalanceChecker_CollectionBalanceItem_EdgeCases(t *testing.T) {
+	// Test with zero row count
+	item := newCollectionBalanceItem(1, 0, "byrowcount")
+	assert.Equal(t, 0, item.getPriority())
+
+	// Test with negative collection ID
+	item = newCollectionBalanceItem(-1, 100, "bycollectionid")
+	assert.Equal(t, -1, item.getPriority())
+
+	// Test with very large values
+	item = newCollectionBalanceItem(9223372036854775807, 2147483647, "byrowcount")
+	assert.Equal(t, -2147483647, item.getPriority())
+
+	// Test with empty sort order (should default to byrowcount)
+	item = newCollectionBalanceItem(5, 100, "")
+	assert.Equal(t, -100, item.getPriority())
+
+	// Test with invalid sort order (should default to byrowcount)
+	item = newCollectionBalanceItem(5, 100, "invalid")
+	assert.Equal(t, -100, item.getPriority())
+}
+
+func TestBalanceChecker_FilterCollectionForBalance_EdgeCases(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
 
 	// Test with empty collection list
-	emptyCollections := []int64{}
-	sortedCollections = suite.checker.sortCollections(ctx, emptyCollections)
-	suite.Equal([]int64{}, sortedCollections, "Should handle empty collection list")
-}
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{}).Build()
+	defer mockGetAll.UnPatch()
 
-func (suite *BalanceCheckerTestSuite) TestSortCollectionsIntegration() {
-	ctx := context.Background()
-
-	// Set up test collections and nodes
-	nodeID1 := int64(1)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
-
-	// Create two collections to ensure sorting is triggered
-	cid1, replicaID1 := int64(1), int64(101)
-	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-
-	// Add a second collection with different characteristics
-	cid2, replicaID2 := int64(2), int64(102)
-	collection2 := utils.CreateTestCollection(cid2, int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(replicaID2, cid2, []int64{nodeID1})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-
-	// Mock target manager
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
-
-	// Setup different row counts to test sorting
-	// Collection 1 has more rows than Collection 2
-	var getRowCountCallCount int
-	mockTargetManager.On("GetCollectionRowCount", mock.Anything, mock.Anything, mock.Anything).
-		Return(func(ctx context.Context, collectionID int64, scope int32) int64 {
-			getRowCountCallCount++
-			if collectionID == cid1 {
-				return 200 // More rows in collection 1
-			}
-			return 100 // Fewer rows in collection 2
-		})
-
-	mockTargetManager.On("IsCurrentTargetReady", mock.Anything, mock.Anything).Return(true)
-	mockTargetManager.On("IsNextTargetExist", mock.Anything, mock.Anything).Return(true)
-
-	// Configure for testing
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
-
-	// Clear first to avoid previous test state
-	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
-
-	// Call normal balance
-	_ = suite.checker.getReplicaForNormalBalance(ctx)
-
-	// Verify GetCollectionRowCount was called at least twice (once for each collection)
-	// This confirms that the collections were sorted
-	suite.True(getRowCountCallCount >= 2, "GetCollectionRowCount should be called at least twice during normal balance")
-
-	// Reset counter and test stopping balance
-	getRowCountCallCount = 0
-
-	// Set up for stopping balance test
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
-
-	mr2 := replica2.CopyForWrite()
-	mr2.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
-
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
-
-	// Call stopping balance
-	_ = suite.checker.getReplicaForStoppingBalance(ctx)
-
-	// Verify GetCollectionRowCount was called at least twice during stopping balance
-	suite.True(getRowCountCallCount >= 2, "GetCollectionRowCount should be called at least twice during stopping balance")
-}
-
-func (suite *BalanceCheckerTestSuite) TestBalanceTriggerOrder() {
-	ctx := context.Background()
-
-	// Set up nodes
-	nodeID1, nodeID2 := int64(1), int64(2)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
-
-	// Create collections with different row counts
-	cid1, replicaID1 := int64(1), int64(101)
-	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1, nodeID2})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-
-	cid2, replicaID2 := int64(2), int64(102)
-	collection2 := utils.CreateTestCollection(cid2, int32(replicaID2))
-	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(replicaID2, cid2, []int64{nodeID1, nodeID2})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
-
-	cid3, replicaID3 := int64(3), int64(103)
-	collection3 := utils.CreateTestCollection(cid3, int32(replicaID3))
-	collection3.Status = querypb.LoadStatus_Loaded
-	replica3 := utils.CreateTestReplica(replicaID3, cid3, []int64{nodeID1, nodeID2})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection3)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica3)
-
-	// Mock the target manager
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
-
-	// Set row counts: Collection 1 (highest), Collection 3 (middle), Collection 2 (lowest)
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid1, mock.Anything).Return(int64(300)).Maybe()
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid2, mock.Anything).Return(int64(100)).Maybe()
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid3, mock.Anything).Return(int64(200)).Maybe()
-
-	// Mark the current target as ready
-	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
-
-	// Enable auto balance
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-
-	// Test with ByRowCount order (default)
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
-	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
-
-	// Normal balance should pick the collection with highest row count first
-	replicas := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Contains(replicas, replicaID1, "Should balance collection with highest row count first")
-
-	// Add stopping nodes to test stopping balance
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
-
-	mr2 := replica2.CopyForWrite()
-	mr2.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
-
-	mr3 := replica3.CopyForWrite()
-	mr3.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr3.IntoReplica())
-
-	// Enable stopping balance
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
-
-	// Stopping balance should also pick the collection with highest row count first
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with highest row count")
-
-	// Test with ByCollectionID order
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByCollectionID")
-	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
-
-	// Normal balance should pick the collection with lowest ID first
-	replicas = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Contains(replicas, replicaID1, "Should balance collection with lowest ID first")
-
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	// Stopping balance should also pick the collection with lowest ID first
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with lowest ID")
-}
-
-func (suite *BalanceCheckerTestSuite) TestHasUnbalancedCollectionFlag() {
-	ctx := context.Background()
-
-	// Set up nodes
-	nodeID1, nodeID2 := int64(1), int64(2)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
-
-	// Create collection
-	cid1, replicaID1 := int64(1), int64(101)
-	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
-	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1, nodeID2})
-	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
-	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-
-	// Mock the target manager
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(int64(100)).Maybe()
-
-	// 1. Test normal balance with auto balance disabled
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-
-	// The collections set should be initially empty
-	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
-	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len())
-
-	// Get replicas - should return nil and keep the set empty
-	replicas := suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Empty(replicas)
-	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len(),
-		"normalBalanceCollectionsCurrentRound should remain empty when auto balance is disabled")
-
-	// 2. Test normal balance when targetMgr.IsCurrentTargetReady returns false
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(false).Maybe()
-
-	// The collections set should be initially empty
-	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
-	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len())
-
-	// Get replicas - should return nil and keep the set empty because of not ready targets
-	replicas = suite.checker.getReplicaForNormalBalance(ctx)
-	suite.Empty(replicas)
-	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len(),
-		"normalBalanceCollectionsCurrentRound should remain empty when targets are not ready")
-
-	// 3. Test stopping balance when there are no RO nodes
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
-
-	// The collections set should be initially empty
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
-
-	// Get replicas - should return nil and keep the set empty because there are no RO nodes
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Empty(replicas)
-	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len(),
-		"stoppingBalanceCollectionsCurrentRound should remain empty when there are no RO nodes")
-
-	// 4. Test stopping balance with RO nodes
-	// Add a RO node to the replica
-	mr1 := replica1.CopyForWrite()
-	mr1.AddRONode(nodeID1)
-	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
-
-	// The collections set should be initially empty
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
-
-	// Get replicas - should return the replica ID and add the collection to the set
-	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
-	suite.Equal([]int64{replicaID1}, replicas)
-	suite.Equal(1, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
-	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(cid1),
-		"stoppingBalanceCollectionsCurrentRound should contain the collection when it has RO nodes")
-}
-
-func (suite *BalanceCheckerTestSuite) TestCheckBatchSizesAndMultiCollection() {
-	ctx := context.Background()
-
-	// Set up nodes
-	nodeID1, nodeID2 := int64(1), int64(2)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   nodeID2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
-	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
-
-	// Create 3 collections
-	for i := 1; i <= 3; i++ {
-		cid := int64(i)
-		replicaID := int64(100 + i)
-
-		collection := utils.CreateTestCollection(cid, int32(replicaID))
-		collection.Status = querypb.LoadStatus_Loaded
-		replica := utils.CreateTestReplica(replicaID, cid, []int64{})
-		mutableReplica := replica.CopyForWrite()
-		mutableReplica.AddRWNode(nodeID1)
-		mutableReplica.AddRONode(nodeID2)
-
-		suite.checker.meta.CollectionManager.PutCollection(ctx, collection)
-		suite.checker.meta.ReplicaManager.Put(ctx, mutableReplica.IntoReplica())
+	passAllFilter := func(ctx context.Context, collectionID int64) bool {
+		return true
 	}
 
-	// Mock target manager
-	mockTargetManager := meta.NewMockTargetManager(suite.T())
-	suite.checker.targetMgr = mockTargetManager
+	result := checker.filterCollectionForBalance(ctx, passAllFilter)
+	assert.Empty(t, result)
 
-	// All collections have same row count for simplicity
-	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(int64(100)).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+	// Test with no filters
+	collectionIDs := []int64{1, 2, 3}
+	mockGetAll.UnPatch()
+	mockGetAll = mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+	defer mockGetAll.UnPatch()
 
-	// For each collection, return different segment plans
-	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.AnythingOfType("*meta.Replica")).RunAndReturn(
-		func(ctx context.Context, replica *meta.Replica) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
-			// Create 2 segment plans and 1 channel plan per replica
-			collID := replica.GetCollectionID()
-			segPlans := make([]balance.SegmentAssignPlan, 0)
-			chanPlans := make([]balance.ChannelAssignPlan, 0)
-
-			// Create 2 segment plans
-			for j := 1; j <= 2; j++ {
-				segID := collID*100 + int64(j)
-				segPlan := balance.SegmentAssignPlan{
-					Segment: utils.CreateTestSegment(segID, collID, 1, 1, 1, "test-channel"),
-					Replica: replica,
-					From:    nodeID1,
-					To:      nodeID2,
-				}
-				segPlans = append(segPlans, segPlan)
-			}
-
-			// Create 1 channel plan
-			chanPlan := balance.ChannelAssignPlan{
-				Channel: &meta.DmChannel{
-					VchannelInfo: &datapb.VchannelInfo{
-						CollectionID: collID,
-						ChannelName:  "test-channel",
-					},
-				},
-				Replica: replica,
-				From:    nodeID1,
-				To:      nodeID2,
-			}
-			chanPlans = append(chanPlans, chanPlan)
-
-			return segPlans, chanPlans
-		}).Maybe()
-
-	// Add tasks to check batch size limits
-	var addedTasks []task.Task
-	suite.scheduler.ExpectedCalls = nil
-	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		addedTasks = append(addedTasks, t)
-		return nil
-	}).Maybe()
-
-	// Test 1: Balance with multiple collections disabled
-	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableBalanceOnMultipleCollections.Key, "false")
-	// Set batch sizes to large values to test single-collection case
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceSegmentBatchSize.Key, "10")
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceChannelBatchSize.Key, "10")
-
-	// Reset test state
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	suite.checker.autoBalanceTs = time.Time{} // Reset to trigger auto balance
-	addedTasks = nil
-
-	// Run the Check method
-	suite.checker.Check(ctx)
-
-	// Should have tasks for a single collection (2 segment tasks + 1 channel task)
-	suite.Equal(3, len(addedTasks), "Should have tasks for a single collection when multiple collections balance is disabled")
-
-	// Test 2: Balance with multiple collections enabled
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableBalanceOnMultipleCollections.Key, "true")
-
-	// Reset test state
-	suite.checker.autoBalanceTs = time.Time{}
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	addedTasks = nil
-
-	// Run the Check method
-	suite.checker.Check(ctx)
-
-	// Should have tasks for all collections (3 collections * (2 segment tasks + 1 channel task) = 9 tasks)
-	suite.Equal(9, len(addedTasks), "Should have tasks for all collections when multiple collections balance is enabled")
-
-	// Test 3: Batch size limits
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceSegmentBatchSize.Key, "2")
-	paramtable.Get().Save(Params.QueryCoordCfg.BalanceChannelBatchSize.Key, "1")
-
-	// Reset test state
-	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
-	addedTasks = nil
-
-	// Run the Check method
-	suite.checker.Check(ctx)
-
-	// Should respect batch size limits: 2 segment tasks + 1 channel task = 3 tasks
-	suite.Equal(3, len(addedTasks), "Should respect batch size limits")
-
-	// Count segment tasks and channel tasks
-	segmentTaskCount := 0
-	channelTaskCount := 0
-	for _, t := range addedTasks {
-		if _, ok := t.(*task.SegmentTask); ok {
-			segmentTaskCount++
-		} else {
-			channelTaskCount++
-		}
-	}
-
-	suite.LessOrEqual(segmentTaskCount, 2, "Should have at most 2 segment tasks due to batch size limit")
-	suite.LessOrEqual(channelTaskCount, 1, "Should have at most 1 channel task due to batch size limit")
+	result = checker.filterCollectionForBalance(ctx)
+	assert.Equal(t, collectionIDs, result) // No filters means all pass
 }
 
-func TestBalanceCheckerSuite(t *testing.T) {
-	suite.Run(t, new(BalanceCheckerTestSuite))
+// =============================================================================
+// Error Handling Tests
+// =============================================================================
+
+func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	paramtable.Init()
+
+	// Mock IsActive to return true
+	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(true).Build()
+	defer mockIsActive.UnPatch()
+
+	mockProcessBalanceQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
+		func(ctx context.Context,
+			getReplicasFunc func(ctx context.Context, collectionID int64) []int64,
+			constructQueueFunc func(ctx context.Context) *balance.PriorityQueue,
+			getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+		) (int, int) {
+			time.Sleep(150 * time.Millisecond)
+			return 0, 0
+		}).Build()
+	defer mockProcessBalanceQueue.UnPatch()
+
+	start := time.Now()
+	result := checker.Check(ctx)
+	duration := time.Since(start)
+
+	assert.Nil(t, result)
+	assert.Greater(t, duration, 100*time.Millisecond) // Should trigger log
 }

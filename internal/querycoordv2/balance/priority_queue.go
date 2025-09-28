@@ -20,24 +20,24 @@ import (
 	"container/heap"
 )
 
-type item interface {
+type Item interface {
 	getPriority() int
 	setPriority(priority int)
 }
 
-type baseItem struct {
+type BaseItem struct {
 	priority int
 }
 
-func (b *baseItem) getPriority() int {
+func (b *BaseItem) getPriority() int {
 	return b.priority
 }
 
-func (b *baseItem) setPriority(priority int) {
+func (b *BaseItem) setPriority(priority int) {
 	b.priority = priority
 }
 
-type heapQueue []item
+type heapQueue []Item
 
 func (hq heapQueue) Len() int {
 	return len(hq)
@@ -52,7 +52,7 @@ func (hq heapQueue) Swap(i, j int) {
 }
 
 func (hq *heapQueue) Push(x any) {
-	i := x.(item)
+	i := x.(Item)
 	*hq = append(*hq, i)
 }
 
@@ -64,22 +64,30 @@ func (hq *heapQueue) Pop() any {
 	return ret
 }
 
-type priorityQueue struct {
+type PriorityQueue struct {
 	heapQueue
 }
 
-func newPriorityQueue() priorityQueue {
+func NewPriorityQueue() PriorityQueue {
 	hq := make(heapQueue, 0)
 	heap.Init(&hq)
-	return priorityQueue{
+	return PriorityQueue{
 		heapQueue: hq,
 	}
 }
 
-func (pq *priorityQueue) push(item item) {
+func NewPriorityQueuePtr() *PriorityQueue {
+	hq := make(heapQueue, 0)
+	heap.Init(&hq)
+	return &PriorityQueue{
+		heapQueue: hq,
+	}
+}
+
+func (pq *PriorityQueue) Push(item Item) {
 	heap.Push(&pq.heapQueue, item)
 }
 
-func (pq *priorityQueue) pop() item {
-	return heap.Pop(&pq.heapQueue).(item)
+func (pq *PriorityQueue) Pop() Item {
+	return heap.Pop(&pq.heapQueue).(Item)
 }

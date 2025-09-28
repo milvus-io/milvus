@@ -2130,6 +2130,8 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+
+	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2753,6 +2755,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
+
+	p.BalanceCheckCollectionMaxCount = ParamItem{
+		Key:          "queryCoord.balanceCheckCollectionMaxCount",
+		Version:      "2.6.2",
+		DefaultValue: "100",
+		Doc:          "the max collection count for each balance check",
+		Export:       false,
+	}
+	p.BalanceCheckCollectionMaxCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
