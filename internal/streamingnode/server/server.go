@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -16,7 +17,6 @@ import (
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -41,17 +41,11 @@ func (s *Server) init() {
 
 	// init all service.
 	s.initService()
+
+	log.Info("init query segcore...")
+	initcore.InitQueryNode(context.TODO())
+
 	log.Info("streamingnode server initialized")
-
-	// init storage v2 file system.
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
-			panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
-		}
-	}
-
-	// init paramtable change callback for core related config
-	initcore.SetupCoreConfigChangelCallback()
 }
 
 // Stop stops the streamingnode server.
