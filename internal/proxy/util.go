@@ -2451,6 +2451,25 @@ func GetCostValue(status *commonpb.Status) int {
 	return value
 }
 
+func GetStorageCost(status *commonpb.Status) (int64, int64, float64) {
+	if status == nil || status.ExtraInfo == nil {
+		return 0, 0, 0
+	}
+	scannedRemoteBytes, err := strconv.ParseInt(status.ExtraInfo["scanned_remote_bytes"], 10, 64)
+	if err != nil {
+		return 0, 0, 0
+	}
+	scannedTotalBytes, err := strconv.ParseInt(status.ExtraInfo["scanned_total_bytes"], 10, 64)
+	if err != nil {
+		return 0, 0, 0
+	}
+	cacheHitRatio, err := strconv.ParseFloat(status.ExtraInfo["cache_hit_ratio"], 64)
+	if err != nil {
+		return 0, 0, 0
+	}
+	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio
+}
+
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
 func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
