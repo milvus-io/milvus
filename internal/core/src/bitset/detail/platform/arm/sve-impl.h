@@ -37,6 +37,59 @@ namespace detail {
 namespace arm {
 namespace sve {
 
+///////////////////////////////////////////////////////////////////////////
+
+template <typename ElementType>
+void
+bitset_batch_set_sve(ElementType* data, const uint32_t* idxs, const size_t n) {
+    constexpr size_t data_bits = sizeof(ElementType) * 8;
+    constexpr int shift_bits = __builtin_ctz(data_bits);
+    constexpr uint32_t mask = (data_bits - 1);
+    constexpr uint32_t batch_size = 32;
+
+    if (n == 0) {
+        return;
+    }
+
+    alignas(64) uint32_t elems[batch_size];
+    alignas(64) uint32_t bits[batch_size];
+    auto num_batches = n / batch_size;
+    for (size_t batch = 0; batch < num_batches; batch++) {
+        size_t base_idx = batch * batch_size;
+
+        const uint32_t svew = svcntw();
+        for (size_t j = 0; j < batch_size; j += svew) {
+            svbool_t pg = svwhilelt_b32(uint32_t(j), uint32_t(batch_size));
+            svuint32_t v = svld1_u32(pg, idxs + base_idx + j);
+            svuint32_t e = svlsr_n_u32_z(pg, v, shift_bits);
+            svuint32_t b = svand_u32_z(pg, v, svdup_n_u32(mask));
+            svst1_u32(pg, elems + j, e);
+            svst1_u32(pg, bits + j, b);
+        }
+
+        ElementType cur_mask = 0;
+        uint32_t cur_elem = elems[0];
+        for (size_t j = 0; j < batch_size; j++) {
+            if (elems[j] == cur_elem) {
+                cur_mask |= (static_cast<ElementType>(1) << bits[j]);
+            } else {
+                svprefetch((const void*)(&data[elems[j]]));
+                data[cur_elem] |= cur_mask;
+                cur_elem = elems[j];
+                cur_mask = (static_cast<ElementType>(1) << bits[j]);
+            }
+        }
+        data[cur_elem] |= cur_mask;
+    }
+
+    for (size_t i = num_batches * batch_size; i < n; i++) {
+        auto element_index = idxs[i] >> shift_bits;
+        auto bit_in_element = idxs[i] & mask;
+        data[element_index] |= (static_cast<ElementType>(1) << bit_in_element);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
 namespace {
 
 //

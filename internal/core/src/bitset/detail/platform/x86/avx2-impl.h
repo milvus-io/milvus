@@ -297,6 +297,57 @@ struct CmpHelperI64<CompareOpType::NE> {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <typename ElementType>
+void
+bitset_batch_set_avx2(ElementType* data, const uint32_t* idxs, const size_t n) {
+    constexpr size_t data_bits = sizeof(ElementType) * 8;
+    constexpr int shift_bits = __builtin_ctz(data_bits);
+    constexpr uint32_t mask = (data_bits - 1);
+    constexpr size_t batch_size = 32;
+
+    if (n == 0) {
+        return;
+    }
+
+    const __m256i mask_vec = _mm256_set1_epi32(mask);
+    alignas(64) uint32_t elems[batch_size];
+    alignas(64) uint32_t bits[batch_size];
+
+    size_t num_batches = n / batch_size;
+    for (size_t batch = 0; batch < num_batches; ++batch) {
+        size_t base_idx = batch * batch_size;
+
+        for (size_t j = 0; j < batch_size; j += 8) {
+            __m256i v =
+                _mm256_loadu_si256((const __m256i*)(idxs + base_idx + j));
+            __m256i e = _mm256_srli_epi32(v, shift_bits);
+            __m256i b = _mm256_and_si256(v, mask_vec);
+            _mm256_store_si256((__m256i*)(elems + j), e);
+            _mm256_store_si256((__m256i*)(bits + j), b);
+        }
+
+        ElementType cur_mask = 0;
+        uint32_t cur_elem = elems[0];
+        for (size_t j = 0; j < batch_size; j++) {
+            if (elems[j] == cur_elem) {
+                cur_mask |= (static_cast<ElementType>(1) << bits[j]);
+            } else {
+                _mm_prefetch((const char*)&data[elems[j]], _MM_HINT_T0);
+                data[cur_elem] |= cur_mask;
+                cur_elem = elems[j];
+                cur_mask = (static_cast<ElementType>(1) << bits[j]);
+            }
+        }
+        data[cur_elem] |= cur_mask;
+    }
+
+    size_t remaining_start = num_batches * batch_size;
+    for (size_t i = remaining_start; i < n; ++i) {
+        data[idxs[i] >> shift_bits] |=
+            (static_cast<ElementType>(1) << (idxs[i] & mask));
+    }
+}
+
 //
 template <CompareOpType Op>
 bool
