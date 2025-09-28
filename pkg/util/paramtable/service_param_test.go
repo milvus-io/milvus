@@ -229,6 +229,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, 3600*time.Second, Params.SnapshotReserveTimeSeconds.GetAsDuration(time.Second))
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
+		assert.Equal(t, 64, Params.MaxTxnNum.GetAsInt())
 	})
 
 	t.Run("test profile config", func(t *testing.T) {
