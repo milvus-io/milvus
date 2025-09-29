@@ -1220,7 +1220,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
 		Export:       true,
 	}
@@ -5664,6 +5664,7 @@ type dataNodeConfig struct {
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
+	MaxCompactionConcurrency ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6045,6 +6046,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.MaxSegmentMergeSort.Init(base.mgr)
+
+	p.MaxCompactionConcurrency = ParamItem{
+		Key:          "dataNode.compaction.maxConcurrency",
+		Version:      "2.6.0",
+		Doc:          "The maximum number of compaction tasks that can run concurrently on a datanode",
+		DefaultValue: "10",
+		Export:       false,
+	}
+	p.MaxCompactionConcurrency.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

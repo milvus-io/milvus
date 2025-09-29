@@ -695,7 +695,7 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			},
 		}
 
-		result, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
+		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
 
 		// Verify results
 		assert.NoError(t, err)
@@ -717,7 +717,7 @@ func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
 			},
 		}
 
-		result, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
+		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -750,7 +750,7 @@ func TestRetrieveByPKs_PartitionKeyMode(t *testing.T) {
 			},
 		}
 
-		result, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
+		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -829,7 +829,7 @@ func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 					},
 				},
 			},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 
 		mockey.Mock(typeutil.NewIDsChecker).Return(&typeutil.IDsChecker{}, nil).Build()
 
@@ -1148,7 +1148,7 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 		node: &Proxy{},
 	}
 
-	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
 	err := task.queryPreExecute(context.Background())
@@ -1237,7 +1237,7 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 		node: &Proxy{},
 	}
 
-	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
 	err := task.queryPreExecute(context.Background())
@@ -1325,7 +1325,7 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 		node: &Proxy{},
 	}
 
-	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, nil).Build()
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
 	err := task.queryPreExecute(context.Background())

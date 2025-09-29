@@ -862,9 +862,6 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			if !ok {
 				return fmt.Errorf("function input field not found: %s", name)
 			}
-			if inputField.GetNullable() {
-				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
-			}
 			inputFields = append(inputFields, inputField)
 		}
 
@@ -942,8 +939,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		if err := embedding.TextEmbeddingInputsCheck(function.GetName(), fields); err != nil {
+			return err
 		}
 	default:
 		return errors.New("check input field with unknown function type")
@@ -2421,6 +2418,9 @@ func SetReportValue(status *commonpb.Status, value int) {
 }
 
 func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
+	if !Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		return
+	}
 	if storageCost.ScannedTotalBytes <= 0 {
 		return
 	}
@@ -2449,6 +2449,45 @@ func GetCostValue(status *commonpb.Status) int {
 		return 0
 	}
 	return value
+}
+
+// final return value means value is valid or not
+func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
+	if status == nil || status.ExtraInfo == nil {
+		return 0, 0, 0, false
+	}
+	var scannedRemoteBytes int64
+	var scannedTotalBytes int64
+	var cacheHitRatio float64
+	var err error
+	if value, ok := status.ExtraInfo["scanned_remote_bytes"]; ok {
+		scannedRemoteBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_remote_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["scanned_total_bytes"]; ok {
+		scannedTotalBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_total_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["cache_hit_ratio"]; ok {
+		cacheHitRatio, err = strconv.ParseFloat(value, 64)
+		if err != nil {
+			log.Warn("cache_hit_ratio is not a valid float64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
