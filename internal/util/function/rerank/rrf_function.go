@@ -69,13 +69,15 @@ func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 
 func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	rrfScores := map[T]float32{}
-	for _, col := range cols {
+	idLocations := make(map[T]IDLoc)
+	for i, col := range cols {
 		if col.size == 0 {
 			continue
 		}
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if score, ok := rrfScores[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
 				rrfScores[id] = 1 / (rrf.k + float32(idx+1))
 			} else {
 				rrfScores[id] = score + 1/(rrf.k+float32(idx+1))
@@ -83,19 +85,19 @@ func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParam
 		}
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(rrfScores, searchParams, idGroup)
+		return newGroupingIDScores(rrfScores, idLocations, searchParams, idGroup)
 	}
-	return newIDScores(rrfScores, searchParams, true), nil
+	return newIDScores(rrfScores, idLocations, searchParams, true), nil
 }
 
 func (rrf *RRFFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for _, cols := range inputs.data {
 		idScore, err := rrf.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
 }

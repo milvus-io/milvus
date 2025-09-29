@@ -88,6 +88,8 @@ func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string
 			return common.DefaultDynamicFieldName
 		}
 		return common.DefaultJSONFieldName
+	case entity.FieldTypeGeometry:
+		return common.DefaultGeometryFieldName
 	case entity.FieldTypeArray:
 		return GetFieldNameByElementType(opt.elementType)
 	case entity.FieldTypeBinaryVector:
@@ -119,6 +121,7 @@ const (
 	Int64VecAllScalar     CollectionFieldsType = 8  // int64 + floatVec + all scalar fields
 	FullTextSearch        CollectionFieldsType = 9  // int64 + varchar + sparse vector + analyzer + function
 	TextEmbedding         CollectionFieldsType = 10 // int64 + varchar + float_vector + text_embedding_function
+	Int64VecGeometry      CollectionFieldsType = 11 // int64 + floatVec + geometry
 )
 
 type GenFieldsOption struct {
@@ -274,6 +277,8 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return ff.createFullTextSearchFields(fieldOpts)
 	case TextEmbedding:
 		return ff.createTextEmbeddingFields(fieldOpts)
+	case Int64VecGeometry:
+		return ff.createInt64VecGeometryFields(fieldOpts)
 	default:
 		return ff.createInt64VecFields(fieldOpts)
 	}
@@ -375,6 +380,24 @@ func (ff FieldsFactory) createInt64VarcharSparseVecFields(fieldOpts FieldOptions
 	ff.applyFieldOptions(sparseVecField, fieldOpts.GetFieldOption(sparseName))
 
 	return []*entity.Field{pkField, varcharField, sparseVecField}
+}
+
+func (ff FieldsFactory) createInt64VecGeometryFields(fieldOpts FieldOptions) []*entity.Field {
+	pkName := GetFieldNameByFieldType(entity.FieldTypeInt64)
+	vecName := GetFieldNameByFieldType(entity.FieldTypeFloatVector)
+	geometryName := GetFieldNameByFieldType(entity.FieldTypeGeometry)
+
+	// Create base fields
+	pkField := entity.NewField().WithName(pkName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(vecName).WithDataType(entity.FieldTypeFloatVector)
+	geometryField := entity.NewField().WithName(geometryName).WithDataType(entity.FieldTypeGeometry)
+
+	// Apply field options
+	ff.applyFieldOptions(pkField, fieldOpts.GetFieldOption(pkName))
+	ff.applyFieldOptions(vecField, fieldOpts.GetFieldOption(vecName))
+	ff.applyFieldOptions(geometryField, fieldOpts.GetFieldOption(geometryName))
+
+	return []*entity.Field{pkField, vecField, geometryField}
 }
 
 // Create Int64MultiVec field combination

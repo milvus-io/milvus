@@ -3345,8 +3345,8 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database default"
-                                                 f"with other collection name or alias"}
+        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database "
+                                                 f"default with other collection name or alias"}
         self.rename_collection(client, collection_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
 

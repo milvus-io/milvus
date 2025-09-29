@@ -201,8 +201,9 @@ func TestProduceServerRecvArm(t *testing.T) {
 	l.EXPECT().AppendAsync(mock.Anything, mock.Anything, mock.Anything).Run(func(ctx context.Context, mm message.MutableMessage, f func(*wal.AppendResult, error)) {
 		msgID := walimplstest.NewTestMessageID(1)
 		f(&wal.AppendResult{
-			MessageID: msgID,
-			TimeTick:  100,
+			MessageID:              msgID,
+			LastConfirmedMessageID: msgID,
+			TimeTick:               100,
 		}, nil)
 	})
 	l.EXPECT().IsAvailable().Return(true)

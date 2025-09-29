@@ -44,6 +44,17 @@ func (br *BroadcastResult[H, B]) GetControlChannelResult() *AppendResult {
 	return nil
 }
 
+// GetVChannelsWithoutControlChannel returns the vchannels without control channel.
+func (br *BroadcastResult[H, B]) GetVChannelsWithoutControlChannel() []string {
+	vchannels := make([]string, 0, len(br.Results))
+	for vchannel := range br.Results {
+		if !funcutil.IsControlChannel(vchannel) {
+			vchannels = append(vchannels, vchannel)
+		}
+	}
+	return vchannels
+}
+
 // AppendResult is the result of append operation.
 type AppendResult struct {
 	MessageID              MessageID

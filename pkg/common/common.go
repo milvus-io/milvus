@@ -185,6 +185,12 @@ const (
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
 
+	// Note:
+	// Function output fields cannot be included in inserted data.
+	// In particular, the `bm25` function output field is always disallowed
+	// and is not controlled by this option.
+	CollectionAllowInsertNonBM25FunctionOutputs = "collection.function.allowInsertNonBM25FunctionOutputs"
+
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"
 	CollectionInsertRateMinKey   = "collection.insertRate.min.mb"
@@ -239,6 +245,7 @@ const (
 	// timezone releated
 	DatabaseDefaultTimezone   = "database.timezone"
 	CollectionDefaultTimezone = "collection.timezone"
+	AllowInsertAutoIDKey      = "allow_insert_auto_id"
 )
 
 const (
@@ -542,4 +549,24 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	reversed = reversed >> 1
 
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
+func GetCollectionAllowInsertNonBM25FunctionOutputs(kvs []*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == CollectionAllowInsertNonBM25FunctionOutputs {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable
+		}
+	}
+	return false
+}
+
+func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.Key == AllowInsertAutoIDKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
+		}
+	}
+	return false, false
 }

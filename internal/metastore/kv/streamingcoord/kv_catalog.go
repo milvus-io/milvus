@@ -36,7 +36,7 @@ import (
 // │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 
@@ -236,6 +236,12 @@ func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.Re
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) string {
+	targetClusterID := meta.GetTargetCluster().GetClusterId()
+	sourceChannelName := meta.GetSourceChannelName()
+	return buildReplicatePChannelPath(targetClusterID, sourceChannelName)
 }
 
 func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {

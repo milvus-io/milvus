@@ -263,7 +263,7 @@ type rerankOperator struct {
 	functionScore *rerank.FunctionScore
 }
 
-func newRerankOperator(t *searchTask, _ map[string]any) (operator, error) {
+func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 	if t.SearchRequest.GetIsAdvanced() {
 		return &rerankOperator{
 			nq:              t.GetNq(),
@@ -334,7 +334,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 	if err != nil {
 		return nil, err
 	}
-	outputFieldNames := typeutil.NewSet[string](t.translatedOutputFields...)
+	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
 	if t.SearchRequest.GetIsAdvanced() {
 		outputFieldNames.Insert(t.functionScore.GetAllInputFieldNames()...)
 	}
@@ -903,8 +903,14 @@ var hybridSearchPipe = &pipelineDef{
 		{
 			name:    "rerank",
 			inputs:  []string{"reduced", "metrics"},
-			outputs: []string{"output"},
+			outputs: []string{"result"},
 			opName:  rerankOp,
+		},
+		{
+			name:    "filter_field",
+			inputs:  []string{"result"},
+			outputs: []string{"output"},
+			opName:  filterFieldOp,
 		},
 	},
 }
