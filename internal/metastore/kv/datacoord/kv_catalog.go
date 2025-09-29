@@ -52,6 +52,7 @@ type Catalog struct {
 	MetaKv kv.MetaKv
 
 	paginationSize       int
+	maxTxnNum            int
 	ChunkManagerRootPath string
 	metaRootpath         string
 }
@@ -60,6 +61,7 @@ func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath stri
 	return &Catalog{
 		MetaKv:               MetaKv,
 		paginationSize:       paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
+		maxTxnNum:            paramtable.Get().MetaStoreCfg.MaxTxnNum.GetAsInt(),
 		ChunkManagerRootPath: chunkManagerRootPath,
 		metaRootpath:         metaRootpath,
 	}
@@ -338,7 +340,7 @@ func (kc *Catalog) SaveByBatch(ctx context.Context, kvs map[string]string) error
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(ctx, partialKvs)
 	}
-	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
+	err := etcd.SaveByBatchWithLimit(kvs, kc.maxTxnNum, saveFn)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to save by batch", zap.Error(err))
 		return err
@@ -390,7 +392,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(ctx, partialKvs)
 	}
-	if err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(kvs, kc.maxTxnNum, saveFn); err != nil {
 		return err
 	}
 

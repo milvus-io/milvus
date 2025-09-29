@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path"
@@ -462,6 +463,7 @@ type MetaStoreConfig struct {
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
 	ReadConcurrency            ParamItem `refreshable:"true"`
+	MaxTxnNum                  ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -507,6 +509,22 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Doc:          `read concurrency for fetching metadata from the metastore.`,
 	}
 	p.ReadConcurrency.Init(base.mgr)
+
+	p.MaxTxnNum = ParamItem{
+		Key:          "metastore.maxTxnNum",
+		Version:      "2.5.19",
+		DefaultValue: "64",
+		Doc:          `max transaction number for the metastore`,
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n < 1 {
+				panic(fmt.Sprintf("max transaction number should be greater than 0, not %d", n))
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxTxnNum.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
