@@ -32,9 +32,7 @@ impl IndexReaderWrapper {
         let collector = DirectBitsetCollector {
             bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
             terms: terms.clone(),
-            //terms,
         };
-        //let query = BooleanQuery::new_multiterms_query(vec![]);
         let query = BooleanQuery::new_multiterms_query(terms);
         let searcher = self.reader.searcher();
         searcher

@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
