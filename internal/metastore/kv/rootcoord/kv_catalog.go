@@ -244,7 +244,8 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	// Recovering from failure, if we found collection is creating, we should remove all these related meta.
 	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
 	// MaxEtcdTxnNum need to divided by 2
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
 	})
 }
@@ -668,7 +669,8 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// However, if we remove collection first, we cannot remove other metas.
 	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
 	// MaxEtcdTxnNum need to divided by 2
-	if err := batchMultiSaveAndRemove(ctx, kc.Snapshot, util.MaxEtcdTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if err := batchMultiSaveAndRemove(ctx, kc.Snapshot, maxTxnNum, nil, delMetakeysSnap, ts); err != nil {
 		return err
 	}
 
@@ -730,7 +732,8 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		}
 	}
 
-	return etcd.SaveByBatchWithLimit(saves, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(saves, maxTxnNum, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
 	})
 }
