@@ -191,12 +191,8 @@ PhyTermFilterExpr::InitPkCacheOffset() {
         }
     }
 
-    auto seg_offsets = segment_->search_ids(*id_array, query_timestamp_);
     cached_bits_.resize(active_count_, false);
-    for (const auto& offset : seg_offsets) {
-        auto _offset = (int64_t)offset.get();
-        cached_bits_[_offset] = true;
-    }
+    segment_->search_ids(cached_bits_, *id_array);
     cached_bits_inited_ = true;
 }
 
