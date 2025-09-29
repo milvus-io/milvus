@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -37,6 +38,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1798,5 +1800,357 @@ func TestNamespaceProperty(t *testing.T) {
 
 		err = task.handleNamespaceField(ctx, schema)
 		assert.Error(t, err)
+	})
+}
+
+func Test_validateMultiAnalyzerParams(t *testing.T) {
+	createTestCollectionSchema := func(fields []*schemapb.FieldSchema) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			Fields: fields,
+		}
+	}
+
+	createTestFieldSchema := func(name string, dataType schemapb.DataType) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:     name,
+			DataType: dataType,
+		}
+	}
+
+	t.Run("invalid json params", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateMultiAnalyzerParams("invalid json", coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing by_field", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("by_field not string", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": 123, "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("by_field references non-existent field", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("existing_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "non_existent_field", "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("by_field references non-string field", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("int_field", schemapb.DataType_Int64),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "int_field", "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid alias format", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field", "alias": "invalid_alias", "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing analyzers", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field"}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid analyzers format", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field", "analyzers": "invalid_analyzers"}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing default analyzer", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field", "analyzers": {"custom": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("valid params", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{
+			"by_field": "string_field",
+			"alias": {"en": "english", "zh": "chinese"},
+			"analyzers": {
+				"default": {"type": "standard"},
+				"english": {"type": "english"},
+				"chinese": {"type": "chinese"}
+			}
+		}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 3)
+
+		analyzerNames := make(map[string]bool)
+		for _, info := range infos {
+			assert.Equal(t, "test_field", info.Field)
+			analyzerNames[info.Name] = true
+		}
+		assert.True(t, analyzerNames["default"])
+		assert.True(t, analyzerNames["english"])
+		assert.True(t, analyzerNames["chinese"])
+	})
+
+	t.Run("valid params with minimal config", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{
+			"by_field": "string_field",
+			"analyzers": {"default": {"type": "standard"}}
+		}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 1)
+		assert.Equal(t, "default", infos[0].Name)
+		assert.Equal(t, "test_field", infos[0].Field)
+		assert.Equal(t, `{"type": "standard"}`, infos[0].Params)
+	})
+}
+
+func Test_validateAnalyzer(t *testing.T) {
+	createTestCollectionSchemaWithBM25 := func(fields []*schemapb.FieldSchema, inputFieldName string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			Fields: fields,
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{inputFieldName},
+					OutputFieldNames: []string{"bm25_output"},
+				},
+			},
+		}
+	}
+
+	createTestFieldSchema := func(name string, dataType schemapb.DataType, typeParams []*commonpb.KeyValuePair) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:       name,
+			DataType:   dataType,
+			TypeParams: typeParams,
+		}
+	}
+
+	t.Run("field without enable_match and not BM25 input", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "invalid_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 0)
+	})
+
+	t.Run("field with enable_match but no enable_analyzer", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_match", Value: "true"},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("field with enable_match and enable_analyzer", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_match", Value: "true"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "analyzer_params", Value: "{\"type\": \"standard\"}"},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 1)
+		assert.Equal(t, "text_field", infos[0].Field)
+		assert.Equal(t, "{\"type\": \"standard\"}", infos[0].Params)
+	})
+
+	t.Run("field with multi analyzer and enable_match", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_match", Value: "true"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "multi_analyzer_params", Value: `{"by_field": "lang", "analyzers": {"default": "{}"}}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{
+			fieldSchema,
+			createTestFieldSchema("lang", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "10"},
+			}),
+		}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("field with multi analyzer and analyzer_params", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "multi_analyzer_params", Value: `{"by_field": "lang", "analyzers": {"default": "{}"}}`},
+			{Key: "analyzer_params", Value: `{"type": "standard"}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{
+			fieldSchema,
+			createTestFieldSchema("lang", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "10"},
+			}),
+		}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("field with valid multi analyzer", func(t *testing.T) {
+		// Create a field with valid multi analyzer
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "multi_analyzer_params", Value: `{
+				"by_field": "lang",
+				"analyzers": {
+					"default": {"type": "standard"},
+					"english": {"type": "english"}
+				}
+			}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{
+			fieldSchema,
+			createTestFieldSchema("lang", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "10"},
+			}),
+		}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 2)
+
+		// Verify analyzer info content
+		analyzerNames := make(map[string]bool)
+		for _, info := range infos {
+			assert.Equal(t, "text_field", info.Field)
+			analyzerNames[info.Name] = true
+		}
+		assert.True(t, analyzerNames["default"])
+		assert.True(t, analyzerNames["english"])
+	})
+
+	t.Run("field with invalid multi analyzer params", func(t *testing.T) {
+		// Create a field with invalid multi analyzer params
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "multi_analyzer_params", Value: `{"by_field": "non_existent_field", "analyzers": {"default": "{}"}}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.Error(t, err)
+	})
+
+	t.Run("field with analyzer_params only", func(t *testing.T) {
+		// Create a field with analyzer_params only
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_analyzer", Value: "true"},
+			{Key: "analyzer_params", Value: `{"type": "standard"}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		assert.Equal(t, "text_field", infos[0].Field)
+		assert.Equal(t, "", infos[0].Name) // Regular analyzer has no name
+		assert.Equal(t, `{"type": "standard"}`, infos[0].Params)
+	})
+
+	t.Run("field with enable_analyzer but no analyzer_params", func(t *testing.T) {
+		// Create a field with enable_analyzer but no analyzer_params (uses default analyzer)
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: "enable_match", Value: "true"},
+			{Key: "enable_analyzer", Value: "true"},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "text_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Len(t, infos, 0) // No analyzer_params, uses default analyzer
 	})
 }
