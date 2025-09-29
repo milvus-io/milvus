@@ -2170,6 +2170,177 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 	}
 }
 
+func (suite *ServiceSuite) TestRunAnalyzer() {
+	ctx := context.Background()
+	server := suite.server
+
+	suite.Run("no available nodes", func() {
+		// Mock no streaming query nodes available
+		resp, err := server.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		suite.Contains(resp.GetStatus().GetReason(), "no delegator")
+	})
+
+	suite.Run("cluster run analyzer success", func() {
+		// Add a node to make streaming query nodes available
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  1,
+			Address: "localhost:8080",
+		}))
+		defer suite.nodeMgr.Remove(1)
+
+		// Mock cluster RunAnalyzer call
+		suite.cluster.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(
+			&milvuspb.RunAnalyzerResponse{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Results: []*milvuspb.AnalyzerResult{
+					{
+						Tokens: []*milvuspb.AnalyzerToken{
+							{Token: "test"},
+							{Token: "doc"},
+						},
+					},
+				},
+			}, nil).Once()
+
+		resp, err := server.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		suite.Len(resp.GetResults(), 1)
+	})
+
+	suite.Run("cluster run analyzer failed", func() {
+		// Add a node to make streaming query nodes available
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  1,
+			Address: "localhost:8080",
+		}))
+		defer suite.nodeMgr.Remove(1)
+
+		// Mock cluster RunAnalyzer call with error
+		suite.cluster.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, errors.New("cluster error")).Once()
+
+		resp, err := server.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	suite.Run("server not healthy", func() {
+		server.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := server.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func (suite *ServiceSuite) TestValidateAnalyzer() {
+	ctx := context.Background()
+	server := suite.server
+
+	suite.Run("no available nodes", func() {
+		// Mock no streaming query nodes available
+		resp, err := server.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Params: `{"tokenizer": "standard"}`,
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Contains(resp.GetReason(), "no delegator")
+	})
+
+	suite.Run("cluster validate analyzer success", func() {
+		// Add a node to make streaming query nodes available
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  1,
+			Address: "localhost:8080",
+		}))
+		defer suite.nodeMgr.Remove(1)
+
+		// Mock cluster ValidateAnalyzer call
+		suite.cluster.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(
+			&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Once()
+
+		resp, err := server.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Params: `{"tokenizer": "standard"}`,
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	suite.Run("cluster validate analyzer failed", func() {
+		// Add a node to make streaming query nodes available
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  1,
+			Address: "localhost:8080",
+		}))
+		defer suite.nodeMgr.Remove(1)
+
+		// Mock cluster ValidateAnalyzer call with error
+		suite.cluster.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, errors.New("cluster error")).Once()
+
+		resp, err := server.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Params: `{"tokenizer": "standard"}`,
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	suite.Run("server not healthy", func() {
+		server.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := server.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Params: `{"tokenizer": "standard"}`,
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
 }

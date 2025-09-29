@@ -851,11 +851,11 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	}
 
 	hasDefault := false
-	for name, params := range analyzerMap {
+	for name, bytes := range analyzerMap {
 		*infos = append(*infos, &querypb.AnalyzerInfo{
 			Name:   name,
 			Field:  fieldSchema.GetName(),
-			Params: string(params),
+			Params: string(bytes),
 		})
 		if name == "default" {
 			hasDefault = true
