@@ -66,6 +66,17 @@ func TextEmbeddingOutputsCheck(fields []*schemapb.FieldSchema) error {
 	return nil
 }
 
+func TextEmbeddingInputsCheck(name string, fields []*schemapb.FieldSchema) error {
+	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+		return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+	}
+
+	if fields[0].Nullable {
+		return fmt.Errorf("function input field cannot be nullable: function %s, field %s", name, fields[0].GetName())
+	}
+	return nil
+}
+
 // Text embedding for retrieval task
 type textEmbeddingProvider interface {
 	MaxBatch() int
