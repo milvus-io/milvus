@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -76,6 +77,8 @@ type upsertTask struct {
 
 	deletePKs       *schemapb.IDs
 	insertFieldData []*schemapb.FieldData
+
+	storageCost segcore.StorageCost
 }
 
 // TraceCtx returns upsertTask context
@@ -155,7 +158,7 @@ func (it *upsertTask) OnEnqueue() error {
 	return nil
 }
 
-func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
+func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := log.Ctx(ctx).With(zap.String("collectionName", t.req.GetCollectionName()))
 	var err error
 	queryReq := &milvuspb.QueryRequest{
@@ -173,7 +176,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
 	if err != nil {
-		return nil, err
+		return nil, segcore.StorageCost{}, err
 	}
 
 	var partitionIDs []int64
@@ -188,12 +191,12 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		partName := t.upsertMsg.DeleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
 			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
-			return nil, err
+			return nil, segcore.StorageCost{}, err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
 		if err != nil {
 			log.Warn("Failed to get partition id", zap.String("partitionName", partName), zap.Error(err))
-			return nil, err
+			return nil, segcore.StorageCost{}, err
 		}
 		partitionIDs = []int64{partID}
 		queryReq.PartitionNames = []string{partName}
@@ -222,12 +225,11 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	defer func() {
 		sp.End()
 	}()
-	// ignore storage cost?
-	queryResult, _, err := t.node.(*Proxy).query(ctx, qt, sp)
+	queryResult, storageCost, err := t.node.(*Proxy).query(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
-		return nil, err
+		return nil, storageCost, err
 	}
-	return queryResult, err
+	return queryResult, storageCost, err
 }
 
 func (it *upsertTask) queryPreExecute(ctx context.Context) error {
@@ -261,12 +263,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
 	// retrieve by primary key to get original field data
-	resp, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
+	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
 	if err != nil {
 		log.Info("retrieve by primary key failed", zap.Error(err))
 		return err
 	}
-
+	it.storageCost = storageCost
 	if len(resp.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
 	}
