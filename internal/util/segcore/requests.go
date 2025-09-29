@@ -44,6 +44,10 @@ type LoadFieldDataRequest struct {
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
 	WarmupPolicy   string
+	// Additional metadata fields
+	CollectionID int64
+	PartitionID  int64
+	SegmentID    int64
 }
 
 type LoadFieldDataInfo struct {
@@ -63,6 +67,15 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		}
 	}()
 	rowCount := C.int64_t(req.RowCount)
+
+	// Set global context
+	status = C.AppendLoadFieldDataContext(cLoadFieldDataInfo,
+		C.int64_t(req.CollectionID),
+		C.int64_t(req.PartitionID),
+		C.int64_t(req.SegmentID))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, errors.Wrap(err, "AppendLoadFieldDataContext failed")
+	}
 
 	for _, field := range req.Fields {
 		cFieldID := C.int64_t(field.Field.GetFieldID())

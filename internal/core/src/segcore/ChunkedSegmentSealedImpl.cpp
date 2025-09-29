@@ -68,6 +68,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/DataCodec.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "cachinglayer/CacheSlot.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -443,6 +444,19 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                  num_rows,
                  is_sorted_by_pk_);
 
+        // Construct metadata for passing to LoadArrowReaderFromRemote
+        auto field_meta = get_schema()[field_id];
+        storage::FieldDataMeta field_data_meta;
+        field_data_meta.collection_id = load_info.collection_id;
+        field_data_meta.partition_id = load_info.partition_id;
+        field_data_meta.segment_id = load_info.segment_id;
+        field_data_meta.field_id = field_id.get();
+
+        storage::IndexMeta index_meta;
+        index_meta.segment_id = load_info.segment_id;
+        index_meta.field_id = field_id.get();
+        index_meta.field_type = field_meta.get_data_type();
+
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto insert_files = info.insert_files;
             storage::SortByPath(insert_files);
@@ -455,7 +469,9 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             pool.Submit(LoadArrowReaderFromRemote,
                         insert_files,
                         field_data_info.arrow_reader_channel,
-                        load_info.load_priority);
+                        load_info.load_priority,
+                        field_data_meta,
+                        index_meta);
 
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
@@ -486,7 +502,9 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     field_data_info,
                     std::move(file_infos),
                     info.enable_mmap,
-                    load_info.load_priority);
+                    load_info.load_priority,
+                    field_data_meta,
+                    index_meta);
 
             auto data_type = field_meta.get_data_type();
             auto column = MakeChunkedColumnBase(

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -38,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -201,18 +201,19 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	if it.req.GetCollectionID() == 0 || it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
-		err := it.parseFieldMetaFromBinlog(ctx)
-		if err != nil {
-			log.Ctx(ctx).Warn("parse field meta from binlog failed", zap.Error(err))
-			return err
-		}
+		// should not happen
+		log.Ctx(ctx).Warn("collectionID or fieldID is not set in request",
+			zap.Int64("collectionID", it.req.GetCollectionID()),
+			zap.Int64("fieldID", it.req.GetField().GetFieldID()),
+			zap.String("fieldType", it.req.GetField().GetDataType().String()),
+		)
+		return errors.New("collectionID or fieldID is not set in request")
 	}
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 	it.req.CurrentScalarIndexVersion = getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
-	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
-		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
+	log.Ctx(ctx).Info("Successfully prepare indexBuildTask",
 		zap.Int64("taskVersion", it.req.GetIndexVersion()),
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		zap.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
@@ -377,39 +378,5 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		zap.Uint64("serializedSize", serializedSize),
 		zap.Int64("memSize", indexStats.MemSize),
 		zap.Strings("indexFiles", saveFileKeys))
-	return nil
-}
-
-func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
-	// fill collectionID, partitionID... for requests before v2.4.0
-	toLoadDataPaths := it.req.GetDataPaths()
-	if len(toLoadDataPaths) == 0 {
-		return merr.WrapErrParameterInvalidMsg("data insert path must be not empty")
-	}
-	data, err := it.cm.Read(ctx, toLoadDataPaths[0])
-	if err != nil {
-		return err
-	}
-
-	var insertCodec storage.InsertCodec
-	collectionID, partitionID, segmentID, insertData, err := insertCodec.DeserializeAll([]*storage.Blob{{Key: toLoadDataPaths[0], Value: data}})
-	if err != nil {
-		return err
-	}
-	if len(insertData.Data) != 1 {
-		return merr.WrapErrParameterInvalidMsg("we expect only one field in deserialized insert data")
-	}
-
-	it.req.CollectionID = collectionID
-	it.req.PartitionID = partitionID
-	it.req.SegmentID = segmentID
-	if it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
-		for fID, value := range insertData.Data {
-			it.req.Field.DataType = value.GetDataType()
-			it.req.Field.FieldID = fID
-			break
-		}
-	}
-
 	return nil
 }
