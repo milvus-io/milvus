@@ -36,7 +36,7 @@ extraConfigFiles:
         dropTolerance: 1800
     queryNode:
       segcore:
-        exprEvalBatchSize:512
+        exprEvalBatchSize: 512
       mmap:
         vectorField: true
         vectorIndex: true
