@@ -40,10 +40,7 @@ ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
 # Change user to milvus
-ENV ASAN_OPTIONS=detect_leaks=0
-RUN groupadd milvus && useradd -m -g milvus milvus && chown -R milvus:milvus /milvus
 USER milvus
-ENV ASAN_OPTIONS=detect_leaks=1
 
 ENTRYPOINT ["/tini", "--"]
 
