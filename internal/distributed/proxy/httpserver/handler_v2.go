@@ -860,8 +860,8 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-				scannedRemoteBytes, scannedTotalBytes, cacheHitRatio := proxy.GetStorageCost(queryResp.GetStatus())
+			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
+			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
 					HTTPReturnData:               outputData,
@@ -928,8 +928,8 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-				scannedRemoteBytes, scannedTotalBytes, cacheHitRatio := proxy.GetStorageCost(queryResp.GetStatus())
+			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
+			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
 					HTTPReturnData:               outputData,
@@ -1106,12 +1106,12 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err == nil {
 		upsertResp := resp.(*milvuspb.MutationResult)
 		cost := proxy.GetCostValue(upsertResp.GetStatus())
-		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio := proxy.GetStorageCost(upsertResp.GetStatus())
+		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(upsertResp.GetStatus())
 		switch upsertResp.IDs.GetIdField().(type) {
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
 						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
@@ -1128,7 +1128,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 					})
 				}
 			} else {
-				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
 						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
@@ -1146,7 +1146,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				}
 			}
 		case *schemapb.IDs_StrId:
-			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
 					HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
@@ -1299,7 +1299,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err == nil {
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
-		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio := proxy.GetStorageCost(searchResp.GetStatus())
+		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
@@ -1313,7 +1313,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				})
 			} else {
 				if len(searchResp.Results.Recalls) > 0 {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:               merr.Code(nil),
 							HTTPReturnData:               outputData,
@@ -1334,7 +1334,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 						})
 					}
 				} else {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:               merr.Code(nil),
 							HTTPReturnData:               outputData,
@@ -1450,7 +1450,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	if err == nil {
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
-		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio := proxy.GetStorageCost(searchResp.GetStatus())
+		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
@@ -1463,7 +1463,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks, HTTPReturnScannedRemoteBytes: scannedRemoteBytes, HTTPReturnScannedTotalBytes: scannedTotalBytes, HTTPReturnCacheHitRatio: cacheHitRatio})
 				} else {
 					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
