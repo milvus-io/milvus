@@ -64,6 +64,10 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 	// setup dynamic related var
 	isDynamic := colSchema.EnableDynamicField
 
+	inputDynamicColumn := lo.FindOrElse(columns, nil, func(col column.Column) bool {
+		return col.FieldData().GetIsDynamic()
+	})
+
 	// check columns and field matches
 	var rowSize int
 	mNameField := make(map[string]*entity.Field)
@@ -87,6 +91,9 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 		if !has {
 			if !isDynamic {
 				return nil, 0, fmt.Errorf("field %s does not exist in collection %s", col.Name(), colSchema.CollectionName)
+			}
+			if inputDynamicColumn != nil {
+				return nil, 0, errors.New("cannot pass pre-composed dynamic json column with other dynamic columns")
 			}
 			// add to dynamic column list for further processing
 			dynamicColumns = append(dynamicColumns, col)
@@ -138,6 +145,9 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 		// make sure the field data in compact mode
 		fixedColumn.CompactNullableValues()
 		fieldsData = append(fieldsData, fixedColumn.FieldData())
+	}
+	if inputDynamicColumn != nil {
+		fieldsData = append(fieldsData, inputDynamicColumn.FieldData())
 	}
 	if len(dynamicColumns) > 0 {
 		// use empty column name here
