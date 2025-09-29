@@ -128,6 +128,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             }
         }
 
+        search_info.min_should_match_ = query_info_proto.min_should_match() > 0 
+                                         ? query_info_proto.min_should_match() 
+                                         : 1;
+
         return search_info;
     };
 

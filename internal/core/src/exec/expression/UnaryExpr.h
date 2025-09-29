@@ -877,7 +877,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     CanUseIndexForJson(DataType val_type);
 
     VectorPtr
-    ExecTextMatch();
+    ExecTextMatch(EvalCtx& context);
 
     bool
     CanUseNgramIndex() const override;
