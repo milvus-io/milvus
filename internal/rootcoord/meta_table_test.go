@@ -617,6 +617,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, errors.New("error mock GetCollectionByName"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -634,6 +635,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	t.Run("collection not available", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -656,6 +658,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -1654,6 +1657,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
@@ -1693,6 +1697,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		catalog.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -1737,6 +1742,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		catalog.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
