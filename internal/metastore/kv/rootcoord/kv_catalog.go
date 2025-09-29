@@ -863,7 +863,7 @@ func (kc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts t
 	return kc.Snapshot.MultiSaveAndRemove(ctx, nil, []string{k, oldKeyWithoutDb, oldKBefore210}, ts)
 }
 
-func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
 	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
 	if err != nil {
@@ -884,7 +884,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 		}
 	}
 
-	return nil, merr.WrapErrCollectionNotFoundWithDB(dbID, collectionName, fmt.Sprintf("timestamp = %d", ts))
+	return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName, fmt.Sprintf("timestamp = %d", ts))
 }
 
 func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
