@@ -515,7 +515,7 @@ class VectorArrayChunk : public Chunk {
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;
-    // The name 'Lims' is consistent with knowhere::DataSet::SetLims which describes the number of vectors
+    // The name 'Lims' is consistent with knowhere::DataSet::Set(knowhere::meta::EMB_LIST_OFFSET, ptr) which describes the number of vectors
     // in each vector array (embedding list). This is needed as vectors are flattened in the chunk.
     std::vector<size_t> lims_;
 };

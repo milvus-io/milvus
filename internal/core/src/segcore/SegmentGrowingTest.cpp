@@ -581,7 +581,7 @@ TEST(GrowingTest, SearchVectorArray) {
     config.set_enable_interim_segment_index(true);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
+        {"index_type", knowhere::IndexEnum::INDEX_HNSW},
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {
