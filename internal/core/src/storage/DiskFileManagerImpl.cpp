@@ -336,6 +336,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                 auto index_chunks_futures =
                     GetObjectData(rcm_.get(),
                                   batch_remote_files,
+                                  field_meta_,
+                                  index_meta_,
                                   milvus::PriorityForLoad(priority));
                 for (auto& chunk_future : index_chunks_futures) {
                     auto chunk_codec = chunk_future.get();
@@ -436,7 +438,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     int64_t write_offset = sizeof(num_rows) + sizeof(dim);
 
     auto FetchRawData = [&]() {
-        auto field_datas = GetObjectData(rcm_.get(), batch_files);
+        auto field_datas =
+            GetObjectData(rcm_.get(), batch_files, field_meta_, index_meta_);
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i].get()->GetFieldData();
@@ -806,7 +809,8 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
             }
 
             SortByPath(field_paths);
-            field_datas = FetchFieldData(rcm_.get(), field_paths);
+            field_datas = FetchFieldData(
+                rcm_.get(), field_paths, field_meta_, index_meta_);
         }
 
         if (WriteOptFieldIvfData(field_type,

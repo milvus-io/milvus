@@ -210,11 +210,8 @@ func newDescriptorEvent() *descriptorEvent {
 	}
 }
 
-func NewBaseDescriptorEvent(collectionID int64, partitionID int64, segmentID int64) *descriptorEvent {
+func NewBaseDescriptorEvent() *descriptorEvent {
 	de := newDescriptorEvent()
-	de.CollectionID = collectionID
-	de.PartitionID = partitionID
-	de.SegmentID = segmentID
 	de.StartTimestamp = 0
 	de.EndTimestamp = 0
 	return de

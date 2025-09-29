@@ -105,12 +105,20 @@ EventHeader::Serialize() {
 }
 
 DescriptorEventDataFixPart::DescriptorEventDataFixPart(BinlogReaderPtr reader) {
+    // Read deprecated fields to maintain binary compatibility
     auto ast = reader->Read(sizeof(collection_id), &collection_id);
     assert(ast.ok());
     ast = reader->Read(sizeof(partition_id), &partition_id);
     assert(ast.ok());
     ast = reader->Read(sizeof(segment_id), &segment_id);
     assert(ast.ok());
+
+    // Force deprecated fields to DEPRECATED_ID_VALUE regardless of what was read
+    collection_id = DEPRECATED_ID_VALUE;  // Always set to -1 (deprecated)
+    partition_id = DEPRECATED_ID_VALUE;   // Always set to -1 (deprecated)
+    segment_id = DEPRECATED_ID_VALUE;     // Always set to -1 (deprecated)
+
+    // Continue reading valid fields
     ast = reader->Read(sizeof(field_id), &field_id);
     assert(ast.ok());
     ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
@@ -129,12 +137,17 @@ DescriptorEventDataFixPart::Serialize() {
                          sizeof(data_type);
     std::vector<uint8_t> res(fix_part_size);
     int offset = 0;
-    memcpy(res.data() + offset, &collection_id, sizeof(collection_id));
+
+    // Write deprecated fields as DEPRECATED_ID_VALUE
+    int64_t deprecated_value = DEPRECATED_ID_VALUE;
+    memcpy(res.data() + offset, &deprecated_value, sizeof(collection_id));
     offset += sizeof(collection_id);
-    memcpy(res.data() + offset, &partition_id, sizeof(partition_id));
+    memcpy(res.data() + offset, &deprecated_value, sizeof(partition_id));
     offset += sizeof(partition_id);
-    memcpy(res.data() + offset, &segment_id, sizeof(segment_id));
+    memcpy(res.data() + offset, &deprecated_value, sizeof(segment_id));
     offset += sizeof(segment_id);
+
+    // Write valid fields
     memcpy(res.data() + offset, &field_id, sizeof(field_id));
     offset += sizeof(field_id);
     memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));

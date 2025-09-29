@@ -115,12 +115,16 @@ LoadArrowReaderForJsonStatsFromRemote(
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel,
-                          milvus::proto::common::LoadPriority priority);
+                          milvus::proto::common::LoadPriority priority,
+                          storage::FieldDataMeta field_meta,
+                          storage::IndexMeta index_meta);
 
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority);
+                         milvus::proto::common::LoadPriority priority,
+                         storage::FieldDataMeta field_meta,
+                         storage::IndexMeta index_meta);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

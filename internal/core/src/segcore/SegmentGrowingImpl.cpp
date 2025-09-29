@@ -43,6 +43,7 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
+#include "storage/DataCodec.h"
 #include "common/TypeTraits.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -316,10 +317,26 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
+
+        // Construct metadata for passing to LoadFieldDatasFromRemote
+        auto field_meta = get_schema()[field_id];
+        storage::FieldDataMeta field_data_meta;
+        field_data_meta.collection_id = infos.collection_id;
+        field_data_meta.partition_id = infos.partition_id;
+        field_data_meta.segment_id = infos.segment_id;
+        field_data_meta.field_id = field_id.get();
+
+        storage::IndexMeta index_meta;
+        index_meta.segment_id = infos.segment_id;
+        index_meta.field_id = field_id.get();
+        index_meta.field_type = field_meta.get_data_type();
+
         auto load_future = pool.Submit(LoadFieldDatasFromRemote,
                                        insert_files,
                                        channel,
-                                       infos.load_priority);
+                                       infos.load_priority,
+                                       field_data_meta,
+                                       index_meta);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),

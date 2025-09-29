@@ -153,9 +153,6 @@ func (codec *IndexFileBinlogCodec) Serialize(
 func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	indexBuildID UniqueID,
 	version int64,
-	collectionID UniqueID,
-	partitionID UniqueID,
-	segmentID UniqueID,
 	fieldID UniqueID,
 	indexParams map[string]string,
 	indexName string,
@@ -164,7 +161,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	err error,
 ) {
 	if len(blobs) == 0 {
-		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, errors.New("blobs is empty")
+		return 0, 0, 0, nil, "", 0, nil, errors.New("blobs is empty")
 	}
 	indexParams = make(map[string]string)
 	datas = make([]*Blob, 0)
@@ -174,7 +171,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		if err != nil {
 			log.Warn("failed to read binlog",
 				zap.Error(err))
-			return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+			return 0, 0, 0, nil, "", 0, nil, err
 		}
 		dataType := binlogReader.PayloadDataType
 
@@ -182,7 +179,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		//if err != nil {
 		//	log.Warn("failed to read descriptor event",
 		//		zap.Error(err))
-		//	return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+		//	return 0, 0, 0, nil, "", 0, nil, err
 		//}
 		desc := binlogReader.descriptorEvent
 		extraBytes := desc.ExtraBytes
@@ -195,9 +192,6 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		value, _ = strconv.Atoi(extra["version"].(string))
 		version = int64(value)
 
-		collectionID = desc.CollectionID
-		partitionID = desc.PartitionID
-		segmentID = desc.SegmentID
 		fieldID = desc.FieldID
 
 		indexName = extra["indexName"].(string)
@@ -213,7 +207,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 				log.Warn("failed to get next event reader",
 					zap.Error(err))
 				binlogReader.Close()
-				return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+				return 0, 0, 0, nil, "", 0, nil, err
 			}
 			if eventReader == nil {
 				break
@@ -228,7 +222,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 						zap.Error(err))
 					eventReader.Close()
 					binlogReader.Close()
-					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+					return 0, 0, 0, nil, "", 0, nil, err
 				}
 
 				if key == IndexParamsKey {
@@ -245,7 +239,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 					log.Warn("failed to get string from payload", zap.Error(err))
 					eventReader.Close()
 					binlogReader.Close()
-					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+					return 0, 0, 0, nil, "", 0, nil, err
 				}
 
 				// make sure there is one string
@@ -253,7 +247,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 					err := fmt.Errorf("failed to parse index event because content length is not one %d", len(content))
 					eventReader.Close()
 					binlogReader.Close()
-					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
+					return 0, 0, 0, nil, "", 0, nil, err
 				}
 				contentByte := typeutil.UnsafeStr2bytes(content[0])
 				if key == IndexParamsKey {
@@ -269,7 +263,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		binlogReader.Close()
 	}
 
-	return indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas, nil
+	return indexBuildID, version, fieldID, indexParams, indexName, indexID, datas, nil
 }
 
 func (codec *IndexFileBinlogCodec) Deserialize(blobs []*Blob) (
@@ -279,7 +273,7 @@ func (codec *IndexFileBinlogCodec) Deserialize(blobs []*Blob) (
 	indexID UniqueID,
 	err error,
 ) {
-	_, _, _, _, _, _, indexParams, indexName, indexID, datas, err = codec.DeserializeImpl(blobs)
+	_, _, _, indexParams, indexName, indexID, datas, err = codec.DeserializeImpl(blobs)
 	return datas, indexParams, indexName, indexID, err
 }
 
@@ -348,9 +342,6 @@ func NewIndexFileBinlogWriter(
 	key string,
 ) *IndexFileBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
-	descriptorEvent.CollectionID = collectionID
-	descriptorEvent.PartitionID = partitionID
-	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = fieldID
 	descriptorEvent.PayloadDataType = schemapb.DataType_String
 	descriptorEvent.AddExtra("indexBuildID", fmt.Sprintf("%d", indexBuildID))

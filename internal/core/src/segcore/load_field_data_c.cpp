@@ -154,3 +154,28 @@ SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority) {
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->load_priority = milvus::proto::common::LoadPriority(priority);
 }
+
+CStatus
+AppendLoadFieldDataContext(CLoadFieldDataInfo c_load_field_data_info,
+                           int64_t collection_id,
+                           int64_t partition_id,
+                           int64_t segment_id) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+        info->collection_id = collection_id;
+        info->partition_id = partition_id;
+        info->segment_id = segment_id;
+
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}

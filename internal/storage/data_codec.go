@@ -482,15 +482,13 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 	return nil
 }
 
+// Deprecated: only for testing
 func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
-	collectionID UniqueID,
-	partitionID UniqueID,
-	segmentID UniqueID,
 	data *InsertData,
 	err error,
 ) {
 	if len(blobs) == 0 {
-		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, errors.New("blobs is empty")
+		return nil, errors.New("blobs is empty")
 	}
 
 	var blobList BlobList = blobs
@@ -499,27 +497,20 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 	data = &InsertData{
 		Data: make(map[FieldID]FieldData),
 	}
-	if collectionID, partitionID, segmentID, err = insertCodec.DeserializeInto(blobs, 0, data); err != nil {
-		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
+	if err = insertCodec.DeserializeInto(blobs, 0, data); err != nil {
+		return nil, err
 	}
 
 	return
 }
 
-func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int, insertData *InsertData) (
-	collectionID UniqueID,
-	partitionID UniqueID,
-	segmentID UniqueID,
-	err error,
-) {
+// Deprecated: only for testing
+func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int, insertData *InsertData) error {
 	for _, blob := range fieldBinlogs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
-			return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+			return err
 		}
-
-		// read partitionID and SegmentID
-		collectionID, partitionID, segmentID = binlogReader.CollectionID, binlogReader.PartitionID, binlogReader.SegmentID
 
 		dataType := binlogReader.PayloadDataType
 		fieldID := binlogReader.FieldID
@@ -529,7 +520,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
 				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				return err
 			}
 			if eventReader == nil {
 				break
@@ -538,13 +529,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			if err != nil {
 				eventReader.Close()
 				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				return err
 			}
 			length, err := AddInsertData(dataType, data, insertData, fieldID, rowNum, eventReader, dim, validData)
 			if err != nil {
 				eventReader.Close()
 				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				return err
 			}
 			totalLength += length
 			eventReader.Close()
@@ -563,7 +554,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 		binlogReader.Close()
 	}
 
-	return collectionID, partitionID, segmentID, nil
+	return nil
 }
 
 func GetVectorElementType(data *schemapb.VectorField) schemapb.DataType {
@@ -852,9 +843,9 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 // From schema, it get all fields.
 // For each field, it will create a binlog reader, and read all event to the buffer.
 // It returns origin @InsertData in the end.
-func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertData, err error) {
-	_, partitionID, segmentID, data, err = insertCodec.DeserializeAll(blobs)
-	return partitionID, segmentID, data, err
+func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (data *InsertData, err error) {
+	data, err = insertCodec.DeserializeAll(blobs)
+	return data, err
 }
 
 // DeleteCodec serializes and deserializes the delete data
@@ -931,16 +922,15 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 }
 
 // Deserialize deserializes the deltalog blobs into DeleteData
-func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeltaData, err error) {
+func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (data *DeltaData, err error) {
 	if len(blobs) == 0 {
-		return InvalidUniqueID, InvalidUniqueID, nil, errors.New("blobs is empty")
+		return nil, errors.New("blobs is empty")
 	}
 
 	rowNum := lo.SumBy(blobs, func(blob *Blob) int64 {
 		return blob.RowNum
 	})
 
-	var pid, sid UniqueID
 	result := NewDeltaData(rowNum)
 
 	deserializeBlob := func(blob *Blob) error {
@@ -950,7 +940,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 		}
 		defer binlogReader.Close()
 
-		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
 		eventReader, err := binlogReader.NextEventReader()
 		if err != nil {
 			return err
@@ -994,9 +983,9 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 	for _, blob := range blobs {
 		if err := deserializeBlob(blob); err != nil {
-			return InvalidUniqueID, InvalidUniqueID, nil, err
+			return nil, err
 		}
 	}
 
-	return pid, sid, result, nil
+	return result, nil
 }

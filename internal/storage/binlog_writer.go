@@ -249,9 +249,6 @@ func NewInsertBinlogWriter(
 ) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
-	descriptorEvent.CollectionID = collectionID
-	descriptorEvent.PartitionID = partitionID
-	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = FieldID
 	// store nullable in extra for compatible
 	descriptorEvent.AddExtra(nullableKey, nullable)
@@ -281,9 +278,6 @@ func NewDeleteBinlogWriter(
 ) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
-	descriptorEvent.CollectionID = collectionID
-	descriptorEvent.PartitionID = partitionID
-	descriptorEvent.SegmentID = segmentID
 
 	baseWriter := baseBinlogWriter{
 		descriptorEvent: descriptorEvent,

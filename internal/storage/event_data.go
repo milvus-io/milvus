@@ -40,6 +40,9 @@ const (
 
 	// mark useMultiFieldFormat if there are multi fields in a log file
 	MultiField = "MULTI_FIELD"
+
+	// DeprecatedIDValue is the value used for deprecated ID fields to maintain binary compatibility
+	DeprecatedIDValue = int64(-1)
 )
 
 type descriptorEventData struct {
@@ -52,9 +55,12 @@ type descriptorEventData struct {
 
 // DescriptorEventDataFixPart is a memory struct saves events' DescriptorEventData.
 type DescriptorEventDataFixPart struct {
-	CollectionID    int64
-	PartitionID     int64
-	SegmentID       int64
+	// DEPRECATED: Always set to -1, kept for binary compatibility only
+	// Will be removed in future versions. Do not use these fields in new code.
+	CollectionID int64
+	PartitionID  int64
+	SegmentID    int64
+	// FieldID is the only valid ID field in this struct
 	FieldID         int64
 	StartTimestamp  typeutil.Timestamp
 	EndTimestamp    typeutil.Timestamp
@@ -195,6 +201,10 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 	if err := binary.Read(buffer, common.Endian, &event.DescriptorEventDataFixPart); err != nil {
 		return nil, err
 	}
+	// Force deprecated fields to DeprecatedIDValue regardless of what was read
+	event.CollectionID = DeprecatedIDValue
+	event.PartitionID = DeprecatedIDValue
+	event.SegmentID = DeprecatedIDValue
 	if err := binary.Read(buffer, common.Endian, &event.PostHeaderLengths); err != nil {
 		return nil, err
 	}
@@ -414,9 +424,9 @@ func getEventFixPartSize(code EventTypeCode) int32 {
 func newDescriptorEventData() *descriptorEventData {
 	data := descriptorEventData{
 		DescriptorEventDataFixPart: DescriptorEventDataFixPart{
-			CollectionID:    -1,
-			PartitionID:     -1,
-			SegmentID:       -1,
+			CollectionID:    DeprecatedIDValue,
+			PartitionID:     DeprecatedIDValue,
+			SegmentID:       DeprecatedIDValue,
 			FieldID:         -1,
 			StartTimestamp:  0,
 			EndTimestamp:    0,

@@ -849,6 +849,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files,
+              FieldDataMeta field_meta,
+              IndexMeta index_meta,
               milvus::ThreadPoolPriority priority,
               bool is_field_data) {
     auto& pool = ThreadPools::GetThreadPool(priority);
@@ -857,18 +859,25 @@ GetObjectData(ChunkManager* remote_chunk_manager,
 
     auto DownloadAndDeserialize = [](ChunkManager* chunk_manager,
                                      bool is_field_data,
+                                     FieldDataMeta field_meta,
+                                     IndexMeta index_meta,
                                      const std::string file) {
         // TODO remove this Size() cost
         auto fileSize = chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
         chunk_manager->Read(file, buf.get(), fileSize);
-        auto res = DeserializeFileData(buf, fileSize, is_field_data);
+        auto res = DeserializeFileData(
+            buf, fileSize, is_field_data, field_meta, index_meta);
         return res;
     };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
+        futures.emplace_back(pool.Submit(DownloadAndDeserialize,
+                                         remote_chunk_manager,
+                                         is_field_data,
+                                         field_meta,
+                                         index_meta,
+                                         file));
     }
     return futures;
 }
@@ -1175,11 +1184,14 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
 }
 
 std::vector<FieldDataPtr>
-FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
+FetchFieldData(ChunkManager* cm,
+               const std::vector<std::string>& remote_files,
+               FieldDataMeta field_meta,
+               IndexMeta index_meta) {
     std::vector<FieldDataPtr> field_datas;
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
-        auto fds = GetObjectData(cm, batch_files);
+        auto fds = GetObjectData(cm, batch_files, field_meta, index_meta);
         for (size_t i = 0; i < batch_files.size(); ++i) {
             auto data = fds[i].get()->GetFieldData();
             field_datas.emplace_back(data);
