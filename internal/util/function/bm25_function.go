@@ -110,6 +110,11 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 	defer tokenizer.Destroy()
 
 	for i := 0; i < len(data); i++ {
+		if len(data[i]) == 0 {
+			dst[i] = map[uint32]float32{}
+			continue
+		}
+
 		if !typeutil.IsUTF8(data[i]) {
 			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", data[i])
 		}
