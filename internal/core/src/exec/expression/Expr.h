@@ -350,6 +350,8 @@ class SegmentExpr : public Expr {
         Assert(num_data_chunk_ == 1);
         auto need_size =
             std::min(active_count_ - current_data_chunk_pos_, batch_size_);
+        if (need_size == 0)
+            return 0;  //do not go empty-loop at the bound of the chunk
 
         auto& skip_index = segment_->GetSkipIndex();
         auto views_info = segment_->get_batch_views<T>(
@@ -670,6 +672,8 @@ class SegmentExpr : public Expr {
                     : size_per_chunk_ - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
             auto chunk = segment_->chunk_data<T>(field_id_, i);
