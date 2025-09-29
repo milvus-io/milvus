@@ -2491,8 +2491,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	})
 	SetReportValue(dr.result.GetStatus(), v)
 
-	metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()))
-	metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()))
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()))
+		metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()))
+	}
 	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
 		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
 		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
@@ -2629,8 +2631,10 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	})
 	SetReportValue(it.result.GetStatus(), v)
 	SetStorageCost(it.result.GetStatus(), it.storageCost)
-	metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes))
-	metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes))
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes))
+		metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes))
+	}
 	if merr.Ok(it.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
@@ -2891,19 +2895,21 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
-	metrics.ProxyScannedRemoteBytes.WithLabelValues(
-		nodeID,
-		metrics.SearchLabel,
-		dbName,
-		collectionName,
-	).Add(float64(qt.storageCost.ScannedRemoteBytes))
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+			nodeID,
+			metrics.SearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
-	metrics.ProxyScannedTotalBytes.WithLabelValues(
-		nodeID,
-		metrics.SearchLabel,
-		dbName,
-		collectionName,
-	).Add(float64(qt.storageCost.ScannedTotalBytes))
+		metrics.ProxyScannedTotalBytes.WithLabelValues(
+			nodeID,
+			metrics.SearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes))
+	}
 
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
@@ -3113,19 +3119,21 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
-	metrics.ProxyScannedRemoteBytes.WithLabelValues(
-		nodeID,
-		metrics.HybridSearchLabel,
-		dbName,
-		collectionName,
-	).Add(float64(qt.storageCost.ScannedRemoteBytes))
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+			nodeID,
+			metrics.HybridSearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
-	metrics.ProxyScannedTotalBytes.WithLabelValues(
-		nodeID,
-		metrics.HybridSearchLabel,
-		dbName,
-		collectionName,
-	).Add(float64(qt.storageCost.ScannedTotalBytes))
+		metrics.ProxyScannedTotalBytes.WithLabelValues(
+			nodeID,
+			metrics.HybridSearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes))
+	}
 
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
@@ -3369,19 +3377,21 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-		metrics.ProxyScannedRemoteBytes.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
-			request.DbName,
-			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes))
+		if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+			metrics.ProxyScannedRemoteBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.QueryLabel,
+				request.DbName,
+				request.CollectionName,
+			).Add(float64(qt.storageCost.ScannedRemoteBytes))
 
-		metrics.ProxyScannedTotalBytes.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
-			request.DbName,
-			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes))
+			metrics.ProxyScannedTotalBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.QueryLabel,
+				request.DbName,
+				request.CollectionName,
+			).Add(float64(qt.storageCost.ScannedTotalBytes))
+		}
 	}
 
 	return qt.result, qt.storageCost, nil
