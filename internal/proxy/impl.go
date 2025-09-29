@@ -2492,9 +2492,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	SetReportValue(dr.result.GetStatus(), v)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()))
-		metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()))
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()) / 1024 / 1024)
 	}
+
 	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
 		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
 		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
@@ -2632,8 +2633,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	SetReportValue(it.result.GetStatus(), v)
 	SetStorageCost(it.result.GetStatus(), it.storageCost)
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes))
-		metrics.ProxyScannedTotalBytes.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes))
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes) / 1024 / 1024)
 	}
 	if merr.Ok(it.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
@@ -2896,19 +2897,19 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	).Observe(float64(searchDur))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes))
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
 
-		metrics.ProxyScannedTotalBytes.WithLabelValues(
+		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes))
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
 	}
 
 	if qt.result != nil {
@@ -3120,19 +3121,19 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	).Observe(float64(searchDur))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteBytes.WithLabelValues(
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes))
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
 
-		metrics.ProxyScannedTotalBytes.WithLabelValues(
+		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes))
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
 	}
 
 	if qt.result != nil {
@@ -3376,22 +3377,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-			metrics.ProxyScannedRemoteBytes.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-				request.DbName,
-				request.CollectionName,
-			).Add(float64(qt.storageCost.ScannedRemoteBytes))
-
-			metrics.ProxyScannedTotalBytes.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-				request.DbName,
-				request.CollectionName,
-			).Add(float64(qt.storageCost.ScannedTotalBytes))
-		}
 	}
 
 	return qt.result, qt.storageCost, nil
@@ -3442,6 +3427,23 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	method := "Query"
 
 	res, storageCost, err := node.query(ctx, qt, sp)
+
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+
+		metrics.ProxyScannedTotalMB.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+	}
+
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
