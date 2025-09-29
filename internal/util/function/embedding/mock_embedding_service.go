@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
+	"github.com/milvus-io/milvus/internal/util/function/models/cometapi"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
@@ -162,6 +163,35 @@ func CreateSiliconflowEmbeddingServer(dim int) *httptest.Server {
 		res.Usage = siliconflow.Usage{
 			TotalTokens: 100,
 		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateCometAPIEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req cometapi.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding[float32](req.Input, dim)
+		var res cometapi.EmbeddingResponse
+		for i := 0; i < len(req.Input); i++ {
+			res.Data = append(res.Data, cometapi.EmbeddingData{
+				Object:    "embedding",
+				Embedding: embs[i],
+				Index:     i,
+			})
+		}
+
+		res.Usage = cometapi.Usage{
+			TotalTokens:  100,
+			PromptTokens: 50,
+		}
+		res.Object = "list"
+		res.Model = req.Model
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
