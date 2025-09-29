@@ -43,6 +43,11 @@ struct LoadFieldDataInfo {
     CacheWarmupPolicy warmup_policy =
         CacheWarmupPolicy::CacheWarmupPolicy_Disable;
     std::vector<int64_t> child_field_ids;
+
+    // Additional metadata fields
+    int64_t collection_id = -1;
+    int64_t partition_id = -1;
+    int64_t segment_id = -1;
 };
 
 struct LoadDeletedRecordInfo {
