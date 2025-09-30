@@ -433,29 +433,20 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 // getCollectionStartPos returns collection start position.
 func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosition {
 	log := log.With(zap.String("channel", channel.GetName()))
+	if channel.GetStartPosition() != nil {
+		return channel.GetStartPosition()
+	}
 	// use collection start position when segment position is not found
-	var startPosition *msgpb.MsgPosition
-	if channel.GetStartPositions() == nil {
-		collection, err := h.GetCollection(h.s.ctx, channel.GetCollectionID())
-		if collection != nil && err == nil {
-			startPosition = getCollectionStartPosition(channel.GetName(), collection)
-		}
+	collection, err := h.GetCollection(h.s.ctx, channel.GetCollectionID())
+	if collection != nil && err == nil {
+		startPosition := getCollectionStartPosition(channel.GetName(), collection)
 		log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
 			zap.Uint64("posTs", startPosition.GetTimestamp()),
 			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
 		)
-	} else {
-		// use passed start positions, skip to ask RootCoord.
-		startPosition = toMsgPosition(channel.GetName(), channel.GetStartPositions())
-		if startPosition != nil {
-			startPosition.Timestamp = channel.GetCreateTimestamp()
-		}
-		log.Info("segment position not found, setting channel seek position to channel start position",
-			zap.Uint64("posTs", startPosition.GetTimestamp()),
-			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
-		)
+		return startPosition
 	}
-	return startPosition
+	return nil
 }
 
 // GetChannelSeekPosition gets channel seek position from:

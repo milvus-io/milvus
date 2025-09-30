@@ -90,7 +90,6 @@ type compactionInspector struct {
 
 	meta             CompactionMeta
 	allocator        allocator.Allocator
-	cluster          Cluster
 	analyzeScheduler task.GlobalScheduler
 	handler          Handler
 	scheduler        task.GlobalScheduler
