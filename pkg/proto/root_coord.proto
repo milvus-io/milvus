@@ -38,7 +38,7 @@ service RootCoord {
      *
      * @return Status
      */
-    rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
+    rpc AddCollectionField(.milvus.proto.milvus.AddCollectionFieldRequest) returns (common.Status) {}
 
     /**
      * @brief This method is used to test collection existence.
