@@ -100,6 +100,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 			structArrayField := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, batch, dim)
 			fieldsData = append(fieldsData, structArrayField)
 		}
+		// geoColumn := integration.NewGeometryFieldData(integration.GeometryField, batch)
 		hashKeys := integration.GenerateHashKeys(batch)
 		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,

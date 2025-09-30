@@ -48,7 +48,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
             } else {
@@ -57,7 +57,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
@@ -396,10 +396,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -431,7 +431,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -448,7 +449,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                     arg_set_, arg_set_double_);
 
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
         // process shared data
@@ -485,7 +491,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
             }
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -607,10 +613,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::vector<proto::plan::Array> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
@@ -627,7 +633,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -643,7 +650,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             if (!target_field.empty()) {
                 ShreddingArrayBsonContainsArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -672,7 +684,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             return false;
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -887,10 +899,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     std::set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
@@ -907,7 +919,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -924,7 +937,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                     elements);
 
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
         // process shared data
@@ -955,7 +973,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             res_view[row_offset] = tmp_elements.empty();
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1136,10 +1154,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     std::set<int> elements_index;
@@ -1159,7 +1177,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1176,7 +1195,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                 ShreddingArrayBsonContainsAllWithDiffTypeExecutor executor(
                     elements, elements_index);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1273,7 +1297,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1401,10 +1425,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::vector<proto::plan::Array> elements;
     for (auto const& element : expr_->vals_) {
@@ -1421,7 +1445,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1437,7 +1462,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             if (!target_field.empty()) {
                 ShreddingArrayBsonContainsAllArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1473,7 +1503,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
                 exist_elements_index.size() == elements.size();
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
@@ -1644,10 +1674,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     if (elements.empty()) {
@@ -1661,7 +1691,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -1678,7 +1709,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 ShreddingArrayBsonContainsAnyWithDiffTypeExecutor executor(
                     elements);
                 index->ExecutorForShreddingData<std::string_view>(
-                    target_field, executor, nullptr, res_view, valid_res_view);
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    res_view,
+                    valid_res_view);
             }
         }
 
@@ -1767,7 +1803,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             }
         };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }

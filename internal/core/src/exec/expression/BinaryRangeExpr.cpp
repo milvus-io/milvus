@@ -68,7 +68,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->lower_val_.val_case();
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 switch (value_type) {
                     case proto::plan::GenericValue::ValCase::kInt64Val: {
                         proto::plan::GenericValue double_lower_val;
@@ -163,7 +163,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (is_index_mode_ && !has_offset_input_) {
+    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -200,8 +200,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         }
         auto valid_res =
             (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
-                : ProcessChunksForValid<T>(is_index_mode_);
+                ? ProcessChunksForValidByOffsets<T>(SegmentExpr::CanUseIndex(),
+                                                    *input)
+                : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
 
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
@@ -550,9 +551,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -563,7 +565,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -603,7 +606,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                             }
                         }
                     };
-                index->ExecutorForShreddingData<ColType>(target_field,
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
                                                          shredding_executor,
                                                          nullptr,
                                                          res_view,
@@ -704,7 +708,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 }
             };
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(pointer, shared_executor);
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }

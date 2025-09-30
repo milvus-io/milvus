@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -10,13 +11,16 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -98,7 +102,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	return
 }
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+func handleExprInternal(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (result interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = fmt.Errorf("unsupported expression: %s", exprStr)
@@ -113,12 +117,16 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface
 		return err
 	}
 
-	visitor := NewParserVisitor(schema)
+	visitor := NewParserVisitor(schema, visitorArgs)
 	return ast.Accept(visitor)
 }
 
-func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
-	ret := handleExpr(schema, exprStr)
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+	return handleExprInternal(schema, exprStr, &ParserVisitorArgs{})
+}
+
+func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
 		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
@@ -144,8 +152,12 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues
 	return predicate.expr, nil
 }
 
-func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error) error {
-	ret := handleExpr(schema, identifier)
+func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
+	return parseExprInner(schema, exprStr, exprTemplateValues, &ParserVisitorArgs{})
+}
+
+func parseIdentifierInner(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error, visitorArgs *ParserVisitorArgs) error {
+	ret := handleExprInternal(schema, identifier, visitorArgs)
 
 	if err := getError(ret); err != nil {
 		return fmt.Errorf("cannot parse identifier: %s, error: %s", identifier, err)
@@ -162,8 +174,13 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 	return checkFunc(predicate.expr)
 }
 
-func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
-	expr, err := ParseExpr(schema, exprStr, exprTemplateValues)
+func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error) error {
+	visitorArgs := &ParserVisitorArgs{}
+	return parseIdentifierInner(schema, identifier, checkFunc, visitorArgs)
+}
+
+func CreateRetrievePlanArgs(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.PlanNode, error) {
+	expr, err := parseExprInner(schema, exprStr, exprTemplateValues, visitorArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +200,17 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 	return planNode, nil
 }
 
-func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
+func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+	visitorArgs := &ParserVisitorArgs{}
+	return CreateRetrievePlanArgs(schema, exprStr, exprTemplateValues, visitorArgs)
+}
+
+func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore, visitorArgs *ParserVisitorArgs) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
 		}
-		return ParseExpr(schema, exprStr, exprTemplateValues)
+		return parseExprInner(schema, exprStr, exprTemplateValues, visitorArgs)
 	}
 
 	expr, err := parse()
@@ -237,7 +259,7 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		return nil, err
 	}
 
-	scorers, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
+	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
 	if err != nil {
 		return nil, err
 	}
@@ -258,12 +280,74 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 				FieldId:        fieldID,
 			},
 		},
-		Scorers: scorers,
+		Scorers:     scorers,
+		ScoreOption: options,
 		PlanOptions: &planpb.PlanOption{
 			ExprUseJsonStats: exprParams.UseJSONStats,
 		},
 	}
 	return planNode, nil
+}
+
+func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*commonpb.KeyValuePair, error) {
+	paramsMap := make(map[string]any)
+
+	dec := json.NewDecoder(strings.NewReader(bytes))
+	dec.UseNumber()
+
+	err := dec.Decode(&paramsMap)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range paramsMap {
+		switch key {
+		// parse field name to field ID
+		case RandomScoreFileNameKey:
+			name, ok := value.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("random seed field name must be string")
+			}
+
+			field, err := schema.GetFieldFromName(name)
+			if err != nil {
+				return nil, merr.WrapErrFieldNotFound(value, "random seed field not found")
+			}
+
+			if field.DataType != schemapb.DataType_Int64 {
+				return nil, merr.WrapErrParameterInvalidMsg("only support int64 field as random seed, but got %s", field.DataType.String())
+			}
+			result = append(result, &commonpb.KeyValuePair{Key: RandomScoreFileIdKey, Value: fmt.Sprint(field.FieldID)})
+		case RandomScoreSeedKey:
+			number, ok := value.(json.Number)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("random seed must be number")
+			}
+
+			result = append(result, &commonpb.KeyValuePair{Key: key, Value: number.String()})
+		}
+	}
+	return result, nil
+}
+
+func setBoostType(schema *typeutil.SchemaHelper, scorer *planpb.ScoreFunction, params []*commonpb.KeyValuePair) error {
+	scorer.Type = planpb.FunctionType_FunctionTypeWeight
+	for _, param := range params {
+		switch param.GetKey() {
+		case BoostRandomScoreKey:
+			{
+				scorer.Type = planpb.FunctionType_FunctionTypeRandom
+				params, err := prepareBoostRandomParams(schema, param.GetValue())
+				if err != nil {
+					return err
+				}
+				scorer.Params = params
+			}
+		default:
+		}
+	}
+	return nil
 }
 
 func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.ScoreFunction, error) {
@@ -290,6 +374,12 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 			return nil, fmt.Errorf("parse function scorer weight params failed with error: {%v}", err)
 		}
 		scorer.Weight = float32(weight)
+
+		err = setBoostType(schema, scorer, function.GetParams())
+		if err != nil {
+			return nil, err
+		}
+
 		return scorer, nil
 	default:
 		// if not boost scorer, regard as normal function scorer
@@ -299,22 +389,72 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 	}
 }
 
-func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, error) {
+func ParseBoostMode(s string) (planpb.BoostMode, error) {
+	s = strings.ToLower(s)
+	switch s {
+	case "multiply":
+		return planpb.BoostMode_BoostModeMultiply, nil
+	case "sum":
+		return planpb.BoostMode_BoostModeSum, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unknown boost mode: %s", s)
+	}
+}
+
+func ParseFunctionMode(s string) (planpb.FunctionMode, error) {
+	s = strings.ToLower(s)
+	switch s {
+	case "multiply":
+		return planpb.FunctionMode_FunctionModeMultiply, nil
+	case "sum":
+		return planpb.FunctionMode_FunctionModeSum, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unknown function mode: %s", s)
+	}
+}
+
+func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, *planpb.ScoreOption, error) {
 	scorers := []*planpb.ScoreFunction{}
 	for _, function := range functionScore.GetFunctions() {
 		// create scorer for search plan
 		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if scorer != nil {
 			scorers = append(scorers, scorer)
 		}
 	}
 	if len(scorers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return scorers, nil
+
+	option := &planpb.ScoreOption{}
+
+	s, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(BoostModeKey, functionScore.GetParams())
+	if ok {
+		boostMode, err := ParseBoostMode(s)
+		if err != nil {
+			return nil, nil, err
+		}
+		option.BoostMode = boostMode
+	}
+
+	s, ok = funcutil.TryGetAttrByKeyFromRepeatedKV(BoostFunctionModeKey, functionScore.GetParams())
+	if ok {
+		functionMode, err := ParseFunctionMode(s)
+		if err != nil {
+			return nil, nil, err
+		}
+		option.FunctionMode = functionMode
+	}
+
+	return scorers, option, nil
+}
+
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
+	visitorArgs := &ParserVisitorArgs{}
+	return CreateSearchPlanArgs(schema, exprStr, vectorFieldName, queryInfo, exprTemplateValues, functionScorer, visitorArgs)
 }
 
 func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {

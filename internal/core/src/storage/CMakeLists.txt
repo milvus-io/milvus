@@ -21,21 +21,10 @@ if (ENABLE_GCP_NATIVE)
     add_subdirectory(gcp-native-storage)
 endif()
 
-if (DEFINED AZURE_BUILD_DIR)
+if (ENABLE_AZURE_FS)
+    set(AZURE_BUILD_DIR ON)
     add_definitions(-DAZURE_BUILD_DIR)
-    include_directories(azure-blob-storage)
-    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
-    set(SOURCE_FILES ${SOURCE_FILES} azure/AzureChunkManager.cpp)
-    add_library(azure_blob_chunk_manager SHARED IMPORTED)
-    set_target_properties(azure_blob_chunk_manager
-        PROPERTIES
-        IMPORTED_GLOBAL TRUE
-        IMPORTED_LOCATION "${AZURE_BUILD_DIR}/libblob-chunk-manager${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    )
-    get_target_property(AZURE_IMPORTED_LOCATION azure_blob_chunk_manager IMPORTED_LOCATION)
-    get_target_property(AZURE_INTERFACE_INCLUDE_DIRECTORIES azure_blob_chunk_manager INTERFACE_INCLUDE_DIRECTORIES)
-    message("AZURE_IMPORTED_LOCATION: ${AZURE_IMPORTED_LOCATION}")
-    message("AZURE_INTERFACE_INCLUDE_DIRECTORIES: ${AZURE_INTERFACE_INCLUDE_DIRECTORIES}")
+    add_subdirectory(azure)
 endif()
 
 if(USE_OPENDAL)

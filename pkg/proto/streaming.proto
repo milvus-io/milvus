@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "data_coord.proto";
 import "messages.proto";
+import "common.proto";
 import "milvus.proto";
 import "schema.proto";
 import "google/protobuf/empty.proto";
@@ -89,14 +90,31 @@ enum BroadcastTaskState {
     BROADCAST_TASK_STATE_UNKNOWN = 0;          // should never used.
     BROADCAST_TASK_STATE_PENDING = 1;          // task is pending.
     BROADCAST_TASK_STATE_DONE = 2;             // task has been broadcasted and acknowledged, the resource lock is released, and the persisted task can be cleared.
-    BROADCAST_TASK_STATE_WAIT_ACK = 3;         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
+    BROADCAST_TASK_STATE_WAIT_ACK = 3 [deprecated = true];         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
+    BROADCAST_TASK_STATE_REPLICATED = 4;       // task is replicated from the source cluster, the resource lock isn't acquired, so the execution order should be protected by the order of broadcastID.
+    BROADCAST_TASK_STATE_TOMBSTONE = 5;        // task is tombstone, it's used to mark the task is already acked, but for idempotency and deduplication, it will be kept in recovery stroage for a while.
 }
 
 // BroadcastTask is the task to broadcast the messake.
 message BroadcastTask {
     messages.Message message = 1;    // message to be broadcast.
     BroadcastTaskState state = 2;    // state of the task.
-    bytes acked_vchannel_bitmap = 3; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
+    bytes acked_vchannel_bitmap = 3 [deprecated = true]; // deprecated, use acked_checkpoints instead.
+    repeated AckedCheckpoint acked_checkpoints = 4; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
+}
+
+// AckedResult is the result of the ack.
+// It's a helper proto to help managing the consuming of broadcast message at coordinator.
+message AckedResult {
+    repeated string channels = 1; // may be pchannel name or vchannel name.
+    repeated AckedCheckpoint acked_checkpoints = 2; // always same length with channels, not nil if acked.
+}
+
+// AckedCheckpoint is the checkpoint that has been acked.
+message AckedCheckpoint {
+    common.MessageID message_id = 1;  // the message id that has been acked.
+    common.MessageID last_confirmed_message_id = 2; // the last confirmed message id that has been acked.
+    uint64 time_tick = 3; // the time tick of the message that has been acked.
 }
 
 //
@@ -136,7 +154,7 @@ message BroadcastResponse {
 message BroadcastAckRequest {
     uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
     string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
-    messages.ImmutableMessage message = 3;       // the message that to be acked.
+    common.ImmutableMessage message = 3;       // the message that to be acked.
 }
 
 message BroadcastAckResponse {
@@ -150,9 +168,24 @@ message BroadcastAckResponse {
 // Server: log coord. Running on every log node.
 // Client: all log publish/consuming node.
 service StreamingCoordAssignmentService {
+    // UpdateReplicateConfiguration applies a full replacement of the current
+    // replication configuration across Milvus clusters.
+    //
+    // Semantics:
+    //   - The provided ReplicateConfiguration completely replaces any existing
+    //     configuration persisted in the metadata store.
+    //   - Passing an empty ReplicateConfiguration is treated as a "clear"
+    //     operation, effectively removing all replication configuration.
+    //   - The RPC is expected to be idempotent: submitting the same configuration
+    //     multiple times must not cause side effects.
+    rpc UpdateReplicateConfiguration(UpdateReplicateConfigurationRequest)
+        returns (UpdateReplicateConfigurationResponse) {}
+
     // UpdateWALBalancePolicy is used to update the WAL balance policy.
     // The policy is used to control the balance of the WAL.
-    rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {};
+    rpc UpdateWALBalancePolicy(UpdateWALBalancePolicyRequest) returns (UpdateWALBalancePolicyResponse) {
+        option deprecated = true;
+    };
 
     // AssignmentDiscover is used to discover all log nodes managed by the
     // streamingcoord. Channel assignment information will be pushed to client
@@ -160,6 +193,13 @@ service StreamingCoordAssignmentService {
     rpc AssignmentDiscover(stream AssignmentDiscoverRequest)
         returns (stream AssignmentDiscoverResponse) {}
 }
+
+message UpdateReplicateConfigurationRequest {
+    common.ReplicateConfiguration configuration = 1;
+}
+
+// UpdateReplicateConfigurationResponse is the response of UpdateReplicateConfiguration service
+message UpdateReplicateConfigurationResponse {}
 
 // UpdateWALBalancePolicyRequest is the request to update the WAL balance policy.
 message UpdateWALBalancePolicyRequest {
@@ -214,9 +254,10 @@ message AssignmentDiscoverResponse {
 // FullStreamingNodeAssignmentWithVersion is the full assignment info of a log
 // node with version.
 message FullStreamingNodeAssignmentWithVersion {
-    VersionPair version                          = 1;
-    repeated StreamingNodeAssignment assignments = 2;
-    CChannelAssignment cchannel                  = 3; // Where the control channel located.
+    VersionPair version                                   = 1;
+    repeated StreamingNodeAssignment assignments          = 2;
+    CChannelAssignment cchannel                           = 3; // Where the control channel located.
+    common.ReplicateConfiguration replicate_configuration = 4;
 }
 
 // CChannelAssignment is the assignment info of a control channel.
@@ -243,9 +284,9 @@ message DeliverPolicy {
     oneof policy {
         google.protobuf.Empty all    = 1;  // deliver all messages.
         google.protobuf.Empty latest = 2;  // deliver the latest message.
-        messages.MessageID start_from =
+        common.MessageID start_from =
             3;  // deliver message from this message id. [startFrom, ...]
-        messages.MessageID start_after =
+        common.MessageID start_after =
             4;  // deliver message after this message id. (startAfter, ...]
     }
 }
@@ -291,8 +332,9 @@ enum StreamingCode {
     STREAMING_CODE_INVAILD_ARGUMENT       = 8;  // invalid argument
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
-    STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
+    STREAMING_CODE_UNRECOVERABLE          = 11; // unrecoverable error
     STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
+    STREAMING_CODE_REPLICATE_VIOLATION    = 13; // replicate violation
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
@@ -311,6 +353,10 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
+    // from the correct position, ensuring no duplicate or missing messages.
+    rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
+
     // Produce is a bi-directional streaming RPC to send messages to a channel.
     // All messages sent to a channel will be assigned a unique messageID.
     // The messageID is used to identify the message in the channel.
@@ -327,6 +373,16 @@ service StreamingNodeHandlerService {
     // log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
     // moving away to other log node, the RPC will return error CHANNEL_FENCED.
     rpc Consume(stream ConsumeRequest) returns (stream ConsumeResponse) {};
+}
+
+// GetReplicateCheckpointRequest is the request of GetReplicateCheckpoint service.
+message GetReplicateCheckpointRequest {
+  PChannelInfo pchannel = 1;
+}
+
+// GetReplicateCheckpointResponse is the response of GetReplicateCheckpoint service.
+message GetReplicateCheckpointResponse {
+  common.ReplicateCheckpoint checkpoint = 1;
 }
 
 // ProduceRequest is the request of the Produce RPC.
@@ -366,7 +422,7 @@ message ProduceResponse {
 
 // CreateProducerResponse is the result of the CreateProducer RPC.
 message CreateProducerResponse {
-    string wal_name   = 1;  // wal name at server side.
+    string wal_name          = 1 [deprecated = true];  // wal name at server side.
     int64 producer_server_id = 2;   // A unique producer server id on streamingnode
            // for this producer in streamingnode lifetime.
     // Is used to identify the producer in streamingnode for other unary grpc
@@ -385,10 +441,11 @@ message ProduceMessageResponse {
 // ProduceMessageResponseResult is the result of the produce message streaming
 // RPC.
 message ProduceMessageResponseResult {
-    messages.MessageID id = 1;  // the offset of the message in the channel.
+    common.MessageID id = 1;  // the offset of the message in the channel.
     uint64 timetick       = 2;  // the timetick of that message sent.
     messages.TxnContext txnContext = 3;  // the txn context of the message.
     google.protobuf.Any extra      = 4;  // the extra message.
+    common.MessageID last_confirmed_id = 5;  // the last confirmed message id.
 }
 
 // CloseProducerResponse is the result of the CloseProducer RPC.
@@ -466,7 +523,7 @@ message ConsumeResponse {
 }
 
 message CreateConsumerResponse {
-    string wal_name = 1;  // wal name at server side.
+    string wal_name          = 1 [deprecated = true];  // wal name at server side.
     // A unique consumer id on streamingnode for this
     // consumer in streamingnode lifetime.
     int64 consumer_server_id = 2;
@@ -474,7 +531,7 @@ message CreateConsumerResponse {
 
 message ConsumeMessageReponse {
     int64 consumer_id = 1;
-    messages.ImmutableMessage message = 2;
+    common.ImmutableMessage message = 2;
 }
 
 message CloseConsumerResponse {}
@@ -638,7 +695,7 @@ message SegmentAssignmentStat {
 
 // The WALCheckpoint that is used to recovery the wal scanner.
 message WALCheckpoint {
-    messages.MessageID message_id = 1; // From here to recover all uncommited info.
+    common.MessageID message_id = 1; // From here to recover all uncommited info.
     // e.g., primary key index, segment assignment info, vchannel info...
     // because current data path flush is slow, and managed by the coordinator, current current is not apply to it.
     // 
@@ -646,4 +703,21 @@ message WALCheckpoint {
     uint64 time_tick = 2; // The timetick of checkpoint, keep consistecy with message_id.
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
+    // The wal name of the checkpoint.
+    common.ReplicateConfiguration replicate_config = 4; // if the wal join a replicated clusters, the replicate config is not null,
+    common.ReplicateCheckpoint replicate_checkpoint = 5; // if the wal is replicated from remote cluster, the checkpoint is not null,
+    // It's used to recover the replication state for remote cluster.
+}
+
+// ReplicateConfigurationMeta is the replicate configuration of the wal.
+message ReplicateConfigurationMeta {
+    common.ReplicateConfiguration replicate_configuration = 1;
+    AckedResult acked_result = 2; // a acked helper to help managing the consuming of PutReplicateConfigMessageV2 message at coordinator.
+}
+
+message ReplicatePChannelMeta {
+    string source_channel_name          = 1;
+    string target_channel_name          = 2;
+    common.MilvusCluster target_cluster = 3;
+    common.ReplicateCheckpoint initialized_checkpoint = 4;
 }

@@ -3,10 +3,25 @@
         "msgpb": "github.com/milvus-io/milvus-proto/go-api/v2/msgpb",
         "messagespb": "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
     },
+    "consts": {
+        "FieldMaskDB": "db",
+        "FieldMaskCollectionName": "collection_name",
+        "FieldMaskCollectionDescription": "description",
+        "FieldMaskCollectionSchema": "schema",
+        "FieldMaskCollectionProperties": "properties",
+        "FieldMaskCollectionConsistencyLevel": "consistency_level"
+    },
     "ExtraExportTypes": [
         "messagespb.PartitionSegmentAssignment",
         "messagespb.SegmentAssignment",
-        "messagespb.ManualFlushExtraResponse"
+        "messagespb.ManualFlushExtraResponse",
+        "messagespb.RoleBinding",
+        "messagespb.AlterLoadConfigOfAlterDatabase",
+        "messagespb.AlterLoadConfigOfAlterCollection",
+        "messagespb.AlterCollectionMessageUpdates",
+        "messagespb.CacheExpirations",
+        "messagespb.CacheExpiration",
+        "messagespb.LegacyProxyCollectionMetaCache"
     ],
     "messageReflectInfoTable": [
         {
@@ -121,6 +136,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterReplicateConfigMessageHeader",
+                "BodyType": "messagespb.AlterReplicateConfigMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterReplicateConfig",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.BeginTxnMessageHeader",
                 "BodyType": "messagespb.BeginTxnMessageBody"
             },
@@ -167,6 +192,246 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeSchemaChange",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterCollectionMessageHeader",
+                "BodyType": "messagespb.AlterCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterLoadConfigMessageHeader",
+                "BodyType": "messagespb.AlterLoadConfigMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterLoadConfig",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropLoadConfigMessageHeader",
+                "BodyType": "messagespb.DropLoadConfigMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropLoadConfig",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateDatabaseMessageHeader",
+                "BodyType": "messagespb.CreateDatabaseMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateDatabase",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterDatabaseMessageHeader",
+                "BodyType": "messagespb.AlterDatabaseMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterDatabase",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropDatabaseMessageHeader",
+                "BodyType": "messagespb.DropDatabaseMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropDatabase",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterAliasMessageHeader",
+                "BodyType": "messagespb.AlterAliasMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterAlias",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropAliasMessageHeader",
+                "BodyType": "messagespb.DropAliasMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropAlias",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterUserMessageHeader",
+                "BodyType": "messagespb.AlterUserMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterUser",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropUserMessageHeader",
+                "BodyType": "messagespb.DropUserMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropUser",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterRoleMessageHeader",
+                "BodyType": "messagespb.AlterRoleMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterRole",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropRoleMessageHeader",
+                "BodyType": "messagespb.DropRoleMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropRole",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterUserRoleMessageHeader",
+                "BodyType": "messagespb.AlterUserRoleMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterUserRole",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropUserRoleMessageHeader",
+                "BodyType": "messagespb.DropUserRoleMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropUserRole",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterPrivilegeMessageHeader",
+                "BodyType": "messagespb.AlterPrivilegeMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterPrivilege",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropPrivilegeMessageHeader",
+                "BodyType": "messagespb.DropPrivilegeMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropPrivilege",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterPrivilegeGroupMessageHeader",
+                "BodyType": "messagespb.AlterPrivilegeGroupMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterPrivilegeGroup",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropPrivilegeGroupMessageHeader",
+                "BodyType": "messagespb.DropPrivilegeGroupMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropPrivilegeGroup",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RestoreRBACMessageHeader",
+                "BodyType": "messagespb.RestoreRBACMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRestoreRBAC",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterResourceGroupMessageHeader",
+                "BodyType": "messagespb.AlterResourceGroupMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterResourceGroup",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropResourceGroupMessageHeader",
+                "BodyType": "messagespb.DropResourceGroupMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropResourceGroup",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateIndexMessageHeader",
+                "BodyType": "messagespb.CreateIndexMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateIndex",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterIndexMessageHeader",
+                "BodyType": "messagespb.AlterIndexMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterIndex",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropIndexMessageHeader",
+                "BodyType": "messagespb.DropIndexMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropIndex",
                 "Version": 2
             }
         }

@@ -351,8 +351,10 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
+	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
+	backgroundEvictionEnabled := C.bool(params.QueryNodeCfg.TieredBackgroundEvictionEnabled.GetAsBool())
 	evictionIntervalMs := C.int64_t(params.QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
 	cacheCellUnaccessedSurvivalTime := C.int64_t(params.QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
@@ -367,7 +369,9 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		vectorIndexCacheWarmupPolicy,
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
-		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
+		storageUsageTrackingEnabled,
+		evictionEnabled, cacheTouchWindowMs,
+		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()

@@ -82,3 +82,50 @@ func TestNewKeyLock(t *testing.T) {
 	keyLock.keyLocksMutex.Unlock()
 	assert.Equal(t, 0, keyLen)
 }
+
+func TestKeyLockTryLock(t *testing.T) {
+	keyLock := NewKeyLock[string]()
+	ok := keyLock.TryLock("a")
+	assert.True(t, ok)
+	ok = keyLock.TryLock("b")
+	assert.True(t, ok)
+
+	ok = keyLock.TryLock("a")
+	assert.False(t, ok)
+	ok = keyLock.TryLock("b")
+	assert.False(t, ok)
+
+	ok = keyLock.TryRLock("a")
+	assert.False(t, ok)
+	ok = keyLock.TryRLock("b")
+	assert.False(t, ok)
+
+	assert.Equal(t, 2, keyLock.size())
+	keyLock.Unlock("a")
+	keyLock.Unlock("b")
+	assert.Zero(t, keyLock.size())
+
+	ok = keyLock.TryRLock("a")
+	assert.True(t, ok)
+	ok = keyLock.TryRLock("b")
+	assert.True(t, ok)
+
+	ok = keyLock.TryLock("a")
+	assert.False(t, ok)
+	ok = keyLock.TryLock("b")
+	assert.False(t, ok)
+
+	ok = keyLock.TryRLock("a")
+	assert.True(t, ok)
+	ok = keyLock.TryRLock("b")
+	assert.True(t, ok)
+
+	assert.Equal(t, 2, keyLock.size())
+	keyLock.RUnlock("a")
+	keyLock.RUnlock("b")
+	assert.Equal(t, 2, keyLock.size())
+
+	keyLock.RUnlock("a")
+	keyLock.RUnlock("b")
+	assert.Equal(t, 0, keyLock.size())
+}

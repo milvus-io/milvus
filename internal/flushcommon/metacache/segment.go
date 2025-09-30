@@ -17,10 +17,14 @@
 package metacache
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -43,6 +47,7 @@ type SegmentInfo struct {
 	statslogs        []*datapb.FieldBinlog
 	deltalogs        []*datapb.FieldBinlog
 	bm25logs         []*datapb.FieldBinlog
+	currentSplit     []storagecommon.ColumnGroup
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -104,6 +109,10 @@ func (s *SegmentInfo) GetStorageVersion() int64 {
 	return s.storageVersion
 }
 
+func (s *SegmentInfo) GetCurrentSplit() []storagecommon.ColumnGroup {
+	return s.currentSplit
+}
+
 func (s *SegmentInfo) Binlogs() []*datapb.FieldBinlog {
 	return s.binlogs
 }
@@ -140,6 +149,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		statslogs:        s.statslogs,
 		deltalogs:        s.deltalogs,
 		bm25logs:         s.bm25logs,
+		currentSplit:     s.currentSplit,
 	}
 }
 
@@ -147,6 +157,19 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 	level := info.GetLevel()
 	if level == datapb.SegmentLevel_Legacy {
 		level = datapb.SegmentLevel_L1
+	}
+	// legacy split also share same field here
+	// shall be checked by caller
+	var currentSplit []storagecommon.ColumnGroup
+	if info.GetStorageVersion() == storage.StorageV2 && len(info.Binlogs) > 0 {
+		currentSplit = make([]storagecommon.ColumnGroup, 0, len(info.Binlogs))
+		for _, group := range info.Binlogs {
+			currentSplit = append(currentSplit, storagecommon.ColumnGroup{
+				GroupID: group.GetFieldID(),
+				Fields:  group.GetChildFields(),
+			})
+		}
+		log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{
 		segmentID:        info.GetID(),
@@ -164,5 +187,6 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		statslogs:        info.GetStatslogs(),
 		deltalogs:        info.GetDeltalogs(),
 		bm25logs:         info.GetBm25Statslogs(),
+		currentSplit:     currentSplit,
 	}
 }

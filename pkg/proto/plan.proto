@@ -3,6 +3,7 @@ package milvus.proto.plan;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
 import "schema.proto";
+import "common.proto";
 
 enum OpType {
   Invalid = 0;
@@ -81,6 +82,9 @@ message QueryInfo {
   int64 query_field_id =11;
   string hints = 12;
   optional SearchIteratorV2Info search_iterator_v2_info = 13;
+  string json_path = 14;
+  schema.DataType json_type = 15;
+  bool strict_cast = 16;
 }
 
 message ColumnInfo {
@@ -172,6 +176,24 @@ message NullExpr {
   NullOp op = 2;
 }
 
+message GISFunctionFilterExpr{
+  ColumnInfo column_info = 1;
+  string wkt_string = 2;
+  enum GISOp {
+    Invalid = 0;
+    Equals = 1;
+    Touches = 2;
+    Overlaps = 3;
+    Crosses = 4;
+    Contains = 5;
+    Intersects = 6;
+    Within = 7;
+    DWithin = 8;
+  }
+  GISOp op = 3;
+  double distance = 4;  // Distance parameter for DWithin
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -221,6 +243,24 @@ message RandomSampleExpr {
 
 message AlwaysTrueExpr {}
 
+message Interval {
+  int64 years = 1;
+  int64 months = 2;
+  int64 days = 3;
+  int64 hours = 4;
+  int64 minutes = 5;
+  int64 seconds = 6;
+}
+
+// New expression type for the operation: (timestamp_col + interval) OP iso_string
+message TimestamptzArithCompareExpr {
+  ColumnInfo timestamptz_column = 1;
+  ArithOpType arith_op = 2; // ADD or SUB
+  Interval interval = 3;
+  OpType compare_op = 4;
+  GenericValue compare_value = 5;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -239,6 +279,8 @@ message Expr {
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
     RandomSampleExpr random_sample_expr = 16;
+    GISFunctionFilterExpr gisfunction_filter_expr = 17;
+    TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
   };
   bool is_template = 20;
 }
@@ -257,9 +299,35 @@ message QueryPlanNode {
   int64 limit = 3;
 };
 
+enum FunctionType{
+  FunctionTypeWeight = 0;
+  FunctionTypeRandom = 1;
+}
+
+// FunctionMode decide how to calculate boost score
+// for multiple boost function scores
+enum FunctionMode{
+  FunctionModeMultiply = 0;
+  FunctionModeSum = 1;
+};
+
+// BoostMode decide how to calculate final score
+// for origin score and boost score.
+enum BoostMode{
+  BoostModeMultiply = 0;
+  BoostModeSum = 1;
+};
+
 message ScoreFunction {
-  Expr filter =1;
-  float weight = 2;  
+  Expr filter = 1;
+  float weight = 2;
+  FunctionType type = 3;
+  repeated common.KeyValuePair params = 4;
+}
+
+message ScoreOption{
+  BoostMode boost_mode = 1;
+  FunctionMode function_mode = 2;
 }
 
 message PlanOption {
@@ -276,4 +344,5 @@ message PlanNode {
   repeated string dynamic_fields = 5;
   repeated ScoreFunction scorers = 6;
   PlanOption plan_options = 7;
+  ScoreOption score_option = 8;
 }

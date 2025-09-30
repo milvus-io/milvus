@@ -32,10 +32,12 @@ struct CTMeta : public milvus::cachinglayer::Meta {
         virt_chunk_order_;  // indicates the size of each virtual chunk, i.e. 2^virt_chunk_order_
     CTMeta(milvus::cachinglayer::StorageType storage_type,
            milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
+           milvus::cachinglayer::CellDataType cell_data_type,
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction)
         : milvus::cachinglayer::Meta(storage_type,
                                      cell_id_mapping_mode,
+                                     cell_data_type,
                                      cache_warmup_policy,
                                      support_eviction) {
     }
@@ -80,6 +82,18 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     milvus::cachinglayer::Meta*
     meta() override {
         return &meta_;
+    }
+
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+        constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
+        int64_t total_size = 0;
+        for (auto cid : cids) {
+            total_size +=
+                std::max(file_infos_[cid].memory_size, MIN_STORAGE_BYTES);
+        }
+        return total_size;
     }
 
  private:

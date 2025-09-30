@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -256,6 +257,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
 	var strictGroupSize bool
+	var jsonPath string
+	var jsonType schemapb.DataType
+	var strictCast bool
 	if isAdvanced {
 		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
@@ -264,6 +268,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			return nil, err
 		}
 		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
+		jsonPath, jsonType, strictCast = groupByInfo.GetJSONPath(), groupByInfo.GetJSONType(), groupByInfo.GetStrictCast()
+		if jsonPath != "" {
+			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByFieldId)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
@@ -314,6 +325,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			StrictGroupSize:      strictGroupSize,
 			Hints:                hints,
 			SearchIteratorV2Info: planSearchIteratorV2Info,
+			JsonPath:             jsonPath,
+			JsonType:             jsonType,
+			StrictCast:           strictCast,
 		},
 		offset:       offset,
 		isIterator:   isIterator,
@@ -416,6 +430,9 @@ type groupByInfo struct {
 	groupByFieldId  int64
 	groupSize       int64
 	strictGroupSize bool
+	jsonPath        string
+	jsonType        schemapb.DataType
+	strictCast      bool
 }
 
 func (g *groupByInfo) GetGroupByFieldId() int64 {
@@ -439,6 +456,27 @@ func (g *groupByInfo) GetStrictGroupSize() bool {
 	return false
 }
 
+func (g *groupByInfo) GetJSONPath() string {
+	if g != nil {
+		return g.jsonPath
+	}
+	return ""
+}
+
+func (g *groupByInfo) GetJSONType() schemapb.DataType {
+	if g != nil {
+		return g.jsonType
+	}
+	return schemapb.DataType_None
+}
+
+func (g *groupByInfo) GetStrictCast() bool {
+	if g != nil {
+		return g.strictCast
+	}
+	return false
+}
+
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
 	ret := &groupByInfo{}
 
@@ -450,14 +488,23 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	var groupByFieldId int64 = -1
 	if groupByFieldName != "" {
 		fields := schema.GetFields()
+		var dynamicField *schemapb.FieldSchema
 		for _, field := range fields {
 			if field.Name == groupByFieldName {
 				groupByFieldId = field.FieldID
 				break
 			}
+			if field.GetIsDynamic() {
+				dynamicField = field
+				break
+			}
 		}
 		if groupByFieldId == -1 {
-			return nil, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+			if dynamicField != nil {
+				groupByFieldId = dynamicField.FieldID
+			} else {
+				return nil, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+			}
 		}
 	}
 	ret.groupByFieldId = groupByFieldId
@@ -496,6 +543,32 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		}
 	}
 	ret.strictGroupSize = strictGroupSize
+
+	// 4. parse json path
+	jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONPath, searchParamsPair)
+	if err == nil {
+		ret.jsonPath = jsonPath
+	}
+
+	// 5. parse json type
+	jsonTypeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONType, searchParamsPair)
+	if err == nil {
+		dataTypeVal, ok := schemapb.DataType_value[jsonTypeStr]
+		if ok {
+			ret.jsonType = schemapb.DataType(dataTypeVal)
+		}
+	}
+
+	// 6. parse strict cast
+	strictCastStr, err := funcutil.GetAttrByKeyFromRepeatedKV(StrictCastKey, searchParamsPair)
+	if err == nil {
+		strictCast, err := strconv.ParseBool(strictCastStr)
+		if err != nil {
+			strictCast = false
+		}
+		ret.strictCast = strictCast
+	}
+
 	return ret, nil
 }
 
@@ -560,6 +633,24 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}, nil
 }
 
+func parseTimezone(params []*commonpb.KeyValuePair) string {
+	timezone, err := funcutil.GetAttrByKeyFromRepeatedKV(TimezoneKey, params)
+	if err != nil {
+		return ""
+	}
+	return timezone
+}
+
+func parseTimeFields(params []*commonpb.KeyValuePair) []string {
+	timeFields, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, params)
+	if err != nil {
+		return nil
+	}
+	return strings.FieldsFunc(timeFields, func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+}
+
 func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
 	groupScorerStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankGroupScorer, params)
 	if err != nil {
@@ -602,9 +693,10 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 }
 
 func getMetricType(toReduceResults []*internalpb.SearchResults) string {
-	metricType := ""
-	if len(toReduceResults) >= 1 {
-		metricType = toReduceResults[0].GetMetricType()
+	for _, r := range toReduceResults {
+		if m := r.GetMetricType(); m != "" {
+			return m
+		}
 	}
-	return metricType
+	return ""
 }

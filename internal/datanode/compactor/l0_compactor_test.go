@@ -18,6 +18,7 @@ package compactor
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -617,6 +619,176 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	}
 }
 
+func (s *LevelZeroCompactionTaskSuite) TestBuildBinlogWithRootPath() {
+	ctx := context.Background()
+
+	// Test cases for different binlog types and parameters
+	testCases := []struct {
+		name         string
+		rootPath     string
+		binlogType   storage.BinlogType
+		collectionID int64
+		partitionID  int64
+		segmentID    int64
+		fieldID      int64
+		logID        int64
+		expectError  bool
+		expectPrefix string
+	}{
+		{
+			name:         "DeleteBinlog with valid params",
+			rootPath:     "/test/root",
+			binlogType:   storage.DeleteBinlog,
+			collectionID: 1001,
+			partitionID:  2001,
+			segmentID:    3001,
+			fieldID:      -1,
+			logID:        4001,
+			expectError:  false,
+			expectPrefix: "/test/root/delta_log/",
+		},
+		{
+			name:         "InsertBinlog with valid params",
+			rootPath:     "/test/root",
+			binlogType:   storage.InsertBinlog,
+			collectionID: 1002,
+			partitionID:  2002,
+			segmentID:    3002,
+			fieldID:      100,
+			logID:        4002,
+			expectError:  false,
+			expectPrefix: "/test/root/insert_log/",
+		},
+		{
+			name:         "StatsBinlog with valid params",
+			rootPath:     "/test/root",
+			binlogType:   storage.StatsBinlog,
+			collectionID: 1003,
+			partitionID:  2003,
+			segmentID:    3003,
+			fieldID:      101,
+			logID:        4003,
+			expectError:  false,
+			expectPrefix: "/test/root/stats_log/",
+		},
+		{
+			name:         "BM25Binlog with valid params",
+			rootPath:     "/test/root",
+			binlogType:   storage.BM25Binlog,
+			collectionID: 1004,
+			partitionID:  2004,
+			segmentID:    3004,
+			fieldID:      102,
+			logID:        4004,
+			expectError:  false,
+			expectPrefix: "/test/root/bm25_stats/",
+		},
+		{
+			name:         "Empty root path",
+			rootPath:     "",
+			binlogType:   storage.DeleteBinlog,
+			collectionID: 1005,
+			partitionID:  2005,
+			segmentID:    3005,
+			fieldID:      -1,
+			logID:        4005,
+			expectError:  false,
+			expectPrefix: "delta_log/",
+		},
+		{
+			name:         "Invalid binlog type",
+			rootPath:     "/test/root",
+			binlogType:   storage.BinlogType(999),
+			collectionID: 1006,
+			partitionID:  2006,
+			segmentID:    3006,
+			fieldID:      103,
+			logID:        4006,
+			expectError:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			path, err := binlog.BuildLogPathWithRootPath(
+				tc.rootPath,
+				tc.binlogType,
+				tc.collectionID,
+				tc.partitionID,
+				tc.segmentID,
+				tc.fieldID,
+				tc.logID,
+			)
+
+			if tc.expectError {
+				s.Error(err)
+				s.Empty(path)
+			} else {
+				s.NoError(err)
+				s.NotEmpty(path)
+				s.Contains(path, tc.expectPrefix)
+				s.Contains(path, strconv.FormatInt(tc.collectionID, 10))
+				s.Contains(path, strconv.FormatInt(tc.partitionID, 10))
+				s.Contains(path, strconv.FormatInt(tc.segmentID, 10))
+				s.Contains(path, strconv.FormatInt(tc.logID, 10))
+
+				// For non-delete binlogs, check field ID is included
+				if tc.binlogType != storage.DeleteBinlog {
+					s.Contains(path, strconv.FormatInt(tc.fieldID, 10))
+				}
+			}
+		})
+	}
+
+	// Test the actual usage in serializeUpload method context
+	s.Run("serializeUpload context usage", func() {
+		plan := &datapb.CompactionPlan{
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					CollectionID: 1234,
+					PartitionID:  5678,
+					SegmentID:    9012,
+				},
+			},
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 1000, End: 2000},
+		}
+		s.task.plan = plan
+		s.task.compactionParams.StorageConfig.RootPath = "/compaction/root"
+
+		// Create a segment delta writer for testing
+		writer := NewSegmentDeltaWriter(9012, 5678, 1234)
+		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		segmentWriters := map[int64]*SegmentDeltaWriter{9012: writer}
+
+		// Mock the upload
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, blobs map[string][]byte) error {
+				s.Len(blobs, 1)
+				for blobKey := range blobs {
+					// Verify the blob key format
+					s.Contains(blobKey, "/compaction/root/delta_log/")
+					s.Contains(blobKey, "1234") // collection ID
+					s.Contains(blobKey, "5678") // partition ID
+					s.Contains(blobKey, "9012") // segment ID
+				}
+				return nil
+			},
+		).Once()
+
+		results, err := s.task.serializeUpload(ctx, segmentWriters)
+		s.NoError(err)
+		s.Len(results, 1)
+		s.Equal(int64(9012), results[0].GetSegmentID())
+		s.NotNil(results[0].GetDeltalogs())
+		s.Len(results[0].GetDeltalogs(), 1)
+		s.Len(results[0].GetDeltalogs()[0].GetBinlogs(), 1)
+
+		// Verify the log path in result
+		logPath := results[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath()
+		s.Contains(logPath, "/compaction/root/delta_log/")
+	})
+}
+
 func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 	s.Run("no primary key", func() {
 		plan := &datapb.CompactionPlan{
@@ -659,5 +831,223 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 
 		_, err := s.task.Compact()
 		s.Error(err)
+	})
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestLoadBFWithDecompression() {
+	s.Run("successful decompression with root path", func() {
+		// Test that DecompressBinLogWithRootPath is called with correct parameters
+		plan := &datapb.CompactionPlan{
+			PlanID: 19530,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					CollectionID: 100,
+					PartitionID:  200,
+					SegmentID:    300,
+					Level:        datapb.SegmentLevel_L1,
+					Field2StatslogPaths: []*datapb.FieldBinlog{
+						{
+							FieldID: 1,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 9999, LogSize: 100},
+							},
+						},
+					},
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      1,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+		}
+
+		s.task.plan = plan
+
+		data := &storage.Int64FieldData{
+			Data: []int64{1, 2, 3, 4, 5},
+		}
+		sw := &storage.StatsWriter{}
+		err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+		s.NoError(err)
+
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
+		s.task.cm = cm
+
+		bfs, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+		s.NoError(err)
+		s.Len(bfs, 1)
+		s.Contains(bfs, int64(300))
+	})
+
+	s.Run("multiple segments with decompression", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19531,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					CollectionID: 100,
+					PartitionID:  200,
+					SegmentID:    301,
+					Level:        datapb.SegmentLevel_L1,
+					Field2StatslogPaths: []*datapb.FieldBinlog{
+						{
+							FieldID: 1,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 10001, LogSize: 100},
+							},
+						},
+					},
+				},
+				{
+					CollectionID: 100,
+					PartitionID:  200,
+					SegmentID:    302,
+					Level:        datapb.SegmentLevel_L1,
+					Field2StatslogPaths: []*datapb.FieldBinlog{
+						{
+							FieldID: 1,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 10002, LogSize: 100},
+							},
+						},
+					},
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      1,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+		}
+
+		s.task.plan = plan
+
+		data1 := &storage.Int64FieldData{
+			Data: []int64{1, 2, 3},
+		}
+		data2 := &storage.Int64FieldData{
+			Data: []int64{4, 5, 6},
+		}
+		sw1 := &storage.StatsWriter{}
+		err := sw1.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data1)
+		s.NoError(err)
+		sw2 := &storage.StatsWriter{}
+		err = sw2.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data2)
+		s.NoError(err)
+
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw1.GetBuffer()}, nil).Once()
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw2.GetBuffer()}, nil).Once()
+		s.task.cm = cm
+
+		bfs, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+		s.NoError(err)
+		s.Len(bfs, 2)
+		s.Contains(bfs, int64(301))
+		s.Contains(bfs, int64(302))
+	})
+
+	s.Run("decompression with empty field2statslogpaths", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19532,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					CollectionID:        100,
+					PartitionID:         200,
+					SegmentID:           303,
+					Level:               datapb.SegmentLevel_L1,
+					Field2StatslogPaths: []*datapb.FieldBinlog{},
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      1,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+		}
+
+		s.task.plan = plan
+
+		cm := mocks.NewChunkManager(s.T())
+		// Expect no calls since there are no stats log paths
+		s.task.cm = cm
+
+		bfs, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+		s.NoError(err)
+		s.Len(bfs, 1)
+		s.Contains(bfs, int64(303))
+		// Bloom filter should be empty since no stats were loaded
+	})
+
+	s.Run("verify root path parameter usage", func() {
+		// Test that the root path from compactionParams.StorageConfig is used correctly
+		plan := &datapb.CompactionPlan{
+			PlanID: 19533,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					CollectionID: 100,
+					PartitionID:  200,
+					SegmentID:    304,
+					Level:        datapb.SegmentLevel_L1,
+					Field2StatslogPaths: []*datapb.FieldBinlog{
+						{
+							FieldID: 1,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 10003, LogSize: 100, LogPath: ""},
+							},
+						},
+					},
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      1,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+		}
+
+		s.task.plan = plan
+		// Verify that compactionParams.StorageConfig.GetRootPath() is used
+		s.NotEmpty(s.task.compactionParams.StorageConfig.GetRootPath())
+
+		data := &storage.Int64FieldData{
+			Data: []int64{1, 2, 3},
+		}
+		sw := &storage.StatsWriter{}
+		err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+		s.NoError(err)
+
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().MultiRead(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+			// Verify the path includes the root path
+			return len(paths) > 0
+		})).Return([][]byte{sw.GetBuffer()}, nil)
+		s.task.cm = cm
+
+		bfs, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+		s.NoError(err)
+		s.Len(bfs, 1)
+		s.Contains(bfs, int64(304))
 	})
 }

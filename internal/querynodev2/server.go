@@ -33,12 +33,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"plugin"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -60,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -72,9 +69,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -243,127 +239,6 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
 }
 
-// InitSegcore set init params of segCore, such as chunkRows, SIMD type...
-func (node *QueryNode) InitSegcore() error {
-	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
-	C.SegcoreInit(cGlogConf)
-	C.free(unsafe.Pointer(cGlogConf))
-
-	// update log level based on current setup
-	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
-
-	// override segcore chunk size
-	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
-	C.SegcoreSetChunkRows(cChunkRows)
-
-	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
-	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
-
-	cKnowhereFetchThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereFetchThreadPoolSize.GetAsUint32())
-	C.SegcoreSetKnowhereFetchThreadPoolNum(cKnowhereFetchThreadPoolSize)
-
-	// override segcore SIMD type
-	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
-	C.SegcoreSetSimdType(cSimdType)
-	C.free(unsafe.Pointer(cSimdType))
-
-	enableKnowhereScoreConsistency := paramtable.Get().QueryNodeCfg.KnowhereScoreConsistency.GetAsBool()
-	if enableKnowhereScoreConsistency {
-		C.SegcoreEnableKnowhereScoreConsistency()
-	}
-
-	// override segcore index slice size
-	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
-	C.SetIndexSliceSize(cIndexSliceSize)
-
-	// set up thread pool for different priorities
-	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
-	C.SetHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
-	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
-	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
-	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
-	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
-
-	node.RegisterSegcoreConfigWatcher()
-
-	cCPUNum := C.int(hardware.GetCPUNum())
-	C.InitCpuNum(cCPUNum)
-
-	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
-	if knowhereBuildPoolSize < uint32(1) {
-		knowhereBuildPoolSize = uint32(1)
-	}
-	log.Ctx(node.ctx).Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
-	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
-	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
-
-	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
-	C.SetDefaultExprEvalBatchSize(cExprBatchSize)
-
-	cDeleteDumpBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.GetAsInt64())
-	C.SetDefaultDeleteDumpBatchSize(cDeleteDumpBatchSize)
-
-	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
-	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
-
-	cGrowingJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.GetAsBool())
-	C.SetDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
-
-	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
-	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
-	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
-
-	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
-	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
-
-	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
-	C.SetExprResCacheEnable(cExprResCacheEnabled)
-
-	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
-	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
-
-	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, node.GetNodeID())
-
-	initcore.InitLocalChunkManager(localDataRootPath)
-
-	err := initcore.InitRemoteChunkManager(paramtable.Get())
-	if err != nil {
-		return err
-	}
-
-	err = initcore.InitDiskFileWriterConfig(paramtable.Get())
-	if err != nil {
-		return err
-	}
-
-	err = initcore.InitStorageV2FileSystem(paramtable.Get())
-	if err != nil {
-		return err
-	}
-
-	err = initcore.InitMmapManager(paramtable.Get(), node.GetNodeID())
-	if err != nil {
-		return err
-	}
-
-	err = initcore.InitTieredStorage(paramtable.Get())
-	if err != nil {
-		return err
-	}
-
-	err = initcore.InitInterminIndexConfig(paramtable.Get())
-	if err != nil {
-		return err
-	}
-
-	initcore.InitTraceConfig(paramtable.Get())
-	C.InitExecExpressionFunctionFactory()
-
-	// init paramtable change callback for core related config
-	initcore.SetupCoreConfigChangelCallback()
-	return initcore.InitPluginLoader()
-}
-
 func getIndexEngineVersion() (minimal, current int32) {
 	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
 	return int32(cMinimal), int32(cCurrent)
@@ -480,12 +355,13 @@ func (node *QueryNode) Init() error {
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
-		err = node.InitSegcore()
+		err = initcore.InitQueryNode(node.ctx)
 		if err != nil {
 			log.Error("QueryNode init segcore failed", zap.Error(err))
 			initError = err
 			return
 		}
+		node.RegisterSegcoreConfigWatcher()
 
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
@@ -537,7 +413,7 @@ func (node *QueryNode) Stop() error {
 		err := node.session.GoingStop()
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))
-		} else if util.MustSelectWALName() != rmq.WALName { // rocksmq cannot support querynode graceful stop because of using local storage.
+		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.

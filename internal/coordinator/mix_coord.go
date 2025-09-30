@@ -155,6 +155,7 @@ func (s *mixCoordImpl) Init() error {
 				return err
 			}
 			log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
+			s.startAndUpdateHealthy()
 			return err
 		}
 		s.UpdateStateCode(commonpb.StateCode_StandBy)
@@ -229,11 +230,20 @@ func (s *mixCoordImpl) initKVCreator() {
 }
 
 func (s *mixCoordImpl) Start() error {
+	if !s.enableActiveStandBy {
+		s.startAndUpdateHealthy()
+	}
+	return nil
+}
+
+// startAndUpdateHealthy is the internal impl actually start mixcoord
+// it could be invoked by:
+// - `Start()` when enableActiveStandBy is false
+// - `activateFunc` when enableActiveStandBy is true
+func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	s.startPosixCleanupTask()
-
-	var startErr error
-	return startErr
+	RegisterMgrRoute(s)
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {

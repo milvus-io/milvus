@@ -25,7 +25,7 @@ SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
     if (field_metrics != fieldChunkMetrics_.end()) {
         auto& field_chunk_metrics = field_metrics->second;
         auto ca = cachinglayer::SemiInlineGet(
-            field_chunk_metrics->PinCells({chunk_id}));
+            field_chunk_metrics->PinCells(nullptr, {chunk_id}));
         auto metrics = ca->get_cell_of(chunk_id);
         return cachinglayer::PinWrapper<const FieldChunkMetrics*>(ca, metrics);
     }
@@ -43,7 +43,7 @@ FieldChunkMetricsTranslator::get_cells(
     cells.reserve(cids.size());
     if (data_type_ == milvus::DataType::VARCHAR) {
         for (auto chunk_id : cids) {
-            auto pw = column_->GetChunk(chunk_id);
+            auto pw = column_->GetChunk(nullptr, chunk_id);
             auto chunk = static_cast<StringChunk*>(pw.get());
 
             int num_rows = chunk->RowNums();
@@ -59,7 +59,7 @@ FieldChunkMetricsTranslator::get_cells(
         }
     } else {
         for (auto chunk_id : cids) {
-            auto pw = column_->GetChunk(chunk_id);
+            auto pw = column_->GetChunk(nullptr, chunk_id);
             auto chunk = static_cast<FixedWidthChunk*>(pw.get());
             auto span = chunk->Span();
 

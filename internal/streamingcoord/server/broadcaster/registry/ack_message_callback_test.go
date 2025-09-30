@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestMessageCallbackRegistration(t *testing.T) {
@@ -18,12 +18,12 @@ func TestMessageCallbackRegistration(t *testing.T) {
 
 	// Test registering a callback
 	called := false
-	callback := func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
+	callback := func(ctx context.Context, msg message.BroadcastResultDropPartitionMessageV1) error {
 		called = true
 		return nil
 	}
 
-	RegisterDropPartitionMessageV1AckCallback(callback)
+	RegisterDropPartitionV1AckCallback(callback)
 
 	// Verify callback was registered
 	callbackFuture, ok := messageAckCallbacks[message.MessageTypeDropPartitionV1]
@@ -34,13 +34,17 @@ func TestMessageCallbackRegistration(t *testing.T) {
 	msg := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{}).
 		WithBody(&message.DropPartitionRequest{}).
-		WithVChannel("v1").
-		MustBuildMutable().
-		WithTimeTick(1).
-		IntoImmutableMessage(rmq.NewRmqID(1))
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
 
 	// Call the callback
-	err := CallMessageAckCallback(context.Background(), msg)
+	err := CallMessageAckCallback(context.Background(), msg, map[string]*message.AppendResult{
+		"v1": {
+			MessageID:              walimplstest.NewTestMessageID(1),
+			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:               1,
+		},
+	})
 	assert.NoError(t, err)
 	assert.True(t, called)
 
@@ -48,7 +52,7 @@ func TestMessageCallbackRegistration(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	err = CallMessageAckCallback(ctx, msg)
+	err = CallMessageAckCallback(ctx, msg, nil)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }

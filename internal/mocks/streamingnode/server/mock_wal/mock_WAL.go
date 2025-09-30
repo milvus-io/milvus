@@ -301,6 +301,63 @@ func (_c *MockWAL_GetLatestMVCCTimestamp_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetReplicateCheckpoint provides a mock function with no fields
+func (_m *MockWAL) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateCheckpoint")
+	}
+
+	var r0 *wal.ReplicateCheckpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (*wal.ReplicateCheckpoint, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() *wal.ReplicateCheckpoint); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*wal.ReplicateCheckpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWAL_GetReplicateCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateCheckpoint'
+type MockWAL_GetReplicateCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetReplicateCheckpoint is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) GetReplicateCheckpoint() *MockWAL_GetReplicateCheckpoint_Call {
+	return &MockWAL_GetReplicateCheckpoint_Call{Call: _e.mock.On("GetReplicateCheckpoint")}
+}
+
+func (_c *MockWAL_GetReplicateCheckpoint_Call) Run(run func()) *MockWAL_GetReplicateCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_GetReplicateCheckpoint_Call) Return(_a0 *wal.ReplicateCheckpoint, _a1 error) *MockWAL_GetReplicateCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWAL_GetReplicateCheckpoint_Call) RunAndReturn(run func() (*wal.ReplicateCheckpoint, error)) *MockWAL_GetReplicateCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsAvailable provides a mock function with no fields
 func (_m *MockWAL) IsAvailable() bool {
 	ret := _m.Called()
@@ -453,18 +510,18 @@ func (_c *MockWAL_Read_Call) RunAndReturn(run func(context.Context, wal.ReadOpti
 }
 
 // WALName provides a mock function with no fields
-func (_m *MockWAL) WALName() string {
+func (_m *MockWAL) WALName() message.WALName {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WALName")
 	}
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 message.WALName
+	if rf, ok := ret.Get(0).(func() message.WALName); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(message.WALName)
 	}
 
 	return r0
@@ -487,12 +544,12 @@ func (_c *MockWAL_WALName_Call) Run(run func()) *MockWAL_WALName_Call {
 	return _c
 }
 
-func (_c *MockWAL_WALName_Call) Return(_a0 string) *MockWAL_WALName_Call {
+func (_c *MockWAL_WALName_Call) Return(_a0 message.WALName) *MockWAL_WALName_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWAL_WALName_Call) RunAndReturn(run func() string) *MockWAL_WALName_Call {
+func (_c *MockWAL_WALName_Call) RunAndReturn(run func() message.WALName) *MockWAL_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

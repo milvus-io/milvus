@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"unsafe"
@@ -82,7 +83,8 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 		default:
 			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
 		}
-	case schemapb.DataType_Array, schemapb.DataType_JSON:
+	// geometry field max length now consider the same as json field, which is 512 bytes
+	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 		return DynamicFieldMaxLength, nil
 	default:
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
@@ -104,7 +106,8 @@ func EstimateAvgSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 
 func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLengthPolicy) (int, error) {
 	res := 0
-	for _, fs := range schema.Fields {
+	allFields := GetAllFieldSchemas(schema)
+	for _, fs := range allFields {
 		switch fs.DataType {
 		case schemapb.DataType_Bool, schemapb.DataType_Int8:
 			res++
@@ -114,7 +117,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
-		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
 				return 0, err
@@ -170,6 +173,31 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 					break
 				}
 			}
+		case schemapb.DataType_ArrayOfVector:
+			dim := 0
+			for _, kv := range fs.TypeParams {
+				if kv.Key == common.DimKey {
+					v, err := strconv.Atoi(kv.Value)
+					if err != nil {
+						return -1, err
+					}
+					dim = v
+				}
+			}
+			assumedArrayLen := 10
+			// Estimate size based on element type
+			switch fs.ElementType {
+			case schemapb.DataType_FloatVector:
+				res += assumedArrayLen * dim * 4
+			case schemapb.DataType_BinaryVector:
+				res += assumedArrayLen * (dim / 8)
+			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+				res += assumedArrayLen * dim * 2
+			case schemapb.DataType_Int8Vector:
+				res += assumedArrayLen * dim
+			default:
+				return 0, fmt.Errorf("unsupported element type in VectorArray: %s", fs.ElementType.String())
+			}
 		}
 	}
 	return res, nil
@@ -207,6 +235,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		}
 	case schemapb.DataType_JSON:
 		for _, str := range column.GetScalars().GetJsonData().GetData() {
+			res += len(str)
+		}
+	case schemapb.DataType_Geometry:
+		for _, str := range column.GetScalars().GetGeometryData().GetData() {
 			res += len(str)
 		}
 	default:
@@ -269,6 +301,11 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 				return 0, errors.New("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetJsonData().GetData()[rowOffset])
+		case schemapb.DataType_Geometry:
+			if rowOffset >= len(fs.GetScalars().GetGeometryData().GetData()) {
+				return 0, fmt.Errorf("offset out range of field datas")
+			}
+			res += len(fs.GetScalars().GetGeometryData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector:
 			res += int(fs.GetVectors().GetDim())
 		case schemapb.DataType_FloatVector:
@@ -570,7 +607,8 @@ func IsVectorArrayType(dataType schemapb.DataType) bool {
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64:
+		schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Timestamptz:
 		return true
 	default:
 		return false
@@ -579,6 +617,10 @@ func IsIntegerType(dataType schemapb.DataType) bool {
 
 func IsJSONType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_JSON
+}
+
+func IsGeometryType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Geometry
 }
 
 func IsArrayType(dataType schemapb.DataType) bool {
@@ -630,7 +672,7 @@ func IsArrayContainStringElementType(dataType schemapb.DataType, elementType sch
 }
 
 func IsVariableDataType(dataType schemapb.DataType) bool {
-	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType) || IsVectorArrayType(dataType)
+	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType) || IsVectorArrayType(dataType) || IsGeometryType(dataType)
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
@@ -697,6 +739,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 						Data: make([][]byte, 0, topK),
 					},
 				}
+			case *schemapb.ScalarField_GeometryData:
+				scalar.Scalars.Data = &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{
+						Data: make([][]byte, 0, topK),
+					},
+				}
 			case *schemapb.ScalarField_ArrayData:
 				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
@@ -755,26 +803,6 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 }
 
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
-	return AppendFieldDataWithNullData(dst, src, idx, false)
-}
-
-// AppendFieldData appends field data of specified index from src to dst
-//
-// Note: The field data in src may have two different nullable formats, so the caller
-// must specify how to handle null values using the skipAppendNullData parameter.
-//
-// Two nullable data formats are supported:
-//
-//	Case 1: Before validateUtil.fillWithValue processing
-//		Data: [1, null, 2] = [1, 2] + [true, false, true]
-//		Set skipAppendNullData = true to skip appending values to data array of dst
-//
-//	Case 2: After validateUtil.fillWithValue processing
-//		Data: [1, null, 2] = [1, 0, 2] + [true, false, true]
-//		Set skipAppendNullData = false to append zero values to data array of dst
-//
-// TODO: Unify nullable format - SDK uses Case 1, Milvus uses Case 2
-func AppendFieldDataWithNullData(dst, src []*schemapb.FieldData, idx int64, skipAppendNullData bool) (appendSize int64) {
 	dstMap := make(map[int64]*schemapb.FieldData)
 	for _, fieldData := range dst {
 		if fieldData != nil {
@@ -799,10 +827,6 @@ func AppendFieldDataWithNullData(dst, src []*schemapb.FieldData, idx int64, skip
 			}
 			valid := fieldData.ValidData[idx]
 			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
-
-			if !valid && skipAppendNullData {
-				continue
-			}
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -922,6 +946,28 @@ func AppendFieldDataWithNullData(dst, src []*schemapb.FieldData, idx int64, skip
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.TimestamptzData.Data[idx]))
+			case *schemapb.ScalarField_GeometryData:
+				if dstScalar.GetGeometryData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
+							Data: [][]byte{srcScalar.GeometryData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data[idx])
+				}
+				appendSize += int64(unsafe.Sizeof(srcScalar.GeometryData.Data[idx]))
+			// just for result
+			case *schemapb.ScalarField_GeometryWktData:
+				if dstScalar.GetGeometryWktData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: []string{srcScalar.GeometryWktData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
+				}
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
@@ -1060,6 +1106,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
 			case *schemapb.ScalarField_JsonData:
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
+			case *schemapb.ScalarField_GeometryData:
+				dstScalar.GetGeometryData().Data = dstScalar.GetGeometryData().Data[:len(dstScalar.GetGeometryData().Data)-1]
 			default:
 				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
 			}
@@ -1108,25 +1156,10 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			continue
 		}
 
-		updateFieldIdx := updateIdx
 		// Update ValidData if present
 		if len(updateFieldData.GetValidData()) != 0 {
 			if len(baseFieldData.GetValidData()) != 0 {
-				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateFieldIdx]
-			}
-
-			// update field data to null, only modify valid data
-			if !updateFieldData.ValidData[updateFieldIdx] {
-				continue
-			}
-
-			// for nullable field data, such as data=[1,1], valid_data=[true, false, true]
-			// should update the updateFieldIdx to the expected valid index
-			updateFieldIdx = 0
-			for _, validData := range updateFieldData.GetValidData()[:updateIdx] {
-				if validData {
-					updateFieldIdx += 1
-				}
+				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateIdx]
 			}
 		}
 
@@ -1140,43 +1173,58 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			switch baseScalar.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				updateData := updateScalar.GetBoolData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetBoolData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetBoolData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_IntData:
 				updateData := updateScalar.GetIntData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetIntData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetIntData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_LongData:
 				updateData := updateScalar.GetLongData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetLongData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetLongData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_FloatData:
 				updateData := updateScalar.GetFloatData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetFloatData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetFloatData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_DoubleData:
 				updateData := updateScalar.GetDoubleData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetDoubleData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetDoubleData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_StringData:
 				updateData := updateScalar.GetStringData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetStringData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetStringData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_ArrayData:
 				updateData := updateScalar.GetArrayData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
-					baseScalar.GetArrayData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+				baseData := baseScalar.GetArrayData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			case *schemapb.ScalarField_JsonData:
 				updateData := updateScalar.GetJsonData()
 				baseData := baseScalar.GetJsonData()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Data) {
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
@@ -1186,7 +1234,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
 							return fmt.Errorf("failed to unmarshal base json: %v", err)
 						}
-						if err := json.Unmarshal(updateData.Data[updateFieldIdx], &updateMap); err != nil {
+						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
 							return fmt.Errorf("failed to unmarshal update json: %v", err)
 						}
 						// merge
@@ -1200,7 +1248,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 						}
 						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					} else {
-						baseScalar.GetJsonData().Data[baseIdx] = updateData.Data[updateFieldIdx]
+						baseScalar.GetJsonData().Data[baseIdx] = updateData.Data[updateIdx]
 					}
 				}
 			default:
@@ -1216,73 +1264,71 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 
 			switch baseVector.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
+				baseData := baseVector.GetBinaryVector()
 				updateData := updateVector.GetBinaryVector()
-				if updateData != nil {
-					baseData := baseVector.GetBinaryVector()
-					baseStartIdx := updateFieldIdx * (dim / 8)
-					baseEndIdx := (updateFieldIdx + 1) * (dim / 8)
-					updateStartIdx := updateFieldIdx * (dim / 8)
-					updateEndIdx := (updateFieldIdx + 1) * (dim / 8)
+				if baseData != nil && updateData != nil {
+					baseStartIdx := baseIdx * (dim / 8)
+					baseEndIdx := (baseIdx + 1) * (dim / 8)
+					updateStartIdx := updateIdx * (dim / 8)
+					updateEndIdx := (updateIdx + 1) * (dim / 8)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
 				}
 			case *schemapb.VectorField_FloatVector:
+				baseData := baseVector.GetFloatVector()
 				updateData := updateVector.GetFloatVector()
-				if updateData != nil {
-					baseData := baseVector.GetFloatVector()
-					baseStartIdx := updateFieldIdx * dim
-					baseEndIdx := (updateFieldIdx + 1) * dim
-					updateStartIdx := updateFieldIdx * dim
-					updateEndIdx := (updateFieldIdx + 1) * dim
+				if baseData != nil && updateData != nil {
+					baseStartIdx := baseIdx * dim
+					baseEndIdx := (baseIdx + 1) * dim
+					updateStartIdx := updateIdx * dim
+					updateEndIdx := (updateIdx + 1) * dim
 					if int(updateEndIdx) <= len(updateData.Data) && int(baseEndIdx) <= len(baseData.Data) {
 						copy(baseData.Data[baseStartIdx:baseEndIdx], updateData.Data[updateStartIdx:updateEndIdx])
 					}
 				}
 			case *schemapb.VectorField_Float16Vector:
+				baseData := baseVector.GetFloat16Vector()
 				updateData := updateVector.GetFloat16Vector()
-				if updateData != nil {
-					baseData := baseVector.GetFloat16Vector()
-					baseStartIdx := updateFieldIdx * (dim * 2)
-					baseEndIdx := (updateFieldIdx + 1) * (dim * 2)
-					updateStartIdx := updateFieldIdx * (dim * 2)
-					updateEndIdx := (updateFieldIdx + 1) * (dim * 2)
+				if baseData != nil && updateData != nil {
+					baseStartIdx := baseIdx * (dim * 2)
+					baseEndIdx := (baseIdx + 1) * (dim * 2)
+					updateStartIdx := updateIdx * (dim * 2)
+					updateEndIdx := (updateIdx + 1) * (dim * 2)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
 				}
 			case *schemapb.VectorField_Bfloat16Vector:
+				baseData := baseVector.GetBfloat16Vector()
 				updateData := updateVector.GetBfloat16Vector()
-				if updateData != nil {
-					baseData := baseVector.GetBfloat16Vector()
-					baseStartIdx := updateFieldIdx * (dim * 2)
-					baseEndIdx := (updateFieldIdx + 1) * (dim * 2)
-					updateStartIdx := updateFieldIdx * (dim * 2)
-					updateEndIdx := (updateFieldIdx + 1) * (dim * 2)
+				if baseData != nil && updateData != nil {
+					baseStartIdx := baseIdx * (dim * 2)
+					baseEndIdx := (baseIdx + 1) * (dim * 2)
+					updateStartIdx := updateIdx * (dim * 2)
+					updateEndIdx := (updateIdx + 1) * (dim * 2)
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
 				}
 			case *schemapb.VectorField_SparseFloatVector:
+				baseData := baseVector.GetSparseFloatVector()
 				updateData := updateVector.GetSparseFloatVector()
-				if updateData != nil && int(updateFieldIdx) < len(updateData.Contents) {
-					baseData := baseVector.GetSparseFloatVector()
-					if int(updateFieldIdx) < len(baseData.Contents) {
-						baseData.Contents[updateFieldIdx] = updateData.Contents[updateFieldIdx]
-						// Update dimension if necessary
-						if updateData.Dim > baseData.Dim {
-							baseData.Dim = updateData.Dim
-						}
+				if baseData != nil && updateData != nil && int(baseIdx) < len(baseData.Contents) && int(updateIdx) < len(updateData.Contents) {
+					baseData.Contents[baseIdx] = updateData.Contents[updateIdx]
+					// Update dimension if necessary
+					if updateData.Dim > baseData.Dim {
+						baseData.Dim = updateData.Dim
 					}
 				}
 			case *schemapb.VectorField_Int8Vector:
+				baseData := baseVector.GetInt8Vector()
 				updateData := updateVector.GetInt8Vector()
-				if updateData != nil {
-					baseData := baseVector.GetInt8Vector()
-					baseStartIdx := updateFieldIdx * dim
-					baseEndIdx := (updateFieldIdx + 1) * dim
-					updateStartIdx := updateFieldIdx * dim
-					updateEndIdx := (updateFieldIdx + 1) * dim
+				if baseData != nil && updateData != nil {
+					baseStartIdx := baseIdx * dim
+					baseEndIdx := (baseIdx + 1) * dim
+					updateStartIdx := updateIdx * dim
+					updateEndIdx := (updateIdx + 1) * dim
 					if int(updateEndIdx) <= len(updateData) && int(baseEndIdx) <= len(baseData) {
 						copy(baseData[baseStartIdx:baseEndIdx], updateData[updateStartIdx:updateEndIdx])
 					}
@@ -1400,6 +1446,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					}
 				} else {
 					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data...)
+				}
+			case *schemapb.ScalarField_GeometryData:
+				if dstScalar.GetGeometryData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
+							Data: srcScalar.GeometryData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data...)
 				}
 			case *schemapb.ScalarField_BytesData:
 				if dstScalar.GetBytesData() == nil {
@@ -2303,4 +2359,52 @@ func SparseFloatRowDim(row []byte) int64 {
 func EstimateSparseVectorNNZFromPlaceholderGroup(placeholderGroup []byte, nq int) int {
 	overheadBytes := math.Max(10, float64(nq*3))
 	return (len(placeholderGroup) - int(overheadBytes)) / 8
+}
+
+func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSchema, allowNonBM25Outputs bool, partialUpdate bool) ([]*schemapb.FunctionSchema, error) {
+	if len(functions) == 0 {
+		return functions, nil
+	}
+
+	fieldIDFuncMapping := map[int64]*schemapb.FunctionSchema{}
+	funCandidate := map[string]*schemapb.FunctionSchema{}
+
+	for _, functionSchema := range functions {
+		funCandidate[functionSchema.Name] = functionSchema
+		for _, fieldID := range functionSchema.OutputFieldIds {
+			fieldIDFuncMapping[fieldID] = functionSchema
+		}
+	}
+
+	for _, fieldID := range fieldIDs {
+		if f, exists := fieldIDFuncMapping[fieldID]; exists {
+			if f.Type == schemapb.FunctionType_BM25 {
+				return nil, fmt.Errorf("Attempt to insert bm25 function output field")
+			}
+			if !allowNonBM25Outputs {
+				return nil, fmt.Errorf("Insert data has function output field, but collection's property `collection.function.allowInsertNonBM25FunctionOutputs` is not enable")
+			}
+			delete(funCandidate, f.Name)
+		}
+	}
+
+	needProcessFunctions := []*schemapb.FunctionSchema{}
+	for _, functionSchema := range funCandidate {
+		if partialUpdate {
+			// If some input exists, push it down to the function for processing
+			allInputNotExist := true
+			for _, inputID := range functionSchema.InputFieldIds {
+				if slices.Contains(fieldIDs, inputID) {
+					allInputNotExist = false
+					break
+				}
+			}
+			if !allInputNotExist {
+				needProcessFunctions = append(needProcessFunctions, functionSchema)
+			}
+		} else {
+			needProcessFunctions = append(needProcessFunctions, functionSchema)
+		}
+	}
+	return needProcessFunctions, nil
 }

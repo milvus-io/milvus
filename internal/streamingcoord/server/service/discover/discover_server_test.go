@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
@@ -17,7 +18,11 @@ import (
 )
 
 func TestAssignmentDiscover(t *testing.T) {
-	resource.InitForTest()
+	mc := mock_manager.NewMockManagerClient(t)
+	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {ServerID: 1, Address: "localhost:1"},
+	}, nil)
+	resource.InitForTest(resource.OptStreamingManagerClient(mc))
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		versions := []typeutil.VersionInt64Pair{

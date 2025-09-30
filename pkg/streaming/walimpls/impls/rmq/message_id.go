@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -45,8 +46,8 @@ func (id rmqID) RmqID() int64 {
 }
 
 // WALName returns the name of message id related wal.
-func (id rmqID) WALName() string {
-	return WALName
+func (id rmqID) WALName() message.WALName {
+	return message.WALNameRocksmq
 }
 
 // LT less than.
@@ -67,6 +68,14 @@ func (id rmqID) EQ(other message.MessageID) bool {
 // Marshal marshal the message id.
 func (id rmqID) Marshal() string {
 	return message.EncodeInt64(int64(id))
+}
+
+// IntoProto marshal the message id to proto.
+func (id rmqID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      message.EncodeInt64(int64(id)),
+		WALName: commonpb.WALName(id.WALName()),
+	}
 }
 
 func (id rmqID) String() string {

@@ -11,6 +11,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 )
 
+type WALCheckpoint = utility.WALCheckpoint
+
+const RecoveryMagicStreamingInitialized = utility.RecoveryMagicStreamingInitialized
+
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
 	VChannels          map[string]*streamingpb.VChannelMeta
@@ -32,7 +36,7 @@ type RecoveryMetrics struct {
 // RecoveryStreamBuilder is an interface that is used to build a recovery stream from the WAL.
 type RecoveryStreamBuilder interface {
 	// WALName returns the name of the WAL.
-	WALName() string
+	WALName() message.WALName
 
 	// Channel returns the channel info of wal.
 	Channel() types.PChannelInfo

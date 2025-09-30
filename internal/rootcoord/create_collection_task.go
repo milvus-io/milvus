@@ -22,6 +22,8 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -154,6 +156,21 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	return check(maxColNumPerDB)
 }
 
+func checkGeometryDefaultValue(value string) error {
+	geomT, err := wkt.Unmarshal(value)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+	_, err = wkb.Marshal(geomT, wkb.NDR)
+	if err != nil {
+		log.Warn("invalid default value for geometry field", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
+	}
+
+	return nil
+}
+
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
@@ -262,7 +279,7 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
-	enabled, has, err := parseNamespaceProp(t.Req.Properties...)
+	enabled, has, err := common.ParseNamespaceProp(t.Req.Properties...)
 	if err != nil {
 		return err
 	}
@@ -301,19 +318,6 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		zap.String("collectionName", t.Req.CollectionName),
 		zap.String("fieldName", common.NamespaceFieldName))
 	return nil
-}
-
-func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == common.NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
 }
 
 func hasIsolationProperty(props ...*commonpb.KeyValuePair) bool {
@@ -459,6 +463,18 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = reqProperties
 	}
 	t.dbProperties = db.Properties
+
+	// set collection timezone
+	properties := t.Req.GetProperties()
+	ok, _ := getDefaultTimezoneVal(properties...)
+	if !ok {
+		ok, defaultTz := getDefaultTimezoneVal(db.Properties...)
+		if !ok {
+			defaultTz = "UTC"
+		}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: defaultTz}
+		t.Req.Properties = append(properties, timezoneKV)
+	}
 
 	if hookutil.GetEzPropByDBProperties(t.dbProperties) != nil {
 		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(t.dbProperties))

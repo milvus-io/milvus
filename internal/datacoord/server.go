@@ -353,17 +353,24 @@ func (s *Server) initDataCoord() error {
 // initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
 func (s *Server) initMessageCallback() {
-	registry.RegisterDropPartitionMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
-		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{msg.Header().PartitionId})
+	registry.RegisterDropPartitionV1AckCallback(func(ctx context.Context, result message.BroadcastResultDropPartitionMessageV1) error {
+		partitionID := result.Message.Header().PartitionId
+		for _, vchannel := range result.GetVChannelsWithoutControlChannel() {
+			if err := s.NotifyDropPartition(ctx, vchannel, []int64{partitionID}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
-	registry.RegisterImportMessageV1AckCallback(func(ctx context.Context, msg message.ImmutableImportMessageV1) error {
-		body := msg.MustBody()
+	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
+		body := result.Message.MustBody()
+		vchannels := result.GetVChannelsWithoutControlChannel()
 		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			CollectionID:   body.GetCollectionID(),
 			CollectionName: body.GetCollectionName(),
 			PartitionIDs:   body.GetPartitionIDs(),
-			ChannelNames:   []string{msg.VChannel()},
+			ChannelNames:   vchannels,
 			Schema:         body.GetSchema(),
 			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
 				return &internalpb.ImportFile{
@@ -388,7 +395,7 @@ func (s *Server) initMessageCallback() {
 		return nil
 	})
 
-	registry.RegisterImportMessageV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
+	registry.RegisterImportV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
 		b := msg.MustBody()
 		options := funcutil.Map2KeyValuePair(b.GetOptions())
 		_, err := importutilv2.GetTimeoutTs(options)

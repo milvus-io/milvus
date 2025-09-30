@@ -628,7 +628,7 @@ BatchUnaryCompare(const T* src,
 
 template <typename GetType, typename ValType>
 class ShreddingExecutor {
-    using IndexInnerType =
+    using InnerType =
         std::conditional_t<std::is_same_v<GetType, std::string_view>,
                            std::string,
                            GetType>;
@@ -659,7 +659,7 @@ class ShreddingExecutor {
  private:
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
-        BatchUnaryCompare<GetType, ValType>(src, size, val_, op_type_, res);
+        BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
     }
 
     void
@@ -677,7 +677,7 @@ class ShreddingExecutor {
     }
 
     proto::plan::OpType op_type_;
-    ValType val_;
+    InnerType val_;
     std::string pointer_;
 };
 
@@ -738,12 +738,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
@@ -767,9 +769,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 auto pointer =
                     milvus::Json::pointer(expr_->column_.nested_path_);
                 pinned_ngram_index_ =
-                    segment->GetNgramIndexForJson(field_id, pointer);
+                    segment->GetNgramIndexForJson(op_ctx_, field_id, pointer);
             } else {
-                pinned_ngram_index_ = segment->GetNgramIndex(field_id);
+                pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
     }
@@ -878,10 +880,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     ExecTextMatch();
 
     bool
-    CanExecNgramMatch();
-
-    bool
-    CanExecNgramMatchForJson();
+    CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
     ExecNgramMatch();
@@ -895,6 +894,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

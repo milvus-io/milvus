@@ -1563,7 +1563,8 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
                                        index_info,
                                        nullptr,
                                        DataType::VECTOR_FLOAT,
-                                       DataType::NONE);
+                                       DataType::NONE,
+                                       nullptr);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     segment->FillPrimaryKeys(plan.get(), *sr);

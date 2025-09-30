@@ -2,6 +2,7 @@ package streamingcoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -10,9 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewCataLog creates a new catalog instance
@@ -26,7 +27,20 @@ import (
 //
 //	├── pchannel-1
 //	└── pchannel-2
+//
+// └── replicate-configuration
+// └── replicating-pchannel
+// │   ├── cluster-1-pchannel-1
+// │   └── cluster-1-pchannel-2
+// │   ├── cluster-2-pchannel-1
+// │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
+	return &catalog{
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
+	}
+}
+
+func NewReplicationCatalog(metaKV kv.MetaKv) metastore.ReplicationCatalog {
 	return &catalog{
 		metaKV: metaKV,
 	}
@@ -120,7 +134,8 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
@@ -162,4 +177,75 @@ func buildPChannelInfoPath(name string) string {
 // buildBroadcastTaskPath builds the path for broadcast task.
 func buildBroadcastTaskPath(id uint64) string {
 	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
+}
+
+func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
+	v, err := proto.Marshal(config)
+	if err != nil {
+		return errors.Wrapf(err, "marshal replicate configuration failed")
+	}
+
+	kvs := make(map[string]string, len(replicatingTasks)+1)
+	kvs[ReplicateConfigurationKey] = string(v)
+
+	for _, task := range replicatingTasks {
+		key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
+		v, err := proto.Marshal(task)
+		if err != nil {
+			return errors.Wrapf(err, "marshal replicate pchannel meta failed")
+		}
+		kvs[key] = string(v)
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
+		return c.metaKV.MultiSave(ctx, partialKvs)
+	})
+}
+
+func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error) {
+	key := ReplicateConfigurationKey
+	value, err := c.metaKV.Load(ctx, key)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	config := &streamingpb.ReplicateConfigurationMeta{}
+	if err = proto.Unmarshal([]byte(value), config); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
+	}
+	return config, nil
+}
+
+func (c *catalog) RemoveReplicatePChannel(ctx context.Context, task *streamingpb.ReplicatePChannelMeta) error {
+	key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
+	return c.metaKV.Remove(ctx, key)
+}
+
+func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error) {
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, ReplicatePChannelMetaPrefix)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]*streamingpb.ReplicatePChannelMeta, 0, len(values))
+	for k, value := range values {
+		info := &streamingpb.ReplicatePChannelMeta{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) string {
+	targetClusterID := meta.GetTargetCluster().GetClusterId()
+	sourceChannelName := meta.GetSourceChannelName()
+	return buildReplicatePChannelPath(targetClusterID, sourceChannelName)
+}
+
+func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {
+	return fmt.Sprintf("%s%s-%s", ReplicatePChannelMetaPrefix, targetClusterID, sourceChannelName)
 }

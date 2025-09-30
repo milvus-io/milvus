@@ -98,7 +98,7 @@ Linux systems (Recommend Ubuntu 20.04 or later):
 ```text
 go: >= 1.21
 cmake: >= 3.18
-gcc: 7.5
+gcc: 12
 conan: 1.61
 ```
 
@@ -503,10 +503,6 @@ ${CMAKE_EXTRA_ARGS} \
  -DINDEX_ENGINE=${INDEX_ENGINE} \
  -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
  -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
-if [ -z "$BUILD_WITHOUT_AZURE" ]; then
-CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
- -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
-fi
 CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 ```
 

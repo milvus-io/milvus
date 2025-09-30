@@ -2,10 +2,10 @@ set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CARGO_CMD cargo build)
+    set(CARGO_CMD cargo +1.89 build --verbose)
     set(TARGET_DIR "debug")
 else ()
-    set(CARGO_CMD cargo build --release)
+    set(CARGO_CMD cargo +1.89 build --release --verbose)
     set(TARGET_DIR "release")
 endif ()
 
@@ -13,6 +13,8 @@ if (TANTIVY_FEATURES)
     set(CARGO_CMD ${CARGO_CMD} --features ${TANTIVY_FEATURES})
 endif ()
 message("Cargo command: ${CARGO_CMD}")
+
+set(TOKENIZER_PROTO ${CMAKE_BINARY_DIR}/thirdparty/milvus-proto/proto/tokenizer.proto)
 
 set(TANTIVY_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(TANTIVY_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")
@@ -36,7 +38,7 @@ add_custom_target(ls_cargo_target DEPENDS ls_cargo)
 
 add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
-        COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
+        COMMAND TOKENIZER_PROTO=${TOKENIZER_PROTO} CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding)
 add_custom_target(tantivy_binding_target DEPENDS compile_tantivy ls_cargo_target)
 

@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
@@ -32,8 +33,9 @@ class PhyLogicalUnaryExpr : public Expr {
     PhyLogicalUnaryExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::LogicalUnaryExpr>& expr,
-        const std::string& name)
-        : Expr(DataType::BOOL, std::move(input), name), expr_(expr) {
+        const std::string& name,
+        milvus::OpContext* op_ctx)
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx), expr_(expr) {
     }
 
     void

@@ -214,11 +214,16 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
+		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
+		if err != nil {
+			return merr.Status(err), err
+		}
 		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
 			compactionParams,
+			[]int64{pk.GetFieldID()},
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
@@ -250,7 +255,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	succeed, err := node.compactionExecutor.Execute(task)
+	succeed, err := node.compactionExecutor.Enqueue(task)
 	if succeed {
 		return merr.Success(), nil
 	} else {

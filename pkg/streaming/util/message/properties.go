@@ -15,6 +15,7 @@ const (
 	messageTxnContext                       = "_tx"  // transaction context.
 	messageCipherHeader                     = "_ch"  // message cipher header.
 	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
+	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 )
 
 var (

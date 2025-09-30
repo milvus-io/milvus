@@ -20,7 +20,6 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "index/JsonInvertedIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus {
 namespace exec {
@@ -32,7 +31,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
         case DataType::JSON: {
-            if (is_index_mode_ && !has_offset_input_) {
+            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
                 result = EvalJsonExistsForDataSegment(context);
@@ -194,7 +193,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         cached_index_chunk_id_ = 0;
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -206,7 +206,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         // process shredding data
         auto shredding_fields = index->GetShreddingFields(pointer);
         for (const auto& field : shredding_fields) {
-            index->ExecutorForGettingValid(field, valid_res_view);
+            index->ExecutorForGettingValid(op_ctx_, field, valid_res_view);
             res_view |= valid_res_view;
         }
 

@@ -517,7 +517,6 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 			idata.Data[field.FieldID] = &DoubleFieldData{
 				Data: readDoubleArray(blobReaders),
 			}
-
 		case schemapb.DataType_Timestamptz:
 			idata.Data[field.FieldID] = &TimestamptzFieldData{
 				Data: readTimestamptzArray(blobReaders),
@@ -760,6 +759,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				ElementType: field.GetElementType(),
 				Data:        vectorArray.GetData(),
 				Dim:         vectorArray.GetDim(),
+			}
+		case schemapb.DataType_Geometry:
+			srcData := srcField.GetScalars().GetGeometryData().GetData()
+			validData := srcField.GetValidData()
+			fieldData = &GeometryFieldData{
+				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
+				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
 			}
 
 		default:
@@ -1361,6 +1367,21 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 				ValidData: rawData.ValidData,
 			}
+		case *GeometryFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Geometry,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+				ValidData: rawData.ValidData,
+			}
 		case *FloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_FloatVector,
@@ -1640,4 +1661,24 @@ func SortFieldBinlogs(fieldBinlogs map[int64]*datapb.FieldBinlog) []*datapb.Fiel
 		binlogs = append(binlogs, fieldBinlogs[fieldID])
 	}
 	return binlogs
+}
+
+// VectorArrayToArrowType converts VectorArray element type to the corresponding Arrow type
+// Note: This returns the element type (e.g., float32), not a list type
+// The caller is responsible for wrapping it in a list if needed
+func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		return arrow.PrimitiveTypes.Float32, nil
+	case schemapb.DataType_BinaryVector:
+		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
+	case schemapb.DataType_Float16Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
+	case schemapb.DataType_BFloat16Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
+	case schemapb.DataType_Int8Vector:
+		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
+	}
 }

@@ -16,6 +16,9 @@
 
 #pragma once
 
+// Forward declaration of test accessor in global namespace for friend declaration
+class TraverseJsonForBuildStatsAccessor;
+
 #include <string>
 #include <boost/filesystem.hpp>
 
@@ -160,16 +163,17 @@ class JsonKeyStats : public ScalarIndex<std::string> {
  public:
     void
     ExecuteForSharedData(
+        milvus::OpContext* op_ctx,
         const std::string& path,
         std::function<void(BsonView bson, uint32_t row_id, uint32_t offset)>
             func) {
         bson_inverted_index_->TermQuery(
             path,
-            [this, &func](const uint32_t* row_id_array,
-                          const uint32_t* offset_array,
-                          const int64_t array_len) {
+            [this, &func, op_ctx](const uint32_t* row_id_array,
+                                  const uint32_t* offset_array,
+                                  const int64_t array_len) {
                 shared_column_->BulkRawBsonAt(
-                    func, row_id_array, offset_array, array_len);
+                    op_ctx, func, row_id_array, offset_array, array_len);
             });
     }
 
@@ -183,7 +187,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     int64_t
-    ExecutorForGettingValid(const std::string& path,
+    ExecutorForGettingValid(milvus::OpContext* op_ctx,
+                            const std::string& path,
                             TargetBitmapView valid_res) {
         size_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
@@ -198,12 +203,12 @@ class JsonKeyStats : public ScalarIndex<std::string> {
             const bool* valid_data;
             if (GetShreddingJsonType(path) == JSONType::STRING ||
                 GetShreddingJsonType(path) == JSONType::ARRAY) {
-                auto pw = column->StringViews(i);
+                auto pw = column->StringViews(op_ctx, i);
                 valid_data = pw.get().second.data();
                 ApplyOnlyValidData(
                     valid_data, valid_res + processed_size, chunk_size);
             } else {
-                auto pw = column->Span(i);
+                auto pw = column->Span(op_ctx, i);
                 auto chunk = pw.get();
                 valid_data = chunk.valid_data();
                 ApplyOnlyValidData(
@@ -221,6 +226,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
     ExecutorForShreddingData(
+        milvus::OpContext* op_ctx,
         // path is field_name in shredding_columns_
         const std::string& path,
         FUNC func,
@@ -245,7 +251,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                 if constexpr (std::is_same_v<T, std::string_view>) {
                     // first is the raw data, second is valid_data
                     // use valid_data to see if raw data is null
-                    auto pw = column->StringViews(i);
+                    auto pw = column->StringViews(op_ctx, i);
                     auto [data_vec, valid_data] = pw.get();
 
                     func(data_vec.data(),
@@ -255,7 +261,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                          valid_res + processed_size,
                          values...);
                 } else {
-                    auto pw = column->Span(i);
+                    auto pw = column->Span(op_ctx, i);
                     auto chunk = pw.get();
                     const T* data = static_cast<const T*>(chunk.data());
                     const bool* valid_data = chunk.valid_data();
@@ -269,14 +275,14 @@ class JsonKeyStats : public ScalarIndex<std::string> {
             } else {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view>) {
-                    auto pw = column->StringViews(i);
+                    auto pw = column->StringViews(op_ctx, i);
                     valid_data = pw.get().second.data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    chunk_size);
                 } else {
-                    auto pw = column->Span(i);
+                    auto pw = column->Span(op_ctx, i);
                     auto chunk = pw.get();
                     valid_data = chunk.valid_data();
                     ApplyValidData(valid_data,
@@ -397,6 +403,16 @@ class JsonKeyStats : public ScalarIndex<std::string> {
             return shred_field_data_type_map_[field_name];
         }
         return JSONType::UNKNOWN;
+    }
+
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return cell_size_;
+    }
+
+    void
+    SetCellSize(cachinglayer::ResourceUsage cell_size) {
+        cell_size_ = cell_size;
     }
 
  private:
@@ -667,6 +683,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string shared_column_field_name_;
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
+    cachinglayer::ResourceUsage cell_size_ = {0, 0};
+
+    // Friend accessor for unit tests to call private methods safely.
+    friend class ::TraverseJsonForBuildStatsAccessor;
 };
+
+using CacheJsonKeyStatsPtr =
+    std::shared_ptr<milvus::cachinglayer::CacheSlot<JsonKeyStats>>;
 
 }  // namespace milvus::index

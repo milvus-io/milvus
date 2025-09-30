@@ -36,6 +36,7 @@ type AutoIndexConfig struct {
 	EnableResultLimitCheck ParamItem `refreshable:"true"`
 
 	IndexParams            ParamItem  `refreshable:"true"`
+	IntVectorIndexParams   ParamItem  `refreshable:"true"`
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
@@ -48,14 +49,15 @@ type AutoIndexConfig struct {
 	AutoIndexSearchConfig  ParamItem  `refreshable:"true"`
 	AutoIndexTuningConfig  ParamGroup `refreshable:"true"`
 
-	ScalarAutoIndexEnable  ParamItem `refreshable:"true"`
-	ScalarAutoIndexParams  ParamItem `refreshable:"true"`
-	ScalarNumericIndexType ParamItem `refreshable:"true"`
-	ScalarIntIndexType     ParamItem `refreshable:"true"`
-	ScalarVarcharIndexType ParamItem `refreshable:"true"`
-	ScalarBoolIndexType    ParamItem `refreshable:"true"`
-	ScalarFloatIndexType   ParamItem `refreshable:"true"`
-	ScalarJSONIndexType    ParamItem `refreshable:"true"`
+	ScalarAutoIndexEnable   ParamItem `refreshable:"true"`
+	ScalarAutoIndexParams   ParamItem `refreshable:"true"`
+	ScalarNumericIndexType  ParamItem `refreshable:"true"`
+	ScalarIntIndexType      ParamItem `refreshable:"true"`
+	ScalarVarcharIndexType  ParamItem `refreshable:"true"`
+	ScalarBoolIndexType     ParamItem `refreshable:"true"`
+	ScalarFloatIndexType    ParamItem `refreshable:"true"`
+	ScalarJSONIndexType     ParamItem `refreshable:"true"`
+	ScalarGeometryIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 }
@@ -100,6 +102,15 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
+
+	p.IntVectorIndexParams = ParamItem{
+		Key:          "autoIndex.params.int8.build",
+		Version:      "2.6.4",
+		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
+		Formatter:    GetBuildParamFormatter(IntVectorDefaultMetricType, "autoIndex.params.int.build"),
+		Export:       true,
+	}
+	p.IntVectorIndexParams.Init(base.mgr)
 
 	p.BinaryIndexParams = ParamItem{
 		Key:          "autoIndex.params.binary.build",
@@ -186,7 +197,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED", "geometry": "RTREE"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
@@ -238,6 +249,18 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarJSONIndexType.Init(base.mgr)
+
+	p.ScalarGeometryIndexType = ParamItem{
+		Version: "2.5.16",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["geometry"]
+		},
+	}
+	p.ScalarGeometryIndexType.Init(base.mgr)
 
 	p.BitmapCardinalityLimit = ParamItem{
 		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",

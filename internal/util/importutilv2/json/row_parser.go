@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -42,10 +43,15 @@ type rowParser struct {
 	pkField              *schemapb.FieldSchema
 	dynamicField         *schemapb.FieldSchema
 	functionOutputFields map[string]int64
+
+	structArrays      map[string]interface{}
+	allowInsertAutoID bool
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
-	id2Field := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+
+	id2Field := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 
@@ -71,11 +77,19 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	dynamicField := typeutil.GetDynamicField(schema)
 
 	name2FieldID := lo.SliceToMap(
-		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
+		},
+	)
+	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
+
+	sturctArrays := lo.SliceToMap(
+		schema.GetStructArrayFields(),
+		func(sa *schemapb.StructArrayFieldSchema) (string, interface{}) {
+			return sa.GetName(), nil
 		},
 	)
 
@@ -86,6 +100,8 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		pkField:              pkField,
 		dynamicField:         dynamicField,
 		functionOutputFields: functionOutputFields,
+		structArrays:         sturctArrays,
+		allowInsertAutoID:    allowInsertAutoID,
 	}, nil
 }
 
@@ -109,29 +125,61 @@ func (r *rowParser) wrapArrayValueTypeError(v any, eleType schemapb.DataType) er
 			eleType.String(), v, v))
 }
 
+// StructArray are passed in with format for one row: StructArray: [element 1, element 2, ...]
+// where each element contains one value of all sub-fields in StructArrayField.
+// So we need to reconstruct it to be handled by handleField.
+//
+// For example, let StructArrayFieldSchema { sub-field1: array of int32, sub-field2: array of float vector }
+// When we have one row:
+//
+//	[{"sub-field1": 1, "sub-field2": [1.0, 2.0]}, {"sub-field1": 2, "sub-field2": [3.0, 4.0]}],
+//
+// we reconstruct it to be handled by handleField as:
+//
+//	{"sub-field1": [1, 2], "sub-field2": [[1.0, 2.0], [3.0, 4.0]]}
+func reconstructArrayForStructArray(raw any) (map[string]any, error) {
+	rows, ok := raw.([]any)
+	if !ok {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in JSON, each row should be a key-value map, but got type %T", raw))
+	}
+
+	buf := make(map[string][]any)
+	for _, elem := range rows {
+		row, ok := elem.(map[string]any)
+		if !ok {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
+		}
+		for key, value := range row {
+			buf[key] = append(buf[key], value)
+		}
+	}
+
+	out := make(map[string]any, len(buf))
+	for k, v := range buf {
+		out[k] = v
+	}
+	return out, nil
+}
+
 func (r *rowParser) Parse(raw any) (Row, error) {
 	stringMap, ok := raw.(map[string]any)
 	if !ok {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("invalid JSON format, each row should be a key-value map, but got type %T", raw))
 	}
-	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() {
+	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() && !r.allowInsertAutoID {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", r.pkField.GetName()))
 	}
 
 	row := make(Row)
 	dynamicValues := make(map[string]any)
-	// read values from json file
-	for key, value := range stringMap {
-		if _, ok := r.functionOutputFields[key]; ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is output by function, no need to provide", key))
-		}
 
+	handleField := func(key string, value any) error {
 		if fieldID, ok := r.name2FieldID[key]; ok {
 			data, err := r.parseEntity(fieldID, value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			row[fieldID] = data
 		} else if r.dynamicField != nil {
@@ -139,7 +187,33 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			dynamicValues[key] = value
 		} else {
 			// from v2.6, we don't intend to return error for redundant fields, just skip it
-			continue
+			return nil
+		}
+
+		return nil
+	}
+
+	// read values from json file
+	for key, value := range stringMap {
+		if _, ok := r.functionOutputFields[key]; ok {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is output by function, no need to provide", key))
+		}
+
+		if _, ok := r.structArrays[key]; ok {
+			values, err := reconstructArrayForStructArray(value)
+			if err != nil {
+				return nil, err
+			}
+
+			for subKey, subValue := range values {
+				if err := handleField(subKey, subValue); err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			if err := handleField(key, value); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -474,6 +548,24 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return scalarFieldData, nil
+	case schemapb.DataType_ArrayOfVector:
+		arr, ok := obj.([]interface{})
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		maxCapacity, err := parameterutil.GetMaxCapacity(field)
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(arr), maxCapacity, field); err != nil {
+			return nil, err
+		}
+		vectorFieldData, err := r.arrayOfVectorToFieldData(arr, field)
+		if err != nil {
+			return nil, err
+		}
+		return vectorFieldData, nil
+
 	default:
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("parse json failed, unsupport data type: %s",
@@ -632,5 +724,46 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 	default:
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("parse json failed, unsupported array data type '%s'", eleType.String()))
+	}
+}
+
+func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema) (*schemapb.VectorField, error) {
+	elementType := field.GetElementType()
+	fieldID := field.GetFieldID()
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		values := make([]float32, 0, len(vectors)*10)
+		dim := r.id2Dim[fieldID]
+		for _, vectorAny := range vectors {
+			vector, ok := vectorAny.([]any)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected slice as vector, but got %T", vectorAny))
+			}
+			for _, v := range vector {
+				value, ok := v.(json.Number)
+				if !ok {
+					return nil, r.wrapTypeError(value, fieldID)
+				}
+				num, err := strconv.ParseFloat(value.String(), 32)
+				if err != nil {
+					return nil, err
+				}
+				values = append(values, float32(num))
+			}
+		}
+		return &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: values,
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("not implemented element type: %s", elementType.String()))
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type: %s", elementType.String()))
 	}
 }

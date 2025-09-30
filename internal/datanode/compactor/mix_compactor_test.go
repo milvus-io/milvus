@@ -85,7 +85,6 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
@@ -94,7 +93,9 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
@@ -119,7 +120,6 @@ func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
@@ -128,7 +128,9 @@ func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupSubTest() {

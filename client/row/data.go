@@ -64,7 +64,7 @@ const (
 // AnyToColumns converts input rows into column-based data.
 // when schemas are provided, this method will use 0-th element
 // otherwise, it shall try to parse schema from row[0]
-func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Column, error) {
+func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schema) ([]column.Column, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []column.Column{}, errors.New("0 length column")
@@ -123,7 +123,7 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 
 		for fieldName, candi := range set {
 			fieldSch, ok := nameSchemas[fieldName]
-			if ok && fieldSch.PrimaryKey && fieldSch.AutoID {
+			if ok && fieldSch.PrimaryKey && fieldSch.AutoID && !keepPkField {
 				// remove pk field from candidates set, avoid adding it into dynamic column
 				delete(set, fieldName)
 				continue

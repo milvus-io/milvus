@@ -16,32 +16,7 @@
 
 namespace milvus::query {
 void
-FloatVectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
-
-void
-BinaryVectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
-
-void
-Float16VectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
-
-void
-BFloat16VectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
-
-void
-SparseFloatVectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
-
-void
-Int8VectorANNS::accept(PlanNodeVisitor& visitor) {
+VectorPlanNode::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }
 
@@ -50,9 +25,6 @@ RetrievePlanNode::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }
 
-void
-EmbListFloatVectorANNS::accept(PlanNodeVisitor& visitor) {
-    visitor.visit(*this);
-}
+// no other vector plan node types
 
 }  // namespace milvus::query

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -9,16 +10,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -43,18 +41,11 @@ func (s *Server) init() {
 
 	// init all service.
 	s.initService()
+
+	log.Info("init query segcore...")
+	initcore.InitQueryNode(context.TODO())
+
 	log.Info("streamingnode server initialized")
-
-	// init storage v2 file system.
-	if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
-		panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
-	}
-
-	// init paramtable change callback for core related config
-	initcore.SetupCoreConfigChangelCallback()
-	if hookutil.IsClusterEncyptionEnabled() {
-		message.RegisterCipher(hookutil.GetCipher())
-	}
 }
 
 // Stop stops the streamingnode server.

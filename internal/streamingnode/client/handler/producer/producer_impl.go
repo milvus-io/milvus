@@ -298,19 +298,21 @@ func (p *producerImpl) recvLoop() (err error) {
 			var result produceResponse
 			switch produceResp := resp.Produce.Response.(type) {
 			case *streamingpb.ProduceMessageResponse_Result:
-				msgID, err := message.UnmarshalMessageID(
-					p.walName,
-					produceResp.Result.GetId().GetId(),
-				)
+				msgID, err := message.UnmarshalMessageID(produceResp.Result.GetId())
 				if err != nil {
-					return err
+					return errors.Wrap(err, "failed to unmarshal message id")
+				}
+				lcMsgID, err := message.UnmarshalMessageID(produceResp.Result.GetLastConfirmedId())
+				if err != nil {
+					return errors.Wrap(err, "failed to unmarshal last confirmed message id")
 				}
 				result = produceResponse{
 					result: &types.AppendResult{
-						MessageID: msgID,
-						TimeTick:  produceResp.Result.GetTimetick(),
-						TxnCtx:    message.NewTxnContextFromProto(produceResp.Result.GetTxnContext()),
-						Extra:     produceResp.Result.GetExtra(),
+						MessageID:              msgID,
+						LastConfirmedMessageID: lcMsgID,
+						TimeTick:               produceResp.Result.GetTimetick(),
+						TxnCtx:                 message.NewTxnContextFromProto(produceResp.Result.GetTxnContext()),
+						Extra:                  produceResp.Result.GetExtra(),
 					},
 				}
 			case *streamingpb.ProduceMessageResponse_Error:

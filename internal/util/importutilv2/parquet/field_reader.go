@@ -160,6 +160,12 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadJSONData(c, count)
 		return data, nil, err
+	case schemapb.DataType_Geometry:
+		if c.field.GetNullable() {
+			return ReadNullableGeometryData(c, count)
+		}
+		data, err := ReadGeometryData(c, count)
+		return data, nil, err
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		// vector not support default_value
 		if c.field.GetNullable() {
@@ -205,6 +211,12 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			return ReadNullableArrayData(c, count)
 		}
 		data, err := ReadArrayData(c, count)
+		return data, nil, err
+	case schemapb.DataType_ArrayOfVector:
+		if c.field.GetNullable() {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
+		data, err := ReadVectorArrayData(c, count)
 		return data, nil, err
 	default:
 		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
@@ -643,6 +655,42 @@ func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 		byteArr = append(byteArr, []byte(str))
 	}
 	return byteArr, validData, nil
+}
+
+func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error) {
+	// Geometry field read data from string array Parquet
+	data, validData, err := ReadNullableStringData(pcr, count, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	if data == nil {
+		return nil, nil, nil
+	}
+	byteArr := make([][]byte, 0)
+	for i, str := range data.([]string) {
+		if !validData[i] {
+			byteArr = append(byteArr, []byte(nil))
+			continue
+		}
+		byteArr = append(byteArr, []byte(str))
+	}
+	return byteArr, validData, nil
+}
+
+func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
+	// Geometry field read data from string array Parquet
+	data, err := ReadStringData(pcr, count, false)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, nil
+	}
+	byteArr := make([][]byte, 0)
+	for _, str := range data.([]string) {
+		byteArr = append(byteArr, []byte(str))
+	}
+	return byteArr, nil
 }
 
 func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
@@ -1767,4 +1815,73 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
 			elementType.String(), pcr.field.GetName()))
 	}
+}
+
+func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
+	data := make([]*schemapb.VectorField, 0, count)
+	maxCapacity, err := parameterutil.GetMaxCapacity(pcr.field)
+	if err != nil {
+		return nil, err
+	}
+
+	dim, err := typeutil.GetDim(pcr.field)
+	if err != nil {
+		return nil, err
+	}
+
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
+	}
+
+	if chunked == nil {
+		return nil, nil
+	}
+
+	elementType := pcr.field.GetElementType()
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		for _, chunk := range chunked.Chunks() {
+			if chunk.NullN() > 0 {
+				return nil, WrapNullRowErr(pcr.field)
+			}
+			listReader, ok := chunk.(*array.List)
+			if !ok {
+				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			}
+			listFloat32Reader, ok := listReader.ListValues().(*array.Float32)
+			if !ok {
+				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			}
+			offsets := listReader.Offsets()
+			for i := 1; i < len(offsets); i++ {
+				start, end := offsets[i-1], offsets[i]
+				floatCount := end - start
+				if floatCount%int32(dim) != 0 {
+					return nil, merr.WrapErrImportFailed(fmt.Sprintf("vectors in VectorArray should be aligned with dim: %d", dim))
+				}
+
+				arrLength := floatCount / int32(dim)
+				if err = common.CheckArrayCapacity(int(arrLength), maxCapacity, pcr.field); err != nil {
+					return nil, err
+				}
+
+				arrData := make([]float32, floatCount)
+				copy(arrData, listFloat32Reader.Float32Values()[start:end])
+				data = append(data, &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: arrData,
+						},
+					},
+				})
+			}
+		}
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for vector field '%s'",
+			elementType.String(), pcr.field.GetName()))
+	}
+
+	return data, nil
 }

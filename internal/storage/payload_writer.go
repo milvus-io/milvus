@@ -114,12 +114,12 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		if w.elementType == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("ArrayOfVector requires elementType, use WithElementType option")
 		}
-		arrowType, err := VectorArrayToArrowType(*w.elementType)
+		elemType, err := VectorArrayToArrowType(*w.elementType)
 		if err != nil {
 			return nil, err
 		}
-		w.arrowType = arrowType
-		w.builder = array.NewListBuilder(memory.DefaultAllocator, arrowType.(*arrow.ListType).Elem())
+		w.arrowType = arrow.ListOf(elemType)
+		w.builder = array.NewListBuilder(memory.DefaultAllocator, elemType)
 	} else {
 		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
@@ -234,6 +234,25 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 			isValid = validData[0]
 		}
 		return w.AddOneJSONToPayload(val, isValid)
+	case schemapb.DataType_Geometry:
+		val, ok := data.([]byte)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneGeometryToPayload(val, isValid)
 	case schemapb.DataType_BinaryVector:
 		val, ok := data.([]byte)
 		if !ok {
@@ -614,6 +633,29 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 	return nil
 }
 
+func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool) error {
+	if w.finished {
+		return errors.New("can't append data to finished geometry payload")
+	}
+
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
+	}
+
+	builder, ok := w.builder.(*array.BinaryBuilder)
+	if !ok {
+		return errors.New("failed to cast geometryBuilder")
+	}
+
+	if !isValid {
+		builder.AppendNull()
+	} else {
+		builder.Append(data)
+	}
+
+	return nil
+}
+
 func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int) error {
 	if w.finished {
 		return errors.New("can't append data to finished binary vector payload")
@@ -869,6 +911,8 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.BinaryType{}
 	case schemapb.DataType_JSON:
 		return &arrow.BinaryType{}
+	case schemapb.DataType_Geometry:
+		return &arrow.BinaryType{}
 	case schemapb.DataType_FloatVector:
 		return &arrow.FixedSizeBinaryType{
 			ByteWidth: dim * 4,
@@ -897,28 +941,6 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 	default:
 		panic("unsupported data type")
 	}
-}
-
-// VectorArrayToArrowType converts VectorArray type with elementType to Arrow ListArray type
-func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
-	var childType arrow.DataType
-
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		childType = arrow.PrimitiveTypes.Float32
-	case schemapb.DataType_BinaryVector:
-		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
-	case schemapb.DataType_Float16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
-	case schemapb.DataType_BFloat16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
-	case schemapb.DataType_Int8Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
-	}
-
-	return arrow.ListOf(childType), nil
 }
 
 // AddVectorArrayFieldDataToPayload adds VectorArrayFieldData to payload using Arrow ListArray

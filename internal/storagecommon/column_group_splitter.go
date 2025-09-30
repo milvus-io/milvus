@@ -17,7 +17,11 @@
 package storagecommon
 
 import (
+	"fmt"
+	"sort"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -29,23 +33,39 @@ const (
 type ColumnGroup struct {
 	GroupID typeutil.UniqueID
 	Columns []int // column indices
+	Fields  []int64
 }
 
-// SplitBySchema is a generic function to split columns by schema based on data type
-func SplitBySchema(fields []*schemapb.FieldSchema) []ColumnGroup {
-	groups := make([]ColumnGroup, 0)
-	shortColumnGroup := ColumnGroup{Columns: make([]int, 0), GroupID: DefaultShortColumnGroupID}
-	for i, field := range fields {
-		if IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
-			groups = append(groups, ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
+func (cg ColumnGroup) String() string {
+	return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v]", cg.GroupID, cg.Columns, cg.Fields)
+}
+
+func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, policies ...ColumnGroupSplitPolicy) []ColumnGroup {
+	split := newCurrentSplit(fields, stats)
+	for _, policy := range policies {
+		split = policy.Split(split)
 	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append([]ColumnGroup{shortColumnGroup}, groups...)
+	sort.Slice(split.outputGroups, func(i, j int) bool {
+		return split.outputGroups[i].GroupID < split.outputGroups[j].GroupID
+	})
+	return split.outputGroups
+}
+
+func DefaultPolicies() []ColumnGroupSplitPolicy {
+	paramtable.Init()
+	result := make([]ColumnGroupSplitPolicy, 0, 4)
+	if paramtable.Get().CommonCfg.Stv2SplitSystemColumn.GetAsBool() {
+		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludePartitionKey.GetAsBool(),
+			paramtable.Get().CommonCfg.Stv2SystemColumnIncludeClusteringKey.GetAsBool()))
 	}
-	return groups
+	if paramtable.Get().CommonCfg.Stv2SplitByAvgSize.GetAsBool() {
+		result = append(result, NewAvgSizePolicy(paramtable.Get().CommonCfg.Stv2SplitAvgSizeThreshold.GetAsInt64()))
+	}
+	result = append(result,
+		NewSelectedDataTypePolicy(),
+		NewRemanentShortPolicy(-1))
+	return result
 }
 
 func IsVectorDataType(dataType schemapb.DataType) bool {

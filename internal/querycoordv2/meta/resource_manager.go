@@ -406,6 +406,34 @@ func (rm *ResourceManager) getResourceGroupByNodeID(nodeID int64) *ResourceGroup
 	return nil
 }
 
+// IsNodeSuspended checks whether a node is suspended.
+// If a node is not in any resource group, return true.
+func (rm *ResourceManager) IsNodeSuspended(nodeID int64) bool {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	return rm.getResourceGroupByNodeID(nodeID) == nil
+}
+
+// GetNodesSuspended returns a map indicating whether each node is suspended.
+// A node is considered suspended if it is not associated with any resource group.
+func (rm *ResourceManager) GetNodesSuspended(nodeIDs []int64) map[int64]bool {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+
+	// Initialize a map to store the results.
+	result := make(map[int64]bool, len(nodeIDs))
+
+	// Iterate through the list of node IDs to check their status.
+	for _, nodeID := range nodeIDs {
+		// Check if the node is associated with a resource group.
+		isSuspended := rm.getResourceGroupByNodeID(nodeID) == nil
+
+		// Store the result in the map.
+		result[nodeID] = isSuspended
+	}
+	return result
+}
+
 // ContainsNode return whether given node is in given resource group.
 func (rm *ResourceManager) ContainsNode(ctx context.Context, rgName string, node int64) bool {
 	rm.rwmutex.RLock()

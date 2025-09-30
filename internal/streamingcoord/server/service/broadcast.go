@@ -3,11 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // BroadcastService is the interface of the broadcast service.
@@ -16,32 +14,31 @@ type BroadcastService interface {
 }
 
 // NewBroadcastService creates a new broadcast service.
-func NewBroadcastService(bc *syncutil.Future[broadcaster.Broadcaster]) BroadcastService {
-	return &broadcastServceImpl{
-		broadcaster: bc,
-		walName:     util.MustSelectWALName(),
-	}
+func NewBroadcastService() BroadcastService {
+	return &broadcastServceImpl{}
 }
 
 // broadcastServiceeeeImpl is the implementation of the broadcast service.
-type broadcastServceImpl struct {
-	broadcaster *syncutil.Future[broadcaster.Broadcaster]
-	walName     string
-}
+type broadcastServceImpl struct{}
 
 // Broadcast broadcasts the message to all channels.
 func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.BroadcastRequest) (*streamingpb.BroadcastResponse, error) {
-	broadcaster, err := s.broadcaster.GetWithContext(ctx)
+	msg := message.NewBroadcastMutableMessageBeforeAppend(req.Message.Payload, req.Message.Properties)
+	api, err := broadcast.StartBroadcastWithResourceKeys(ctx, msg.BroadcastHeader().ResourceKeys.Collect()...)
 	if err != nil {
 		return nil, err
 	}
-	results, err := broadcaster.Broadcast(ctx, message.NewBroadcastMutableMessageBeforeAppend(req.Message.Payload, req.Message.Properties))
+	results, err := api.Broadcast(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
 	protoResult := make(map[string]*streamingpb.ProduceMessageResponseResult, len(results.AppendResults))
 	for vchannel, result := range results.AppendResults {
-		protoResult[vchannel] = result.IntoProto()
+		protoResult[vchannel] = &streamingpb.ProduceMessageResponseResult{
+			Id:              result.MessageID.IntoProto(),
+			Timetick:        result.TimeTick,
+			LastConfirmedId: result.LastConfirmedMessageID.IntoProto(),
+		}
 	}
 	return &streamingpb.BroadcastResponse{
 		BroadcastId: results.BroadcastID,
@@ -51,7 +48,7 @@ func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.Br
 
 // Ack acknowledges the message at the specified vchannel.
 func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.BroadcastAckRequest) (*streamingpb.BroadcastAckResponse, error) {
-	broadcaster, err := s.broadcaster.GetWithContext(ctx)
+	broadcaster, err := broadcast.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +60,11 @@ func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.Broadcas
 		}
 		return &streamingpb.BroadcastAckResponse{}, nil
 	}
-	if err := broadcaster.Ack(ctx, message.NewImmutableMessageFromProto(s.walName, req.Message)); err != nil {
+	if err := broadcaster.Ack(ctx, message.NewImmutableMesasge(
+		message.MustUnmarshalMessageID(req.Message.Id),
+		req.Message.Payload,
+		req.Message.Properties,
+	)); err != nil {
 		return nil, err
 	}
 	return &streamingpb.BroadcastAckResponse{}, nil

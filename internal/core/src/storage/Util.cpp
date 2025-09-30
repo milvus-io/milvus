@@ -31,6 +31,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
+#include "storage/StorageV2FSCache.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/azure/AzureChunkManager.h"
 #endif
@@ -376,7 +377,8 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
-        case DataType::JSON: {
+        case DataType::JSON:
+        case DataType::GEOMETRY: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         // sparse float vector doesn't require a dim
@@ -531,7 +533,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
         case DataType::ARRAY:
-        case DataType::JSON: {
+        case DataType::JSON:
+        case DataType::GEOMETRY: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
@@ -999,14 +1002,12 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+    StorageV2FSCache::Key conf;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
-        milvus_storage::ArrowFileSystemConfig conf;
         conf.root_path = path;
         conf.storage_type = "local";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
     } else {
-        milvus_storage::ArrowFileSystemConfig conf;
         conf.address = std::string(storage_config.address);
         conf.bucket_name = std::string(storage_config.bucket_name);
         conf.access_key_id = std::string(storage_config.access_key_id);
@@ -1025,10 +1026,8 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.gcp_credential_json =
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
     }
-    return milvus_storage::ArrowFileSystemSingleton::GetInstance()
-        .GetArrowFileSystem();
+    return StorageV2FSCache::Instance().Get(conf);
 }
 
 FieldDataPtr
@@ -1069,6 +1068,9 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(
+                type, nullable, total_num_rows);
+        case DataType::GEOMETRY:
+            return std::make_shared<FieldData<Geometry>>(
                 type, nullable, total_num_rows);
         case DataType::ARRAY:
             return std::make_shared<FieldData<Array>>(
@@ -1207,26 +1209,52 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     }
 
     std::vector<std::string> remote_chunk_files;
-    int64_t column_group_id;
+    int64_t column_group_id = -1;
+    size_t col_offset = -1;
     if (column_group_files.find(field_id) == column_group_files.end()) {
-        column_group_id = DEFAULT_SHORT_COLUMN_GROUP_ID;
-        remote_chunk_files = column_group_files[DEFAULT_SHORT_COLUMN_GROUP_ID];
+        for (auto& [group_id, files] : column_group_files) {
+            if (group_id >= START_USER_FIELDID) {
+                continue;
+            }
+            milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+                FieldId(group_id), files[0], nullptr, fs);
+            for (size_t i = 0; i < field_id_list.size(); ++i) {
+                if (field_id_list.Get(i) == field_id) {
+                    remote_chunk_files = files;
+                    column_group_id = group_id;
+                    col_offset = i;
+                    break;
+                }
+            }
+            if (column_group_id != -1) {
+                break;
+            }
+        }
     } else {
         remote_chunk_files = column_group_files[field_id];
         column_group_id = field_id;
     }
 
+    if (column_group_id == -1) {
+        LOG_INFO(
+            "[StorageV2] field {} not found in any column group, return "
+            "empty result set",
+            field_id);
+        return field_data_list;
+    }
     AssertInfo(remote_chunk_files.size() > 0,
                "[StorageV2] remote files size is 0");
 
     // find column offset
-    milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
-    size_t col_offset = -1;
-    for (size_t i = 0; i < field_id_list.size(); ++i) {
-        if (field_id_list.Get(i) == field_id) {
-            col_offset = i;
-            break;
+    if (col_offset == -1) {
+        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+            FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
+
+        for (size_t i = 0; i < field_id_list.size(); ++i) {
+            if (field_id_list.Get(i) == field_id) {
+                col_offset = i;
+                break;
+            }
         }
     }
     // field not found, must be newly added field, return empty resultset
@@ -1283,6 +1311,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
+                                    fs,
                                     nullptr,
                                     milvus::proto::common::LoadPriority::HIGH);
         });

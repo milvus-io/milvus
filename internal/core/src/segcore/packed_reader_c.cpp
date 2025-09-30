@@ -14,13 +14,10 @@
 
 #include "segcore/packed_reader_c.h"
 #include "milvus-storage/packed/reader.h"
-#include "milvus-storage/common/log.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/config.h"
-#include "parquet/encryption/encryption.h"
 #include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
-#include "log/Log.h"
+#include "storage/StorageV2FSCache.h"
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
@@ -43,28 +40,26 @@ NewPackedReaderWithStorageConfig(char** paths,
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
-        milvus_storage::ArrowFileSystemConfig conf;
-        conf.address = std::string(c_storage_config.address);
-        conf.bucket_name = std::string(c_storage_config.bucket_name);
-        conf.access_key_id = std::string(c_storage_config.access_key_id);
-        conf.access_key_value = std::string(c_storage_config.access_key_value);
-        conf.root_path = std::string(c_storage_config.root_path);
-        conf.storage_type = std::string(c_storage_config.storage_type);
-        conf.cloud_provider = std::string(c_storage_config.cloud_provider);
-        conf.iam_endpoint = std::string(c_storage_config.iam_endpoint);
-        conf.log_level = std::string(c_storage_config.log_level);
-        conf.region = std::string(c_storage_config.region);
-        conf.useSSL = c_storage_config.useSSL;
-        conf.sslCACert = std::string(c_storage_config.sslCACert);
-        conf.useIAM = c_storage_config.useIAM;
-        conf.useVirtualHost = c_storage_config.useVirtualHost;
-        conf.requestTimeoutMs = c_storage_config.requestTimeoutMs;
-        conf.gcp_credential_json =
-            std::string(c_storage_config.gcp_credential_json);
-        conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
+            std::string(c_storage_config.address),
+            std::string(c_storage_config.bucket_name),
+            std::string(c_storage_config.access_key_id),
+            std::string(c_storage_config.access_key_value),
+            std::string(c_storage_config.root_path),
+            std::string(c_storage_config.storage_type),
+            std::string(c_storage_config.cloud_provider),
+            std::string(c_storage_config.iam_endpoint),
+            std::string(c_storage_config.log_level),
+            std::string(c_storage_config.region),
+            c_storage_config.useSSL,
+            std::string(c_storage_config.sslCACert),
+            c_storage_config.useIAM,
+            c_storage_config.useVirtualHost,
+            c_storage_config.requestTimeoutMs,
+            false,
+            std::string(c_storage_config.gcp_credential_json),
+            c_storage_config.use_custom_part_upload,
+        });
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,

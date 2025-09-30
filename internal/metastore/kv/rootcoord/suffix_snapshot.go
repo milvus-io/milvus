@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -547,7 +546,8 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 		updateList = append(updateList, removal)
 	}
 
-	err = etcd.SaveByBatchWithLimit(execute, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	err = etcd.SaveByBatchWithLimit(execute, maxTxnNum, func(partialKvs map[string]string) error {
 		return ss.MetaKv.MultiSave(ctx, partialKvs)
 	})
 	if err == nil {
@@ -658,7 +658,8 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(ctx, partialKeys)
 	}
-	return etcd.RemoveByBatchWithLimit(keyGroup, util.MaxEtcdTxnNum, removeFn)
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.RemoveByBatchWithLimit(keyGroup, maxTxnNum, removeFn)
 }
 
 // removeExpiredKvs removes expired key-value pairs from the snapshot

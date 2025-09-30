@@ -31,6 +31,7 @@ import (
 type IDFOracleSuite struct {
 	suite.Suite
 	collectionID     int64
+	channel          string
 	collectionSchema *schemapb.CollectionSchema
 	idfOracle        *idfOracle
 
@@ -40,6 +41,7 @@ type IDFOracleSuite struct {
 
 func (suite *IDFOracleSuite) SetupSuite() {
 	suite.collectionID = 111
+	suite.channel = "test-channel"
 	suite.collectionSchema = &schemapb.CollectionSchema{
 		Functions: []*schemapb.FunctionSchema{{
 			Type:           schemapb.FunctionType_BM25,
@@ -50,7 +52,7 @@ func (suite *IDFOracleSuite) SetupSuite() {
 }
 
 func (suite *IDFOracleSuite) SetupTest() {
-	suite.idfOracle = NewIDFOracle(suite.collectionID, suite.collectionSchema.GetFunctions()).(*idfOracle)
+	suite.idfOracle = NewIDFOracle(suite.channel, suite.collectionSchema.GetFunctions()).(*idfOracle)
 	suite.idfOracle.Start()
 	suite.snapshot = &snapshot{
 		dist: []SnapshotItem{{1, make([]SegmentEntry, 0)}},
@@ -134,14 +136,21 @@ func (suite *IDFOracleSuite) TestSealed() {
 		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
 	}
 
-	// register sealed segment but all deactvate
-	suite.Zero(suite.idfOracle.current.NumRow())
+	// some sealed not in target
+	invalidSealedSegs := []int64{5, 6}
+	for _, segID := range invalidSealedSegs {
+		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+	}
 
-	// update and sync snapshot make all sealed activate
+	// register sealed segment and all preload to current
+	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.idfOracle.current.NumRow())
+
+	// update and sync snapshot make all sealed in target activate
+	// and invalid sealed segemnt deactivate
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)), suite.idfOracle.current.NumRow())
 
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
@@ -211,11 +220,20 @@ func (suite *IDFOracleSuite) TestLocalCache() {
 		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
 	}
 
-	// update and sync snapshot make all sealed activate
+	// some sealed not in target
+	invalidSealedSegs := []int64{5, 6}
+	for _, segID := range invalidSealedSegs {
+		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+	}
+
+	// register sealed segment and all preload to current
+	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.idfOracle.current.NumRow())
+
+	// update and sync snapshot make all sealed in target activate
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)), suite.idfOracle.current.NumRow())
 
 	suite.Require().Eventually(func() bool {
 		allInLocal := true

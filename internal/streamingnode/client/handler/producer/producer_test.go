@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -50,9 +49,7 @@ func TestProducer(t *testing.T) {
 
 	recvCh <- &streamingpb.ProduceResponse{
 		Response: &streamingpb.ProduceResponse_Create{
-			Create: &streamingpb.CreateProducerResponse{
-				WalName: walimplstest.WALName,
-			},
+			Create: &streamingpb.CreateProducerResponse{},
 		},
 	}
 	producer, err := CreateProducer(ctx, opts, c)
@@ -89,7 +86,8 @@ func TestProducer(t *testing.T) {
 				RequestId: 2,
 				Response: &streamingpb.ProduceMessageResponse_Result{
 					Result: &streamingpb.ProduceMessageResponseResult{
-						Id: &messagespb.MessageID{Id: walimplstest.NewTestMessageID(1).Marshal()},
+						Id:              walimplstest.NewTestMessageID(1).IntoProto(),
+						LastConfirmedId: walimplstest.NewTestMessageID(1).IntoProto(),
 					},
 				},
 			},

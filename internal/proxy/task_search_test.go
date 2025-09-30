@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -395,7 +396,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -435,7 +436,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -475,7 +476,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		f4.FieldId = fieldNameId[testFloatField]
 		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
 			FieldsData: []*schemapb.FieldData{f1, f2, f3, f4},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
@@ -3072,7 +3073,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 }
 
-func TestTaskSearch_parseSearchInfo(t *testing.T) {
+func TestSearchTask_parseSearchInfo(t *testing.T) {
 	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
@@ -3820,6 +3821,195 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
 		})
 	})
+
+	t.Run("parseSearchInfo groupBy info with JSON path parameters", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		// Test JSON path parameters
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c3",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: "5",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   StrictGroupSize,
+			Value: "true",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   JSONPath,
+			Value: "c3[\"product_info\"][\"brand\"]",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   JSONType,
+			Value: "VarChar",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   StrictCastKey,
+			Value: "true",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+
+		// Verify JSON-related parameters are correctly parsed
+		assert.Equal(t, "/product_info/brand", searchInfo.planInfo.GetJsonPath())
+		assert.Equal(t, schemapb.DataType_VarChar, searchInfo.planInfo.GetJsonType())
+		assert.True(t, searchInfo.planInfo.GetStrictCast())
+
+		// Verify other groupBy parameters
+		assert.Equal(t, int64(103), searchInfo.planInfo.GetGroupByFieldId())
+		assert.Equal(t, int64(5), searchInfo.planInfo.GetGroupSize())
+		assert.True(t, searchInfo.planInfo.GetStrictGroupSize())
+	})
+
+	t.Run("parseSearchInfo groupBy info with JSON path parameters - default values", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		// Test with only groupBy field, other JSON parameters should have default values
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c3",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: "3",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+
+		// Verify default values for JSON parameters
+		assert.Equal(t, "", searchInfo.planInfo.GetJsonPath())
+		assert.Equal(t, schemapb.DataType_None, searchInfo.planInfo.GetJsonType())
+		assert.False(t, searchInfo.planInfo.GetStrictCast())
+
+		// Verify other groupBy parameters
+		assert.Equal(t, int64(103), searchInfo.planInfo.GetGroupByFieldId())
+		assert.Equal(t, int64(3), searchInfo.planInfo.GetGroupSize())
+		assert.False(t, searchInfo.planInfo.GetStrictGroupSize()) // default value
+	})
+
+	t.Run("parseSearchInfo groupBy info with invalid JSON type", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		// Test with invalid JSON type
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c3",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   JSONType,
+			Value: "invalid_type",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err) // Should not error, just use default value
+		assert.NotNil(t, searchInfo.planInfo)
+
+		// Verify invalid JSON type results in default value
+		assert.Equal(t, schemapb.DataType_None, searchInfo.planInfo.GetJsonType())
+	})
+
+	t.Run("parseSearchInfo groupBy info with invalid strict cast", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		// Test with invalid strict cast value
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c3",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   StrictCastKey,
+			Value: "invalid_bool",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err) // Should not error, just use default value
+		assert.NotNil(t, searchInfo.planInfo)
+
+		// Verify invalid strict cast results in default value
+		assert.False(t, searchInfo.planInfo.GetStrictCast())
+	})
+
+	t.Run("parseSearchInfo groupBy info with JSON path and different data types", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		// Test different JSON data types
+		testCases := []struct {
+			jsonTypeStr  string
+			expectedType schemapb.DataType
+		}{
+			{"VarChar", schemapb.DataType_VarChar},
+			{"Int64", schemapb.DataType_Int64},
+			{"Double", schemapb.DataType_Double},
+			{"Bool", schemapb.DataType_Bool},
+			{"Float", schemapb.DataType_Float},
+		}
+
+		for _, tc := range testCases {
+			t.Run(fmt.Sprintf("JSON type %s", tc.jsonTypeStr), func(t *testing.T) {
+				params := getValidSearchParams()
+				params = append(params, &commonpb.KeyValuePair{
+					Key:   GroupByFieldKey,
+					Value: "c3",
+				})
+				params = append(params, &commonpb.KeyValuePair{
+					Key:   JSONPath,
+					Value: "c3[\"product_info\"][\"brand\"]",
+				})
+				params = append(params, &commonpb.KeyValuePair{
+					Key:   JSONType,
+					Value: tc.jsonTypeStr,
+				})
+
+				searchInfo, err := parseSearchInfo(params, schema, nil)
+				assert.NoError(t, err)
+				assert.NotNil(t, searchInfo.planInfo)
+
+				assert.Equal(t, "/product_info/brand", searchInfo.planInfo.GetJsonPath())
+				assert.Equal(t, tc.expectedType, searchInfo.planInfo.GetJsonType())
+			})
+		}
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
@@ -3878,6 +4068,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
 	globalMetaCache = cache
 
 	t.Run("Test normal", func(t *testing.T) {
@@ -3965,8 +4156,10 @@ func TestSearchTask_Requery(t *testing.T) {
 		}
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
-		queryResult, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
+		queryResult, storageCost, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
 		assert.NoError(t, err)
+		assert.Equal(t, int64(0), storageCost.ScannedRemoteBytes)
+		assert.Equal(t, int64(0), storageCost.ScannedTotalBytes)
 		assert.Len(t, queryResult.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
 			fieldName := field.GetFieldName()
@@ -4030,7 +4223,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
-		_, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
+		_, _, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})

@@ -70,8 +70,8 @@ func (w *walImpl) initProducer() error {
 	return nil
 }
 
-func (w *walImpl) WALName() string {
-	return walName
+func (w *walImpl) WALName() message.WALName {
+	return message.WALNamePulsar
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {

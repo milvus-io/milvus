@@ -17,18 +17,26 @@ var systemMessageType = map[MessageType]struct{}{
 	MessageTypeTxn:         {},
 }
 
+var selfControlledMessageType = map[MessageType]struct{}{
+	MessageTypeTimeTick:      {},
+	MessageTypeCreateSegment: {},
+	MessageTypeFlush:         {},
+}
+
 var cipherMessageType = map[MessageType]struct{}{
 	MessageTypeInsert: {},
 	MessageTypeDelete: {},
 }
 
 var exclusiveRequiredMessageType = map[MessageType]struct{}{
-	MessageTypeCreateCollection: {},
-	MessageTypeDropCollection:   {},
-	MessageTypeCreatePartition:  {},
-	MessageTypeDropPartition:    {},
-	MessageTypeManualFlush:      {},
-	MessageTypeSchemaChange:     {},
+	MessageTypeCreateCollection:     {},
+	MessageTypeDropCollection:       {},
+	MessageTypeCreatePartition:      {},
+	MessageTypeDropPartition:        {},
+	MessageTypeManualFlush:          {},
+	MessageTypeSchemaChange:         {},
+	MessageTypeAlterReplicateConfig: {},
+	MessageTypeAlterCollection:      {},
 }
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
@@ -155,7 +163,7 @@ func asSpecializedBroadcastMessage[H proto.Message, B proto.Message](msg BasicMe
 	if err != nil {
 		return nil, err
 	}
-	return sm, nil
+	return sm.(*specializedMutableMessageImpl[H, B]), nil
 }
 
 // MustAsSpecializedBroadcastMessage converts a BasicMessage to a specialized BroadcastMessage.
@@ -201,6 +209,20 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 		panic(fmt.Sprintf("failed to encode insert header, there's a bug, %+v, %s", m.header, err.Error()))
 	}
 	m.messageImpl.properties.Set(messageHeader, newHeader)
+}
+
+// OverwriteBody overwrites the message body.
+func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
+	payload, err := proto.Marshal(body)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
+	}
+	m.messageImpl.payload = payload
+}
+
+// BroadcastMessage returns the broadcast message.
+func (m *specializedMutableMessageImpl[H, B]) BroadcastMessage() BroadcastMutableMessage {
+	return m.messageImpl
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.

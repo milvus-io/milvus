@@ -1766,7 +1766,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[]):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[], desired_field_names=[]):
     """
     Generates row data based on the given schema.
     
@@ -1786,6 +1786,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         - For primary key fields, generates sequential values starting from 'start'.
         - For non-primary fields, generates random data based on field type.
     """
+    # if both skip_field_names and desired_field_names are specified, raise an exception
+    if skip_field_names and desired_field_names:
+        raise Exception(f"Cannot specify both skip_field_names and desired_field_names")
+
     if schema is None:
         schema = gen_default_collection_schema()
 
@@ -1793,7 +1797,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
     func_output_fields = []
     if isinstance(schema, dict):
         # a dict of collection schema info is usually from client.describe_collection()
-        fields = schema.get('fields', [])
+        all_fields = schema.get('fields', [])
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.get('name', None) in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         functions = schema.get('functions', [])
         for func in functions:
             output_field_names = func.get('output_field_names', [])
@@ -1822,7 +1835,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
             data.append(tmp)
     else:
         # a schema object is usually form orm schema object
-        fields = schema.fields
+        all_fields = schema.fields
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.name in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         if hasattr(schema, "functions"):
             functions = schema.functions
             for func in functions:
@@ -3931,3 +3953,103 @@ def parse_fmod(x: int, y: int) -> int:
     v = abs(x) % abs(y)
 
     return v if x >= 0 else -v
+
+def gen_partial_row_data_by_schema(nb=ct.default_nb, schema=None, desired_field_names=None, num_fields=1,
+                                   start=0, random_pk=False, skip_field_names=[]):
+    """
+    Generate row data that contains a subset of fields from the given schema.
+    Args:
+        schema: Collection schema or collection info dict. If None, uses default schema.
+        desired_field_names (list[str] | None): Explicit field names to include (intersected with eligible fields).
+        num_fields (int): Number of fields to include if desired_field_names is not provided. Defaults to 1.
+        start (int): Starting value for primary key fields when sequential values are needed.
+        random_pk (bool): Whether to generate random primary key values.
+        skip_field_names (list[str]): Field names to skip.
+        nb (int): Number of rows to generate. Defaults to 1.
+    Returns:
+        list[dict]: a list of rows.
+    Notes:
+        - Skips auto_id fields and function output fields.
+        - Primary INT64/VARCHAR fields get sequential values from `start` unless `random_pk=True`.
+        - Works with both schema dicts (from v2 client describe_collection) and ORM schema objects.
+    """
+    if schema is None:
+        schema = gen_default_collection_schema()
+    func_output_fields = []
+    # Build list of eligible fields
+    if isinstance(schema, dict):
+        fields = schema.get('fields', [])
+        functions = schema.get('functions', [])
+        for func in functions:
+            output_field_names = func.get('output_field_names', [])
+            func_output_fields.extend(output_field_names)
+        func_output_fields = list(set(func_output_fields))
+        eligible_fields = []
+        for field in fields:
+            field_name = field.get('name', None)
+            if field.get('auto_id', False):
+                continue
+            if field_name in func_output_fields or field_name in skip_field_names:
+                continue
+            eligible_fields.append(field)
+        # Choose subset
+        if desired_field_names:
+            desired_set = set(desired_field_names)
+            chosen_fields = [f for f in eligible_fields if f.get('name') in desired_set]
+        else:
+            n = max(0, min(len(eligible_fields), num_fields if num_fields is not None else 1))
+            chosen_fields = eligible_fields[:n]
+        rows = []
+        curr_start = start
+        for _ in range(nb):
+            row = {}
+            for field in chosen_fields:
+                fname = field.get('name', None)
+                value = gen_data_by_collection_field(field, random_pk=random_pk)
+                # Override for PKs when not random
+                if not random_pk and field.get('is_primary', False) is True:
+                    if field.get('type', None) == DataType.INT64:
+                        value = curr_start
+                        curr_start += 1
+                    elif field.get('type', None) == DataType.VARCHAR:
+                        value = str(curr_start)
+                        curr_start += 1
+                row[fname] = value
+            rows.append(row)
+        return rows
+    # ORM schema path
+    fields = schema.fields
+    if hasattr(schema, "functions"):
+        functions = schema.functions
+        for func in functions:
+            func_output_fields.extend(func.output_field_names)
+    func_output_fields = list(set(func_output_fields))
+    eligible_fields = []
+    for field in fields:
+        if field.auto_id:
+            continue
+        if field.name in func_output_fields or field.name in skip_field_names:
+            continue
+        eligible_fields.append(field)
+    if desired_field_names:
+        desired_set = set(desired_field_names)
+        chosen_fields = [f for f in eligible_fields if f.name in desired_set]
+    else:
+        n = max(0, min(len(eligible_fields), num_fields if num_fields is not None else 1))
+        chosen_fields = eligible_fields[:n]
+    rows = []
+    curr_start = start
+    for _ in range(nb):
+        row = {}
+        for field in chosen_fields:
+            value = gen_data_by_collection_field(field, random_pk=random_pk)
+            if not random_pk and field.is_primary is True:
+                if field.dtype == DataType.INT64:
+                    value = curr_start
+                    curr_start += 1
+                elif field.dtype == DataType.VARCHAR:
+                    value = str(curr_start)
+                    curr_start += 1
+            row[field.name] = value
+        rows.append(row)
+    return rows

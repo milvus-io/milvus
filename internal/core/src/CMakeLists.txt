@@ -50,6 +50,7 @@ add_subdirectory( clustering )
 add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
+add_subdirectory( rescores )
 
 milvus_add_pkg_config("milvus_core")
 
@@ -67,6 +68,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_exec>
     $<TARGET_OBJECTS:milvus_bitset>
     $<TARGET_OBJECTS:milvus_futures>
+    $<TARGET_OBJECTS:milvus_rescores>
 )
 
 set(LINK_TARGETS 
@@ -84,8 +86,10 @@ if(USE_OPENDAL)
     set(LINK_TARGETS ${LINK_TARGETS} opendal)
 endif()
 
-if(DEFINED AZURE_BUILD_DIR)
-    set(LINK_TARGETS ${LINK_TARGETS} azure_blob_chunk_manager)
+if(ENABLE_AZURE_FS)
+    set(AZURE_BUILD_DIR ON)
+    # Arrow already includes Azure SDK when built with_azure=True
+    # No need to link additional azure_blob_chunk_manager
 endif()
 
 if (ENABLE_GCP_NATIVE)

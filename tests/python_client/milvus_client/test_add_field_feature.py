@@ -349,9 +349,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
 
         # 2. insert initial data before adding analyzer field
-        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i)} for i in range(default_nb)]
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == default_nb
 
@@ -371,6 +370,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             "Database performance and scalability features"
         ]
         rows_with_analyzer = []
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
         for i in range(default_nb, default_nb + len(text_data)):
             rows_with_analyzer.append({
                 default_primary_key_field_name: i,

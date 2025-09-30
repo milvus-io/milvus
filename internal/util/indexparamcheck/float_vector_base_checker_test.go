@@ -63,17 +63,19 @@ func Test_floatVectorBaseChecker_CheckValidDataType(t *testing.T) {
 		},
 		{
 			dType:    schemapb.DataType_BinaryVector,
-			errIsNil: false,
+			errIsNil: true,
 		},
 	}
 
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("HNSW")
 	for _, test := range cases {
-		err := c.CheckValidDataType("HNSW", &schemapb.FieldSchema{DataType: test.dType})
-		if test.errIsNil {
-			assert.NoError(t, err)
-		} else {
-			assert.Error(t, err)
-		}
+		t.Run(test.dType.String(), func(t *testing.T) {
+			err := c.CheckValidDataType("HNSW", &schemapb.FieldSchema{DataType: test.dType})
+			if test.errIsNil {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
 	}
 }

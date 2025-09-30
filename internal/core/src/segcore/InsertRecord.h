@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
-#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -462,6 +461,14 @@ class InsertRecordSealed {
         }
     }
 
+    ~InsertRecordSealed() {
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
+    }
+
     bool
     contain(const PkType& pk) const {
         return pk2offset_->contain(pk);
@@ -490,6 +497,14 @@ class InsertRecordSealed {
 
     void
     search_pk_range(const PkType& pk,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        pk2offset_->find_range(
+            pk, op, bitset, [](int64_t offset) { return true; });
+    }
+
+    void
+    search_pk_range(const PkType& pk,
                     Timestamp timestamp,
                     proto::plan::OpType op,
                     BitsetTypeView& bitset) const {
@@ -507,7 +522,7 @@ class InsertRecordSealed {
             case DataType::INT64: {
                 auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto pw = data->DataOfChunk(i);
+                    auto pw = data->DataOfChunk(nullptr, i);
                     auto pks = reinterpret_cast<const int64_t*>(pw.get());
                     auto chunk_num_rows = data->chunk_row_nums(i);
                     for (int j = 0; j < chunk_num_rows; ++j) {
@@ -522,7 +537,7 @@ class InsertRecordSealed {
                     auto column =
                         reinterpret_cast<ChunkedVariableColumn<std::string>*>(
                             data);
-                    auto pw = column->StringViews(i);
+                    auto pw = column->StringViews(nullptr, i);
                     auto pks = pw.get().first;
                     for (auto& pk : pks) {
                         pk2offset_->insert(std::string(pk), offset++);
@@ -580,9 +595,11 @@ class InsertRecordSealed {
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         reserved = 0;
-        cachinglayer::Manager::GetInstance().RefundLoadedResource(
-            {static_cast<int64_t>(estimated_memory_size_), 0});
-        estimated_memory_size_ = 0;
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
     }
 
  public:
@@ -660,6 +677,14 @@ class InsertRecordGrowing {
             }
         }
         return res_offsets;
+    }
+
+    void
+    search_pk_range(const PkType& pk,
+                    proto::plan::OpType op,
+                    BitsetTypeView& bitset) const {
+        pk2offset_->find_range(
+            pk, op, bitset, [](int64_t offset) { return true; });
     }
 
     void
@@ -873,6 +898,11 @@ class InsertRecordGrowing {
             }
             case DataType::ARRAY: {
                 this->append_data<Array>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::GEOMETRY: {
+                this->append_data<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }

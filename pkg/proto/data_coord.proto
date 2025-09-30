@@ -169,16 +169,34 @@ message FlushResult {
   int64 timeOfSeal = 4;
   uint64 flush_ts = 5;
   map<string, msg.MsgPosition> channel_cps = 6;
+  string db_name = 7; // database name for this flush result
+  string collection_name = 8; // collection name for this flush result
 }
 
 message FlushAllRequest {
   common.MsgBase base = 1;
-  string dbName = 2;
+  string dbName = 2;  // Deprecated: use flush_targets instead
+  
+  // List of specific databases and collections to flush
+  repeated FlushAllTarget flush_targets = 3;
+}
+
+// Specific collection to flush with database context
+// This message allows targeting specific collections within a database for flush operations  
+message FlushAllTarget {
+  // Database name to target for flush operation
+  string db_name = 1;
+  // Collections within this database to flush
+  // If empty, flush all collections in this database
+  repeated int64 collection_ids = 3;
 }
 
 message FlushAllResponse {
   common.Status status = 1;
   uint64 flushTs = 2;
+  
+  // Detailed flush results for each target
+  repeated FlushResult flush_results = 3;
 }
 
 message FlushChannelsRequest {
@@ -476,6 +494,7 @@ message SegmentBinlogs {
 message FieldBinlog{
   int64 fieldID = 1;
   repeated Binlog binlogs = 2;
+  repeated int64 child_fields = 3;
 }
 
 message TextIndexStats {
@@ -658,7 +677,7 @@ message CompactionPlan {
   int64 planID = 1;
   repeated CompactionSegmentBinlogs segmentBinlogs = 2;
   int64 start_time = 3;
-  int32 timeout_in_seconds = 4;
+  int32 timeout_in_seconds = 4 [deprecated = true];
   CompactionType type = 5;
   uint64 timetravel = 6;
   string channel = 7;
@@ -1026,6 +1045,14 @@ message GcControlRequest {
   repeated common.KeyValuePair params = 3;
 }
 
+// The response message for GetGcStatus.
+message GetGcStatusResponse {
+  // is_paused is true if the garbage collector is currently paused.
+  bool is_paused = 1;
+  // time_remaining_seconds is the remaining duration in seconds until the GC resumes.
+  int32 time_remaining_seconds = 2;
+}
+
 message QuerySlotRequest {}
 
 message QuerySlotResponse {
@@ -1058,7 +1085,7 @@ message CompactionTask{
   string fail_reason = 8;
   int64 start_time = 9;
   int64 end_time = 10;
-  int32 timeout_in_seconds = 11;
+  int32 timeout_in_seconds = 11 [deprecated = true];
   int32 retry_times = 12;
   int64 collection_ttl = 13;
   int64 total_rows = 14;

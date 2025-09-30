@@ -2,11 +2,13 @@ package message
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -35,20 +37,6 @@ func NewBroadcastMutableMessageBeforeAppend(payload []byte, properties map[strin
 	return m
 }
 
-// NewImmutableMessageFromProto creates a new immutable message from the proto message.
-// !!! Only used at server side for streaming internal service, don't use it at client side.
-func NewImmutableMessageFromProto(walName string, msg *messagespb.ImmutableMessage) ImmutableMessage {
-	id, err := UnmarshalMessageID(walName, msg.Id.Id)
-	if err != nil {
-		panic(err)
-	}
-	return NewImmutableMesasge(
-		id,
-		msg.Payload,
-		msg.Properties,
-	)
-}
-
 // NewImmutableMessage creates a new immutable message.
 // !!! Only used at server side for streaming internal service, don't use it at client side.
 func NewImmutableMesasge(
@@ -62,6 +50,47 @@ func NewImmutableMesasge(
 			payload:    payload,
 			properties: properties,
 		},
+	}
+}
+
+// NewReplicateMessage creates a new replicate message.
+func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) ReplicateMutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
+	rh, err := EncodeProto(&messagespb.ReplicateHeader{
+		ClusterId:              clustrID,
+		MessageId:              msg.MessageID().IntoProto(),
+		LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
+		TimeTick:               msg.TimeTick(),
+		Vchannel:               msg.VChannel(),
+	})
+	if err != nil {
+		panic("failed to encode replicate header")
+	}
+	m := &messageImpl{
+		payload:    msg.payload,
+		properties: msg.properties.Clone(),
+	}
+	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
+	m.properties.Delete(messageTimeTick)
+	m.properties.Delete(messageLastConfirmed)
+	m.properties.Delete(messageWALTerm)
+	m.properties.Set(messageReplicateMesssageHeader, rh)
+	return m
+}
+
+func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
+	messageID := MustUnmarshalMessageID(im.GetId())
+	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
+	return msg
+}
+
+func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
+	msg := im.IntoImmutableMessageProto()
+	return &commonpb.ImmutableMessage{
+		Id:         im.MessageID().IntoProto(),
+		Payload:    msg.GetPayload(),
+		Properties: msg.GetProperties(),
 	}
 }
 
@@ -293,6 +322,9 @@ type ImmutableTxnMessageBuilder struct {
 
 // ExpiredTimeTick returns the expired time tick of the txn.
 func (b *ImmutableTxnMessageBuilder) ExpiredTimeTick() uint64 {
+	if b.txnCtx.Keepalive == TxnKeepaliveInfinite {
+		return math.MaxUint64
+	}
 	if len(b.messages) > 0 {
 		return tsoutil.AddPhysicalDurationOnTs(b.messages[len(b.messages)-1].TimeTick(), b.txnCtx.Keepalive)
 	}

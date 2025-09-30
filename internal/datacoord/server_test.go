@@ -61,7 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -1706,6 +1706,25 @@ func TestManualCompaction(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockTriggerManager := NewMockTriggerManager(t)
+		svr.compactionTriggerManager = mockTriggerManager
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		svr.compactionInspector = mockHandler
+		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+			CollectionID: 1,
+			Timetravel:   1,
+			L0Compaction: true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -2868,8 +2887,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	server.initMessageCallback()
 
 	// Test DropPartition message callback
-	dropPartitionMsg, err := message.NewDropPartitionMessageBuilderV1().
-		WithVChannel("test_channel").
+	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{
 			CollectionId: 1,
 			PartitionId:  1,
@@ -2879,9 +2897,15 @@ func TestServer_InitMessageCallback(t *testing.T) {
 				MsgType: commonpb.MsgType_DropPartition,
 			},
 		}).
-		BuildMutable()
-	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, dropPartitionMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
+		WithBroadcast([]string{"test_channel"}, message.NewImportJobIDResourceKey(1)).
+		MustBuildBroadcast()
+	err := registry.CallMessageAckCallback(ctx, dropPartitionMsg, map[string]*message.AppendResult{
+		"test_channel": {
+			MessageID:              walimplstest.NewTestMessageID(1),
+			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:               1,
+		},
+	})
 	assert.Error(t, err) // server not healthy
 
 	// Test Import message check callback
@@ -2899,16 +2923,22 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test Import message ack callback
-	importMsg, err := message.NewImportMessageBuilderV1().
-		WithVChannel("test_channel").
+	importMsg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_Import,
 			},
 		}).
-		BuildMutable()
-	assert.NoError(t, err)
-	err = registry.CallMessageAckCallback(ctx, importMsg.IntoImmutableMessage(rmq.NewRmqID(1)))
+		WithBroadcast([]string{"test_channel"}, resourceKey).
+		MustBuildBroadcast()
+	err = registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
+		"test_channel": {
+			MessageID:              walimplstest.NewTestMessageID(1),
+			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:               1,
+		},
+	},
+	)
 	assert.Error(t, err) // server not healthy
 }

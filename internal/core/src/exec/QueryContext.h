@@ -281,6 +281,16 @@ class QueryContext : public Context {
         return std::move(retrieve_result_);
     }
 
+    void
+    set_op_context(milvus::OpContext* op_context) {
+        op_context_ = op_context;
+    }
+
+    milvus::OpContext*
+    get_op_context() {
+        return op_context_;
+    }
+
     int32_t
     get_consistency_level() {
         return consistency_level_;
@@ -312,6 +322,9 @@ class QueryContext : public Context {
     // used for store segment search/retrieve result
     milvus::SearchResult search_result_;
     milvus::RetrieveResult retrieve_result_;
+
+    // used for save op context
+    milvus::OpContext* op_context_{nullptr};
 
     int32_t consistency_level_ = 0;
 

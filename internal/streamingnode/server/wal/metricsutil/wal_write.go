@@ -12,12 +12,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewWriteMetrics creates a new WriteMetrics.
-func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics {
+func NewWriteMetrics(pchannel types.PChannelInfo, walName message.WALName) *WriteMetrics {
 	constLabel := prometheus.Labels{
 		metrics.NodeIDLabelName:     paramtable.GetStringNodeID(),
 		metrics.WALChannelLabelName: pchannel.Name,
@@ -26,18 +25,18 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics 
 		paramtable.GetStringNodeID(),
 		pchannel.Name,
 		strconv.FormatInt(pchannel.Term, 10),
-		walName).Set(1)
+		walName.String()).Set(1)
 
 	slowLogThreshold := paramtable.Get().StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse()
 	if slowLogThreshold <= 0 {
 		slowLogThreshold = time.Second
 	}
-	if walName == wp.WALName && slowLogThreshold < 3*time.Second {
+	if walName == message.WALNameWoodpecker && slowLogThreshold < 3*time.Second {
 		// woodpecker wal is always slow, so we need to set a higher threshold by default.
 		slowLogThreshold = 3 * time.Second
 	}
 	return &WriteMetrics{
-		walName:                      walName,
+		walName:                      walName.String(),
 		pchannel:                     pchannel,
 		constLabel:                   constLabel,
 		bytes:                        metrics.WALAppendMessageBytes.MustCurryWith(constLabel),

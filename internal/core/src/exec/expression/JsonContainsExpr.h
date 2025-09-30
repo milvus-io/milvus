@@ -450,12 +450,14 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::JsonContainsExpr>& expr,
         const std::string& name,
+        milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
+                      op_ctx,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
@@ -552,6 +554,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
+    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

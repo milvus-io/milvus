@@ -15,9 +15,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -83,6 +85,20 @@ func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.Async
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
 }
 
+func (b *balancerImpl) GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error) {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	return b.channelMetaManager.GetLatestChannelAssignment()
+}
+
+// ReplicateRole returns the replicate role of the balancer.
+func (b *balancerImpl) ReplicateRole() replicateutil.Role {
+	return b.channelMetaManager.ReplicateRole()
+}
+
 // GetAllStreamingNodes fetches all streaming node info.
 func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
 	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
@@ -103,6 +119,22 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb WatchChan
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
+}
+
+// UpdateReplicateConfiguration updates the replicate configuration.
+func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+
+	if err := b.channelMetaManager.UpdateReplicateConfiguration(ctx, msgs...); err != nil {
+		return err
+	}
+	return nil
 }
 
 // UpdateBalancePolicy update the balance policy.
@@ -220,6 +252,8 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 				return // nodeChanged is only closed if context cancel.
 				// in other word, balancer is closed.
 			}
+			// trigger the watch update.
+			b.channelMetaManager.TriggerWatchUpdate()
 			// balance triggered by new streaming node changed.
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.

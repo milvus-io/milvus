@@ -20,6 +20,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
@@ -32,10 +33,11 @@ class PhyValueExpr : public Expr {
     PhyValueExpr(const std::vector<std::shared_ptr<Expr>>& input,
                  const std::shared_ptr<const milvus::expr::ValueExpr> expr,
                  const std::string& name,
+                 milvus::OpContext* op_ctx,
                  const segcore::SegmentInternalInterface* segment,
                  int64_t active_count,
                  int64_t batch_size)
-        : Expr(expr->type(), std::move(input), name),
+        : Expr(expr->type(), std::move(input), name, op_ctx),
           expr_(expr),
           active_count_(active_count),
           batch_size_(batch_size) {
