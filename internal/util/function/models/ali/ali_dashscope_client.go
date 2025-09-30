@@ -122,3 +122,59 @@ func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim 
 	})
 	return res, nil
 }
+
+type Inputs struct {
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+}
+type RerankRequest struct {
+	// ID of the model to use.
+	Model string `json:"model"`
+
+	// Input text to embed, encoded as a string.
+	Inputs Inputs `json:"input"`
+}
+
+type RerankItem struct {
+	Index          int     `json:"index"`
+	RelevanceScore float32 `json:"relevance_score"`
+}
+
+type RerankOutput struct {
+	Results []RerankItem `json:"results"`
+}
+
+type RerankResponse struct {
+	Output    RerankOutput `json:"output"`
+	Usage     Usage        `json:"usage"`
+	RequestID string       `json:"request_id"`
+}
+
+type AliDashScopeRerank struct {
+	apiKey string
+}
+
+func NewAliDashScopeRerank(apiKey string) *AliDashScopeRerank {
+	return &AliDashScopeRerank{
+		apiKey: apiKey,
+	}
+}
+
+func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+	var r RerankRequest
+	r.Model = modelName
+	r.Inputs = Inputs{query, texts}
+
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
+	}
+	res, err := models.PostRequest[RerankResponse](r, url, headers, timeoutSec)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(res.Output.Results, func(i, j int) bool {
+		return res.Output.Results[i].Index < res.Output.Results[j].Index
+	})
+	return res, nil
+}
