@@ -38,6 +38,16 @@ type ResourceUsage struct {
 	FieldGpuMemorySize []uint64
 }
 
+func (r *ResourceUsage) Add(other *ResourceUsage) {
+	r.MemorySize += other.MemorySize
+	r.DiskSize += other.DiskSize
+}
+
+func (r *ResourceUsage) Sub(other *ResourceUsage) {
+	r.MemorySize -= other.MemorySize
+	r.DiskSize -= other.DiskSize
+}
+
 // Segment is the interface of a segment implementation.
 // Some methods can not apply to all segment types，such as LoadInfo, ResourceUsageEstimate.
 // Add more interface to represent different segment types is a better implementation.
@@ -71,6 +81,8 @@ type Segment interface {
 	MemSize() int64
 	// ResourceUsageEstimate returns the estimated resource usage of the segment
 	ResourceUsageEstimate() ResourceUsage
+	ChargeLogicalResourceUsage(usage ResourceUsage)
+	RefundLogicalResourceUsage(usage ResourceUsage)
 
 	// Index related
 	GetIndexByID(indexID int64) *IndexedFieldInfo
