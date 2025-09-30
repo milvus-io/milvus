@@ -93,6 +93,9 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 				return nil, 0, fmt.Errorf("field %s does not exist in collection %s", col.Name(), colSchema.CollectionName)
 			}
 			if inputDynamicColumn != nil {
+				if col == inputDynamicColumn {
+					continue
+				}
 				return nil, 0, errors.New("cannot pass pre-composed dynamic json column with other dynamic columns")
 			}
 			// add to dynamic column list for further processing
