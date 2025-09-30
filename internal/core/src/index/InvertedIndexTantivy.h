@@ -187,7 +187,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     int64_t
     Size() override {
-        return Count();
+        return wrapper_->index_size_bytes();
     }
 
     virtual const TargetBitmap

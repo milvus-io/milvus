@@ -681,6 +681,15 @@ struct TantivyIndexWrapper {
         return res.result_->value.u32._0;
     }
 
+    inline uint64_t
+    index_size_bytes() {
+        auto res = RustResultWrapper(tantivy_index_size_bytes(reader_));
+        AssertInfo(res.result_->success,
+                   "failed to get index size bytes: {}",
+                   res.result_->error);
+        return res.result_->value.u64._0;
+    }
+
  public:
     template <typename T>
     void
