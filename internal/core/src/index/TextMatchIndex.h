@@ -85,6 +85,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     MatchQuery(const std::string& query);
 
     TargetBitmap
+    MatchQueryWithMinimum(const std::string& query, uint32_t min_should_match);
+
+    TargetBitmap
     PhraseMatchQuery(const std::string& query, uint32_t slop);
 
  private:
