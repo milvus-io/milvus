@@ -2306,7 +2306,7 @@ TEST(Sealed, SearchSortedPk) {
 
 TEST(Sealed, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
+    auto metric_type = knowhere::metric::MAX_SIM_IP;
     int64_t dim = 4;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
@@ -2368,7 +2368,7 @@ TEST(Sealed, SearchVectorArray) {
     int64_t dim = 4;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
+    auto metric_type = knowhere::metric::MAX_SIM_IP;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
@@ -2444,8 +2444,8 @@ TEST(Sealed, SearchVectorArray) {
     // create index
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM_IP;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -2456,8 +2456,7 @@ TEST(Sealed, SearchVectorArray) {
 
     // build index
     Config config;
-    config[milvus::index::INDEX_TYPE] =
-        knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
     config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
     config[knowhere::indexparam::M] = "16";
@@ -2478,12 +2477,12 @@ TEST(Sealed, SearchVectorArray) {
     query_vec_lims.push_back(0);
     query_vec_lims.push_back(3);
     query_vec_lims.push_back(10);
-    query_dataset->SetLims(query_vec_lims.data());
+    query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET, query_vec_lims.data());
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = 5;
-    searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
+    searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
     vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
@@ -2502,7 +2501,7 @@ TEST(Sealed, SearchVectorArray) {
                                     query_info: <
                                       topk: 5
                                       round_decimal: 3
-                                      metric_type: "MAX_SIM"
+                                      metric_type: "MAX_SIM_IP"
                                       search_params: "{\"nprobe\": 10}"
                                     >
                                     placeholder_tag: "$0"
@@ -2531,7 +2530,7 @@ TEST(Sealed, SearchVectorArray) {
         load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
         load_info.cache_index =
             CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
-        load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
+        load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM_IP;
 
         sealed_segment->DropFieldData(array_vec);
         sealed_segment->LoadIndex(load_info);
@@ -2541,7 +2540,7 @@ TEST(Sealed, SearchVectorArray) {
                                     query_info: <
                                       topk: 5
                                       round_decimal: 3
-                                      metric_type: "MAX_SIM"
+                                      metric_type: "MAX_SIM_IP"
                                       search_params: "{\"nprobe\": 10}"
                                     >
                                     placeholder_tag: "$0"

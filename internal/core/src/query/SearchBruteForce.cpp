@@ -93,7 +93,8 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // knowhere::DataSet count vectors in a flattened manner where as the num_raw_data here is the number
         // of embedding lists where each embedding list contains multiple vectors. So we should use the last element
         // in lims which equals to the total number of vectors.
-        base_dataset->SetLims(raw_ds.raw_data_lims);
+        base_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                          raw_ds.raw_data_lims);
         // the length of lims equals to the number of embedding lists + 1
         base_dataset->SetRows(raw_ds.raw_data_lims[raw_ds.num_raw_data]);
     }
@@ -102,7 +103,8 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         query_ds.num_queries, query_ds.dim, query_ds.query_data);
     if (query_ds.query_lims != nullptr) {
         // ditto
-        query_dataset->SetLims(query_ds.query_lims);
+        query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                           query_ds.query_lims);
         query_dataset->SetRows(query_ds.query_lims[query_ds.num_queries]);
     }
 

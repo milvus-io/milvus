@@ -174,7 +174,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 		CollectionName: collectionName,
 		FieldName:      integration.StructSubFloatVecField,
 		IndexName:      "array_of_vector_index",
-		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexEmbListHNSW, metric.MaxSim),
+		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexHNSW, metric.MaxSimIP),
 	})
 	s.NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
@@ -315,9 +315,9 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexEmbListHNSW, metric.MaxSim)
+	params := integration.GetSearchParams(integration.IndexHNSW, metric.MaxSimIP)
 	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, expr,
-		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)
+		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSimIP, params, nq, s.dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 

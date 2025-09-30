@@ -506,7 +506,7 @@ TEST_P(GrowingTest, FillVectorArrayData) {
 
 TEST(GrowingTest, LoadVectorArrayData) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
+    auto metric_type = knowhere::metric::MAX_SIM_IP;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_float_vector = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
@@ -565,7 +565,7 @@ TEST(GrowingTest, SearchVectorArray) {
     using namespace milvus::query;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
+    auto metric_type = knowhere::metric::MAX_SIM_IP;
 
     auto dim = 32;
 
@@ -581,7 +581,7 @@ TEST(GrowingTest, SearchVectorArray) {
     config.set_enable_interim_segment_index(true);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
+        {"index_type", knowhere::IndexEnum::INDEX_HNSW},
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {
@@ -624,7 +624,7 @@ TEST(GrowingTest, SearchVectorArray) {
                                   query_info: <
                                     topk: 5
                                     round_decimal: 3
-                                    metric_type: "MAX_SIM"
+                                    metric_type: "MAX_SIM_IP"
                                     search_params: "{\"nprobe\": 10}"
                                   >
                                   placeholder_tag: "$0"
