@@ -47,8 +47,29 @@ TEST(storage, InsertDataBool) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Bool);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::BOOL;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -79,8 +100,29 @@ TEST(storage, InsertDataBoolNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Bool);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::BOOL;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -114,8 +156,29 @@ TEST(storage, InsertDataInt8) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int8);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT8;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -145,8 +208,29 @@ TEST(storage, InsertDataInt8Nullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int8);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT8;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -178,8 +262,29 @@ TEST(storage, InsertDataInt16) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int16);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT16;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -209,8 +314,29 @@ TEST(storage, InsertDataInt16Nullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int16);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT16;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -242,8 +368,29 @@ TEST(storage, InsertDataInt32) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int32);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT32;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -273,8 +420,29 @@ TEST(storage, InsertDataInt32Nullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int32);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT32;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -306,8 +474,29 @@ TEST(storage, InsertDataInt64) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int64);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT64;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -337,8 +526,29 @@ TEST(storage, InsertDataInt64Nullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int64);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT64;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -481,8 +691,29 @@ TEST(storage, InsertDataString) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::VarChar);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::VARCHAR;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -517,8 +748,29 @@ TEST(storage, InsertDataStringNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::String);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::STRING;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -553,8 +805,29 @@ TEST(storage, InsertDataFloat) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Float);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::FLOAT;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -584,8 +857,29 @@ TEST(storage, InsertDataFloatNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Float);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::FLOAT;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -616,8 +910,29 @@ TEST(storage, InsertDataDouble) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Double);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::DOUBLE;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -647,8 +962,29 @@ TEST(storage, InsertDataDoubleNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Double);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::DOUBLE;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -681,8 +1017,29 @@ TEST(storage, InsertDataTimestamptz) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::TimestampTZ);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::TIMESTAMPTZ;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -713,8 +1070,29 @@ TEST(storage, InsertDataTimestamptzNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::TimestampTZ);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::TIMESTAMPTZ;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -747,8 +1125,29 @@ TEST(storage, InsertDataFloatVector) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::FloatVector);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::VECTOR_FLOAT;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -785,8 +1184,29 @@ TEST(storage, InsertDataSparseFloat) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::SparseFloatVector);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::VECTOR_SPARSE_U32_F32;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -827,8 +1247,29 @@ TEST(storage, InsertDataBinaryVector) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::BinaryVector);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::VECTOR_BINARY;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -858,8 +1299,29 @@ TEST(storage, InsertDataFloat16Vector) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Float16Vector);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::VECTOR_FLOAT16;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -886,8 +1348,29 @@ TEST(storage, IndexData) {
     auto serialized_bytes = index_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int8);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT8;
+    test_index_meta.build_id = 1000;
+
     auto new_index_data = storage::DeserializeFileData(serialized_data_ptr,
-                                                       serialized_bytes.size());
+                                                       serialized_bytes.size(),
+                                                       false,
+                                                       test_field_meta,
+                                                       test_index_meta);
     ASSERT_EQ(new_index_data->GetCodecType(), storage::IndexDataType);
     ASSERT_EQ(new_index_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -922,8 +1405,29 @@ TEST(storage, InsertDataStringArray) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Array);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::ARRAY;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -969,8 +1473,29 @@ TEST(storage, InsertDataStringArrayNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Array);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::ARRAY;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -1007,8 +1532,29 @@ TEST(storage, InsertDataJsonNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::JSON);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::JSON;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -1037,8 +1583,29 @@ TEST(storage, InsertDataJsonFillWithNull) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::JSON);
+    field_schema.set_nullable(true);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::JSON;
+    test_index_meta.build_id = 1000;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -1048,4 +1615,107 @@ TEST(storage, InsertDataJsonFillWithNull) {
     ASSERT_EQ(new_payload->get_null_count(), size);
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
     delete[] valid_data;
+}
+
+// Tests for new metadata parameter passing functionality
+TEST(storage, DeserializeFileDataWithMetadata) {
+    // Test that metadata parameters are correctly passed to DeserializeFileData
+    FixedVector<int32_t> data = {1, 2, 3, 4, 5};
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::INT32, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+
+    // Create test metadata
+    storage::FieldDataMeta field_data_meta{1001, 2002, 3003, 100};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+
+    // Test with provided metadata
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 4001;
+    test_field_meta.partition_id = 5002;
+    test_field_meta.segment_id = 6003;
+    test_field_meta.field_id = 200;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int32);
+    field_schema.set_nullable(false);
+    test_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 6003;
+    test_index_meta.field_id = 200;
+    test_index_meta.field_type = DataType::INT32;
+    test_index_meta.build_id = 7004;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
+
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT32);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+}
+
+TEST(storage, DeserializeFileDataWithDifferentMetadata) {
+    // Test that different metadata values are handled correctly
+    FixedVector<int64_t> data = {100, 200, 300, 400};
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::INT64, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta original_meta{1, 2, 3, 4};
+    insert_data.SetFieldDataMeta(original_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+
+    // Test with completely different metadata from what was serialized
+    storage::FieldDataMeta new_field_meta;
+    new_field_meta.collection_id = 9999;
+    new_field_meta.partition_id = 8888;
+    new_field_meta.segment_id = 7777;
+    new_field_meta.field_id = 6666;
+
+    auto field_schema = schemapb::FieldSchema();
+    field_schema.set_data_type(schemapb::DataType::Int64);
+    field_schema.set_nullable(false);
+    new_field_meta.field_schema = field_schema;
+
+    storage::IndexMeta new_index_meta;
+    new_index_meta.segment_id = 7777;
+    new_index_meta.field_id = 6666;
+    new_index_meta.field_type = DataType::INT64;
+
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        &new_field_meta,
+                                                        &new_index_meta);
+
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT64);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+
+    // Verify the data content is preserved
+    FixedVector<int64_t> new_data(data.size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
+    ASSERT_EQ(data, new_data);
 }

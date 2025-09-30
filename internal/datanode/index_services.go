@@ -59,6 +59,8 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Int64("fieldID", req.GetFieldID()),
+		zap.String("fieldType", req.GetFieldType().String()),
 		zap.Int64("indexID", req.GetIndexID()),
 		zap.String("indexName", req.GetIndexName()),
 		zap.String("indexFilePrefix", req.GetIndexFilePrefix()),

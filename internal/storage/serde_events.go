@@ -526,7 +526,7 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 		return err
 	}
 	// Write descriptor
-	de := NewBaseDescriptorEvent(bsw.collectionID, bsw.partitionID, bsw.segmentID)
+	de := NewBaseDescriptorEvent()
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
@@ -1083,7 +1083,7 @@ func (dsw *DeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) error {
 		return err
 	}
 	// Write descriptor
-	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
+	de := NewBaseDescriptorEvent()
 	de.PayloadDataType = dsw.fieldSchema.DataType
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
 	if err := de.Write(w); err != nil {
@@ -1322,7 +1322,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 		return err
 	}
 	// Write descriptor
-	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
+	de := NewBaseDescriptorEvent()
 	de.PayloadDataType = schemapb.DataType_Int64
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(version, MultiField)
