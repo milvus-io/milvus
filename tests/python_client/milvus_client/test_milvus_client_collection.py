@@ -3055,7 +3055,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             'functions': [], 
             'aliases': [], 
             'consistency_level': 0, 
-            'properties': {},
+            'properties': {'collection.timezone': 'UTC'},
             'num_partitions': 1, 
             'enable_dynamic_field': True
         }
