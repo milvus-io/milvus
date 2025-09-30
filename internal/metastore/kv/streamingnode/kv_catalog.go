@@ -14,9 +14,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -49,13 +49,15 @@ import (
 //	        └── 456398247938
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV:    metaKV,
+		maxTxnNum: paramtable.Get().MetaStoreCfg.MaxTxnNum.GetAsInt(),
 	}
 }
 
 // catalog is a kv based catalog.
 type catalog struct {
-	metaKV kv.MetaKv
+	metaKV    kv.MetaKv
+	maxTxnNum int
 }
 
 // ListVChannel lists the vchannel info of the pchannel.
@@ -132,14 +134,14 @@ func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchann
 
 	// TODO: We should perform a remove and save as a transaction but current the kv interface doesn't support it.
 	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
+		if err := etcd.RemoveByBatchWithLimit(removes, c.maxTxnNum, func(partialRemoves []string) error {
 			return c.metaKV.MultiRemove(ctx, partialRemoves)
 		}); err != nil {
 			return err
 		}
 	}
 	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return etcd.SaveByBatchWithLimit(kvs, c.maxTxnNum, func(partialKvs map[string]string) error {
 			return c.metaKV.MultiSave(ctx, partialKvs)
 		})
 	}
@@ -228,7 +230,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 	}
 
 	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
+		if err := etcd.RemoveByBatchWithLimit(removes, c.maxTxnNum, func(partialRemoves []string) error {
 			return c.metaKV.MultiRemove(ctx, partialRemoves)
 		}); err != nil {
 			return err
@@ -236,7 +238,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 	}
 
 	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return etcd.SaveByBatchWithLimit(kvs, c.maxTxnNum, func(partialKvs map[string]string) error {
 			return c.metaKV.MultiSave(ctx, partialKvs)
 		})
 	}

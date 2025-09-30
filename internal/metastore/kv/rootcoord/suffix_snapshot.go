@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -82,6 +81,7 @@ type SuffixSnapshot struct {
 	snapshotLen int
 
 	paginationSize int
+	maxTxnNum      int
 
 	closeGC chan struct{}
 }
@@ -118,6 +118,7 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		rootPrefix:     root,
 		rootLen:        rootLen,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
+		maxTxnNum:      paramtable.Get().MetaStoreCfg.MaxTxnNum.GetAsInt(),
 		closeGC:        make(chan struct{}, 1),
 	}
 	go ss.startBackgroundGC(context.TODO())
@@ -547,7 +548,7 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 		updateList = append(updateList, removal)
 	}
 
-	err = etcd.SaveByBatchWithLimit(execute, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	err = etcd.SaveByBatchWithLimit(execute, ss.maxTxnNum, func(partialKvs map[string]string) error {
 		return ss.MetaKv.MultiSave(ctx, partialKvs)
 	})
 	if err == nil {
@@ -658,7 +659,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(ctx, partialKeys)
 	}
-	return etcd.RemoveByBatchWithLimit(keyGroup, util.MaxEtcdTxnNum, removeFn)
+	return etcd.RemoveByBatchWithLimit(keyGroup, ss.maxTxnNum, removeFn)
 }
 
 // removeExpiredKvs removes expired key-value pairs from the snapshot
