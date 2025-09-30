@@ -98,13 +98,24 @@ fi
 
 cd ${ROOT}/tests/python_client
 
-# Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
+# run all tests to expose the problem
+
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
   timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6
 else
   pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6
 fi
+
+# # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
+# if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+#   timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
+#     --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+# else
+#   pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
+#     --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+# fi
 
