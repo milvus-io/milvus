@@ -47,21 +47,14 @@ func TestResourceKeyLocker(t *testing.T) {
 					n := rand.Intn(10)
 					if n < 3 {
 						// Lock the keys
-						guards, err := locker.Lock(keysToLock...)
-						if err != nil {
-							t.Errorf("Failed to lock keys: %v", err)
-							return
-						}
+						guards := locker.Lock(keysToLock...)
 						// Hold lock briefly
 						time.Sleep(time.Millisecond)
-
 						// Unlock the keys
 						guards.Unlock()
 					} else {
-						guards, err := locker.Lock(keysToLock...)
-						if err == nil {
-							guards.Unlock()
-						}
+						guards := locker.Lock(keysToLock...)
+						guards.Unlock()
 					}
 				}
 				done <- true
@@ -84,11 +77,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		go func() {
 			for i := 0; i < 100; i++ {
 				// Lock key1 then key2
-				guards, err := locker.Lock(key1, key2)
-				if err != nil {
-					t.Errorf("Failed to lock keys in order 1->2: %v", err)
-					return
-				}
+				guards := locker.Lock(key1, key2)
 				time.Sleep(time.Millisecond)
 				guards.Unlock()
 			}
@@ -98,11 +87,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		go func() {
 			for i := 0; i < 100; i++ {
 				// Lock key2 then key1
-				guards, err := locker.Lock(key2, key1)
-				if err != nil {
-					t.Errorf("Failed to lock keys in order 2->1: %v", err)
-					return
-				}
+				guards := locker.Lock(key2, key1)
 				time.Sleep(time.Millisecond)
 				guards.Unlock()
 			}

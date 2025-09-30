@@ -36,6 +36,7 @@ import (
 // │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
+		// catalog should be reliable to write, ensure the data is consistent in memory and underlying meta storage.
 		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }

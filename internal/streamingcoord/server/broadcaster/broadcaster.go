@@ -3,14 +3,19 @@ package broadcaster
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
+
+var ErrNotPrimary = errors.New("cluster is not primary, cannot do any DDL/DCL")
 
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.
 	// It will acquire locks of the resource keys and return the broadcast api.
 	// Once the broadcast api is returned, the Close() method of the broadcast api should be called to release the resource safely.
+	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
 	// LegacyAck is the legacy ack interface for the 2.6.0 import message.
