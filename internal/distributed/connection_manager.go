@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -164,7 +165,7 @@ func (cm *ConnectionManager) GetDataCoordClient() (datapb.DataCoordClient, bool)
 	return cm.dataCoord, true
 }
 
-func (cm *ConnectionManager) GetQueryNodeClients() (map[int64]querypb.QueryNodeClient, bool) {
+func (cm *ConnectionManager) GetQueryNodeClients() ([]lo.Tuple2[int64, querypb.QueryNodeClient], bool) {
 	cm.queryNodesMu.RLock()
 	defer cm.queryNodesMu.RUnlock()
 	_, ok := cm.dependencies[typeutil.QueryNodeRole]
@@ -173,10 +174,14 @@ func (cm *ConnectionManager) GetQueryNodeClients() (map[int64]querypb.QueryNodeC
 		return nil, false
 	}
 
-	return cm.queryNodes, true
+	nodes := lo.MapToSlice(cm.queryNodes, func(id int64, client querypb.QueryNodeClient) lo.Tuple2[int64, querypb.QueryNodeClient] {
+		return lo.Tuple2[int64, querypb.QueryNodeClient]{A: id, B: client}
+	})
+
+	return nodes, true
 }
 
-func (cm *ConnectionManager) GetDataNodeClients() (map[int64]datapb.DataNodeClient, bool) {
+func (cm *ConnectionManager) GetDataNodeClients() ([]lo.Tuple2[int64, datapb.DataNodeClient], bool) {
 	cm.dataNodesMu.RLock()
 	defer cm.dataNodesMu.RUnlock()
 	_, ok := cm.dependencies[typeutil.DataNodeRole]
@@ -185,10 +190,12 @@ func (cm *ConnectionManager) GetDataNodeClients() (map[int64]datapb.DataNodeClie
 		return nil, false
 	}
 
-	return cm.dataNodes, true
+	return lo.MapToSlice(cm.dataNodes, func(id int64, client datapb.DataNodeClient) lo.Tuple2[int64, datapb.DataNodeClient] {
+		return lo.Tuple2[int64, datapb.DataNodeClient]{A: id, B: client}
+	}), true
 }
 
-func (cm *ConnectionManager) GetIndexNodeClients() (map[int64]workerpb.IndexNodeClient, bool) {
+func (cm *ConnectionManager) GetIndexNodeClients() ([]lo.Tuple2[int64, workerpb.IndexNodeClient], bool) {
 	cm.indexNodesMu.RLock()
 	defer cm.indexNodesMu.RUnlock()
 	_, ok := cm.dependencies[typeutil.IndexNodeRole]
@@ -197,7 +204,9 @@ func (cm *ConnectionManager) GetIndexNodeClients() (map[int64]workerpb.IndexNode
 		return nil, false
 	}
 
-	return cm.indexNodes, true
+	return lo.MapToSlice(cm.indexNodes, func(id int64, client workerpb.IndexNodeClient) lo.Tuple2[int64, workerpb.IndexNodeClient] {
+		return lo.Tuple2[int64, workerpb.IndexNodeClient]{A: id, B: client}
+	}), true
 }
 
 func (cm *ConnectionManager) Stop() {

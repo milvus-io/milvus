@@ -41,7 +41,7 @@ extraConfigFiles:
       storageType: local
     queryNode:
       segcore:
-        exprEvalBatchSize:512
+        exprEvalBatchSize: 512
 image:
   all:
     pullPolicy: Always

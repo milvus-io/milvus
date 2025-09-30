@@ -397,6 +397,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!HasIndex(field_id)) {
             return {};
         }
+
+        auto& field_meta = schema_->operator[](field_id);
+
+        // For geometry fields, return segment-level index (RTree doesn't use chunks)
+        if (IsGeometryType(field_meta.get_data_type())) {
+            auto segment_index = indexing_record_.get_field_indexing(field_id)
+                                     .get_segment_indexing();
+            if (segment_index.get() != nullptr) {
+                // Convert from PinWrapper<index::IndexBase*> to PinWrapper<const index::IndexBase*>
+                return {
+                    PinWrapper<const index::IndexBase*>(segment_index.get())};
+            } else {
+                return {};
+            }
+        }
+
+        // For vector fields, return chunk-level indexes
         auto num_chunk = num_chunk_index(field_id);
         std::vector<PinWrapper<const index::IndexBase*>> indexes;
         for (int64_t i = 0; i < num_chunk; i++) {

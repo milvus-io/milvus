@@ -4593,3 +4593,85 @@ func TestLackOfFieldsDataBySchema(t *testing.T) {
 		})
 	}
 }
+
+func TestGetStorageCost(t *testing.T) {
+	// nil and empty cases
+	t.Run("nil or empty status", func(t *testing.T) {
+		{
+			remote, total, ratio, ok := GetStorageCost(nil)
+			assert.Equal(t, int64(0), remote)
+			assert.Equal(t, int64(0), total)
+			assert.Equal(t, 0.0, ratio)
+			assert.False(t, ok)
+		}
+		{
+			remote, total, ratio, ok := GetStorageCost(&commonpb.Status{})
+			assert.Equal(t, int64(0), remote)
+			assert.Equal(t, int64(0), total)
+			assert.Equal(t, 0.0, ratio)
+			assert.False(t, ok)
+		}
+	})
+
+	// missing keys should result in zeros
+	t.Run("missing keys", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+	})
+
+	// invalid number formats should result in zeros
+	t.Run("invalid formats", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "x",
+			"scanned_total_bytes":  "200",
+			"cache_hit_ratio":      "0.5",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+
+		st = &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+			"scanned_total_bytes":  "y",
+			"cache_hit_ratio":      "0.5",
+		}}
+		remote, total, ratio, ok = GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+
+		st = &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+			"scanned_total_bytes":  "200",
+			"cache_hit_ratio":      "abc",
+		}}
+		remote, total, ratio, ok = GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+	})
+
+	// success case
+	t.Run("success", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "123",
+			"scanned_total_bytes":  "456",
+			"cache_hit_ratio":      "0.27",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(123), remote)
+		assert.Equal(t, int64(456), total)
+		assert.InDelta(t, 0.27, ratio, 1e-9)
+		assert.True(t, ok)
+	})
+}
