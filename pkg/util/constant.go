@@ -72,9 +72,6 @@ const (
 	RoleConfigObjectName = "object_name"
 	RoleConfigDBName     = "db_name"
 	RoleConfigPrivilege  = "privilege"
-
-	MaxEtcdTxnNum = 128
-	GB            = 1024 * 1024 * 1024
 )
 
 const (

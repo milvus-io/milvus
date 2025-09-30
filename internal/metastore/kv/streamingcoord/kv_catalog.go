@@ -10,8 +10,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewCataLog creates a new catalog instance
@@ -64,7 +64,8 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }

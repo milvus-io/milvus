@@ -11,8 +11,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewCataLog creates a new streaming-node catalog instance.
@@ -80,8 +80,9 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 		kvs[key] = string(data)
 	}
 
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
+		if err := etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
 			return c.metaKV.MultiRemove(ctx, partialRemoves)
 		}); err != nil {
 			return err
@@ -89,7 +90,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 	}
 
 	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 			return c.metaKV.MultiSave(ctx, partialKvs)
 		})
 	}
