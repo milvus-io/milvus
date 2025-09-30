@@ -79,6 +79,10 @@ struct VectorizedSve {
     template <typename ElementT>
     static constexpr inline auto forward_op_sub =
         sve::ForwardOpsImpl<ElementT>::op_sub;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_set_indices =
+        sve::ForwardOpsImpl<ElementT>::op_set_indices;
 };
 
 }  // namespace arm

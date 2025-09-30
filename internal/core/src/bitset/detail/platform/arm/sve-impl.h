@@ -1866,6 +1866,38 @@ ForwardOpsImpl<uint64_t>::op_sub(uint64_t* const left,
     return true;
 }
 
+bool
+ForwardOpsImpl<uint8_t>::op_set_indices(
+    uint8_t* const __restrict data,
+    const size_t start,
+    const size_t,
+    const uint32_t* const __restrict indices,
+    const size_t n_indices) {
+    if (start != 0) {
+        // TODO, this case is complicated
+        return false;
+    }
+
+    // TODO: add a kernel here and return `true`
+    return false;
+}
+
+bool
+ForwardOpsImpl<uint64_t>::op_set_indices(
+    uint64_t* const __restrict data,
+    const size_t start,
+    const size_t n,
+    const uint32_t* const __restrict indices,
+    const size_t n_indices) {
+    if (start != 0) {
+        // TODO, this case is complicated
+        return false;
+    }
+
+    // TODO: add a kernel here and return `true`
+    return false;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 
 }  // namespace sve

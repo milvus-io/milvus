@@ -138,6 +138,19 @@ struct VectorizedElementWiseBitsetPolicy {
     }
 
     static inline void
+    op_set_indices(data_type* const data,
+                   const size_t start,
+                   const size_t size,
+                   const uint32_t* const __restrict indices,
+                   const size_t n_indices) {
+        if (!VectorizedT::template forward_op_set_indices<ElementT>(
+                data, start, size, indices, n_indices)) {
+            ElementWiseBitsetPolicy<ElementT>::op_set_indices(
+                data, start, size, indices, n_indices);
+        }
+    }
+
+    static inline void
     op_reset(data_type* const data, const size_t start, const size_t size) {
         ElementWiseBitsetPolicy<ElementT>::op_reset(data, start, size);
     }

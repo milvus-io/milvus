@@ -79,6 +79,10 @@ struct VectorizedNeon {
     template <typename ElementT>
     static constexpr inline auto forward_op_sub =
         neon::ForwardOpsImpl<ElementT>::op_sub;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_set_indices =
+        neon::ForwardOpsImpl<ElementT>::op_set_indices;
 };
 
 }  // namespace arm

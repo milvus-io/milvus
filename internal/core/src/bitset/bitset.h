@@ -195,6 +195,21 @@ class BitsetBase {
             this->data(), this->offset() + bit_idx_start, size, value);
     }
 
+    // Sets bits, according to a collection of indices
+    inline void
+    set_indices(const uint32_t* indices, const size_t n_indices) {
+        if constexpr (IsRangeCheckEnabled) {
+            // disable range checking for debug builds in order to avoid
+            //   reading `indices` without a need
+            for (size_t i = 0; i < n_indices; i++) {
+                range_checker::lt(indices[i], this->size());
+            }
+        }
+
+        policy_type::op_set_indices(
+            this->data(), this->offset(), this->size(), indices, n_indices);
+    }
+
     // Set all bits to false.
     inline void
     reset() {

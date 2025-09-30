@@ -363,6 +363,13 @@ using ForwardOpsOpMultiple2 =
              const size_t n_rights,
              const size_t size);
 
+template <typename ElementT>
+using OpSetIndicesPtr = bool (*)(ElementT* const __restrict data,
+                                 const size_t start,
+                                 const size_t n,
+                                 const uint32_t* const __restrict indices,
+                                 const size_t n_indices);
+
 #define DECLARE_FORWARD_OPS_OP2(ELEMENTTYPE)                                   \
     ForwardOpsOp2<ELEMENTTYPE> forward_op_and_##ELEMENTTYPE =                  \
         VectorizedRef::template forward_op_and<ELEMENTTYPE>;                   \
@@ -375,7 +382,9 @@ using ForwardOpsOpMultiple2 =
     ForwardOpsOp2<ELEMENTTYPE> forward_op_xor_##ELEMENTTYPE =                  \
         VectorizedRef::template forward_op_xor<ELEMENTTYPE>;                   \
     ForwardOpsOp2<ELEMENTTYPE> forward_op_sub_##ELEMENTTYPE =                  \
-        VectorizedRef::template forward_op_sub<ELEMENTTYPE>;
+        VectorizedRef::template forward_op_sub<ELEMENTTYPE>;                   \
+    OpSetIndicesPtr<ELEMENTTYPE> forward_op_set_indices_##ELEMENTTYPE =        \
+        VectorizedRef::template forward_op_set_indices<ELEMENTTYPE>;
 
 ALL_FORWARD_OPS(DECLARE_FORWARD_OPS_OP2)
 
@@ -436,6 +445,15 @@ namespace dynamic {
                                              const size_t size) {            \
         return forward_op_sub_##ELEMENTTYPE(                                 \
             left, right, start_left, start_right, size);                     \
+    }                                                                        \
+    bool ForwardOpsImpl<ELEMENTTYPE>::op_set_indices(                        \
+        ELEMENTTYPE* const __restrict data,                                  \
+        const size_t start,                                                  \
+        const size_t n,                                                      \
+        const uint32_t* const __restrict indices,                            \
+        const size_t n_indices) {                                            \
+        return forward_op_set_indices_##ELEMENTTYPE(                         \
+            data, start, n, indices, n_indices);                             \
     }
 
 ALL_FORWARD_OPS(DISPATCH_FORWARD_OPS_OP_AND)
@@ -524,7 +542,9 @@ init_dynamic_hook() {
     forward_op_xor_##ELEMENTTYPE =                                       \
         VectorizedAvx512::template forward_op_xor<ELEMENTTYPE>;          \
     forward_op_sub_##ELEMENTTYPE =                                       \
-        VectorizedAvx512::template forward_op_sub<ELEMENTTYPE>;
+        VectorizedAvx512::template forward_op_sub<ELEMENTTYPE>;          \
+    forward_op_set_indices_##ELEMENTTYPE =                               \
+        VectorizedAvx512::template forward_op_set_indices<ELEMENTTYPE>;
 
         ALL_FORWARD_OPS(SET_FORWARD_OPS_AVX512)
 
@@ -606,7 +626,9 @@ init_dynamic_hook() {
     forward_op_xor_##ELEMENTTYPE =                                     \
         VectorizedAvx2::template forward_op_xor<ELEMENTTYPE>;          \
     forward_op_sub_##ELEMENTTYPE =                                     \
-        VectorizedAvx2::template forward_op_sub<ELEMENTTYPE>;
+        VectorizedAvx2::template forward_op_sub<ELEMENTTYPE>;          \
+    forward_op_set_indices_##ELEMENTTYPE =                             \
+        VectorizedAvx2::template forward_op_set_indices<ELEMENTTYPE>;
 
         ALL_FORWARD_OPS(SET_FORWARD_OPS_AVX2)
 
@@ -691,7 +713,9 @@ init_dynamic_hook() {
     forward_op_xor_##ELEMENTTYPE =                                    \
         VectorizedSve::template forward_op_xor<ELEMENTTYPE>;          \
     forward_op_sub_##ELEMENTTYPE =                                    \
-        VectorizedSve::template forward_op_sub<ELEMENTTYPE>;
+        VectorizedSve::template forward_op_sub<ELEMENTTYPE>;          \
+    forward_op_set_indices_##ELEMENTTYPE =                            \
+        VectorizedSve::template forward_op_set_indices<ELEMENTTYPE>;
 
         ALL_FORWARD_OPS(SET_FORWARD_OPS_SVE)
 
@@ -774,7 +798,9 @@ init_dynamic_hook() {
     forward_op_xor_##ELEMENTTYPE =                                     \
         VectorizedNeon::template forward_op_xor<ELEMENTTYPE>;          \
     forward_op_sub_##ELEMENTTYPE =                                     \
-        VectorizedNeon::template forward_op_sub<ELEMENTTYPE>;
+        VectorizedNeon::template forward_op_sub<ELEMENTTYPE>;          \
+    forward_op_set_indices_##ELEMENTTYPE =                             \
+        VectorizedNeon::template forward_op_set_indices<ELEMENTTYPE>;
 
         ALL_FORWARD_OPS(SET_FORWARD_OPS_NEON)
 
