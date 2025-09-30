@@ -66,7 +66,7 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 		finishedCh:      make(chan struct{}),
 	}
 
-	rs.metrics.OnConnect()
+	rs.metrics.OnInitiate()
 	go rs.startInternal()
 	return rs
 }
@@ -78,7 +78,7 @@ func (r *replicateStreamClient) startInternal() {
 	)
 
 	defer func() {
-		r.metrics.OnDisconnect()
+		r.metrics.OnClose()
 		logger.Info("replicate stream client closed")
 		close(r.finishedCh)
 	}()
@@ -107,6 +107,7 @@ func (r *replicateStreamClient) startInternal() {
 			continue
 		}
 		logger.Info("replicate stream client service started")
+		r.metrics.OnConnect()
 
 		// reset client and pending messages
 		r.client = client
@@ -142,6 +143,14 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	case <-r.ctx.Done():
 		return nil
 	default:
+		// TODO: Should be done at streamingnode, but after move it into streamingnode, the metric need to be adjusted.
+		if msg.MessageType().IsSelfControlled() {
+			if r.pendingMessages.Len() == 0 {
+				// if there is no pending messages, there's no lag between source and target.
+				r.metrics.OnNoIncomingMessages()
+			}
+			return ErrReplicateIgnored
+		}
 		r.metrics.StartReplicate(msg)
 		r.pendingMessages.Enqueue(r.ctx, msg)
 		return nil
