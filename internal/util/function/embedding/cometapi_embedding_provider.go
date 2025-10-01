@@ -118,7 +118,7 @@ func (provider *CometAPIEmbeddingProvider) CallEmbedding(texts []string, _ model
 		if end-i != len(resp.Data) {
 			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 		}
-		
+
 		if provider.embdType == models.Float32Embd {
 			floatEmbeddings := make([][]float32, 0, len(resp.Data))
 			for _, item := range resp.Data {
