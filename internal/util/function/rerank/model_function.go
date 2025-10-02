@@ -39,6 +39,7 @@ const (
 	siliconflowProviderName string = "siliconflow"
 	cohereProviderName      string = "cohere"
 	voyageaiProviderName    string = "voyageai"
+	aliProviderName         string = "ali"
 
 	queryKeyName string = "queries"
 )
@@ -84,6 +85,8 @@ func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
 				return newCohereProvider(params, conf, credentials)
 			case voyageaiProviderName:
 				return newVoyageaiProvider(params, conf, credentials)
+			case aliProviderName:
+				return newAliProvider(params, conf, credentials)
 			default:
 				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
 			}
