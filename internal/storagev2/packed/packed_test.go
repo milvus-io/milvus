@@ -82,7 +82,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
-	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, false, columnGroups, nil, nil)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(suite.rec)
@@ -134,7 +134,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{2}, GroupID: 2}, {Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
-	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, false, columnGroups, nil, nil)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(rec)

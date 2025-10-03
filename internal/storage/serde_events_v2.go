@@ -42,6 +42,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+
+type writeOptions struct {
+	enableSkipIndex bool
+
+}
+
+type WriteOption func(*writeOptions)
+
+func DefaultWriteOptions() *writeOptions {
+	return &writeOptions{
+		enableSkipIndex: false,
+	}
+}
+
+func WithEnableSkipIndex(enable bool) WriteOption {
+	return func(opts *writeOptions) {
+		opts.enableSkipIndex = enable
+	}
+}
+
 type packedRecordReader struct {
 	paths  [][]string
 	chunk  int
@@ -218,23 +238,6 @@ func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 	return pw.rowNum
 }
 
-func (pw *packedRecordWriter) enableSkipIndex(fields []*schemapb.FieldSchema) error {
-	groups := make([]typeutil.UniqueID, 0)
-	for _, columnGroup := range pw.columnGroups {
-		for _, idx := range columnGroup.Columns {
-			field := fields[idx]
-			if field.GetFieldID() < common.StartOfUserFieldID || field.GetIsPrimaryKey() || storagecommon.IsVectorDataType(field.GetDataType()) {
-				break
-			}
-			if storagecommon.CanSkipDataType(field.GetDataType()) {
-				groups = append(groups, columnGroup.GroupID)
-				break
-			}
-		}
-	}
-	return pw.writer.EnableSkipIndex(groups, pw.schema)
-}
-
 func (pw *packedRecordWriter) Close() error {
 	if pw.writer != nil {
 		err := pw.writer.Close()
@@ -253,8 +256,12 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*packedRecordWriter, error) {
+func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, option ...WriteOption) (*packedRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
+	writeOptions := DefaultWriteOptions()
+	for _, opt := range option {
+		opt(writeOptions)
+	}
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
@@ -272,7 +279,7 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 		}
 		return path.Join(bucketName, p)
 	})
-	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, writeOptions.enableSkipIndex, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
@@ -417,13 +424,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 			paths = append(paths, path)
 			logIdStart++
 		}
-		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
-		if pw.isSorted {
-			err = pw.writer.enableSkipIndex(allFields)
-			if err != nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("enable skip index error: %s", err.Error()))
-			}
-		}
+		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, WithEnableSkipIndex(pw.isSorted))
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}

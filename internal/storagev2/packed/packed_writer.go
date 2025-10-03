@@ -31,16 +31,13 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, enableSkipIndex bool, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -87,6 +84,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		pluginContextPtr = &pluginContext
 	}
 
+	var cStorageConfig *C.CStorageConfig
 	if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -119,10 +117,8 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContextPtr)
-	} else {
-		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
 	}
+	status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, enableSkipIndex, cColumnGroups, cStorageConfig, pluginContextPtr, &cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
@@ -150,23 +146,6 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 		return err
 	}
 
-	return nil
-}
-
-func (pw *PackedWriter) EnableSkipIndex(groups []typeutil.UniqueID, schema *schemapb.CollectionSchema) error {
-	if len(groups) == 0 {
-		return nil
-	}
-
-	schemaBlob, err := proto.Marshal(schema)
-	if err != nil {
-		return err
-	}
-
-	status := C.EnableSkipIndex(pw.cPackedWriter, unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), (*C.int64_t)(unsafe.Pointer(&groups[0])), C.int64_t(len(groups)))
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return err
-	}
 	return nil
 }
 

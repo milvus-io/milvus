@@ -1034,10 +1034,12 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
         field_chunk_metrics_;
 };
 
-class ChunkSkipIndexAppender : public milvus_storage::MetadataAppender {
+class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
  public:
-    explicit ChunkSkipIndexAppender(SchemaPtr schema)
+    explicit ChunkSkipIndexBuilder(SchemaPtr schema)
         : schema_(std::move(schema)){};
+
+    explicit ChunkSkipIndexBuilder() = default;
 
  protected:
     std::unique_ptr<milvus_storage::Metadata>
