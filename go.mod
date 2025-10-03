@@ -37,9 +37,9 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 // indirect
 	github.com/tikv/client-go/v2 v2.0.4
-	go.etcd.io/etcd/api/v3 v3.5.5
-	go.etcd.io/etcd/client/v3 v3.5.5
-	go.etcd.io/etcd/server/v3 v3.5.5
+	go.etcd.io/etcd/api/v3 v3.5.23
+	go.etcd.io/etcd/client/v3 v3.5.23
+	go.etcd.io/etcd/server/v3 v3.5.23
 	go.opentelemetry.io/otel v1.34.0
 	go.opentelemetry.io/otel/trace v1.34.0
 	go.uber.org/atomic v1.11.0
@@ -316,4 +316,10 @@ replace (
 	github.com/milvus-io/milvus/pkg/v2 => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+    go.etcd.io/etcd/api/v3 => go.etcd.io/etcd/api/v3 v3.5.23
+    go.etcd.io/etcd/client/pkg/v3 => go.etcd.io/etcd/client/pkg/v3 v3.5.23
+    go.etcd.io/etcd/client/v3 => go.etcd.io/etcd/client/v3 v3.5.23
+    go.etcd.io/etcd/server/v3 => go.etcd.io/etcd/server/v3 v3.5.23
+    go.etcd.io/etcd/raft/v3 => go.etcd.io/etcd/raft/v3 v3.5.23
+    go.etcd.io/etcd/pkg/v3 => go.etcd.io/etcd/pkg/v3 v3.5.23
 )
