@@ -118,7 +118,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 	}
-	status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, enableSkipIndex, cColumnGroups, cStorageConfig, pluginContextPtr, &cPackedWriter)
+	status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, C.bool(enableSkipIndex), cColumnGroups, cStorageConfig, pluginContextPtr, &cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}

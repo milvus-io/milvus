@@ -19,15 +19,13 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
-#include "common/EasyAssert.h"
-#include "tokenizer.h"
+#include "arrow/type.h"
+#include "arrow/type_fwd.h"
 #include "xxhash.h"
 #include "ankerl/unordered_dense.h"
 #include "arrow/record_batch.h"
-#include "arrow/type_traits.h"
 #include "common/Schema.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -69,6 +67,7 @@ struct MetricsInfo {
     bool contains_false_ = false;
 
     ankerl::unordered_dense::set<MetricsDataType<T>> unique_values_;
+    ankerl::unordered_dense::set<std::string_view> ngram_values_;
 
     size_t string_length_ = 0;
     size_t max_string_length_ = 0;
@@ -80,7 +79,6 @@ enum class FieldChunkMetricType {
     SET,
     BLOOM_FILTER,
     NGRAM_FILTER,
-    TOKEN_FILTER,
 };
 
 class FieldChunkMetric {
@@ -116,7 +114,7 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
         }
         std::stringstream ss(data, std::ios::binary | std::ios::in);
         if constexpr (std::is_same_v<T, std::string>) {
-            size_t min_len, max_len;
+            uint32_t min_len, max_len;
             ss.read(reinterpret_cast<char*>(&min_len), sizeof(min_len));
             min_.resize(min_len);
             ss.read(min_.data(), min_len);
@@ -187,11 +185,11 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
     Serialize() const override {
         std::stringstream ss(std::ios::binary | std::ios::out);
         if constexpr (std::is_same_v<T, std::string>) {
-            size_t min_len = min_.length();
+            uint32_t min_len = min_.length();
             ss.write(reinterpret_cast<const char*>(&min_len), sizeof(min_len));
             ss.write(min_.data(), min_len);
 
-            size_t max_len = max_.length();
+            uint32_t max_len = max_.length();
             ss.write(reinterpret_cast<const char*>(&max_len), sizeof(max_len));
             ss.write(max_.data(), max_len);
         } else {
@@ -716,16 +714,7 @@ class NgramFieldChunkMetric : public FieldChunkMetric {
 
  public:
     explicit NgramFieldChunkMetric(const MetricsInfo<std::string>& info) {
-        ankerl::unordered_dense::set<std::string_view> ngrams;
-        for (const auto& text : info.unique_values_) {
-            if (text.length() >= NGRAM_SIZE) {
-                for (size_t j = 0; j <= text.length() - NGRAM_SIZE; ++j) {
-                    ngrams.insert(text.substr(j, NGRAM_SIZE));
-                }
-            }
-        }
-
-        filter_ = BloomFilter::Build<std::string_view>(ngrams);
+        filter_ = BloomFilter::Build<std::string_view>(info.ngram_values_);
         hasValue_ = filter_->IsValid();
     }
 
@@ -779,16 +768,6 @@ class NgramFieldChunkMetric : public FieldChunkMetric {
         return false;
     }
 
-    bool
-    CanSkipPrefixMatch(const std::string& prefix) const {
-        return CanSkipSubstringMatch(prefix);
-    }
-
-    bool
-    CanSkipPostfixMatch(const std::string& suffix) const {
-        return CanSkipSubstringMatch(suffix);
-    }
-
     FieldChunkMetricType
     GetType() const override {
         return FieldChunkMetricType::NGRAM_FILTER;
@@ -800,101 +779,9 @@ class NgramFieldChunkMetric : public FieldChunkMetric {
     }
 };
 
-class TokenFieldChunkMetric : public FieldChunkMetric {
- private:
-    std::unique_ptr<BloomFilter> filter_;
-    std::string analyzer_params_;
-    std::unique_ptr<milvus::tantivy::Tokenizer> tokenizer_;
-
- public:
-    explicit TokenFieldChunkMetric(const MetricsInfo<std::string>& info,
-                                   const char* analyzer_params)
-        : analyzer_params_(analyzer_params),
-          tokenizer_(std::make_unique<milvus::tantivy::Tokenizer>(
-              std::string(analyzer_params))) {
-        ankerl::unordered_dense::set<std::string> unique_tokens;
-        for (auto& text : info.unique_values_) {
-            auto token_stream =
-                tokenizer_->CreateTokenStream(std::string(text));
-            while (token_stream->advance()) {
-                auto token = token_stream->get_token();
-                unique_tokens.insert(token);
-            }
-        }
-
-        filter_ = BloomFilter::Build<std::string>(unique_tokens);
-        hasValue_ = filter_->IsValid();
-    }
-
-    explicit TokenFieldChunkMetric(const std::string& data) {
-        if (data.empty()) {
-            return;
-        }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
-        size_t len;
-        ss.read(reinterpret_cast<char*>(&len), sizeof(len));
-        std::string analyzer_params_(len, '\0');
-        ss.read(analyzer_params_.data(), len);
-        auto filter_data = data.substr(sizeof(len) + len);
-        filter_ = BloomFilter::Deserialize(filter_data);
-        tokenizer_ = std::make_unique<milvus::tantivy::Tokenizer>(
-            std::string(analyzer_params_));
-
-        hasValue_ = filter_ && filter_->IsValid();
-    }
-
-    bool
-    CanSkipFullTextSearch(const std::string& query_string) {
-        if (!hasValue_) {
-            return false;
-        }
-
-        auto token_stream = tokenizer_->CreateTokenStreamCopyText(query_string);
-        while (token_stream->advance()) {
-            auto token = token_stream->get_token();
-            if (!filter_->MightContain<std::string>(token)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    bool
-    CanSkipAnyTokenMatch(const std::string& query_string) {
-        if (!hasValue_) {
-            return false;
-        }
-
-        auto token_stream = tokenizer_->CreateTokenStreamCopyText(query_string);
-        while (token_stream->advance()) {
-            auto token = token_stream->get_token();
-            if (filter_->MightContain<std::string>(token)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    FieldChunkMetricType
-    GetType() const override {
-        return FieldChunkMetricType::TOKEN_FILTER;
-    }
-
-    std::string
-    Serialize() const override {
-        std::stringstream ss(std::ios::binary | std::ios::out);
-        size_t len = analyzer_params_.size();
-        ss.write(reinterpret_cast<const char*>(&len), sizeof(len));
-        ss.write(analyzer_params_.data(), len);
-        auto filter_data = filter_ ? filter_->Serialize() : "";
-        ss.write(filter_data.data(), filter_data.size());
-        return ss.str();
-    }
-};
-
 class FieldChunkMetrics {
  public:
-    explicit FieldChunkMetrics(DataType data_type) : data_type_(data_type){};
+    explicit FieldChunkMetrics(arrow::Type::type data_type) : data_type_(data_type){};
 
     void
     Load(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
@@ -907,7 +794,7 @@ class FieldChunkMetrics {
     }
 
     std::unique_ptr<FieldChunkMetric>
-    LoadMetric(DataType data_type,
+    LoadMetric(arrow::Type::type data_type,
                FieldChunkMetricType metric_type,
                const std::string& data);
 
@@ -922,7 +809,7 @@ class FieldChunkMetrics {
         return nullptr;
     }
 
-    DataType
+    arrow::Type::type
     GetDataType() const {
         return data_type_;
     }
@@ -940,7 +827,7 @@ class FieldChunkMetrics {
 
  private:
     std::vector<std::unique_ptr<FieldChunkMetric>> metrics_;
-    DataType data_type_;
+    arrow::Type::type data_type_;
 };
 
 class ChunkSkipIndex : public milvus_storage::Metadata {
@@ -948,10 +835,6 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
     static constexpr const char* KEY = "SKIP_INDEX";
 
     ChunkSkipIndex() = default;
-
-    explicit ChunkSkipIndex(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        SchemaPtr schema);
 
     void
     Add(FieldId field_id, std::unique_ptr<FieldChunkMetrics> metrics) {
@@ -984,7 +867,7 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             int64_t id = field_id.get();
             ss.write(reinterpret_cast<const char*>(&id), sizeof(id));
 
-            DataType data_type = metrics->GetDataType();
+            arrow::Type::type data_type = metrics->GetDataType();
             ss.write(reinterpret_cast<const char*>(&data_type),
                      sizeof(data_type));
 
@@ -1012,7 +895,7 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             ss.read(reinterpret_cast<char*>(&field_id_val),
                     sizeof(field_id_val));
 
-            DataType data_type;
+            arrow::Type::type data_type;
             ss.read(reinterpret_cast<char*>(&data_type), sizeof(data_type));
 
             uint64_t len;
@@ -1036,9 +919,6 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
 
 class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
  public:
-    explicit ChunkSkipIndexBuilder(SchemaPtr schema)
-        : schema_(std::move(schema)){};
-
     explicit ChunkSkipIndexBuilder() = default;
 
  protected:
@@ -1058,7 +938,11 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
                                ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
                                ->data());
             auto fid = FieldId(field_id);
-            auto field_metrics = LoadFieldChunkMetrics(batches, fid, col_idx);
+            auto data_type = field_schema->field(col_idx)->type()->id();
+            if (fid == RowFieldID || !CanLoadField(data_type)) {
+                continue;
+            }
+            auto field_metrics = LoadFieldChunkMetrics(batches, col_idx, data_type);
             if (field_metrics) {
                 chunk_skip_index->Add(fid, std::move(field_metrics));
             }
@@ -1068,19 +952,16 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
 
  private:
     bool
-    CanLoadField(DataType type) {
+    CanLoadField(arrow::Type::type type) {
         switch (type) {
-            case DataType::BOOL:
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32:
-            case DataType::INT64:
-            case DataType::FLOAT:
-            case DataType::DOUBLE:
-            case DataType::VARCHAR:
-            case DataType::STRING:
-            case DataType::TEXT:
-            case DataType::TIMESTAMPTZ:
+            case arrow::Type::BOOL:
+            case arrow::Type::INT8:
+            case arrow::Type::INT16:
+            case arrow::Type::INT32:
+            case arrow::Type::INT64:
+            case arrow::Type::FLOAT:
+            case arrow::Type::DOUBLE:
+            case arrow::Type::STRING:
                 return true;
             default:
                 return false;
@@ -1090,14 +971,8 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
     std::unique_ptr<FieldChunkMetrics>
     LoadFieldChunkMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        milvus::FieldId fid,
-        int col_idx) {
-        auto field_meta = schema_->operator[](fid);
-        auto data_type = field_meta.get_data_type();
-        if (fid == RowFieldID || !CanLoadField(data_type)) {
-            return nullptr;
-        }
-        auto metrics = LoadMetrics(batches, col_idx, fid, data_type);
+        int col_idx, arrow::Type::type data_type) {
+        auto metrics = LoadMetrics(batches, col_idx, data_type);
         if (metrics.empty()) {
             return nullptr;
         }
@@ -1112,34 +987,30 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
     std::vector<std::unique_ptr<FieldChunkMetric>>
     LoadMetrics(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
                 int col_idx,
-                FieldId fid,
-                DataType data_type) {
+                arrow::Type::type data_type) {
         switch (data_type) {
-            case DataType::BOOL:
+            case arrow::Type::BOOL:
                 return LoadBooleanMetrics(batches, col_idx);
-            case DataType::INT8:
+            case arrow::Type::INT8:
                 return LoadNumMetrics<int8_t, arrow::Int8Array>(batches,
                                                                 col_idx);
-            case DataType::INT16:
+            case arrow::Type::INT16:
                 return LoadNumMetrics<int16_t, arrow::Int16Array>(batches,
                                                                   col_idx);
-            case DataType::INT32:
+            case arrow::Type::INT32:
                 return LoadNumMetrics<int32_t, arrow::Int32Array>(batches,
                                                                   col_idx);
-            case DataType::INT64:
+            case arrow::Type::INT64:
                 return LoadNumMetrics<int64_t, arrow::Int64Array>(batches,
                                                                   col_idx);
-            case DataType::FLOAT:
+            case arrow::Type::FLOAT:
                 return LoadNumMetrics<float, arrow::FloatArray>(batches,
                                                                 col_idx);
-            case DataType::DOUBLE:
+            case arrow::Type::DOUBLE:
                 return LoadNumMetrics<double, arrow::DoubleArray>(batches,
                                                                   col_idx);
-            case DataType::VARCHAR:
-            case DataType::STRING:
+            case arrow::Type::STRING:
                 return LoadStringMetrics(batches, col_idx);
-            case DataType::TEXT:
-                return LoadTextMetrics(batches, col_idx, fid);
             default:
                 return {};
         }
@@ -1216,23 +1087,10 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
                     info));
             remaining_budget -= bf_cost;
         }
-    }
 
-    std::vector<std::unique_ptr<FieldChunkMetric>>
-    LoadTextMetrics(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        int col_idx,
-        FieldId fid) {
-        MetricsInfo<std::string> info{};
-        ProcessStringFieldMetrics(batches, col_idx, info);
-        if (info.total_rows_ - info.null_count_ < MIN_ROWS_TO_BUILD_METRICS) {
-            return {};
-        }
-
-        std::vector<std::unique_ptr<FieldChunkMetric>> metrics;
-        auto field_meta = schema_->operator[](fid);
-        metrics.emplace_back(std::make_unique<TokenFieldChunkMetric>(
-            info, field_meta.get_analyzer_params().c_str()));
+        metrics.emplace_back(
+            std::make_unique<NgramFieldChunkMetric>(info));
+        return metrics;
     }
 
     template <typename T, typename ArrayType>
@@ -1306,6 +1164,10 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
                     }
                 }
 
+                for (size_t j = 0; j <= length - NGRAM_SIZE; ++j) {
+                    std::string_view ngram = value.substr(j, NGRAM_SIZE);
+                    info.ngram_values_.insert(ngram);
+                }
                 info.unique_values_.insert(value);
                 info.string_length_ += length;
                 info.max_string_length_ =
@@ -1339,8 +1201,6 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
             info.total_rows_ += bool_array->length();
         }
     }
-
-    SchemaPtr schema_;
 };
 
 class SkipIndex {

@@ -9,25 +9,23 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <algorithm>
 #include "SkipIndex.h"
-#include "common/FieldDataInterface.h"
 
 namespace milvus {
 
 std::unique_ptr<FieldChunkMetric>
-FieldChunkMetrics::LoadMetric(DataType data_type,
+FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                               FieldChunkMetricType metric_type,
                               const std::string& data) {
     switch (data_type) {
-        case DataType::BOOL:
+        case arrow::Type::BOOL:
             switch (metric_type) {
                 case FieldChunkMetricType::SET:
                     return std::make_unique<SetFieldChunkMetric<bool>>(data);
                 default:
                     return nullptr;
             }
-        case DataType::INT8:
+        case arrow::Type::INT8:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int8_t>>(
@@ -40,7 +38,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::INT16:
+        case arrow::Type::INT16:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int16_t>>(
@@ -53,7 +51,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::INT32:
+        case arrow::Type::INT32:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int32_t>>(
@@ -66,7 +64,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::INT64:
+        case arrow::Type::INT64:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<int64_t>>(
@@ -79,7 +77,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::FLOAT:
+        case arrow::Type::FLOAT:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<float>>(
@@ -92,7 +90,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::DOUBLE:
+        case arrow::Type::DOUBLE:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<MinMaxFieldChunkMetric<double>>(
@@ -105,7 +103,7 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                 default:
                     return nullptr;
             }
-        case DataType::STRING:
+        case arrow::Type::STRING:
             switch (metric_type) {
                 case FieldChunkMetricType::MINMAX:
                     return std::make_unique<
@@ -118,8 +116,6 @@ FieldChunkMetrics::LoadMetric(DataType data_type,
                         BloomFilterFieldChunkMetric<std::string>>(data);
                 case FieldChunkMetricType::NGRAM_FILTER:
                     return std::make_unique<NgramFieldChunkMetric>(data);
-                case FieldChunkMetricType::TOKEN_FILTER:
-                    // return std::make_unique<TokenFieldChunkMetric>(data);
                 default:
                     return nullptr;
             }
@@ -140,7 +136,7 @@ FieldChunkMetrics::Serialize() const {
         ss.write(reinterpret_cast<const char*>(&type), sizeof(type));
 
         std::string data = metric->Serialize();
-        uint64_t len = data.length();
+        uint32_t len = data.length();
         ss.write(reinterpret_cast<const char*>(&len), sizeof(len));
         ss.write(data.data(), len);
     }
@@ -158,7 +154,7 @@ FieldChunkMetrics::Deserialize(const std::string& data) {
         FieldChunkMetricType metric_type;
         ss.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
 
-        uint64_t metric_len;
+        uint32_t metric_len;
         ss.read(reinterpret_cast<char*>(&metric_len), sizeof(metric_len));
         std::string metric_data(metric_len, '\0');
         ss.read(&metric_data[0], metric_len);
