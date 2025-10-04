@@ -26,25 +26,16 @@ extern "C" {
 typedef void* CPackedWriter;
 
 CStatus
-NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
-                                 const int64_t buffer_size,
-                                 char** paths,
-                                 int64_t num_paths,
-                                 int64_t part_upload_size,
-                                 CColumnGroups column_groups,
-                                 CStorageConfig c_storage_config,
-                                 CPackedWriter* c_packed_writer,
-                                 CPluginContext* c_plugin_context);
-
-CStatus
 NewPackedWriter(struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 char** paths,
                 int64_t num_paths,
                 int64_t part_upload_size,
+                bool enableSkipindex,
                 CColumnGroups column_groups,
-                CPackedWriter* c_packed_writer,
-                CPluginContext* c_plugin_context);
+                CStorageConfig* c_storage_config,
+                CPluginContext* c_plugin_context,
+                CPackedWriter* c_packed_writer);
 
 CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
