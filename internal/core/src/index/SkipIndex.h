@@ -26,7 +26,6 @@
 #include "xxhash.h"
 #include "ankerl/unordered_dense.h"
 #include "arrow/record_batch.h"
-#include "common/Schema.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
@@ -51,7 +50,7 @@ using ReverseMetricsDataType =
 // False positive rate for Bloom filter
 static constexpr double FPR = 0.01;
 static constexpr int64_t NGRAM_SIZE = 3;
-static constexpr int64_t MIN_ROWS_TO_BUILD_METRICS = 10;
+// static constexpr int64_t MIN_ROWS_TO_BUILD_METRICS = 10;
 static constexpr double CARDINALITY_RATIO_FOR_SET = 0.1;
 static constexpr double METADATA_BUDGET_RATIO = 0.01;
 
@@ -781,7 +780,8 @@ class NgramFieldChunkMetric : public FieldChunkMetric {
 
 class FieldChunkMetrics {
  public:
-    explicit FieldChunkMetrics(arrow::Type::type data_type) : data_type_(data_type){};
+    explicit FieldChunkMetrics(arrow::Type::type data_type)
+        : data_type_(data_type){};
 
     void
     Load(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
@@ -836,9 +836,31 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
 
     ChunkSkipIndex() = default;
 
-    void
-    Add(FieldId field_id, std::unique_ptr<FieldChunkMetrics> metrics) {
-        field_chunk_metrics_.emplace_back(field_id, std::move(metrics));
+    ChunkSkipIndex(
+        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
+        if (batches.empty()) {
+            return;
+        }
+        auto field_schema = batches[0]->schema();
+        for (int col_idx = 0; col_idx < field_schema->num_fields(); ++col_idx) {
+            auto field_schema = batches[0]->schema();
+            auto field_id =
+                std::stoll(field_schema->field(col_idx)
+                               ->metadata()
+                               ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                               ->data());
+            auto fid = FieldId(field_id);
+            auto data_type = field_schema->field(col_idx)->type()->id();
+            if (fid == RowFieldID || !CanLoadField(data_type)) {
+                continue;
+            }
+            auto field_metrics =
+                LoadFieldChunkMetrics(batches, col_idx, data_type);
+            if (field_metrics) {
+                field_chunk_metrics_.emplace_back(field_id,
+                                                  std::move(field_metrics));
+            }
+        }
     }
 
     bool
@@ -913,44 +935,6 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
     };
 
  private:
-    std::vector<std::pair<FieldId, std::unique_ptr<FieldChunkMetrics>>>
-        field_chunk_metrics_;
-};
-
-class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
- public:
-    explicit ChunkSkipIndexBuilder() = default;
-
- protected:
-    std::unique_ptr<milvus_storage::Metadata>
-    Create(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches)
-        override {
-        auto chunk_skip_index = std::make_unique<ChunkSkipIndex>();
-        if (batches.empty()) {
-            return chunk_skip_index;
-        }
-        auto field_schema = batches[0]->schema();
-        for (int col_idx = 0; col_idx < field_schema->num_fields(); ++col_idx) {
-            auto field_schema = batches[0]->schema();
-            auto field_id =
-                std::stoll(field_schema->field(col_idx)
-                               ->metadata()
-                               ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
-                               ->data());
-            auto fid = FieldId(field_id);
-            auto data_type = field_schema->field(col_idx)->type()->id();
-            if (fid == RowFieldID || !CanLoadField(data_type)) {
-                continue;
-            }
-            auto field_metrics = LoadFieldChunkMetrics(batches, col_idx, data_type);
-            if (field_metrics) {
-                chunk_skip_index->Add(fid, std::move(field_metrics));
-            }
-        }
-        return chunk_skip_index;
-    }
-
- private:
     bool
     CanLoadField(arrow::Type::type type) {
         switch (type) {
@@ -971,7 +955,8 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
     std::unique_ptr<FieldChunkMetrics>
     LoadFieldChunkMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        int col_idx, arrow::Type::type data_type) {
+        int col_idx,
+        arrow::Type::type data_type) {
         auto metrics = LoadMetrics(batches, col_idx, data_type);
         if (metrics.empty()) {
             return nullptr;
@@ -1024,7 +1009,7 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
         MetricsInfo<T> info{};
         ProcessFieldMetrics<T, ArrayType>(batches, col_idx, info);
 
-        if (info.total_rows_ - info.null_count_ < MIN_ROWS_TO_BUILD_METRICS) {
+        if (info.total_rows_ - info.null_count_ == 0) {
             return {};
         }
 
@@ -1048,7 +1033,7 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
         int col_idx) {
         MetricsInfo<bool> info{};
         ProcessBooleanFieldMetrics(batches, col_idx, info);
-        if (info.total_rows_ - info.null_count_ < MIN_ROWS_TO_BUILD_METRICS) {
+        if (info.total_rows_ - info.null_count_ == 0) {
             return {};
         }
         auto metrics = std::vector<std::unique_ptr<FieldChunkMetric>>{};
@@ -1062,7 +1047,7 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
         int col_idx) {
         MetricsInfo<std::string> info{};
         ProcessStringFieldMetrics(batches, col_idx, info);
-        if (info.total_rows_ - info.null_count_ < MIN_ROWS_TO_BUILD_METRICS) {
+        if (info.total_rows_ - info.null_count_ == 0) {
             return {};
         }
 
@@ -1088,8 +1073,7 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
             remaining_budget -= bf_cost;
         }
 
-        metrics.emplace_back(
-            std::make_unique<NgramFieldChunkMetric>(info));
+        metrics.emplace_back(std::make_unique<NgramFieldChunkMetric>(info));
         return metrics;
     }
 
@@ -1200,6 +1184,25 @@ class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
             }
             info.total_rows_ += bool_array->length();
         }
+    }
+    std::vector<std::pair<FieldId, std::unique_ptr<FieldChunkMetrics>>>
+        field_chunk_metrics_;
+};
+
+class ChunkSkipIndexBuilder : public milvus_storage::MetadataBuilder {
+ public:
+    explicit ChunkSkipIndexBuilder() = default;
+
+    std::vector<std::unique_ptr<milvus_storage::Metadata>>
+    Take() {
+        return std::move(metadata_collection_);
+    }
+
+ private:
+    std::unique_ptr<milvus_storage::Metadata>
+    Create(const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches)
+        override {
+        return std::make_unique<ChunkSkipIndex>(batches);
     }
 };
 

@@ -24,7 +24,6 @@
 #include "arrow/type_fwd.h"
 #include "common/type_c.h"
 #include "fmt/format.h"
-#include "index/SkipIndex.h"
 #include "index/Utils.h"
 #include "log/Log.h"
 

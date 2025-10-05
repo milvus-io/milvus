@@ -62,27 +62,27 @@ NewPackedWriter(struct ArrowSchema* schema,
         milvus_storage::ArrowFileSystemPtr trueFs;
         if (c_storage_config == nullptr) {
             trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+                         .GetArrowFileSystem();
         } else {
             trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config->address),
-            std::string(c_storage_config->bucket_name),
-            std::string(c_storage_config->access_key_id),
-            std::string(c_storage_config->access_key_value),
-            std::string(c_storage_config->root_path),
-            std::string(c_storage_config->storage_type),
-            std::string(c_storage_config->cloud_provider),
-            std::string(c_storage_config->iam_endpoint),
-            std::string(c_storage_config->log_level),
-            std::string(c_storage_config->region),
-            c_storage_config->useSSL,
-            std::string(c_storage_config->sslCACert),
-            c_storage_config->useIAM,
-            c_storage_config->useVirtualHost,
-            c_storage_config->requestTimeoutMs,
-            false,
-            std::string(c_storage_config->gcp_credential_json),
-            c_storage_config->use_custom_part_upload,
+                std::string(c_storage_config->address),
+                std::string(c_storage_config->bucket_name),
+                std::string(c_storage_config->access_key_id),
+                std::string(c_storage_config->access_key_value),
+                std::string(c_storage_config->root_path),
+                std::string(c_storage_config->storage_type),
+                std::string(c_storage_config->cloud_provider),
+                std::string(c_storage_config->iam_endpoint),
+                std::string(c_storage_config->log_level),
+                std::string(c_storage_config->region),
+                c_storage_config->useSSL,
+                std::string(c_storage_config->sslCACert),
+                c_storage_config->useIAM,
+                c_storage_config->useVirtualHost,
+                c_storage_config->requestTimeoutMs,
+                false,
+                std::string(c_storage_config->gcp_credential_json),
+                c_storage_config->use_custom_part_upload,
             });
         }
         if (!trueFs) {
@@ -129,11 +129,9 @@ NewPackedWriter(struct ArrowSchema* schema,
             writer_properties);
         AssertInfo(writer, "[StorageV2] writer pointer is null");
         if (enableSkipindex) {
-            writer->AddMetadataBuilder(
-                milvus::ChunkSkipIndex::KEY,
-                []() {
-                    return std::make_unique<milvus::ChunkSkipIndexBuilder>();
-                });
+            writer->AddMetadataBuilder(milvus::ChunkSkipIndex::KEY, []() {
+                return std::make_unique<milvus::ChunkSkipIndexBuilder>();
+            });
         }
         *c_packed_writer = writer.release();
         return milvus::SuccessCStatus();
