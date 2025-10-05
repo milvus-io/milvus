@@ -47,6 +47,12 @@ template <typename T>
 using ReverseMetricsDataType =
     std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
+template <typename T>
+using HighPrecisionType = std::conditional_t<std::is_integral_v<T> &&
+                                !std::is_same_v<bool, T>,
+                            int64_t,
+                            T>;
+
 // False positive rate for Bloom filter
 static constexpr double FPR = 0.01;
 static constexpr int64_t NGRAM_SIZE = 3;
@@ -1413,20 +1419,31 @@ class SkipIndex {
                             int64_t chunk_id,
                             OpType op_type,
                             ArithOpType arith_type,
-                            const T& value,
-                            const T& right_operand) const {
+                            const HighPrecisionType<T> value,
+                            const HighPrecisionType<T> right_operand) const {
+        auto check_and_skip =
+            [&](HighPrecisionType<T> new_value_hp, OpType new_op_type) {
+                if constexpr (std::is_integral_v<T>) {
+                    if (new_value_hp > std::numeric_limits<T>::max() ||
+                        new_value_hp < std::numeric_limits<T>::min()) {
+                        // Overflow detected. The transformed value cannot be represented by T.
+                        // We cannot make a safe comparison with the chunk's min/max.
+                        return false;
+                    }
+                }
+                return CanSkipUnaryRange(field_id,
+                                         chunk_id,
+                                         new_op_type,
+                                         static_cast<T>(new_value_hp));
+            };
         switch (arith_type) {
             case ArithOpType::Add: {
                 // field + C > V  =>  field > V - C
-                T new_value = value - right_operand;
-                return CanSkipUnaryRange(
-                    field_id, chunk_id, op_type, new_value);
+                return check_and_skip(value - right_operand, op_type);
             }
             case ArithOpType::Sub: {
                 // field - C > V  =>  field > V + C
-                T new_value = value + right_operand;
-                return CanSkipUnaryRange(
-                    field_id, chunk_id, op_type, new_value);
+                return check_and_skip(value + right_operand, op_type);
             }
             case ArithOpType::Mul: {
                 // field * C > V
@@ -1435,15 +1452,11 @@ class SkipIndex {
                     return false;
                 }
 
-                T new_value = value / right_operand;
                 OpType new_op_type = op_type;
-
                 if (right_operand < 0) {
-                    // If we divide by a negative number, the inequality flips.
                     new_op_type = FlipComparisonOperator(op_type);
                 }
-                return CanSkipUnaryRange(
-                    field_id, chunk_id, new_op_type, new_value);
+                return check_and_skip(value / right_operand, new_op_type);
             }
             case ArithOpType::Div: {
                 // field / C > V
@@ -1452,15 +1465,11 @@ class SkipIndex {
                     return false;
                 }
 
-                T new_value = value * right_operand;
                 OpType new_op_type = op_type;
-
                 if (right_operand < 0) {
-                    // If we multiply by a negative number, the inequality flips.
                     new_op_type = FlipComparisonOperator(op_type);
                 }
-                return CanSkipUnaryRange(
-                    field_id, chunk_id, new_op_type, new_value);
+                return check_and_skip(value * right_operand, new_op_type);
             }
             default:
                 return false;
