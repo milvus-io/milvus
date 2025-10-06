@@ -48,10 +48,10 @@ using ReverseMetricsDataType =
     std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
 template <typename T>
-using HighPrecisionType = std::conditional_t<std::is_integral_v<T> &&
-                                !std::is_same_v<bool, T>,
-                            int64_t,
-                            T>;
+using HighPrecisionType =
+    std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
+                       int64_t,
+                       T>;
 
 // False positive rate for Bloom filter
 static constexpr double FPR = 0.01;
@@ -146,7 +146,7 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
 
     bool
     CanSkipIn(const std::vector<T>& values) const {
-        if (!hasValue_) {
+        if (!hasValue_ || values.empty()) {
             return false;
         }
         const auto [min_val, max_val] =
@@ -296,6 +296,9 @@ class SetFieldChunkMetric : public FieldChunkMetric {
 
     bool
     CanSkipIn(const std::vector<T>& values) const {
+        if (!hasValue_ || values.empty()) {
+            return false;
+        }
         for (const auto& value : values) {
             if (unique_values_.count(value)) {
                 return false;
@@ -371,6 +374,9 @@ class SetFieldChunkMetric<std::string> : public FieldChunkMetric {
 
     bool
     CanSkipIn(const std::vector<std::string>& values) const {
+        if (!hasValue_ || values.empty()) {
+            return false;
+        }
         for (const auto& value : values) {
             if (unique_values_.count(value)) {
                 return false;
@@ -435,7 +441,7 @@ class SetFieldChunkMetric<bool> : public FieldChunkMetric {
 
     bool
     CanSkipIn(const std::vector<bool>& values) const {
-        if (values.size() != 2) {
+        if (!hasValue_ || values.size() != 2) {
             return false;
         }
         bool query_contains_true = values[0];
@@ -526,8 +532,8 @@ class BloomFilter {
         if (bit_size_ == 0) {
             return true;
         }
-        uint64_t hash1 = Hash(item, 0x9e3779b9);
-        uint64_t hash2 = Hash(item, hash1);
+        uint64_t hash1 = Hash<T>(item, 0x9e3779b9);
+        uint64_t hash2 = Hash<T>(item, hash1);
         for (size_t i = 0; i < hash_count_; ++i) {
             size_t bit_pos = (hash1 + i * hash2) % bit_size_;
             if (!(bit_array_[bit_pos / 64] & (1ULL << (bit_pos % 64)))) {
@@ -691,7 +697,7 @@ class BloomFilterFieldChunkMetric : public FieldChunkMetric {
 
     bool
     CanSkipIn(const std::vector<T>& values) const {
-        if (!hasValue_) {
+        if (!hasValue_ || values.empty()) {
             return false;
         }
         for (const auto& value : values) {
@@ -713,17 +719,17 @@ class BloomFilterFieldChunkMetric : public FieldChunkMetric {
     }
 };
 
-class NgramFieldChunkMetric : public FieldChunkMetric {
+class NgramFilterFieldChunkMetric : public FieldChunkMetric {
  private:
     std::unique_ptr<BloomFilter> filter_;
 
  public:
-    explicit NgramFieldChunkMetric(const MetricsInfo<std::string>& info) {
+    explicit NgramFilterFieldChunkMetric(const MetricsInfo<std::string>& info) {
         filter_ = BloomFilter::Build<std::string_view>(info.ngram_values_);
         hasValue_ = filter_->IsValid();
     }
 
-    explicit NgramFieldChunkMetric(const std::string& data) {
+    explicit NgramFilterFieldChunkMetric(const std::string& data) {
         if (data.empty()) {
             return;
         }
@@ -813,6 +819,16 @@ class FieldChunkMetrics {
             }
         }
         return nullptr;
+    }
+
+    bool
+    HasMetric(FieldChunkMetricType type) const {
+        for (const auto& metric : metrics_) {
+            if (metric->GetType() == type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     arrow::Type::type
@@ -983,23 +999,23 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             case arrow::Type::BOOL:
                 return LoadBooleanMetrics(batches, col_idx);
             case arrow::Type::INT8:
-                return LoadNumMetrics<int8_t, arrow::Int8Array>(batches,
+                return LoadIntMetrics<int8_t, arrow::Int8Array>(batches,
                                                                 col_idx);
             case arrow::Type::INT16:
-                return LoadNumMetrics<int16_t, arrow::Int16Array>(batches,
+                return LoadIntMetrics<int16_t, arrow::Int16Array>(batches,
                                                                   col_idx);
             case arrow::Type::INT32:
-                return LoadNumMetrics<int32_t, arrow::Int32Array>(batches,
+                return LoadIntMetrics<int32_t, arrow::Int32Array>(batches,
                                                                   col_idx);
             case arrow::Type::INT64:
-                return LoadNumMetrics<int64_t, arrow::Int64Array>(batches,
+                return LoadIntMetrics<int64_t, arrow::Int64Array>(batches,
                                                                   col_idx);
             case arrow::Type::FLOAT:
-                return LoadNumMetrics<float, arrow::FloatArray>(batches,
-                                                                col_idx);
-            case arrow::Type::DOUBLE:
-                return LoadNumMetrics<double, arrow::DoubleArray>(batches,
+                return LoadFloatMetrics<float, arrow::FloatArray>(batches,
                                                                   col_idx);
+            case arrow::Type::DOUBLE:
+                return LoadFloatMetrics<double, arrow::DoubleArray>(batches,
+                                                                    col_idx);
             case arrow::Type::STRING:
                 return LoadStringMetrics(batches, col_idx);
             default:
@@ -1009,11 +1025,11 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
 
     template <typename T, typename ArrayType>
     std::vector<std::unique_ptr<FieldChunkMetric>>
-    LoadNumMetrics(
+    LoadIntMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
         int col_idx) {
         MetricsInfo<T> info{};
-        ProcessFieldMetrics<T, ArrayType>(batches, col_idx, info);
+        ProcessIntFieldMetrics<T, ArrayType>(batches, col_idx, info);
 
         if (info.total_rows_ - info.null_count_ == 0) {
             return {};
@@ -1030,6 +1046,23 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             metrics.emplace_back(
                 std::make_unique<BloomFilterFieldChunkMetric<T>>(info));
         }
+        return metrics;
+    }
+
+    template <typename T, typename ArrayType>
+    std::vector<std::unique_ptr<FieldChunkMetric>>
+    LoadFloatMetrics(
+        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
+        int col_idx) {
+        MetricsInfo<T> info{};
+        ProcessFloatFieldMetrics<T, ArrayType>(batches, col_idx, info);
+
+        if (info.total_rows_ - info.null_count_ == 0) {
+            return {};
+        }
+
+        auto metrics = std::vector<std::unique_ptr<FieldChunkMetric>>{};
+        metrics.emplace_back(std::make_unique<MinMaxFieldChunkMetric<T>>(info));
         return metrics;
     }
 
@@ -1079,13 +1112,14 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
             remaining_budget -= bf_cost;
         }
 
-        metrics.emplace_back(std::make_unique<NgramFieldChunkMetric>(info));
+        metrics.emplace_back(
+            std::make_unique<NgramFilterFieldChunkMetric>(info));
         return metrics;
     }
 
     template <typename T, typename ArrayType>
     void
-    ProcessFieldMetrics(
+    ProcessIntFieldMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
         int col_idx,
         MetricsInfo<T>& info) {
@@ -1114,6 +1148,41 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
                     }
                 }
                 info.unique_values_.insert(value);
+            }
+            info.total_rows_ += array->length();
+        }
+    }
+
+    template <typename T, typename ArrayType>
+    void
+    ProcessFloatFieldMetrics(
+        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
+        int col_idx,
+        MetricsInfo<T>& info) {
+        bool has_first_valid = false;
+
+        for (const auto& batch : batches) {
+            auto arr = batch->column(col_idx);
+            auto array = std::static_pointer_cast<ArrayType>(arr);
+            for (int64_t i = 0; i < array->length(); ++i) {
+                if (array->IsNull(i)) {
+                    info.null_count_++;
+                    continue;
+                }
+                T value = array->Value(i);
+
+                if (!has_first_valid) {
+                    info.min_ = value;
+                    info.max_ = value;
+                    has_first_valid = true;
+                } else {
+                    if (value < info.min_) {
+                        info.min_ = value;
+                    }
+                    if (value > info.max_) {
+                        info.max_ = value;
+                    }
+                }
             }
             info.total_rows_ += array->length();
         }
@@ -1223,13 +1292,13 @@ class SkipIndex {
         static constexpr bool isDisabledType =
             std::is_same<T, milvus::Json>::value ||
             std::is_same<T, bool>::value;
-        static constexpr bool value = isAllowedType && !isDisabledType;
+        static constexpr bool value = isAllowedType;
 
         static constexpr bool value_for_arith =
-            std::is_integral<T>::value || std::is_floating_point<T>::value;
+            (std::is_integral<T>::value && !std::is_same_v<T, bool>) ||
+            std::is_floating_point<T>::value;
 
-        static constexpr bool value_for_in =
-            isAllowedType || std::is_same<T, bool>::value;
+        static constexpr bool value_for_in = isAllowedType;
     };
 
     template <typename T>
@@ -1249,8 +1318,9 @@ class SkipIndex {
             case OpType::InnerMatch:
             case OpType::PostfixMatch: {
                 if (auto ngram_metrics =
-                        field_chunk_skipindex->GetMetric<NgramFieldChunkMetric>(
-                            FieldChunkMetricType::NGRAM_FILTER)) {
+                        field_chunk_skipindex
+                            ->GetMetric<NgramFilterFieldChunkMetric>(
+                                FieldChunkMetricType::NGRAM_FILTER)) {
                     return ngram_metrics->CanSkipSubstringMatch(val);
                 }
                 break;
@@ -1307,10 +1377,7 @@ class SkipIndex {
     }
 
     template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::value &&
-                         !std::is_same_v<T, std::string> &&
-                         !std::is_same_v<T, std::string_view>,
-                     bool>
+    std::enable_if_t<std::is_integral_v<T>, bool>
     CanSkipUnaryRange(FieldId field_id,
                       int64_t chunk_id,
                       OpType op_type,
@@ -1372,6 +1439,25 @@ class SkipIndex {
     }
 
     template <typename T>
+    std::enable_if_t<std::is_floating_point_v<T>, bool>
+    CanSkipUnaryRange(FieldId field_id,
+                      int64_t chunk_id,
+                      OpType op_type,
+                      const T& val) const {
+        auto field_chunk_skipindex = GetFieldChunkMetrics(field_id, chunk_id);
+        if (!field_chunk_skipindex) {
+            return false;
+        }
+        if (auto minmax_metrics =
+                field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
+                    FieldChunkMetricType::MINMAX);
+            minmax_metrics) {
+            return minmax_metrics->CanSkipUnaryRange(op_type, val);
+        }
+        return false;
+    }
+
+    template <typename T>
     std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipUnaryRange(FieldId field_id,
                       int64_t chunk_id,
@@ -1421,21 +1507,19 @@ class SkipIndex {
                             ArithOpType arith_type,
                             const HighPrecisionType<T> value,
                             const HighPrecisionType<T> right_operand) const {
-        auto check_and_skip =
-            [&](HighPrecisionType<T> new_value_hp, OpType new_op_type) {
-                if constexpr (std::is_integral_v<T>) {
-                    if (new_value_hp > std::numeric_limits<T>::max() ||
-                        new_value_hp < std::numeric_limits<T>::min()) {
-                        // Overflow detected. The transformed value cannot be represented by T.
-                        // We cannot make a safe comparison with the chunk's min/max.
-                        return false;
-                    }
+        auto check_and_skip = [&](HighPrecisionType<T> new_value_hp,
+                                  OpType new_op_type) {
+            if constexpr (std::is_integral_v<T>) {
+                if (new_value_hp > std::numeric_limits<T>::max() ||
+                    new_value_hp < std::numeric_limits<T>::min()) {
+                    // Overflow detected. The transformed value cannot be represented by T.
+                    // We cannot make a safe comparison with the chunk's min/max.
+                    return false;
                 }
-                return CanSkipUnaryRange(field_id,
-                                         chunk_id,
-                                         new_op_type,
-                                         static_cast<T>(new_value_hp));
-            };
+            }
+            return CanSkipUnaryRange<T>(
+                field_id, chunk_id, new_op_type, static_cast<T>(new_value_hp));
+        };
         switch (arith_type) {
             case ArithOpType::Add: {
                 // field + C > V  =>  field > V - C
@@ -1488,7 +1572,7 @@ class SkipIndex {
     }
 
     template <typename T>
-    std::enable_if_t<IsAllowedType<T>::value, bool>
+    std::enable_if_t<IsAllowedType<T>::value_for_in, bool>
     CanSkipInQuery(FieldId field_id,
                    int64_t chunk_id,
                    const std::vector<T>& values) const {
@@ -1521,7 +1605,7 @@ class SkipIndex {
     }
 
     template <typename T>
-    std::enable_if_t<!IsAllowedType<T>::value, bool>
+    std::enable_if_t<!IsAllowedType<T>::value_for_in, bool>
     CanSkipInQuery(FieldId field_id,
                    int64_t chunk_id,
                    const std::vector<T>& values) const {
@@ -1549,6 +1633,17 @@ class SkipIndex {
                 fieldChunkMetrics_[field_id].emplace_back(std::move(metrics));
             }
         }
+    }
+
+    bool
+    HasMetric(FieldId field_id,
+              int64_t chunk_id,
+              FieldChunkMetricType type) const {
+        auto field_chunk_skipindex = GetFieldChunkMetrics(field_id, chunk_id);
+        if (!field_chunk_skipindex) {
+            return false;
+        }
+        return field_chunk_skipindex->HasMetric(type);
     }
 
  private:

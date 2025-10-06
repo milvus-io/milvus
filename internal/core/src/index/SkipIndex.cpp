@@ -115,7 +115,7 @@ FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                     return std::make_unique<
                         BloomFilterFieldChunkMetric<std::string>>(data);
                 case FieldChunkMetricType::NGRAM_FILTER:
-                    return std::make_unique<NgramFieldChunkMetric>(data);
+                    return std::make_unique<NgramFilterFieldChunkMetric>(data);
                 default:
                     return nullptr;
             }
