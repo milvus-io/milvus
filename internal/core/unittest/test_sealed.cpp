@@ -1585,7 +1585,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     std::cout << "pk_fid:" << pk_fid.get() << std::endl;
 
     //test for int64
-    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 12};
     auto pk_field_data =
         storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
@@ -1599,13 +1599,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto& skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
-    bool equal_12_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
     bool equal_10_skip =
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
+    bool equal_12_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
     ASSERT_FALSE(equal_5_skip);
-    ASSERT_TRUE(equal_12_skip);
-    ASSERT_FALSE(equal_10_skip);
+    ASSERT_TRUE(equal_10_skip);
+    ASSERT_FALSE(equal_12_skip);
     bool less_than_1_skip =
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
     bool less_than_5_skip =
@@ -1618,17 +1618,17 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
     ASSERT_FALSE(less_equal_than_1_skip);
     ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 10);
+    bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterThan, 12);
     bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 5);
-    ASSERT_TRUE(greater_than_10_skip);
+    ASSERT_TRUE(greater_than_12_skip);
     ASSERT_FALSE(greater_than_5_skip);
-    bool greater_equal_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 10);
+    bool greater_equal_than_12_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        pk_fid, 0, OpType::GreaterEqual, 12);
     bool greater_equal_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 5);
-    ASSERT_FALSE(greater_equal_than_10_skip);
+    ASSERT_FALSE(greater_equal_than_12_skip);
     ASSERT_FALSE(greater_equal_than_5_skip);
 
     //test for int32
@@ -1675,7 +1675,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int8_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
+    greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
         i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
 
@@ -1692,7 +1692,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {float_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
+    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
         float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 
@@ -1932,6 +1932,61 @@ TEST(Sealed, SkipIndexSkipStringRange) {
         string_fid, 0, "j", "k", false, true));
     ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
         string_fid, 0, 1, 2, false, true));
+}
+
+TEST(Sealed, SkipIndexSkipStringMatch) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    size_t N = 5;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+
+    std::vector<std::string> strings = {
+        "apple", "application", "banana", "band", "candy"};
+    auto string_field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, N);
+    string_field_data->FillFieldData(strings.data(), N);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    string_fid.get(),
+                                                    {string_field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
+    auto& skip_index = segment->GetSkipIndex();
+
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "ap"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::InnerMatch, "ap"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PostfixMatch, "ap"));
+
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "app"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "xyz"));
+
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::InnerMatch, "ana"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::InnerMatch, "and"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::InnerMatch, "zzz"));
+
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PostfixMatch, "ana"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PostfixMatch, "and"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PostfixMatch, "zzz"));
 }
 
 TEST(Sealed, QueryAllFields) {

@@ -72,9 +72,11 @@ TEST(CPackedTest, PackedWriterAndReader) {
                                paths,
                                1,
                                part_upload_size,
+                               false,
                                cgs,
-                               &c_packed_writer,
-                               nullptr);
+                               nullptr,
+                               nullptr,
+                               &c_packed_writer);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_writer, nullptr);
 

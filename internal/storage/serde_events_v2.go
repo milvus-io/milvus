@@ -42,10 +42,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-
 type writeOptions struct {
 	enableSkipIndex bool
-
 }
 
 type WriteOption func(*writeOptions)

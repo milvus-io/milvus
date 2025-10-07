@@ -77,29 +77,29 @@ class SkipIndexTest : public ::testing::Test {
         arrow::StringBuilder string_low_cardinality_builder;
         arrow::StringBuilder string_high_cardinality_builder;
 
-        pk_builder.AppendValues(pks);
-        i32_builder.AppendValues(int32s);
-        i16_builder.AppendValues(int16s);
-        i8_builder.AppendValues(int8s);
-        float_builder.AppendValues(floats);
-        double_builder.AppendValues(doubles);
-        string_builder.AppendValues(strings);
-        string_for_match_builder.AppendValues(strings_for_match);
+        pk_builder.AppendValues(pks).ok();
+        i32_builder.AppendValues(int32s).ok();
+        i16_builder.AppendValues(int16s).ok();
+        i8_builder.AppendValues(int8s).ok();
+        float_builder.AppendValues(floats).ok();
+        double_builder.AppendValues(doubles).ok();
+        string_builder.AppendValues(strings).ok();
+        string_for_match_builder.AppendValues(strings_for_match).ok();
 
-        bool_builder.AppendValues(bools_mixed);
-        bool_all_true_builder.AppendValues(bools_all_true);
-        bool_all_false_builder.AppendValues(bools_all_false);
+        bool_builder.AppendValues(bools_mixed).ok();
+        bool_all_true_builder.AppendValues(bools_all_true).ok();
+        bool_all_false_builder.AppendValues(bools_all_false).ok();
 
-        i64_low_cardinality_builder.AppendValues(int64_low_cardinality);
-        i64_high_cardinality_builder.AppendValues(int64_high_cardinality);
-        string_low_cardinality_builder.AppendValues(strings_low_card);
-        string_high_cardinality_builder.AppendValues(strings_high_card);
+        i64_low_cardinality_builder.AppendValues(int64_low_cardinality).ok();
+        i64_high_cardinality_builder.AppendValues(int64_high_cardinality).ok();
+        string_low_cardinality_builder.AppendValues(strings_low_card).ok();
+        string_high_cardinality_builder.AppendValues(strings_high_card).ok();
 
         for (int i = 0; i < 10; i++) {
             if (i > 4) {
-                i64_nullable_builder.AppendNull();
+                i64_nullable_builder.AppendNull().ok();
             } else {
-                i64_nullable_builder.Append(pks[i]);
+                i64_nullable_builder.Append(pks[i]).ok();
             }
         }
 
@@ -138,11 +138,12 @@ class SkipIndexTest : public ::testing::Test {
             arrow::RecordBatch::Make(arrow_schema, arrays[0]->length(), arrays);
         auto batches =
             std::vector<std::shared_ptr<arrow::RecordBatch>>{record_batch};
-        auto chunk_skipindex = std::make_unique<ChunkSkipIndex>(batches);
-        auto chunk_skipindex_vec = std::vector<std::unique_ptr<ChunkSkipIndex>>{
-            std::move(chunk_skipindex)};
+
+        std::vector<std::unique_ptr<ChunkSkipIndex>> chunk_skipindex_vec;
+        chunk_skipindex_vec.emplace_back(
+            std::make_unique<ChunkSkipIndex>(batches));
         auto skip_index = std::make_unique<SkipIndex>();
-        skip_index->LoadSkipIndex(chunk_skipindex_vec);
+        skip_index->LoadSkipIndex(std::move(chunk_skipindex_vec));
         return skip_index;
     }
 
