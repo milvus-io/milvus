@@ -131,6 +131,14 @@ pub struct RustResult {
 }
 
 impl RustResult {
+    pub fn from_success() -> Self {
+        RustResult {
+            success: true,
+            value: Value::None(()),
+            error: std::ptr::null(),
+        }
+    }
+
     pub fn from_ptr(value: *mut c_void) -> Self {
         RustResult {
             success: true,
