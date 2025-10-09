@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path"
@@ -532,6 +533,16 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(v string) string {
+			maxTxnNum := getAsInt(v)
+			if maxTxnNum <= 0 {
+				panic(fmt.Sprintf("the maximum etcd transaction should be greater than 0, but got %d", maxTxnNum))
+			}
+			if maxTxnNum > 128 {
+				panic(fmt.Sprintf("the maximum etcd transaction should not exceed 128, but got %d", maxTxnNum))
+			}
+			return v
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 
