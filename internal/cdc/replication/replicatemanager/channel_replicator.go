@@ -37,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-const scannerHandlerChanSize = 64
-
 // Replicator is the client that replicates the message to the channel in the target cluster.
 type Replicator interface {
 	// StartReplicate starts the replicate for the channel.
@@ -112,7 +110,7 @@ func (r *channelReplicator) replicateLoop() error {
 	if err != nil {
 		return err
 	}
-	ch := make(adaptor.ChanMessageHandler, scannerHandlerChanSize)
+	ch := make(adaptor.ChanMessageHandler)
 	scanner := streaming.WAL().Read(r.ctx, streaming.ReadOption{
 		PChannel:       r.replicateInfo.GetSourceChannelName(),
 		DeliverPolicy:  options.DeliverPolicyStartFrom(cp.MessageID),
