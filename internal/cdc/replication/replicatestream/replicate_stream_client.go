@@ -21,7 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -36,8 +36,8 @@ type ReplicateStreamClient interface {
 	// return ErrReplicateIgnored if the message should not be replicated.
 	Replicate(msg message.ImmutableMessage) error
 
-	// Stop stops the replicate operation.
+	// Close closes the replicate stream client.
 	Close()
 }
 
-type CreateReplicateStreamClientFunc func(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient
+type CreateReplicateStreamClientFunc func(ctx context.Context, rm *meta.ReplicateChannel) ReplicateStreamClient

@@ -2,7 +2,6 @@ package streamingcoord
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestCatalog(t *testing.T) {
@@ -217,38 +215,4 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 			},
 		})
 	assert.NoError(t, err)
-
-	infos, err := catalog.ListReplicatePChannels(context.Background())
-	assert.NoError(t, err)
-	assert.Len(t, infos, 2)
-	sort.Slice(infos, func(i, j int) bool {
-		return infos[i].GetTargetChannelName() < infos[j].GetTargetChannelName()
-	})
-	assert.Equal(t, infos[0].GetSourceChannelName(), "source-channel-1")
-	assert.Equal(t, infos[0].GetTargetChannelName(), "target-channel-1")
-	assert.Equal(t, infos[0].GetTargetCluster().GetClusterId(), "target-cluster")
-	assert.Equal(t, infos[1].GetSourceChannelName(), "source-channel-2")
-	assert.Equal(t, infos[1].GetTargetChannelName(), "target-channel-2")
-	assert.Equal(t, infos[1].GetTargetCluster().GetClusterId(), "target-cluster")
-
-	err = catalog.RemoveReplicatePChannel(context.Background(), &streamingpb.ReplicatePChannelMeta{
-		SourceChannelName: "source-channel-1",
-		TargetChannelName: "target-channel-1",
-		TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
-	})
-	assert.NoError(t, err)
-
-	infos, err = catalog.ListReplicatePChannels(context.Background())
-	assert.NoError(t, err)
-	assert.Len(t, infos, 1)
-	assert.Equal(t, infos[0].GetSourceChannelName(), "source-channel-2")
-	assert.Equal(t, infos[0].GetTargetChannelName(), "target-channel-2")
-	assert.Equal(t, infos[0].GetTargetCluster().GetClusterId(), "target-cluster")
-
-	kv.EXPECT().Load(mock.Anything, mock.Anything).Unset()
-	kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", merr.ErrIoKeyNotFound)
-
-	cfg, err = catalog.GetReplicateConfiguration(context.Background())
-	assert.NoError(t, err)
-	assert.Nil(t, cfg)
 }

@@ -27,13 +27,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func newMockPulsarMessageID() *commonpb.MessageID {
@@ -70,7 +70,6 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	streaming.SetWALForTest(wal)
 
 	rs := replicatestream.NewMockReplicateStreamClient(t)
-	rs.EXPECT().Close().Return()
 
 	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
@@ -78,17 +77,17 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 		TargetChannelName: "test-target-channel",
 		TargetCluster:     cluster,
 	}
-	replicator := NewChannelReplicator(replicateInfo)
+	replicator := NewChannelReplicator(&meta.ReplicateChannel{
+		Value:       replicateInfo,
+		ModRevision: 0,
+	})
 	replicator.(*channelReplicator).createRscFunc = func(ctx context.Context,
-		replicateInfo *streamingpb.ReplicatePChannelMeta,
+		replicateInfo *meta.ReplicateChannel,
 	) replicatestream.ReplicateStreamClient {
 		return rs
 	}
 	assert.NotNil(t, replicator)
 
-	replicator.StartReplicate()
-	replicator.StopReplicate()
-
-	state := replicator.GetState()
-	assert.Equal(t, typeutil.LifetimeStateStopped, state)
+	replicator.StartReplication()
+	replicator.StopReplication()
 }
