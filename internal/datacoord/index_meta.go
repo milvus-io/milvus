@@ -920,6 +920,7 @@ func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
+		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", buildID))
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
 
@@ -930,6 +931,7 @@ func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 	}
 
 	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		log.Ctx(m.ctx).Warn("failed to update index meta", zap.Int64("buildID", buildID), zap.Error(err))
 		return err
 	}
 
