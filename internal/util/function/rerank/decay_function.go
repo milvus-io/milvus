@@ -26,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 const (
@@ -35,6 +34,9 @@ const (
 	offsetKey   string = "offset"
 	decayKey    string = "decay"
 	functionKey string = "function"
+
+	normsScorekey string = "norm_score"
+	scoreMode     string = "score_mode"
 )
 
 const (
@@ -51,6 +53,8 @@ type DecayFunction[T PKType, R int32 | int64 | float32 | float64] struct {
 	scale        float64
 	offset       float64
 	decay        float64
+	needNorm     bool
+	scoreFunc    scoreMergeFunc[T]
 	reScorer     decayReScorer
 }
 
@@ -97,7 +101,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 // T: PK Type, R: field type
 func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
 	var err error
-	decayFunc := &DecayFunction[T, R]{RerankBase: *base, offset: 0, decay: 0.5}
+	decayFunc := &DecayFunction[T, R]{RerankBase: *base, offset: 0, decay: 0.5, needNorm: false, scoreFunc: maxMerge[T]}
 	orginInit := false
 	scaleInit := false
 	for _, param := range funcSchema.Params {
@@ -121,6 +125,18 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 		case decayKey:
 			if decayFunc.decay, err = strconv.ParseFloat(param.Value, 64); err != nil {
 				return nil, fmt.Errorf("Param decay:%s is not a number", param.Value)
+			}
+		case normsScorekey:
+			if needNorm, err := strconv.ParseBool(param.Value); err != nil {
+				return nil, fmt.Errorf("%s params must be true/false, bug got %s", normsScorekey, param.Value)
+			} else {
+				decayFunc.needNorm = needNorm
+			}
+		case scoreMode:
+			if f, err := getMergeFunc[T](param.Value); err != nil {
+				return nil, err
+			} else {
+				decayFunc.scoreFunc = f
 			}
 		default:
 		}
@@ -159,19 +175,11 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	return decayFunc, nil
 }
 
-func toGreaterScore(score float32, metricType string) float32 {
-	switch strings.ToUpper(metricType) {
-	case metric.COSINE, metric.IP, metric.BM25:
-		return score
-	default:
-		return 1.0 - 2*float32(math.Atan(float64(score)))/math.Pi
-	}
-}
-
 func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
-	srcScores := maxMerge[T](cols)
+	srcScores := decay.scoreFunc(cols)
 	decayScores := map[T]float32{}
-	for _, col := range cols {
+	idLocations := make(map[T]IDLoc)
+	for i, col := range cols {
 		if col.size == 0 {
 			continue
 		}
@@ -179,6 +187,7 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := decayScores[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
 				decayScores[id] = float32(decay.reScorer(decay.origin, decay.scale, decay.decay, decay.offset, float64(nums[idx])))
 			}
 		}
@@ -187,25 +196,25 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 		decayScores[id] = decayScores[id] * srcScores[id]
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(decayScores, searchParams, idGroup)
+		return newGroupingIDScores(decayScores, idLocations, searchParams, idGroup)
 	}
-	return newIDScores(decayScores, searchParams), nil
+	return newIDScores(decayScores, idLocations, searchParams, true), nil
 }
 
 func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for _, cols := range inputs.data {
 		for i, col := range cols {
-			metricType := searchParams.searchMetrics[i]
+			normFunc := getNormalizeFunc(decay.needNorm, searchParams.searchMetrics[i], true)
 			for j, score := range col.scores {
-				col.scores[j] = toGreaterScore(score, metricType)
+				col.scores[j] = normFunc(score)
 			}
 		}
 		idScore, err := decay.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
 }

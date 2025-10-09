@@ -36,6 +36,7 @@
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
+constexpr uint64_t MMAP_GEOMETRY_PADDING = 1;
 constexpr uint64_t MMAP_ARRAY_PADDING = 1;
 class Chunk {
  public:
@@ -212,10 +213,11 @@ class StringChunk : public Chunk {
         while (left <= right) {
             int mid = left + (right - left) / 2;
             std::string_view midString = (*this)[mid];
-            if (midString == target) {
+            auto cmp = midString.compare(target);
+            if (cmp == 0) {
                 result = mid;     // Store the index of match
                 right = mid - 1;  // Continue searching in the left half
-            } else if (midString < target) {
+            } else if (cmp < 0) {
                 // midString < target
                 left = mid + 1;
             } else {
@@ -278,6 +280,7 @@ class StringChunk : public Chunk {
 };
 
 using JSONChunk = StringChunk;
+using GeometryChunk = StringChunk;
 
 // An ArrayChunk is a class that represents a collection of arrays stored in a contiguous memory block.
 // It is initialized with the number of rows, a pointer to the data, the size of the data, the element type,

@@ -83,6 +83,18 @@ func TestReplaceAppendResultTxnContext(t *testing.T) {
 	assert.Equal(t, retrievedResult.TxnCtx.TxnID, newTxnCtx.TxnID)
 }
 
+func TestReplaceAppendResultLastConfirmedMessageID(t *testing.T) {
+	ctx := context.Background()
+	result := &ExtraAppendResult{LastConfirmedMessageID: walimplstest.NewTestMessageID(1)}
+	ctx = WithExtraAppendResult(ctx, result)
+
+	newLastConfirmedMessageID := walimplstest.NewTestMessageID(2)
+	ReplaceAppendResultLastConfirmedMessageID(ctx, newLastConfirmedMessageID)
+
+	retrievedResult := ctx.Value(extraAppendResultValue).(*ExtraAppendResult)
+	assert.True(t, retrievedResult.LastConfirmedMessageID.EQ(newLastConfirmedMessageID))
+}
+
 func TestWithFlushFromOldArch(t *testing.T) {
 	ctx := context.Background()
 	assert.False(t, GetFlushFromOldArch(ctx))

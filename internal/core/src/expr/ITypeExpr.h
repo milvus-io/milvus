@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
 #include "common/Schema.h"
@@ -673,6 +674,40 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
     const proto::plan::GenericValue value_;
 };
 
+class TimestamptzArithCompareExpr : public ITypeFilterExpr {
+ public:
+    TimestamptzArithCompareExpr(const ColumnInfo& timestamp_column,
+                                const proto::plan::ArithOpType arith_op,
+                                const proto::plan::Interval& interval,
+                                const proto::plan::OpType compare_op,
+                                const proto::plan::GenericValue& compare_value)
+        : timestamp_column_(timestamp_column),
+          arith_op_(arith_op),
+          interval_(interval),
+          compare_op_(compare_op),
+          compare_value_(compare_value) {
+    }
+
+    std::string
+    ToString() const override {
+        std::stringstream ss;
+        ss << "TimestamptzArithCompareExpr:[Column: "
+           << timestamp_column_.ToString()
+           << ", ArithOp: " << milvus::proto::plan::ArithOpType_Name(arith_op_)
+           << ", Interval: " << interval_.DebugString()
+           << ", CompareOp: " << milvus::proto::plan::OpType_Name(compare_op_)
+           << ", CompareValue: " << compare_value_.DebugString() << "]";
+        return ss.str();
+    }
+
+ public:
+    const ColumnInfo timestamp_column_;
+    const proto::plan::ArithOpType arith_op_;
+    const proto::plan::Interval interval_;
+    const proto::plan::OpType compare_op_;
+    const proto::plan::GenericValue compare_value_;
+};
+
 class NullExpr : public ITypeFilterExpr {
  public:
     explicit NullExpr(const ColumnInfo& column, NullExprType op)
@@ -767,6 +802,43 @@ class CompareExpr : public ITypeFilterExpr {
     const DataType left_data_type_;
     const DataType right_data_type_;
     const proto::plan::OpType op_type_;
+};
+
+class GISFunctionFilterExpr : public ITypeFilterExpr {
+ public:
+    GISFunctionFilterExpr(ColumnInfo cloumn,
+                          GISFunctionType op,
+                          const std::string& geometry_wkt,
+                          double distance = 0.0)
+        : column_(cloumn),
+          op_(op),
+          geometry_wkt_(geometry_wkt),
+          distance_(distance){};
+    std::string
+    ToString() const override {
+        if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}, Distance: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_wkt_,
+                distance_);
+        } else {
+            return fmt::format(
+                "GISFunctionFilterExpr:[Column: {}, Operator: {} "
+                "WktValue: {}]",
+                column_.ToString(),
+                GISFunctionFilterExpr_GISOp_Name(op_),
+                geometry_wkt_);
+        }
+    }
+
+ public:
+    const ColumnInfo column_;
+    const GISFunctionType op_;
+    const std::string geometry_wkt_;
+    const double distance_;
 };
 
 class JsonContainsExpr : public ITypeFilterExpr {

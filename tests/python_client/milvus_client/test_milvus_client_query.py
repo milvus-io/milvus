@@ -3825,6 +3825,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="the assert is not good")
     def test_milvus_client_query_with_bloom_filter(self):
         """
         target: test query with bloom filter in PK

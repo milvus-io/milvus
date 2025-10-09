@@ -22,13 +22,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 const (
@@ -87,14 +85,19 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 		return nil, merr.WrapErrParameterInvalid(fmt.Sprint(len(cols)), fmt.Sprint(len(weighted.weight)), "the length of weights param mismatch with ann search requests")
 	}
 	weightedScores := map[T]float32{}
+	isMixd, descendingOrder := classifyMetricsOrder(searchParams.searchMetrics)
+	idLocations := make(map[T]IDLoc)
 	for i, col := range cols {
 		if col.size == 0 {
 			continue
 		}
-		normFunc := getNormalizeFunc(weighted.needNorm, searchParams.searchMetrics[i])
+		// If it is a mixed metric (L2 + IP), with both large to small sorting and small to large sorting,
+		// force the small to large sorting scores to be converted to large to small sorting
+		normFunc := getNormalizeFunc(weighted.needNorm, searchParams.searchMetrics[i], isMixd)
 		ids := col.ids.([]T)
 		for j, id := range ids {
 			if score, ok := weightedScores[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: j}
 				weightedScores[id] = weighted.weight[i] * normFunc(col.scores[j])
 			} else {
 				weightedScores[id] = score + weighted.weight[i]*normFunc(col.scores[j])
@@ -102,53 +105,20 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 		}
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(weightedScores, searchParams, idGroup)
+		return newGroupingIDScores(weightedScores, idLocations, searchParams, idGroup)
 	}
-	return newIDScores(weightedScores, searchParams), nil
+	// If normlize is set, the final result is sorted from largest to smallest, otherwise it depends on descendingOrder
+	return newIDScores(weightedScores, idLocations, searchParams, weighted.needNorm || descendingOrder), nil
 }
 
 func (weighted *WeightedFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for _, cols := range inputs.data {
-		for i, col := range cols {
-			metricType := searchParams.searchMetrics[i]
-			for j, score := range col.scores {
-				col.scores[j] = toGreaterScore(score, metricType)
-			}
-		}
 		idScore, err := weighted.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
-}
-
-type normalizeFunc func(float32) float32
-
-func getNormalizeFunc(normScore bool, metrics string) normalizeFunc {
-	if !normScore {
-		return func(distance float32) float32 {
-			return distance
-		}
-	}
-	switch metrics {
-	case metric.COSINE:
-		return func(distance float32) float32 {
-			return (1 + distance) * 0.5
-		}
-	case metric.IP:
-		return func(distance float32) float32 {
-			return 0.5 + float32(math.Atan(float64(distance)))/math.Pi
-		}
-	case metric.BM25:
-		return func(distance float32) float32 {
-			return 2 * float32(math.Atan(float64(distance))) / math.Pi
-		}
-	default:
-		return func(distance float32) float32 {
-			return 1.0 - 2*float32(math.Atan(float64(distance)))/math.Pi
-		}
-	}
 }

@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
-#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -462,6 +461,14 @@ class InsertRecordSealed {
         }
     }
 
+    ~InsertRecordSealed() {
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
+    }
+
     bool
     contain(const PkType& pk) const {
         return pk2offset_->contain(pk);
@@ -588,9 +595,11 @@ class InsertRecordSealed {
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         reserved = 0;
-        cachinglayer::Manager::GetInstance().RefundLoadedResource(
-            {static_cast<int64_t>(estimated_memory_size_), 0});
-        estimated_memory_size_ = 0;
+        if (estimated_memory_size_ > 0) {
+            cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                {static_cast<int64_t>(estimated_memory_size_), 0});
+            estimated_memory_size_ = 0;
+        }
     }
 
  public:
@@ -889,6 +898,11 @@ class InsertRecordGrowing {
             }
             case DataType::ARRAY: {
                 this->append_data<Array>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::GEOMETRY: {
+                this->append_data<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
