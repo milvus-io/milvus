@@ -121,7 +121,7 @@ func TestReplicateCreateCollection(t *testing.T) {
 		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
 			pulsar.NewMessageID(1, 2, 3, 4),
 		))
-		_, err := streaming.WAL().Replicate().Append(context.Background(), message.NewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+		_, err := streaming.WAL().Replicate().Append(context.Background(), message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
 		if err != nil {
 			panic(err)
 		}
