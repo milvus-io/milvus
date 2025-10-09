@@ -71,7 +71,7 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
 	name2FieldID := lo.SliceToMap(
 		lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.GetIsFunctionOutput() && (!typeutil.IsAutoPKField(field) || allowInsertAutoID) && field.GetName() != dynamicField.GetName()
+			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
@@ -122,6 +122,12 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 				return nil, err
 			}
 			row[fieldID] = data
+		} else if r.pkField.GetName() == key && r.pkField.GetAutoID() && r.allowInsertAutoID {
+			data, err := r.parseEntity(r.pkField.GetFieldID(), value)
+			if err != nil {
+				return nil, err
+			}
+			row[r.pkField.GetFieldID()] = data
 		} else if r.dynamicField != nil {
 			// has dynamic field, put redundant pair to dynamicValues
 			dynamicValues[key] = value

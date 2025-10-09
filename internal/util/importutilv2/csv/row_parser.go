@@ -37,12 +37,13 @@ type RowParser interface {
 	Parse(raw []string) (Row, error)
 }
 type rowParser struct {
-	nullkey      string
-	header       []string
-	name2Dim     map[string]int
-	name2Field   map[string]*schemapb.FieldSchema
-	pkField      *schemapb.FieldSchema
-	dynamicField *schemapb.FieldSchema
+	nullkey           string
+	header            []string
+	name2Dim          map[string]int
+	name2Field        map[string]*schemapb.FieldSchema
+	pkField           *schemapb.FieldSchema
+	dynamicField      *schemapb.FieldSchema
+	allowInsertAutoID bool
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
@@ -89,14 +90,14 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 			return nil, fmt.Errorf("value of field is missed: '%s'", fieldName)
 		}
 	}
-
 	return &rowParser{
-		nullkey:      nullkey,
-		name2Dim:     name2Dim,
-		header:       header,
-		name2Field:   name2Field,
-		pkField:      pkField,
-		dynamicField: dynamicField,
+		nullkey:           nullkey,
+		name2Dim:          name2Dim,
+		header:            header,
+		name2Field:        name2Field,
+		pkField:           pkField,
+		dynamicField:      dynamicField,
+		allowInsertAutoID: allowInsertAutoID,
 	}, nil
 }
 
@@ -116,6 +117,12 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 			row[field.GetFieldID()] = data
 		} else if r.dynamicField != nil {
 			dynamicValues[r.header[index]] = value
+		} else if r.pkField.GetName() == r.header[index] && r.pkField.GetAutoID() && r.allowInsertAutoID {
+			data, err := r.parseEntity(r.pkField, value)
+			if err != nil {
+				return nil, err
+			}
+			row[r.pkField.GetFieldID()] = data
 		} else {
 			return nil, fmt.Errorf("the field '%s' is not defined in schema", r.header[index])
 		}
