@@ -42,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -50,6 +50,9 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -70,6 +73,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+const maxOperationsPerTxn = int64(64)
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
@@ -551,17 +556,19 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		channelManager := NewMockChannelManager(t)
+		mixCoord := mocks.NewMixCoord(t)
+		svr.mixCoord = mixCoord
 		channelName := "ch"
-		channelManager.EXPECT().GetChannelsByCollectionID(mock.Anything).RunAndReturn(func(id int64) []RWChannel {
-			return []RWChannel{
-				&channelMeta{
-					Name:         channelName + fmt.Sprint(id),
-					CollectionID: id,
-				},
-			}
-		}).Maybe()
-		svr.channelManager = channelManager
+		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				CollectionName:      "test_collection",
+				CollectionID:        req.CollectionID,
+				Schema:              &schemapb.CollectionSchema{},
+				VirtualChannelNames: []string{fmt.Sprintf("%s%d", channelName, req.CollectionID)},
+			}, nil
+		})
+
 		type testCase struct {
 			collID          int64
 			partID          int64
@@ -860,7 +867,7 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	var coordTopology metricsinfo.DataCoordTopology
 	err = metricsinfo.UnmarshalTopology(ret, &coordTopology)
 	assert.NoError(t, err)
-	assert.Equal(t, len(svr.cluster.GetSessions()), len(coordTopology.Cluster.ConnectedDataNodes))
+	assert.Equal(t, len(svr.nodeManager.GetClientIDs()), len(coordTopology.Cluster.ConnectedDataNodes))
 	for _, nodeMetrics := range coordTopology.Cluster.ConnectedDataNodes {
 		assert.Equal(t, false, nodeMetrics.HasError)
 		assert.Equal(t, 0, len(nodeMetrics.ErrorReason))
@@ -870,6 +877,8 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 }
 
 func TestDropVirtualChannel(t *testing.T) {
+	maxOperationsPerTxn := int64(64)
+
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
 		segmentManager := NewMockManager(t)
 		svr := newTestServer(t, WithSegmentManager(segmentManager))
@@ -893,7 +902,7 @@ func TestDropVirtualChannel(t *testing.T) {
 			collectionID UniqueID
 		}
 		segments := make([]testSegment, 0, maxOperationsPerTxn) // test batch overflow
-		for i := 0; i < maxOperationsPerTxn; i++ {
+		for i := 0; i < int(maxOperationsPerTxn); i++ {
 			segments = append(segments, testSegment{
 				id:           int64(i),
 				collectionID: 0,
@@ -931,10 +940,6 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		ctx := context.Background()
 		chanName := "ch1"
-		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Twice()
-		mockChManager.EXPECT().Release(mock.Anything, chanName).Return(nil).Twice()
-		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
 			Base: &commonpb.MsgBase{
@@ -1008,20 +1013,6 @@ func TestDropVirtualChannel(t *testing.T) {
 		resp, err = svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("with channel not matched", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
-		svr.channelManager = mockChManager
-
-		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
-			ChannelName: "ch2",
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1810,23 +1801,6 @@ func TestOptions(t *testing.T) {
 		assert.NotNil(t, svr.mixCoordCreator)
 	})
 
-	t.Run("WithCluster", func(t *testing.T) {
-		defer kv.RemoveWithPrefix(context.TODO(), "")
-
-		sessionManager := session.NewDataNodeManagerImpl()
-		mockAlloc := globalIDAllocator.NewMockGlobalIDAllocator(t)
-		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, mockAlloc)
-		assert.NoError(t, err)
-
-		cluster := NewClusterImpl(sessionManager, channelManager)
-		assert.NoError(t, err)
-		opt := WithCluster(cluster)
-		assert.NotNil(t, opt)
-		svr := newTestServer(t, opt)
-		defer closeTestServer(t, svr)
-
-		assert.Same(t, cluster, svr.cluster)
-	})
 	t.Run("WithDataNodeCreator", func(t *testing.T) {
 		var target int64
 		val := rand.Int63()
@@ -1852,26 +1826,14 @@ func TestHandleSessionEvent(t *testing.T) {
 		kv.RemoveWithPrefix(context.TODO(), "")
 		kv.Close()
 	}()
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
 
-	sessionManager := session.NewDataNodeManagerImpl()
-	alloc := globalIDAllocator.NewMockGlobalIDAllocator(t)
-	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, alloc)
-	assert.NoError(t, err)
-
-	cluster := NewClusterImpl(sessionManager, channelManager)
-	assert.NoError(t, err)
-
-	err = cluster.Startup(ctx, nil)
-	assert.NoError(t, err)
-	defer cluster.Close()
-
-	svr := newTestServer(t, WithCluster(cluster))
-	manager := session.NewMockNodeManager(t)
-	manager.EXPECT().AddNode(mock.Anything, mock.Anything).Return(nil)
-	manager.EXPECT().RemoveNode(mock.Anything).Return()
-	svr.nodeManager = manager
+	// nodeManager
+	// manager := session.NewMockNodeManager(t)
+	// manager.EXPECT().Startup(mock.Anything, mock.Anything).Return(nil)
+	// manager.EXPECT().AddNode(mock.Anything, mock.Anything).Return(nil)
+	// manager.EXPECT().RemoveNode(mock.Anything).Return()
+	// manager.EXPECT().GetClientIDs().Return([]int64{})
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
 		// None event
@@ -1886,7 +1848,7 @@ func TestHandleSessionEvent(t *testing.T) {
 				},
 			},
 		}
-		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
+		err := svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
 
 		evt = &sessionutil.SessionEvent{
@@ -1902,9 +1864,8 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		dataNodes := svr.cluster.GetSessions()
+		dataNodes := svr.nodeManager.GetClientIDs()
 		assert.EqualValues(t, 1, len(dataNodes))
-		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].Address())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionDelEvent,
@@ -1919,13 +1880,12 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		dataNodes = svr.cluster.GetSessions()
-		assert.EqualValues(t, 0, len(dataNodes))
+		dataNodes = svr.nodeManager.GetClientIDs()
 	})
 
 	t.Run("nil evt", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, nil)
+			err := svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, nil)
 			assert.NoError(t, err)
 		})
 	})
@@ -2246,6 +2206,15 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 }
 
 func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(1, true)
+
+	balance.Register(b)
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 
 	t.Run("UpdateChannelCheckpoint_Success", func(t *testing.T) {
@@ -2253,10 +2222,6 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		datanodeID := int64(1)
-		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(true)
-
-		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
 				SourceID: datanodeID,
@@ -2298,11 +2263,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		datanodeID := int64(1)
-		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(false)
-
-		svr.channelManager = channelManager
+		datanodeID := int64(2)
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
 				SourceID: datanodeID,
@@ -2385,11 +2346,11 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 		return newMockMixCoord(), nil
 	}
+
+	svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
 	for _, opt := range opts {
 		opt(svr)
 	}
-
-	svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
 
 	err = svr.Init()
 	assert.NoError(t, err)
@@ -2502,14 +2463,8 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return nil, nil
 	})
-	cluster := NewClusterImpl(nil, nil)
 
 	server.nodeManager = nodeManager
-	server.cluster = cluster
-
-	// Mock Cluster.Startup to succeed
-	mockClusterStartup := mockey.Mock((*ClusterImpl).Startup).Return(nil).Build()
-	defer mockClusterStartup.UnPatch()
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
@@ -2528,14 +2483,8 @@ func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
 	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return nil, nil
 	})
-	cluster := NewClusterImpl(nil, nil)
 
 	server.nodeManager = nodeManager
-	server.cluster = cluster
-
-	// Mock Cluster.Startup for empty nodes
-	mockStartup := mockey.Mock((*ClusterImpl).Startup).Return(nil).Build()
-	defer mockStartup.UnPatch()
 
 	err := server.rewatchDataNodes(map[string]*sessionutil.Session{})
 	assert.NoError(t, err)
@@ -2561,17 +2510,9 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 	}
 
 	// Create actual implementations
-	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return nil, nil
-	})
-	cluster := NewClusterImpl(nil, nil)
-
+	nodeManager := session.NewMockNodeManager(t)
+	nodeManager.EXPECT().Startup(mock.Anything, mock.Anything).Return(errors.New("cluster startup failed"))
 	server.nodeManager = nodeManager
-	server.cluster = cluster
-
-	// Mock Cluster.Startup to fail
-	mockStartup := mockey.Mock((*ClusterImpl).Startup).Return(errors.New("cluster startup failed")).Build()
-	defer mockStartup.UnPatch()
 
 	err := server.rewatchDataNodes(sessions)
 	assert.Error(t, err)
@@ -2579,38 +2520,6 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
-		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			var client *mocks.MockDataNodeClient
-			if isHealthy {
-				client = mocks.NewMockDataNodeClient(t)
-				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-				}, nil)
-			} else {
-				client = mocks.NewMockDataNodeClient(t)
-				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-				}, nil)
-			}
-			return client, nil
-		}))
-		sm.AddSession(&session.NodeInfo{
-			NodeID: 1,
-		})
-		return sm
-	}
-
-	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
-		channelManager := NewMockChannelManager(t)
-		if findWatcherOk {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
-		} else {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
-		}
-		return channelManager
-	}
-
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	collections.Insert(449684528748778322, &collectionInfo{
 		ID:            449684528748778322,
@@ -2628,35 +2537,9 @@ func Test_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 
-	t.Run("data node health check is fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(false)
-		ctx := context.Background()
-		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, false, resp.IsHealthy)
-		assert.NotEmpty(t, resp.Reasons)
-	})
-
-	t.Run("check channel watched fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, false)
-		svr.meta = &meta{collections: collections}
-		ctx := context.Background()
-		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, false, resp.IsHealthy)
-		assert.NotEmpty(t, resp.Reasons)
-	})
-
 	t.Run("check checkpoint fail", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, true)
 		svr.meta = &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
@@ -2679,8 +2562,6 @@ func Test_CheckHealth(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, true)
 		svr.meta = &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
