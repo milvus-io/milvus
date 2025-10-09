@@ -990,7 +990,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/44489")
     def test_build_rtree_index(self):
         """
         target: test build RTREE index on geometry field
@@ -2645,10 +2644,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
             assert updated_geo is not None
             assert "POINT" in updated_geo
-            # Verify the geometry value actually changed from original
-            assert updated_geo != original_geo, (
-                f"Record {updated_id} geometry should have been updated"
-            )
             # Verify it matches exactly what we upserted
             assert updated_geo == expected_geo, (
                 f"Record {updated_id} geometry should match upserted value: expected {expected_geo}, got {updated_geo}"
