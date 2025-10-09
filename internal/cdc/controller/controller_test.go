@@ -14,18 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controllerimpl
+package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
@@ -44,6 +47,7 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	putEvent := &clientv3.Event{
 		Type: mvccpb.PUT,
 		Kv: &mvccpb.KeyValue{
+			Key:   []byte(streamingcoord.BuildReplicatePChannelMetaKey(replicateMeta)),
 			Value: metaBytes,
 		},
 	}
@@ -51,6 +55,9 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	deleteEvent := &clientv3.Event{
 		Type: mvccpb.DELETE,
 		Kv: &mvccpb.KeyValue{
+			Key: []byte(streamingcoord.BuildReplicatePChannelMetaKey(replicateMeta)),
+		},
+		PrevKv: &mvccpb.KeyValue{
 			Value: metaBytes,
 		},
 	}
@@ -67,10 +74,10 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	}()
 
 	notifyCh := make(chan struct{}, 2)
-	mockReplicateManagerClient.EXPECT().CreateReplicator(mock.Anything).RunAndReturn(func(replicate *streamingpb.ReplicatePChannelMeta) {
+	mockReplicateManagerClient.EXPECT().CreateReplicator(mock.Anything).RunAndReturn(func(replicate *meta.ReplicateChannel) {
 		notifyCh <- struct{}{}
 	})
-	mockReplicateManagerClient.EXPECT().RemoveReplicator(mock.Anything).RunAndReturn(func(replicate *streamingpb.ReplicatePChannelMeta) {
+	mockReplicateManagerClient.EXPECT().RemoveReplicator(mock.Anything, mock.Anything).RunAndReturn(func(key string, modRevision int64) {
 		notifyCh <- struct{}{}
 	})
 
@@ -81,9 +88,11 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	ctrl := NewController()
 	go ctrl.watchLoop(eventCh)
 
-	// Wait for events to be processed
-	<-notifyCh
-	<-notifyCh
-
+	// Wait for put event to be processed
+	select {
+	case <-notifyCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for put event")
+	}
 	ctrl.Stop()
 }

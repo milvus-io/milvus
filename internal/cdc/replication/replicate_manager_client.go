@@ -16,18 +16,18 @@
 
 package replication
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+import "github.com/milvus-io/milvus/internal/cdc/meta"
 
 // ReplicateManagerClient is the client that manages the replicate configuration.
 type ReplicateManagerClient interface {
 	// CreateReplicator creates a new replicator for the replicate pchannel.
-	CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
+	CreateReplicator(channel *meta.ReplicateChannel)
 
 	// RemoveReplicator removes a replicator for the replicate pchannel.
-	RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
+	RemoveReplicator(key string, modRevision int64)
 
 	// RemoveOutdatedReplicators removes the outdated replicators.
-	RemoveOutdatedReplicators(aliveReplicates []*streamingpb.ReplicatePChannelMeta)
+	RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel)
 
 	// Close closes the replicate manager client.
 	Close()
