@@ -570,7 +570,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonStats(op_ctx_, field_id);
+        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
+        auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);

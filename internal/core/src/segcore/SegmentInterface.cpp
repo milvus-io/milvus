@@ -558,6 +558,16 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::GEOMETRY: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_geometry_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
+                }
+                break;
+            }
             default: {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported default value type {}",
@@ -586,17 +596,6 @@ SegmentInternalInterface::GetNgramIndexForJson(
     FieldId field_id,
     const std::string& nested_path) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-}
-
-index::JsonKeyStats*
-SegmentInternalInterface::GetJsonStats(milvus::OpContext* op_ctx,
-                                       FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = json_stats_.find(field_id);
-    if (iter == json_stats_.end()) {
-        return nullptr;
-    }
-    return iter->second.get();
 }
 
 }  // namespace milvus::segcore

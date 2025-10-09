@@ -182,6 +182,12 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 				return err
 			}
 			row[fieldID] = data
+		} else if r.pkField.GetName() == key && r.pkField.GetAutoID() && r.allowInsertAutoID {
+			data, err := r.parseEntity(r.pkField.GetFieldID(), value)
+			if err != nil {
+				return err
+			}
+			row[r.pkField.GetFieldID()] = data
 		} else if r.dynamicField != nil {
 			// has dynamic field, put redundant pair to dynamicValues
 			dynamicValues[key] = value

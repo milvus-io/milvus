@@ -67,8 +67,11 @@ class DeletedRecord {
 
     ~DeletedRecord() {
         if constexpr (is_sealed) {
-            cachinglayer::Manager::GetInstance().RefundLoadedResource(
-                {estimated_memory_size_, 0});
+            if (estimated_memory_size_ > 0) {
+                cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                    {estimated_memory_size_, 0});
+                estimated_memory_size_ = 0;
+            }
         }
     }
 

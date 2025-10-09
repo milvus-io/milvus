@@ -86,6 +86,7 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 	}
 	weightedScores := map[T]float32{}
 	isMixd, descendingOrder := classifyMetricsOrder(searchParams.searchMetrics)
+	idLocations := make(map[T]IDLoc)
 	for i, col := range cols {
 		if col.size == 0 {
 			continue
@@ -96,6 +97,7 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 		ids := col.ids.([]T)
 		for j, id := range ids {
 			if score, ok := weightedScores[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: j}
 				weightedScores[id] = weighted.weight[i] * normFunc(col.scores[j])
 			} else {
 				weightedScores[id] = score + weighted.weight[i]*normFunc(col.scores[j])
@@ -103,20 +105,20 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 		}
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(weightedScores, searchParams, idGroup)
+		return newGroupingIDScores(weightedScores, idLocations, searchParams, idGroup)
 	}
 	// If normlize is set, the final result is sorted from largest to smallest, otherwise it depends on descendingOrder
-	return newIDScores(weightedScores, searchParams, weighted.needNorm || descendingOrder), nil
+	return newIDScores(weightedScores, idLocations, searchParams, weighted.needNorm || descendingOrder), nil
 }
 
 func (weighted *WeightedFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for _, cols := range inputs.data {
 		idScore, err := weighted.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
 }

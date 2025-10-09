@@ -6,10 +6,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -17,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // Server is the streamingcoord server.
@@ -30,10 +30,6 @@ type Server struct {
 	// service level variables.
 	assignmentService service.AssignmentService
 	broadcastService  service.BroadcastService
-
-	// basic component variables can be used at service level.
-	balancer    *syncutil.Future[balancer.Balancer]
-	broadcaster *syncutil.Future[broadcaster.Broadcaster]
 }
 
 // Init initializes the streamingcoord server.
@@ -60,8 +56,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 			s.logger.Warn("recover balancer failed", zap.Error(err))
 			return struct{}{}, err
 		}
-		s.balancer.Set(balancer)
-		snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+		balance.Register(balancer)
 		s.logger.Info("recover balancer done")
 		return struct{}{}, nil
 	}))
@@ -74,7 +69,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 			s.logger.Warn("recover broadcaster failed", zap.Error(err))
 			return struct{}{}, err
 		}
-		s.broadcaster.Set(broadcaster)
+		broadcast.Register(broadcaster)
 		s.logger.Info("recover broadcaster done")
 		return struct{}{}, nil
 	}))
@@ -89,18 +84,10 @@ func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 
 // Close closes the streamingcoord server.
 func (s *Server) Stop() {
-	if s.balancer.Ready() {
-		s.logger.Info("start close balancer...")
-		s.balancer.Get().Close()
-	} else {
-		s.logger.Info("balancer not ready, skip close")
-	}
-	if s.broadcaster.Ready() {
-		s.logger.Info("start close broadcaster...")
-		s.broadcaster.Get().Close()
-	} else {
-		s.logger.Info("broadcaster not ready, skip close")
-	}
+	s.logger.Info("start close balancer...")
+	balance.Release()
+	s.logger.Info("start close broadcaster...")
+	broadcast.Release()
 	s.logger.Info("release streamingcoord resource...")
 	resource.Release()
 	s.logger.Info("streamingcoord server stopped")

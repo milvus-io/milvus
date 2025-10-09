@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -861,9 +862,6 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			if !ok {
 				return fmt.Errorf("function input field not found: %s", name)
 			}
-			if inputField.GetNullable() {
-				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
-			}
 			inputFields = append(inputFields, inputField)
 		}
 
@@ -941,8 +939,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		if err := embedding.TextEmbeddingInputsCheck(function.GetName(), fields); err != nil {
+			return err
 		}
 	default:
 		return errors.New("check input field with unknown function type")
@@ -2420,6 +2418,9 @@ func SetReportValue(status *commonpb.Status, value int) {
 }
 
 func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
+	if !Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		return
+	}
 	if storageCost.ScannedTotalBytes <= 0 {
 		return
 	}
@@ -2428,6 +2429,9 @@ func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
 	}
 	if status.ExtraInfo == nil {
 		status.ExtraInfo = make(map[string]string)
+		// set report_value to 0 for compatibility, when extra info is not nil, there are always the default report_value
+		// see https://github.com/milvus-io/pymilvus/pull/2999, pymilvus didn't check the report_value is set and use the value
+		status.ExtraInfo["report_value"] = strconv.Itoa(0)
 	}
 
 	status.ExtraInfo["scanned_remote_bytes"] = strconv.FormatInt(storageCost.ScannedRemoteBytes, 10)
@@ -2445,6 +2449,45 @@ func GetCostValue(status *commonpb.Status) int {
 		return 0
 	}
 	return value
+}
+
+// final return value means value is valid or not
+func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
+	if status == nil || status.ExtraInfo == nil {
+		return 0, 0, 0, false
+	}
+	var scannedRemoteBytes int64
+	var scannedTotalBytes int64
+	var cacheHitRatio float64
+	var err error
+	if value, ok := status.ExtraInfo["scanned_remote_bytes"]; ok {
+		scannedRemoteBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_remote_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["scanned_total_bytes"]; ok {
+		scannedTotalBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_total_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["cache_hit_ratio"]; ok {
+		cacheHitRatio, err = strconv.ParseFloat(value, 64)
+		if err != nil {
+			log.Warn("cache_hit_ratio is not a valid float64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
@@ -2621,6 +2664,16 @@ func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	return fields
 }
 
+func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			fields = append(fields, fSchema.OutputFieldNames...)
+		}
+	}
+	return fields
+}
+
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	properties := make(map[string]string)
 	for _, pair := range pairs {
@@ -2762,7 +2815,7 @@ func getDbTimezone(dbInfo *databaseInfo) (bool, string) {
 	return getDefaultTimezoneVal(dbInfo.properties...)
 }
 
-func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, dbTimezone string) error {
+func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string) error {
 	naiveLayouts := []string{
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02T15:04:05",
@@ -2796,8 +2849,6 @@ func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, db
 			defaultTZ := "UTC"
 			if colTimezone != "" {
 				defaultTZ = colTimezone
-			} else if dbTimezone != "" {
-				defaultTZ = dbTimezone
 			}
 
 			location, err := time.LoadLocation(defaultTZ)
@@ -2966,6 +3017,35 @@ func extractFieldsFromResults(results []*schemapb.FieldData, precedenceTimezone 
 		}
 		fieldData.Type = schemapb.DataType_Array
 	}
+	return nil
+}
 
+func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, schema *schemaInfo, partialUpdate bool) error {
+	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
+	fieldIDs := lo.Map(insertMsg.FieldsData, func(fieldData *schemapb.FieldData, _ int) int64 {
+		id, _ := schema.MapFieldID(fieldData.FieldName)
+		return id
+	})
+
+	// Since PartialUpdate is supported, the field_data here may not be complete
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
+	if err != nil {
+		log.Ctx(ctx).Warn("Check upsert field error,", zap.String("collectionName", schema.Name), zap.Error(err))
+		return err
+	}
+
+	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
+		defer sp.End()
+		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions)
+		if err != nil {
+			return err
+		}
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessInsert(ctx, insertMsg); err != nil {
+			return err
+		}
+		sp.AddEvent("Call-function-udf")
+	}
 	return nil
 }
