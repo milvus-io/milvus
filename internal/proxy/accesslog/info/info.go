@@ -16,6 +16,8 @@
 
 package info
 
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 const (
 	Unknown            = "Unknown"
 	timeFormat         = "2006/01/02 15:04:05.000 -07:00"
@@ -78,6 +80,7 @@ type AccessInfo interface {
 	NQ() string
 	SearchParams() string
 	QueryParams() string
+	SetActualConsistencyLevel(commonpb.ConsistencyLevel)
 }
 
 func Get(i AccessInfo, keys ...string) []any {

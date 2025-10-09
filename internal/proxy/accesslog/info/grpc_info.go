@@ -49,6 +49,9 @@ type GrpcAccessInfo struct {
 	grpcInfo *grpc.UnaryServerInfo
 	start    time.Time
 	end      time.Time
+
+	// runtime set info
+	actualConsistencyLevel *commonpb.ConsistencyLevel
 }
 
 func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
@@ -298,6 +301,10 @@ func (i *GrpcAccessInfo) OutputFields() string {
 }
 
 func (i *GrpcAccessInfo) ConsistencyLevel() string {
+	// return actual consistency level if set
+	if i.actualConsistencyLevel != nil {
+		return i.actualConsistencyLevel.String()
+	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
 		return level.String()
@@ -344,4 +351,8 @@ func (i *GrpcAccessInfo) QueryParams() string {
 		return kvsToString(req.GetQueryParams())
 	}
 	return Unknown
+}
+
+func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
+	i.actualConsistencyLevel = &acl
 }
