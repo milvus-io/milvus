@@ -215,7 +215,7 @@ func (i *RestfulInfo) OutputFields() string {
 func (i *RestfulInfo) ConsistencyLevel() string {
 	// return actual consistency level if set
 	if i.actualConsistencyLevel != nil {
-		return (*i.actualConsistencyLevel).String()
+		return i.actualConsistencyLevel.String()
 	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
