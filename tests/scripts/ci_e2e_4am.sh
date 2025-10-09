@@ -66,6 +66,21 @@ if [ "${DISABLE_PIP_INSTALL:-}" = "false" ]; then
 fi
 
 
+cd ${ROOT}/tests/python_client
+
+# run all tests to expose the problem
+
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+  timeout "${TEST_TIMEOUT}" pytest milvus_client/test_milvus_client_geometry.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
+    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6
+else
+  pytest milvus_client/test_milvus_client_geometry.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
+    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6
+fi
+
+
+
 # Run restful test v1
 
 cd ${ROOT}/tests/restful_client
@@ -88,18 +103,7 @@ else
 fi
 
 
-cd ${ROOT}/tests/python_client
 
-# run all tests to expose the problem
-
-if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-
-  timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6 --tag L0 L1 
-else
-  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup -v -n 6 --tag L0 L1
-fi
 
 
 # # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
