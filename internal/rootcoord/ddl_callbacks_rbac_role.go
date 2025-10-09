@@ -1,9 +1,27 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rootcoord
 
 import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -12,20 +30,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
-	if err := c.checkCreateRole(ctx, in); err != nil {
+	if err := c.meta.CheckIfCreateRole(ctx, in); err != nil {
+		if errors.Is(err, errRoleAlreadyExists) {
+			return common.NewIgnorableError(errors.Newf("role [%s] already exists", in.GetEntity().GetName()))
+		}
 		return err
 	}
 
@@ -41,30 +59,6 @@ func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleR
 	return err
 }
 
-// checkCreateRole check if the role can be created.
-func (c *Core) checkCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
-	if in.GetEntity().GetName() == "" {
-		return errors.New("role name is empty")
-	}
-	results, err := c.meta.SelectRole(ctx, util.DefaultTenant, nil, false)
-	if err != nil {
-		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
-		return err
-	}
-	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
-		errMsg := "unable to create role because the number of roles has reached the limit"
-		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
-		return errors.New(errMsg)
-	}
-	for _, result := range results {
-		if result.GetRole().GetName() == in.GetEntity().GetName() {
-			log.Ctx(ctx).Info("role already exists", zap.String("role", in.GetEntity().GetName()))
-			return common.NewIgnorableError(errors.Newf("role [%s] already exists", in.GetEntity().GetName()))
-		}
-	}
-	return nil
-}
-
 // alterRoleV2AckCallback is the ack callback function for the AlterRoleMessageV2 message.
 func (c *DDLCallback) alterRoleV2AckCallback(ctx context.Context, result message.BroadcastResultAlterRoleMessageV2) error {
 	// There should always be only one message in the msgs slice.
@@ -72,13 +66,13 @@ func (c *DDLCallback) alterRoleV2AckCallback(ctx context.Context, result message
 }
 
 func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
-	if err := c.checkDropRole(ctx, in); err != nil {
+	if err := c.meta.CheckIfDropRole(ctx, in); err != nil {
 		return err
 	}
 
@@ -92,38 +86,6 @@ func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleReque
 
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
-}
-
-// checkDropRole check if the role can be dropped.
-func (c *Core) checkDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
-	if util.IsBuiltinRole(in.GetRoleName()) {
-		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
-	}
-
-	if in.GetRoleName() == "" {
-		return errors.New("role name is empty")
-	}
-
-	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
-		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		return errors.New(errMsg)
-	}
-	if in.GetForceDrop() {
-		return nil
-	}
-
-	grantEntities, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-		Role:   &milvuspb.RoleEntity{Name: in.GetRoleName()},
-		DbName: "*",
-	})
-	if err != nil {
-		return err
-	}
-	if len(grantEntities) != 0 {
-		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		return errors.New(errMsg)
-	}
-	return nil
 }
 
 // dropRoleV2AckCallback is the ack callback function for the DropRoleMessageV2 message.
@@ -150,28 +112,14 @@ func (c *DDLCallback) dropRoleV2AckCallback(ctx context.Context, result message.
 }
 
 func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest) error {
-	if funcutil.IsEmptyString(in.Username) {
-		return errors.New("username in the user entity is empty")
-	}
-	if funcutil.IsEmptyString(in.RoleName) {
-		return errors.New("role name in the role entity is empty")
-	}
-
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
-	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		return errors.New(errMsg)
-	}
-	if in.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
-			errMsg := "not found the user, maybe the user isn't existed or internal system error"
-			return errors.New(errMsg)
-		}
+	if err := c.meta.CheckIfOperateUserRole(ctx, in); err != nil {
+		return err
 	}
 
 	var msg message.BroadcastMutableMessage

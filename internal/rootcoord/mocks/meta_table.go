@@ -482,6 +482,288 @@ func (_c *IMetaTable_ChangePartitionState_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// CheckIfAddCredential provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfAddCredential(ctx context.Context, req *internalpb.CredentialInfo) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfAddCredential")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfAddCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfAddCredential'
+type IMetaTable_CheckIfAddCredential_Call struct {
+	*mock.Call
+}
+
+// CheckIfAddCredential is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *internalpb.CredentialInfo
+func (_e *IMetaTable_Expecter) CheckIfAddCredential(ctx interface{}, req interface{}) *IMetaTable_CheckIfAddCredential_Call {
+	return &IMetaTable_CheckIfAddCredential_Call{Call: _e.mock.On("CheckIfAddCredential", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfAddCredential_Call) Run(run func(ctx context.Context, req *internalpb.CredentialInfo)) *IMetaTable_CheckIfAddCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAddCredential_Call) Return(_a0 error) *IMetaTable_CheckIfAddCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAddCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_CheckIfAddCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfCreateRole provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfCreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfCreateRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRoleRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfCreateRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfCreateRole'
+type IMetaTable_CheckIfCreateRole_Call struct {
+	*mock.Call
+}
+
+// CheckIfCreateRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.CreateRoleRequest
+func (_e *IMetaTable_Expecter) CheckIfCreateRole(ctx interface{}, req interface{}) *IMetaTable_CheckIfCreateRole_Call {
+	return &IMetaTable_CheckIfCreateRole_Call{Call: _e.mock.On("CheckIfCreateRole", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfCreateRole_Call) Run(run func(ctx context.Context, req *milvuspb.CreateRoleRequest)) *IMetaTable_CheckIfCreateRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateRoleRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfCreateRole_Call) Return(_a0 error) *IMetaTable_CheckIfCreateRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfCreateRole_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateRoleRequest) error) *IMetaTable_CheckIfCreateRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfDeleteCredential provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfDeleteCredential")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteCredentialRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfDeleteCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfDeleteCredential'
+type IMetaTable_CheckIfDeleteCredential_Call struct {
+	*mock.Call
+}
+
+// CheckIfDeleteCredential is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.DeleteCredentialRequest
+func (_e *IMetaTable_Expecter) CheckIfDeleteCredential(ctx interface{}, req interface{}) *IMetaTable_CheckIfDeleteCredential_Call {
+	return &IMetaTable_CheckIfDeleteCredential_Call{Call: _e.mock.On("CheckIfDeleteCredential", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfDeleteCredential_Call) Run(run func(ctx context.Context, req *milvuspb.DeleteCredentialRequest)) *IMetaTable_CheckIfDeleteCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteCredentialRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfDeleteCredential_Call) Return(_a0 error) *IMetaTable_CheckIfDeleteCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfDeleteCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteCredentialRequest) error) *IMetaTable_CheckIfDeleteCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfDropRole provides a mock function with given fields: ctx, in
+func (_m *IMetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
+	ret := _m.Called(ctx, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfDropRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRoleRequest) error); ok {
+		r0 = rf(ctx, in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfDropRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfDropRole'
+type IMetaTable_CheckIfDropRole_Call struct {
+	*mock.Call
+}
+
+// CheckIfDropRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DropRoleRequest
+func (_e *IMetaTable_Expecter) CheckIfDropRole(ctx interface{}, in interface{}) *IMetaTable_CheckIfDropRole_Call {
+	return &IMetaTable_CheckIfDropRole_Call{Call: _e.mock.On("CheckIfDropRole", ctx, in)}
+}
+
+func (_c *IMetaTable_CheckIfDropRole_Call) Run(run func(ctx context.Context, in *milvuspb.DropRoleRequest)) *IMetaTable_CheckIfDropRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropRoleRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfDropRole_Call) Return(_a0 error) *IMetaTable_CheckIfDropRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfDropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest) error) *IMetaTable_CheckIfDropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfOperateUserRole provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfOperateUserRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperateUserRoleRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfOperateUserRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfOperateUserRole'
+type IMetaTable_CheckIfOperateUserRole_Call struct {
+	*mock.Call
+}
+
+// CheckIfOperateUserRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.OperateUserRoleRequest
+func (_e *IMetaTable_Expecter) CheckIfOperateUserRole(ctx interface{}, req interface{}) *IMetaTable_CheckIfOperateUserRole_Call {
+	return &IMetaTable_CheckIfOperateUserRole_Call{Call: _e.mock.On("CheckIfOperateUserRole", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfOperateUserRole_Call) Run(run func(ctx context.Context, req *milvuspb.OperateUserRoleRequest)) *IMetaTable_CheckIfOperateUserRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.OperateUserRoleRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfOperateUserRole_Call) Return(_a0 error) *IMetaTable_CheckIfOperateUserRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfOperateUserRole_Call) RunAndReturn(run func(context.Context, *milvuspb.OperateUserRoleRequest) error) *IMetaTable_CheckIfOperateUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfUpdateCredential provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfUpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfUpdateCredential")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.CredentialInfo) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfUpdateCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfUpdateCredential'
+type IMetaTable_CheckIfUpdateCredential_Call struct {
+	*mock.Call
+}
+
+// CheckIfUpdateCredential is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *internalpb.CredentialInfo
+func (_e *IMetaTable_Expecter) CheckIfUpdateCredential(ctx interface{}, req interface{}) *IMetaTable_CheckIfUpdateCredential_Call {
+	return &IMetaTable_CheckIfUpdateCredential_Call{Call: _e.mock.On("CheckIfUpdateCredential", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfUpdateCredential_Call) Run(run func(ctx context.Context, req *internalpb.CredentialInfo)) *IMetaTable_CheckIfUpdateCredential_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.CredentialInfo))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfUpdateCredential_Call) Return(_a0 error) *IMetaTable_CheckIfUpdateCredential_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_CheckIfUpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateAlias provides a mock function with given fields: ctx, dbName, alias, collectionName, ts
 func (_m *IMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts uint64) error {
 	ret := _m.Called(ctx, dbName, alias, collectionName, ts)
@@ -2924,8 +3206,7 @@ func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(context.Context, str
 func NewIMetaTable(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *IMetaTable {
+}) *IMetaTable {
 	mock := &IMetaTable{}
 	mock.Mock.Test(t)
 

@@ -28,30 +28,32 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func generateMetaTable(t *testing.T) *MetaTable {
-	return &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV(), nil)}
+func generateMetaTable(_ *testing.T) *MetaTable {
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10)
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}
 }
 
-func buildAlterUserMessage(credInfo *internalpb.CredentialInfo) message.ImmutablePutUserMessageV2 {
+func buildAlterUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultAlterUserMessageV2 {
 	msg := message.NewAlterUserMessageBuilderV2().
-		WithVChannel(message.ControlChannel).
 		WithHeader(&message.AlterUserMessageHeader{
 			UserEntity: &milvuspb.UserEntity{
 				Name: credInfo.Username,
@@ -60,19 +62,46 @@ func buildAlterUserMessage(credInfo *internalpb.CredentialInfo) message.Immutabl
 		WithBody(&message.AlterUserMessageBody{
 			CredentialInfo: credInfo,
 		}).
-		MustBuildMutable().
-		WithTimeTick(1).
-		IntoImmutableMessage(rmq.NewRmqID(1))
-	return message.MustAsImmutableAlterUserMessageV2(msg)
+		WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_1")}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterUserMessageV2{
+		Message: message.MustAsBroadcastAlterUserMessageV2(msg),
+		Results: map[string]*message.AppendResult{
+			funcutil.GetControlChannel("by-dev-rootcoord-dml_1"): {TimeTick: timetick},
+		},
+	}
 }
 
-func TestRbacAddCredential(t *testing.T) {
+func buildDropUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultDropUserMessageV2 {
+	msg := message.NewDropUserMessageBuilderV2().
+		WithHeader(&message.DropUserMessageHeader{
+			UserName: credInfo.Username,
+		}).
+		WithBody(&message.DropUserMessageBody{}).
+		WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_1")}).
+		MustBuildBroadcast()
+	return message.BroadcastResultDropUserMessageV2{
+		Message: message.MustAsBroadcastDropUserMessageV2(msg),
+		Results: map[string]*message.AppendResult{
+			funcutil.GetControlChannel("by-dev-rootcoord-dml_1"): {TimeTick: timetick},
+		},
+	}
+}
+
+func TestRbacCredential(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	err := mt.AlterCredential(context.TODO(), buildPutUserMessage(&internalpb.CredentialInfo{
-		Username: "user1",
+	username := "user" + funcutil.RandomString(10)
+	credInfo := &internalpb.CredentialInfo{
+		Username: username,
 		Tenant:   util.DefaultTenant,
-	}))
+	}
+	err := mt.CheckIfAddCredential(context.TODO(), credInfo)
+	require.NoError(t, err)
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 1))
+	require.NoError(t, err)
+	// idempotency
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 1))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -83,7 +112,7 @@ func TestRbacAddCredential(t *testing.T) {
 	}{
 		{"Empty username", false, &internalpb.CredentialInfo{Username: ""}},
 		{"exceed MaxUserNum", true, &internalpb.CredentialInfo{Username: "user3", Tenant: util.DefaultTenant}},
-		{"user exist", false, &internalpb.CredentialInfo{Username: "user1", Tenant: util.DefaultTenant}},
+		{"user exist", false, &internalpb.CredentialInfo{Username: username, Tenant: util.DefaultTenant}},
 	}
 
 	for _, test := range tests {
@@ -94,10 +123,39 @@ func TestRbacAddCredential(t *testing.T) {
 				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "3")
 			}
 			defer paramtable.Get().Reset(Params.ProxyCfg.MaxUserNum.Key)
-			err := mt.AlterCredential(context.TODO(), buildPutUserMessage(test.info))
+			err := mt.CheckIfAddCredential(context.TODO(), test.info)
 			assert.Error(t, err)
 		})
 	}
+
+	// should be ignored if timetick is too low.
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 0))
+	require.NoError(t, err)
+	newCred, err := mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(1))
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 2))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(2))
+
+	// should be ignored if timetick is too low.
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 2))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(2))
+
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 3))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	require.Nil(t, newCred)
+
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 0))
+	require.NoError(t, err)
 }
 
 func TestRbacCreateRole(t *testing.T) {
@@ -105,7 +163,11 @@ func TestRbacCreateRole(t *testing.T) {
 
 	paramtable.Get().Save(Params.ProxyCfg.MaxRoleNum.Key, "2")
 	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleNum.Key)
-	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
+	require.NoError(t, err)
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	require.NoError(t, err)
+	err = mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role2"}})
 	require.NoError(t, err)
 	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role2"})
 	require.NoError(t, err)
@@ -121,14 +183,14 @@ func TestRbacCreateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.CreateRole(context.TODO(), util.DefaultTenant, test.inEntity)
+			err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: test.inEntity})
 			assert.Error(t, err)
 		})
 	}
 	t.Run("role has existed", func(t *testing.T) {
-		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
-		assert.True(t, common.IsIgnorableError(err))
+		assert.True(t, errors.Is(err, errRoleAlreadyExists))
 	})
 
 	{
@@ -140,7 +202,7 @@ func TestRbacCreateRole(t *testing.T) {
 			mock.Anything,
 		).Return(nil, errors.New("error mock list role"))
 		mockMt := &MetaTable{catalog: mockCata}
-		err := mockMt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mockMt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
 	}
 }
@@ -148,24 +210,21 @@ func TestRbacCreateRole(t *testing.T) {
 func TestRbacDropRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	// drop a exist role
+	roleExist := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleExist})
+	require.NoError(t, err)
+	err = mt.CheckIfDropRole(context.TODO(), &milvuspb.DropRoleRequest{RoleName: roleExist})
+	require.NoError(t, err)
+	err = mt.DropRole(context.TODO(), util.DefaultTenant, roleExist)
+	require.NoError(t, err)
+	// idempotency
+	mt.DropRole(context.TODO(), util.DefaultTenant, roleExist)
 	require.NoError(t, err)
 
-	tests := []struct {
-		roleName string
-
-		description string
-	}{
-		{"role1", "drop role1"},
-		{"role_not_exists", "drop not exist role"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			err := mt.DropRole(context.TODO(), util.DefaultTenant, test.roleName)
-			assert.NoError(t, err)
-		})
-	}
+	// drop a not exist role
+	err = mt.CheckIfDropRole(context.TODO(), &milvuspb.DropRoleRequest{RoleName: "role_not_exist"})
+	require.ErrorIs(t, err, errRoleNotExists)
 }
 
 func TestRbacOperateRole(t *testing.T) {
@@ -189,7 +248,11 @@ func TestRbacOperateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.OperateUserRole(context.TODO(), util.DefaultTenant, &milvuspb.UserEntity{Name: test.user}, &milvuspb.RoleEntity{Name: test.role}, test.oType)
+			err := mt.CheckIfOperateUserRole(context.TODO(), &milvuspb.OperateUserRoleRequest{
+				Username: test.user,
+				RoleName: test.role,
+				Type:     test.oType,
+			})
 			assert.Error(t, err)
 		})
 	}

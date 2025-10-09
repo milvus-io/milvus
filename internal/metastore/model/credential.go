@@ -24,3 +24,17 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 		TimeTick:          cred.TimeTick,
 	}
 }
+
+func UnmarshalCredentialModel(cred *internalpb.CredentialInfo) *Credential {
+	if cred == nil {
+		return nil
+	}
+	return &Credential{
+		Username:          cred.Username,
+		EncryptedPassword: cred.EncryptedPassword,
+		Tenant:            cred.Tenant,
+		IsSuper:           cred.IsSuper,
+		Sha256Password:    cred.Sha256Password,
+		TimeTick:          cred.TimeTick,
+	}
+}

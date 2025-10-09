@@ -50,8 +50,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+type MetaTableChecker interface {
+	RBACChecker
+}
+
 //go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
 type IMetaTable interface {
+	MetaTableChecker
+
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
 	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
@@ -1383,6 +1389,52 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	return nil
 }
 
+func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	// check if the username is empty.
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	usernames, err := mt.catalog.ListCredentials(ctx)
+	if err != nil {
+		return err
+	}
+	// check if the username already exists.
+	for _, username := range usernames {
+		if username == credInfo.GetUsername() {
+			return errUserAlreadyExists
+		}
+	}
+
+	// check if the number of users has reached the limit.
+	maxUserNum := Params.ProxyCfg.MaxUserNum.GetAsInt()
+	if len(usernames) >= maxUserNum {
+		errMsg := "unable to add user because the number of users has reached the limit"
+		log.Ctx(ctx).Error(errMsg, zap.Int("maxUserNum", maxUserNum))
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
+func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, credInfo.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // AlterCredential update credential
 func (mt *MetaTable) AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error {
 	body := result.Message.MustBody()
@@ -1420,6 +1472,23 @@ func (mt *MetaTable) GetCredential(ctx context.Context, username string) (*inter
 	return model.MarshalCredentialModel(credential), err
 }
 
+func (mt *MetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, req.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // DeleteCredential delete credential
 func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error {
 	mt.permissionLock.Lock()
@@ -1453,12 +1522,75 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }
 
+// CheckIfCreateRole checks if the role can be created.
+func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
+		return errEmptyRoleName
+	}
+
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	results, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
+		return err
+	}
+	for _, result := range results {
+		if result.GetRole().GetName() == in.GetEntity().GetName() {
+			log.Ctx(ctx).Info("role already exists", zap.String("role", in.GetEntity().GetName()))
+			return errRoleAlreadyExists
+		}
+	}
+	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
+		errMsg := "unable to create role because the number of roles has reached the limit"
+		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
 // CreateRole create role
 func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.CreateRole(ctx, tenant, entity)
+}
+
+func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetRoleName()) {
+		return errEmptyRoleName
+	}
+	if util.IsBuiltinRole(in.GetRoleName()) {
+		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
+	}
+
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	if in.GetForceDrop() {
+		return nil
+	}
+
+	grantEntities, err := mt.catalog.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   &milvuspb.RoleEntity{Name: in.GetRoleName()},
+		DbName: "*",
+	})
+	if err != nil {
+		return err
+	}
+	if len(grantEntities) != 0 {
+		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
+		return errors.New(errMsg)
+	}
+	return nil
 }
 
 // DropRole drop role info
@@ -1469,15 +1601,35 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 	return mt.catalog.DropRole(ctx, tenant, roleName)
 }
 
-// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
-func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	if funcutil.IsEmptyString(userEntity.Name) {
+func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
 		return errors.New("username in the user entity is empty")
 	}
-	if funcutil.IsEmptyString(roleEntity.Name) {
+	if funcutil.IsEmptyString(req.GetRoleName()) {
 		return errors.New("role name in the role entity is empty")
 	}
 
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: req.RoleName}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		errMsg := "not found the role, maybe the role isn't existed or internal system error"
+		return errors.New(errMsg)
+	}
+	if req.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		if _, err := mt.catalog.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: req.Username}, false); err != nil {
+			errMsg := "not found the user, maybe the user isn't existed or internal system error"
+			return errors.New(errMsg)
+		}
+	}
+	return nil
+}
+
+// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
+func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 

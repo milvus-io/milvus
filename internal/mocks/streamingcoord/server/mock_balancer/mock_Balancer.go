@@ -33,65 +33,6 @@ func (_m *MockBalancer) EXPECT() *MockBalancer_Expecter {
 	return &MockBalancer_Expecter{mock: &_m.Mock}
 }
 
-// AllocVirtualChannels provides a mock function with given fields: ctx, param
-func (_m *MockBalancer) AllocVirtualChannels(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error) {
-	ret := _m.Called(ctx, param)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AllocVirtualChannels")
-	}
-
-	var r0 []string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, balancer.AllocVChannelParam) ([]string, error)); ok {
-		return rf(ctx, param)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, balancer.AllocVChannelParam) []string); ok {
-		r0 = rf(ctx, param)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, balancer.AllocVChannelParam) error); ok {
-		r1 = rf(ctx, param)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBalancer_AllocVirtualChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocVirtualChannels'
-type MockBalancer_AllocVirtualChannels_Call struct {
-	*mock.Call
-}
-
-// AllocVirtualChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - param balancer.AllocVChannelParam
-func (_e *MockBalancer_Expecter) AllocVirtualChannels(ctx interface{}, param interface{}) *MockBalancer_AllocVirtualChannels_Call {
-	return &MockBalancer_AllocVirtualChannels_Call{Call: _e.mock.On("AllocVirtualChannels", ctx, param)}
-}
-
-func (_c *MockBalancer_AllocVirtualChannels_Call) Run(run func(ctx context.Context, param balancer.AllocVChannelParam)) *MockBalancer_AllocVirtualChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(balancer.AllocVChannelParam))
-	})
-	return _c
-}
-
-func (_c *MockBalancer_AllocVirtualChannels_Call) Return(_a0 []string, _a1 error) *MockBalancer_AllocVirtualChannels_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBalancer_AllocVirtualChannels_Call) RunAndReturn(run func(context.Context, balancer.AllocVChannelParam) ([]string, error)) *MockBalancer_AllocVirtualChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Close provides a mock function with no fields
 func (_m *MockBalancer) Close() {
 	_m.Called()

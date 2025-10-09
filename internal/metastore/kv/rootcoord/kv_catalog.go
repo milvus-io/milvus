@@ -348,7 +348,9 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 
 func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
-	v, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credential.EncryptedPassword})
+	credentialInfo := model.MarshalCredentialModel(credential)
+	credentialInfo.Username = ""
+	v, err := json.Marshal(credentialInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("create credential marshal fail", zap.String("key", k), zap.Error(err))
 		return err
@@ -620,8 +622,9 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal credential info err:%w", err)
 	}
-
-	return &model.Credential{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
+	// we don't save the username in the credential info, so we need to set it manually from path.
+	credentialInfo.Username = username
+	return model.UnmarshalCredentialModel(&credentialInfo), nil
 }
 
 func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {

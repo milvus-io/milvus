@@ -515,7 +515,7 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
-		return c.initBuiltinRoles()
+		return c.initBuiltinRoles(initCtx)
 	}
 	return nil
 }
@@ -564,22 +564,22 @@ func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 	return nil
 }
 
-func (c *Core) initBuiltinRoles() error {
-	log := log.Ctx(c.ctx)
+func (c *Core) initBuiltinRoles(ctx context.Context) error {
+	log := log.Ctx(ctx)
 	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
 	for role, privilegesJSON := range rolePrivilegesMap {
-		err := c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err := c.meta.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Error("create a builtin role fail", zap.String("roleName", role), zap.Error(err))
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
-			privilegeName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
+			privilegeName, err := c.getMetastorePrivilegeName(ctx, privilege[util.RoleConfigPrivilege])
 			if err != nil {
 				return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 			}
 
-			err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			err = c.meta.OperatePrivilege(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
 				ObjectName: privilege[util.RoleConfigObjectName],
@@ -2177,8 +2177,8 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 		return merr.Status(err), nil
 	}
 
-	if err := c.broadcastCreateCredential(ctx, credInfo); err != nil {
-		ctxLog.Warn("CreateCredential append message failed", zap.Error(err))
+	if err := c.broadcastAlterUserForCreateCredential(ctx, credInfo); err != nil {
+		ctxLog.Warn("CreateCredential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateCredentialFailure), nil
 	}
@@ -2230,7 +2230,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 		return merr.Status(err), nil
 	}
 
-	if err := c.broadcastUpdateCredential(ctx, credInfo); err != nil {
+	if err := c.broadcastAlterUserForUpdateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("UpdateCredential append message failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
@@ -2252,7 +2252,7 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 		return merr.Status(err), nil
 	}
 
-	if err := c.broadcastDropCredential(ctx, in); err != nil {
+	if err := c.broadcastDropUserForDeleteCredential(ctx, in); err != nil {
 		ctxLog.Warn("DeleteCredential append message failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DeleteCredentialFailure), nil
@@ -2478,14 +2478,14 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	}, nil
 }
 
-func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
+func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) error {
 	if entity == nil {
 		return errors.New("the role entity is nil")
 	}
 	if entity.Name == "" {
 		return errors.New("the name in the role entity is empty")
 	}
-	if _, err := c.meta.SelectRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
+	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
 		return errors.New("not found the role, maybe the role isn't existed or internal system error")
 	}
@@ -2562,6 +2562,10 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
 	ctxLog.Debug(method)
 
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
 	if err := c.broadcastOperatePrivilege(ctx, in); err != nil {
 		errMsg := "fail to execute task when operating the privilege"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2575,9 +2579,6 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 }
 
 func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return err
-	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
 		return errors.New(errMsg)
@@ -2589,7 +2590,7 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 	if err := c.isValidObject(in.Entity.Object); err != nil {
 		return errors.New("the object entity in the request is nil or invalid")
 	}
-	if err := c.isValidRole(in.Entity.Role); err != nil {
+	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {
 		return err
 	}
 	entity := in.Entity.Grantor
@@ -2689,7 +2690,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
-	if err := c.isValidRole(in.Entity.Role); err != nil {
+	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {
 		ctxLog.Warn("", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_SelectGrantFailure),
