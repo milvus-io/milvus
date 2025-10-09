@@ -106,14 +106,14 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
             storage::DataType::INT8, DataType::NONE, false);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
-        auto rawData = (uint8_t*)(index->Data());
+        auto rawData = static_cast<uint8_t*>(index->Data());
 
         EXPECT_EQ(rows, index_size);
         EXPECT_EQ(rawData[0], data[0]);
         EXPECT_EQ(rawData[4], data[4]);
     }
 
-    for (auto file : local_files) {
+    for (auto& file : local_files) {
         cm_->Remove(file);
     }
 }
@@ -123,6 +123,9 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     conf.storage_type = "local";
     conf.root_path = "/tmp";
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
@@ -158,7 +161,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -222,7 +225,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 }
 
 int
-test_worker(string s) {
+test_worker(const string& s) {
     std::cout << s << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(1));
     std::cout << s << std::endl;

@@ -166,16 +166,16 @@ DiskFileManagerImpl::AddFileInternal(
     return true;
 }  // namespace knowhere
 
+// Opens an input stream with fs_
+// note that `fs_` must not be nullptr.
 std::shared_ptr<InputStream>
 DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
     auto fs = fs_;
-    if (!fs) {
-        fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                 .GetArrowFileSystem();
-    }
+    AssertInfo(fs, "fs is nullptr");
+
     auto remote_file = fs->OpenInputFile(remote_file_path);
     AssertInfo(remote_file.ok(), "failed to open remote file");
     return std::static_pointer_cast<milvus::InputStream>(
@@ -183,16 +183,16 @@ DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
             std::move(remote_file.ValueOrDie())));
 }
 
+// Opens an output stream with fs_
+// note that `fs_` must not be nullptr.
 std::shared_ptr<OutputStream>
 DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
     auto fs = fs_;
-    if (!fs) {
-        fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                 .GetArrowFileSystem();
-    }
+    AssertInfo(fs, "fs is nullptr");
+
     auto remote_stream = fs->OpenOutputStream(remote_file_path);
     AssertInfo(remote_stream.ok(),
                "failed to open remote stream, reason: {}",
