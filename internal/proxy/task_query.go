@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -475,6 +476,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
+
+	// update actual consistency level
+	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+
 	t.GuaranteeTimestamp = guaranteeTs
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
