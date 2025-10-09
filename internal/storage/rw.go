@@ -67,6 +67,7 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
+	isSorted            bool
 }
 
 func (o *rwOptions) validate() error {
@@ -160,6 +161,12 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithIsSorted(isSorted bool) RwOption {
+	return func(options *rwOptions) {
+		options.isSorted = isSorted
 	}
 }
 
@@ -356,6 +363,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
+			rwOptions.isSorted,
 			pluginContext,
 		)
 	}

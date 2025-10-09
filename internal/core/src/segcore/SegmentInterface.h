@@ -352,10 +352,8 @@ class SegmentInternalInterface : public SegmentInterface {
     GetSkipIndex() const;
 
     void
-    LoadSkipIndex(FieldId field_id,
-                  DataType data_type,
-                  std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
+    LoadSkipIndex(std::vector<std::unique_ptr<ChunkSkipIndex>> skip_index) {
+        skip_index_.LoadSkipIndex(std::move(skip_index));
     }
 
     virtual DataType
