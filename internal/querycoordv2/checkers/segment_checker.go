@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const initialTargetVersion = int64(0)
@@ -267,20 +268,29 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	}
 
 	isSegmentLack := func(segment *datapb.SegmentInfo) bool {
-		node, existInDist := distMap[segment.ID]
-
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
+			// Note: In the original design, all segments are forwarded through serviceable delegators to target workers for loading.
+			// However, L0 segments are always an exception and need to be loaded directly on the delegator.
+			// during balance channel, we should check each delegator's view to see if it lacks the l0 segment
+			// cause same channel may have different delegators during balance channel progress, and which last for a long time if memory is not enough
+			views := c.dist.LeaderViewManager.GetByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
+			if len(views) == 0 {
+				msg := "no shard leader for the l0 segment to execute loading"
+				err := merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
+				log.Warn(msg, zap.Error(err))
+				return false
+			}
 
-			// if the leader node's version doesn't match load l0 segment's requirement, skip it
-			if leader != nil && checkLeaderVersion(leader, segment.ID) {
-				l0WithWrongLocation := node != leader.ID
-				return !existInDist || l0WithWrongLocation
+			// find delegator which lack of l0 segment
+			for _, view := range views {
+				if _, ok := view.Segments[segment.ID]; !ok && checkLeaderVersion(view, segment.ID) {
+					return true
+				}
 			}
 			return false
 		}
 
+		_, existInDist := distMap[segment.ID]
 		return !existInDist
 	}
 
