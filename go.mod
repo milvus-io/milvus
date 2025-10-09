@@ -28,7 +28,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0
-	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.27.0
 	github.com/sbinet/npyio v0.6.0
 	github.com/soheilhy/cmux v0.1.5
@@ -74,7 +74,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
 	github.com/milvus-io/milvus/client/v2 v2.0.0-00010101000000-000000000000
-	github.com/milvus-io/milvus/pkg/v2 v2.5.7
+	github.com/milvus-io/milvus/pkg/v2 v2.6.3
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.24.10
