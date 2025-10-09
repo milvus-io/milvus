@@ -72,7 +72,14 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		WithBody(&message.CommitTxnMessageBody{}).
 		WithVChannel("v1").
 		MustBuildMutable()
-	immutableCommit := commit.WithTimeTick(3).WithTxnContext(txnCtx).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+	rh := message.ReplicateHeader{
+		ClusterID:              "by-dev",
+		MessageID:              msgID,
+		LastConfirmedMessageID: msgID,
+		TimeTick:               3,
+		VChannel:               "v1",
+	}
+	immutableCommit := commit.WithTimeTick(3).WithTxnContext(txnCtx).WithLastConfirmed(msgID).WithReplicateHeader(&rh).IntoImmutableMessage(msgID)
 	log.Info("test", zap.Object("msg", immutableCommit))
 
 	assert.NotZero(t, b.EstimateSize())
@@ -81,6 +88,11 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	assert.Len(t, msgs, 1)
 	immutableTxnMsg, err := b.Build(message.MustAsImmutableCommitTxnMessageV2(immutableCommit))
 	assert.NoError(t, err)
+	assert.Equal(t, "by-dev", immutableTxnMsg.ReplicateHeader().ClusterID)
+	assert.Equal(t, uint64(3), immutableTxnMsg.ReplicateHeader().TimeTick)
+	assert.Equal(t, "v1", immutableTxnMsg.ReplicateHeader().VChannel)
+	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().MessageID)
+	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().LastConfirmedMessageID)
 	log.Info("test", zap.Object("msg", immutableTxnMsg))
 }
 
@@ -96,7 +108,7 @@ func TestReplicateBuilder(t *testing.T) {
 	msgID := walimplstest.NewTestMessageID(1)
 	immutableMsg := msgs[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
 
-	replicateMsg := message.NewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
+	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
 	assert.NotNil(t, replicateMsg)
 	assert.Equal(t, "by-dev", replicateMsg.ReplicateHeader().ClusterID)
 	assert.Equal(t, uint64(100), replicateMsg.ReplicateHeader().TimeTick)
