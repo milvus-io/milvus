@@ -39,7 +39,7 @@ serde_json = "1.0.128"
 jieba-rs = "0.6.8"
 regex = "1.11.1"
 either = "1.13.0"
-icu_segmenter = "2.0.0-beta2"
+icu_segmenter = "2.0.0"
 whatlang = "0.16.4"
 lingua = "1.7.1"
 fancy-regex = "0.14.0"
@@ -66,12 +66,12 @@ flate2 = "1.1.0"
 tar = "0.4.44"
 
 [dev-dependencies]
-rand = "0.3"
-criterion = "0.4"
+rand = "0.7"
+criterion = "0.5"
 tempfile = "3.0"
 
 [build-dependencies]
-cbindgen = "0.26.0"
+cbindgen = "0.27.0"
 tonic-build = "0.13.0"
 
 [[bench]]
