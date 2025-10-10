@@ -190,6 +190,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return Count();
     }
 
+    int64_t
+    ByteSize() const {
+        return wrapper_->index_size_bytes();
+    }
+
     virtual const TargetBitmap
     PrefixMatch(const std::string_view prefix);
 

@@ -105,6 +105,7 @@ pub enum Value {
     RustArray(RustArray),
     RustArrayI64(RustArrayI64),
     U32(u32),
+    U64(u64),
     Ptr(*mut c_void),
 }
 
@@ -120,7 +121,7 @@ macro_rules! impl_from_for_enum {
     };
 }
 
-impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
+impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, U64 => u64, Ptr => *mut c_void);
 
 #[repr(C)]
 pub struct RustResult {
