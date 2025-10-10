@@ -128,6 +128,7 @@ func TestCompactionExecutor(t *testing.T) {
 			},
 		}
 
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
@@ -155,6 +156,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 
 		planID := int64(2)
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
@@ -393,6 +395,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 
 		ex.Enqueue(mockC)
 		ex.mu.RLock()
@@ -432,6 +435,7 @@ func TestCompactionExecutor(t *testing.T) {
 		planIDs := []int64{1, 2, 3}
 		for _, planID := range planIDs {
 			mockC := NewMockCompactor(t)
+			mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 			mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 			mockC.EXPECT().GetCollection().Return(int64(100))
 			mockC.EXPECT().GetChannelName().Return("ch1")

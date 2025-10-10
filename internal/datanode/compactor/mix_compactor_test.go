@@ -100,7 +100,7 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storage.enableV2", "false")
+	paramtable.Get().Save("common.storage.enablev2", "false")
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
@@ -140,7 +140,7 @@ func (s *MixCompactionTaskStorageV1Suite) SetupSubTest() {
 func (s *MixCompactionTaskStorageV1Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
 	paramtable.Get().Reset("common.storageType")
-	paramtable.Get().Reset("common.storage.enableV2")
+	paramtable.Get().Reset("common.storage.enablev2")
 }
 
 func getMilvusBirthday() time.Time {
