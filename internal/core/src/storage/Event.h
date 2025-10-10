@@ -31,7 +31,7 @@
 namespace milvus::storage {
 
 // Constant for deprecated ID fields to maintain binary compatibility
-static constexpr int64_t DEPRECATED_ID_VALUE = -1;
+static constexpr int64_t DeprecatedIDValue = -1;
 
 struct EventHeader {
     milvus::Timestamp timestamp_;
@@ -48,11 +48,11 @@ struct EventHeader {
 
 struct DescriptorEventDataFixPart {
     int64_t collection_id =
-        DEPRECATED_ID_VALUE;  // DEPRECATED: Always -1, kept for binary compatibility
+        DeprecatedIDValue;  // DEPRECATED: Always -1, kept for binary compatibility
     int64_t partition_id =
-        DEPRECATED_ID_VALUE;  // DEPRECATED: Always -1, kept for binary compatibility
+        DeprecatedIDValue;  // DEPRECATED: Always -1, kept for binary compatibility
     int64_t segment_id =
-        DEPRECATED_ID_VALUE;  // DEPRECATED: Always -1, kept for binary compatibility
+        DeprecatedIDValue;  // DEPRECATED: Always -1, kept for binary compatibility
     int64_t field_id = 0;
     Timestamp start_timestamp = 0;
     Timestamp end_timestamp = 0;

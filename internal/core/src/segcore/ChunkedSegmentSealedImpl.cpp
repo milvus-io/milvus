@@ -445,7 +445,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                  is_sorted_by_pk_);
 
         // Construct metadata for passing to LoadArrowReaderFromRemote
-        auto field_meta = get_schema()[field_id];
         storage::FieldDataMeta field_data_meta;
         field_data_meta.collection_id = load_info.collection_id;
         field_data_meta.partition_id = load_info.partition_id;
@@ -455,7 +454,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
         storage::IndexMeta index_meta;
         index_meta.segment_id = load_info.segment_id;
         index_meta.field_id = field_id.get();
-        index_meta.field_type = field_meta.get_data_type();
 
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto insert_files = info.insert_files;

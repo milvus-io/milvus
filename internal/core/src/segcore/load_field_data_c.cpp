@@ -168,14 +168,8 @@ AppendLoadFieldDataContext(CLoadFieldDataInfo c_load_field_data_info,
         info->partition_id = partition_id;
         info->segment_id = segment_id;
 
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        return milvus::FailureCStatus(&e);
     }
 }
