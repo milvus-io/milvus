@@ -604,5 +604,19 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, resultMapString["key1"], "value1")
 		assert.Equal(t, resultMapString["key2"], "value2")
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"GPU_CAGRA.load.adapt_for_cpu", "true")
+		indexParams := map[string]string{
+			"index_type":       "GPU_CAGRA",
+			"nn_descent_niter": "20",
+			"build_algo":       "NN_DESCENT",
+		}
+
+		err = AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, indexParams["nn_descent_niter"], "20")
+		assert.Equal(t, indexParams["build_algo"], "NN_DESCENT")
+		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
 }
