@@ -3305,7 +3305,7 @@ resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
 It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].`,
-		Export: true,
+		Export: false, // TODO: disabled for now, no need to export
 	}
 	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
 
@@ -3326,7 +3326,7 @@ resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
 It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].`,
-		Export: true,
+		Export: false, // TODO: disabled for now, no need to export
 	}
 	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
 
