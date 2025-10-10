@@ -58,6 +58,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     std::string root_path = "/tmp/test-inverted-index/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
 
     size_t nb = data.size();
 
@@ -96,7 +97,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     std::vector<std::string> index_files;
 
     auto index_size = 0;
