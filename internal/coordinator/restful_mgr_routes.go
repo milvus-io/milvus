@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"

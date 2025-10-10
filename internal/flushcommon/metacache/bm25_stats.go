@@ -19,10 +19,10 @@ package metacache
 import (
 	"sync"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type SegmentBM25Stats struct {
