@@ -3484,8 +3484,8 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 2)
-		assert.Equal(t, "age_array", insertMsg.FieldsData[0].FieldName)
-		assert.Equal(t, "score_array", insertMsg.FieldsData[1].FieldName)
+		assert.Equal(t, "user_info[age_array]", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "user_info[score_array]", insertMsg.FieldsData[1].FieldName)
 	})
 
 	t.Run("success - valid struct array field with vector arrays", func(t *testing.T) {
@@ -3513,7 +3513,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 1)
-		assert.Equal(t, "embeddings", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "embedding_info[embeddings]", insertMsg.FieldsData[0].FieldName)
 		assert.Equal(t, schemapb.DataType_ArrayOfVector, insertMsg.FieldsData[0].Type)
 	})
 
@@ -3556,9 +3556,9 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		for i, field := range insertMsg.FieldsData {
 			fieldNames[i] = field.FieldName
 		}
-		assert.Contains(t, fieldNames, "field1")
-		assert.Contains(t, fieldNames, "field2")
-		assert.Contains(t, fieldNames, "field3")
+		assert.Contains(t, fieldNames, "struct1[field1]")
+		assert.Contains(t, fieldNames, "struct2[field2]")
+		assert.Contains(t, fieldNames, "struct2[field3]")
 	})
 
 	t.Run("success - mixed normal and struct fields", func(t *testing.T) {
@@ -3591,7 +3591,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 			fieldNames[i] = field.FieldName
 		}
 		assert.Contains(t, fieldNames, "id")
-		assert.Contains(t, fieldNames, "tags")
+		assert.Contains(t, fieldNames, "metadata[tags]")
 	})
 
 	t.Run("success - empty struct array fields", func(t *testing.T) {
@@ -3836,7 +3836,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 1)
-		assert.Equal(t, "single_field", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "single_element_struct[single_field]", insertMsg.FieldsData[0].FieldName)
 	})
 }
 
