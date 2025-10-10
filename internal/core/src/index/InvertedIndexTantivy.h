@@ -187,6 +187,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     int64_t
     Size() override {
+        return Count();
+    }
+
+    int64_t
+    ByteSize() const {
         return wrapper_->index_size_bytes();
     }
 
