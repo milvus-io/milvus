@@ -93,7 +93,8 @@ func getTaskSlotUsage(task Compactor) int64 {
 		}
 		log.Warn("illegal task slot usage, change it to a default value",
 			zap.Int64("illegalSlotUsage", task.GetSlotUsage()),
-			zap.Int64("defaultSlotUsage", taskSlotUsage))
+			zap.Int64("defaultSlotUsage", taskSlotUsage),
+			zap.String("type", task.GetCompactionType().String()))
 	}
 
 	return taskSlotUsage
