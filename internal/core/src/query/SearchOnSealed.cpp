@@ -63,7 +63,7 @@ SearchOnSealedIndex(const Schema& schema,
         // stands for the total number of vectors.
         auto num_vectors = query_lims[num_queries];
         dataset = knowhere::GenDataSet(num_vectors, dim, query_data);
-        dataset->SetLims(query_lims);
+        dataset->Set(knowhere::meta::EMB_LIST_OFFSET, query_lims);
     }
 
     dataset->SetIsSparse(is_sparse);
