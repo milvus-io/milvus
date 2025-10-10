@@ -91,15 +91,6 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	s.NoError(err)
 	s.Equal(int64(rowNum), insertResult.GetInsertCnt())
 
-	// delete
-	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Expr:           integration.Int64Field + " in [1, 2]",
-	})
-	err = merr.CheckRPCCall(deleteResult, err)
-	s.NoError(err)
-
 	// flush
 	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
@@ -133,7 +124,7 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	flushedSegment := lo.Filter(segments, func(info *datapb.SegmentInfo, i int) bool {
 		return info.GetState() == commonpb.SegmentState_Flushed || info.GetState() == commonpb.SegmentState_Flushing
 	})
-	s.Equal(2, len(flushedSegment))
+	s.Equal(1, len(flushedSegment))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load
@@ -158,6 +149,16 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+
+	// delete before query
+	// avoid L0 Compaction causing segment number unstable
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           integration.Int64Field + " in [1, 2]",
+	})
+	err = merr.CheckRPCCall(deleteResult, err)
+	s.NoError(err)
 
 	// query
 	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
