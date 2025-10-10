@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -367,4 +368,18 @@ func (i *GrpcAccessInfo) ClientRequestTime() string {
 
 func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
 	i.actualConsistencyLevel = &acl
+}
+
+func (i *GrpcAccessInfo) TemplateValueLength() string {
+	templateValues, ok := requestutil.GetExprTemplateValues(i.req)
+	if !ok {
+		return NotAny
+	}
+
+	// get length only
+	m := lo.MapValues(templateValues, func(tv *schemapb.TemplateValue, _ string) int {
+		return getLengthFromTemplateValue(tv)
+	})
+
+	return fmt.Sprint(m)
 }
