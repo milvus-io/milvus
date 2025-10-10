@@ -105,7 +105,7 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 			if qt.plan == nil || qt.plan.Namespace == nil || *qt.plan.Namespace != *tsk.request.Namespace {
 				t.Fatalf("requery plan namespace mismatch, got=%v want=%v", qt.plan.Namespace, *tsk.request.Namespace)
 			}
-			return &milvuspb.QueryResults{Status: merr.Success()}, nil
+			return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
 		}).Build()
 
 		op, err := newRequeryOperator(tsk, nil)

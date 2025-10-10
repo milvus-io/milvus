@@ -1514,7 +1514,7 @@ func TestUpsertTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 					Field:     &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 256)}}}},
 				},
 			},
-		}, nil).Build()
+		}, segcore.StorageCost{}, nil).Build()
 
 		// Build task
 		task := createTestUpdateTask()
