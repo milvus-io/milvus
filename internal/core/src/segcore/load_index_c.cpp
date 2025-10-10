@@ -400,8 +400,11 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        AssertInfo(fs != nullptr, "arrow file system is nullptr");
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, fs);
         fileManagerContext.set_for_loading_index(true);
 
         // use cache layer to load vector/scalar index
