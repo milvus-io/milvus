@@ -240,11 +240,12 @@ func (e *executor) getAllCompactionResults() []*datapb.CompactionPlanResult {
 		completed          []int64
 		completedLevelZero []int64
 	)
+	var executingResults []*datapb.CompactionPlanResult
 	results := make([]*datapb.CompactionPlanResult, 0)
 	// get executing results
 	e.executing.Range(func(planID int64, task Compactor) bool {
 		executing = append(executing, planID)
-		results = append(results, &datapb.CompactionPlanResult{
+		executingResults = append(executingResults, &datapb.CompactionPlanResult{
 			State:  datapb.CompactionTaskState_executing,
 			PlanID: planID,
 		})
@@ -261,6 +262,13 @@ func (e *executor) getAllCompactionResults() []*datapb.CompactionPlanResult {
 		}
 		return true
 	})
+
+	// quick fix for task id may appear in both executing and completed
+	// TODO: make sure task id only has one state
+	completedIDs := typeutil.NewSet(completed...)
+	results = append(results, lo.Filter(executingResults, func(result *datapb.CompactionPlanResult, _ int) bool {
+		return !completedIDs.Contain(result.GetPlanID())
+	})...)
 
 	// remove level zero results
 	lo.ForEach(completedLevelZero, func(planID int64, _ int) {
