@@ -319,7 +319,6 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  num_rows);
 
         // Construct metadata for passing to LoadFieldDatasFromRemote
-        auto field_meta = get_schema()[field_id];
         storage::FieldDataMeta field_data_meta;
         field_data_meta.collection_id = infos.collection_id;
         field_data_meta.partition_id = infos.partition_id;
@@ -329,7 +328,6 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         storage::IndexMeta index_meta;
         index_meta.segment_id = infos.segment_id;
         index_meta.field_id = field_id.get();
-        index_meta.field_type = field_meta.get_data_type();
 
         auto load_future = pool.Submit(LoadFieldDatasFromRemote,
                                        insert_files,
