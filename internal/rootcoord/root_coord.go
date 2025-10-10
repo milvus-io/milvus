@@ -487,6 +487,7 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
+		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
 
@@ -2180,6 +2181,9 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := c.broadcastAlterUserForCreateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("CreateCredential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		if errors.Is(err, errUserAlreadyExists) {
+			return merr.StatusWithErrorCode(errors.Errorf("user already exists: %s", credInfo.Username), commonpb.ErrorCode_CreateCredentialFailure), nil
+		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateCredentialFailure), nil
 	}
 
@@ -2252,7 +2256,14 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 		return merr.Status(err), nil
 	}
 
+	// user not found will not report to the client to achieve idempotent
 	if err := c.broadcastDropUserForDeleteCredential(ctx, in); err != nil {
+		if errors.Is(err, errUserNotFound) {
+			ctxLog.Info("DeleteCredential user not found, ignored")
+			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+			metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			return merr.Success(), nil
+		}
 		ctxLog.Warn("DeleteCredential append message failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DeleteCredentialFailure), nil
@@ -2311,9 +2322,11 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	}
 
 	if err := c.broadcastCreateRole(ctx, in); err != nil {
-		errMsg := "fail to create role"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Warn("fail to create role", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		if errors.Is(err, errRoleAlreadyExists) {
+			return merr.StatusWithErrorCode(errors.Newf("role [%s] already exists", in.GetEntity()), commonpb.ErrorCode_CreateRoleFailure), nil
+		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateRoleFailure), nil
 	}
 
@@ -2343,8 +2356,10 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	}
 
 	if err := c.broadcastDropRole(ctx, in); err != nil {
-		errMsg := "fail to drop role"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Warn("fail to drop role", zap.Error(err))
+		if errors.Is(err, errRoleNotExists) {
+			return merr.StatusWithErrorCode(errors.New("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_DropRoleFailure), nil
+		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
@@ -2373,9 +2388,11 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	}
 
 	if err := c.broadcastOperateUserRole(ctx, in); err != nil {
-		errMsg := "fail to execute task when operate the user and role"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
+		ctxLog.Warn("fail to operate the user and role", zap.Error(err))
+		if errors.Is(err, errRoleNotExists) {
+			return merr.StatusWithErrorCode(errors.New("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_OperateUserRoleFailure), nil
+		}
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
 
 	ctxLog.Info(method + " success")

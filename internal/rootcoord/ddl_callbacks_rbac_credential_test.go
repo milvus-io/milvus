@@ -50,11 +50,11 @@ func TestDDLCallbacksRBACCredential(t *testing.T) {
 	registry.ResetRegistration()
 	RegisterDDLCallbacks(core)
 
-	// Delete a not existed credential should return error
+	// Delete a not existed credential should succeed
 	status, err := core.DeleteCredential(context.Background(), &milvuspb.DeleteCredentialRequest{
 		Username: testUserName,
 	})
-	require.Error(t, merr.CheckRPCCall(status, err))
+	require.NoError(t, merr.CheckRPCCall(status, err))
 
 	// Update a not existed credential should return error.
 	status, err = core.UpdateCredential(context.Background(), &internalpb.CredentialInfo{

@@ -1616,8 +1616,7 @@ func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.O
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			return errRoleNotExists
 		}
-		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		return errors.New(errMsg)
+		return err
 	}
 	if req.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
 		if _, err := mt.catalog.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: req.Username}, false); err != nil {

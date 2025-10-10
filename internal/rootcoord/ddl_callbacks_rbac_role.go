@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -41,9 +40,6 @@ func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleR
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfCreateRole(ctx, in); err != nil {
-		if errors.Is(err, errRoleAlreadyExists) {
-			return common.NewIgnorableError(errors.Newf("role [%s] already exists", in.GetEntity().GetName()))
-		}
 		return err
 	}
 
