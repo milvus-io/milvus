@@ -16,7 +16,6 @@
 
 #include "segcore/Utils.h"
 #include "storage/Types.h"
-#include "common/Types.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -47,35 +46,8 @@ TEST(UtilsMetadata, LoadArrowReaderFromRemoteInterface) {
         LoadArrowReaderFromRemote(empty_files,
                                   channel,
                                   milvus::proto::common::LoadPriority::HIGH,
-                                  &field_meta,
-                                  &index_meta);
-    });
-
-    // Test with null metadata parameters (should still work)
-    ASSERT_NO_THROW({
-        LoadArrowReaderFromRemote(empty_files,
-                                  channel,
-                                  milvus::proto::common::LoadPriority::HIGH,
-                                  nullptr,
-                                  nullptr);
-    });
-
-    // Test with only field metadata
-    ASSERT_NO_THROW({
-        LoadArrowReaderFromRemote(empty_files,
-                                  channel,
-                                  milvus::proto::common::LoadPriority::HIGH,
-                                  &field_meta,
-                                  nullptr);
-    });
-
-    // Test with only index metadata
-    ASSERT_NO_THROW({
-        LoadArrowReaderFromRemote(empty_files,
-                                  channel,
-                                  milvus::proto::common::LoadPriority::HIGH,
-                                  nullptr,
-                                  &index_meta);
+                                  field_meta,
+                                  index_meta);
     });
 }
 
@@ -102,17 +74,8 @@ TEST(UtilsMetadata, LoadFieldDatasFromRemoteInterface) {
         LoadFieldDatasFromRemote(empty_files,
                                  channel,
                                  milvus::proto::common::LoadPriority::LOW,
-                                 &field_meta,
-                                 &index_meta);
-    });
-
-    // Test with null metadata parameters
-    ASSERT_NO_THROW({
-        LoadFieldDatasFromRemote(empty_files,
-                                 channel,
-                                 milvus::proto::common::LoadPriority::LOW,
-                                 nullptr,
-                                 nullptr);
+                                 field_meta,
+                                 index_meta);
     });
 }
 
@@ -201,17 +164,8 @@ TEST(UtilsMetadata, LoadPriorityHandling) {
         LoadFieldDatasFromRemote(empty_files,
                                  channel,
                                  milvus::proto::common::LoadPriority::HIGH,
-                                 &field_meta,
-                                 &index_meta);
-    });
-
-    // Test MEDIUM priority
-    ASSERT_NO_THROW({
-        LoadFieldDatasFromRemote(empty_files,
-                                 channel,
-                                 milvus::proto::common::LoadPriority::MEDIUM,
-                                 &field_meta,
-                                 &index_meta);
+                                 field_meta,
+                                 index_meta);
     });
 
     // Test LOW priority
@@ -219,7 +173,7 @@ TEST(UtilsMetadata, LoadPriorityHandling) {
         LoadFieldDatasFromRemote(empty_files,
                                  channel,
                                  milvus::proto::common::LoadPriority::LOW,
-                                 &field_meta,
-                                 &index_meta);
+                                 field_meta,
+                                 index_meta);
     });
 }

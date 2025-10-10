@@ -106,17 +106,17 @@ func TestInsertBinlog(t *testing.T) {
 
 	// descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, collID, int64(10))
+	assert.Equal(t, DeprecatedIDValue, collID)
 	pos += int(unsafe.Sizeof(collID))
 
 	// descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, int64(20))
+	assert.Equal(t, DeprecatedIDValue, partID)
 	pos += int(unsafe.Sizeof(partID))
 
 	// descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, int64(30))
+	assert.Equal(t, DeprecatedIDValue, segID)
 	pos += int(unsafe.Sizeof(segID))
 
 	// descriptor data fix, field id
@@ -357,17 +357,17 @@ func TestDeleteBinlog(t *testing.T) {
 
 	// descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, collID, int64(50))
+	assert.Equal(t, DeprecatedIDValue, collID)
 	pos += int(unsafe.Sizeof(collID))
 
 	// descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, int64(1))
+	assert.Equal(t, DeprecatedIDValue, partID)
 	pos += int(unsafe.Sizeof(partID))
 
 	// descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, int64(1))
+	assert.Equal(t, DeprecatedIDValue, segID)
 	pos += int(unsafe.Sizeof(segID))
 
 	// descriptor data fix, field id
@@ -602,17 +602,17 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	// descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, collID, collectionID)
+	assert.Equal(t, DeprecatedIDValue, collID)
 	pos += int(unsafe.Sizeof(collID))
 
 	// descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, partitionID)
+	assert.Equal(t, DeprecatedIDValue, partID)
 	pos += int(unsafe.Sizeof(partID))
 
 	// descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, segmentID)
+	assert.Equal(t, DeprecatedIDValue, segID)
 	pos += int(unsafe.Sizeof(segID))
 
 	// descriptor data fix, field id
@@ -731,17 +731,17 @@ func TestIndexFileBinlogV2(t *testing.T) {
 
 	// descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, collID, collectionID)
+	assert.Equal(t, DeprecatedIDValue, collID)
 	pos += int(unsafe.Sizeof(collID))
 
 	// descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, partitionID)
+	assert.Equal(t, DeprecatedIDValue, partID)
 	pos += int(unsafe.Sizeof(partID))
 
 	// descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, segmentID)
+	assert.Equal(t, DeprecatedIDValue, segID)
 	pos += int(unsafe.Sizeof(segID))
 
 	// descriptor data fix, field id

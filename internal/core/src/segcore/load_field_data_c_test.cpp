@@ -10,15 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdlib>
 
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/reduce_c.h"
 #include "segcore/load_field_data_c.h"
-
-#include "test_utils/c_api_test_utils.h"
-#include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
+#include "common/LoadInfo.h"
 
 TEST(CApiTest, LoadInfoTest) {
     auto load_info = std::make_shared<LoadFieldDataInfo>();
@@ -72,12 +67,6 @@ TEST(CApiTest, LoadFieldDataContextEdgeCases) {
     EXPECT_EQ(load_info->segment_id, 9223372036854775805LL);
 }
 
-TEST(CApiTest, LoadFieldDataContextNullPointer) {
-    // Test with null pointer - should handle gracefully without crashing
-    auto status = AppendLoadFieldDataContext(nullptr, 1001, 2002, 3003);
-    EXPECT_NE(status.error_code, 0);  // Should return error for null pointer
-}
-
 TEST(CApiTest, LoadFieldDataContextMultipleCalls) {
     auto load_info = std::make_shared<LoadFieldDataInfo>();
     auto c_load_info = reinterpret_cast<CLoadFieldDataInfo*>(load_info.get());
@@ -128,4 +117,14 @@ TEST(CApiTest, LoadFieldDataContextIntegrationWithExistingFields) {
     EXPECT_EQ(load_info->partition_id, 2002);
     EXPECT_EQ(load_info->segment_id, 3003);
     EXPECT_TRUE(load_info->field_infos.at(100).enable_mmap);
+}
+
+TEST(CApiTest, LoadFieldDataContextSuccessStatusFormat) {
+    auto load_info = std::make_shared<LoadFieldDataInfo>();
+    auto c_load_info = reinterpret_cast<CLoadFieldDataInfo*>(load_info.get());
+
+    auto status = AppendLoadFieldDataContext(c_load_info, 1001, 2002, 3003);
+
+    // Verify success status format matches milvus::SuccessCStatus()
+    EXPECT_EQ(status.error_code, milvus::Success);
 }

@@ -45,10 +45,10 @@ TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartDefaultValues) {
     // Test that DescriptorEventDataFixPart has correct default values for deprecated fields
     DescriptorEventDataFixPart fix_part;
 
-    // All deprecated fields should default to DEPRECATED_ID_VALUE (-1)
-    ASSERT_EQ(fix_part.collection_id, DEPRECATED_ID_VALUE);
-    ASSERT_EQ(fix_part.partition_id, DEPRECATED_ID_VALUE);
-    ASSERT_EQ(fix_part.segment_id, DEPRECATED_ID_VALUE);
+    // All deprecated fields should default to DeprecatedIDValue (-1)
+    ASSERT_EQ(fix_part.collection_id, DeprecatedIDValue);
+    ASSERT_EQ(fix_part.partition_id, DeprecatedIDValue);
+    ASSERT_EQ(fix_part.segment_id, DeprecatedIDValue);
 
     // Other fields should have their expected defaults
     ASSERT_EQ(fix_part.field_id, 0);
@@ -58,12 +58,12 @@ TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartDefaultValues) {
 }
 
 TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartConstantValue) {
-    // Test that DEPRECATED_ID_VALUE constant has expected value
-    ASSERT_EQ(DEPRECATED_ID_VALUE, -1);
+    // Test that DeprecatedIDValue constant has expected value
+    ASSERT_EQ(DeprecatedIDValue, -1);
 }
 
 TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartSerialization) {
-    // Test that deprecated fields are serialized as DEPRECATED_ID_VALUE regardless of their actual values
+    // Test that deprecated fields are serialized as DeprecatedIDValue regardless of their actual values
     DescriptorEventDataFixPart fix_part;
 
     // Set up test data with different values
@@ -86,19 +86,19 @@ TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartSerialization) {
     // Check collection_id (should be -1)
     int64_t collection_id;
     memcpy(&collection_id, serialized.data() + offset, sizeof(int64_t));
-    ASSERT_EQ(collection_id, DEPRECATED_ID_VALUE);
+    ASSERT_EQ(collection_id, DeprecatedIDValue);
     offset += sizeof(int64_t);
 
     // Check partition_id (should be -1)
     int64_t partition_id;
     memcpy(&partition_id, serialized.data() + offset, sizeof(int64_t));
-    ASSERT_EQ(partition_id, DEPRECATED_ID_VALUE);
+    ASSERT_EQ(partition_id, DeprecatedIDValue);
     offset += sizeof(int64_t);
 
     // Check segment_id (should be -1)
     int64_t segment_id;
     memcpy(&segment_id, serialized.data() + offset, sizeof(int64_t));
-    ASSERT_EQ(segment_id, DEPRECATED_ID_VALUE);
+    ASSERT_EQ(segment_id, DeprecatedIDValue);
     offset += sizeof(int64_t);
 
     // Check field_id (should preserve original value)
@@ -128,7 +128,7 @@ TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartSerialization) {
 }
 
 TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartDeserialization) {
-    // Test that deserialization forces deprecated fields to DEPRECATED_ID_VALUE
+    // Test that deserialization forces deprecated fields to DeprecatedIDValue
 
     // Create a binary buffer with non-deprecated values in the deprecated fields
     std::vector<uint8_t> test_data;
@@ -174,10 +174,10 @@ TEST_F(EventDeprecatedFieldsTest, DescriptorEventDataFixPartDeserialization) {
     // Deserialize using the constructor
     DescriptorEventDataFixPart fix_part(reader);
 
-    // Verify that deprecated fields are forced to DEPRECATED_ID_VALUE
-    ASSERT_EQ(fix_part.collection_id, DEPRECATED_ID_VALUE);
-    ASSERT_EQ(fix_part.partition_id, DEPRECATED_ID_VALUE);
-    ASSERT_EQ(fix_part.segment_id, DEPRECATED_ID_VALUE);
+    // Verify that deprecated fields are forced to DeprecatedIDValue
+    ASSERT_EQ(fix_part.collection_id, DeprecatedIDValue);
+    ASSERT_EQ(fix_part.partition_id, DeprecatedIDValue);
+    ASSERT_EQ(fix_part.segment_id, DeprecatedIDValue);
 
     // Verify that non-deprecated fields preserve their values
     ASSERT_EQ(fix_part.field_id, field_id);
@@ -246,9 +246,9 @@ TEST_F(EventDeprecatedFieldsTest,
         DescriptorEventDataFixPart deserialized(reader);
 
         // Verify consistency
-        ASSERT_EQ(deserialized.collection_id, DEPRECATED_ID_VALUE);
-        ASSERT_EQ(deserialized.partition_id, DEPRECATED_ID_VALUE);
-        ASSERT_EQ(deserialized.segment_id, DEPRECATED_ID_VALUE);
+        ASSERT_EQ(deserialized.collection_id, DeprecatedIDValue);
+        ASSERT_EQ(deserialized.partition_id, DeprecatedIDValue);
+        ASSERT_EQ(deserialized.segment_id, DeprecatedIDValue);
         ASSERT_EQ(deserialized.field_id, original.field_id);
         ASSERT_EQ(deserialized.start_timestamp, original.start_timestamp);
         ASSERT_EQ(deserialized.end_timestamp, original.end_timestamp);

@@ -54,11 +54,6 @@ TEST(storage, InsertDataBool) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Bool);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -106,11 +101,6 @@ TEST(storage, InsertDataBoolNullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Bool);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -163,11 +153,6 @@ TEST(storage, InsertDataInt8) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int8);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -214,11 +199,6 @@ TEST(storage, InsertDataInt8Nullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int8);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -269,11 +249,6 @@ TEST(storage, InsertDataInt16) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int16);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -320,11 +295,6 @@ TEST(storage, InsertDataInt16Nullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int16);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -375,11 +345,6 @@ TEST(storage, InsertDataInt32) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int32);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -426,11 +391,6 @@ TEST(storage, InsertDataInt32Nullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int32);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -481,11 +441,6 @@ TEST(storage, InsertDataInt64) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int64);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -532,11 +487,6 @@ TEST(storage, InsertDataInt64Nullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int64);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -594,8 +544,23 @@ TEST(storage, InsertDataGeometry) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT64;
+    test_index_meta.build_id = 1000;
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
@@ -650,8 +615,23 @@ TEST(storage, InsertDataGeometryNullable) {
     auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
     std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
                                                    [&](uint8_t*) {});
-    auto new_insert_data = storage::DeserializeFileData(
-        serialized_data_ptr, serialized_bytes.size());
+
+    storage::FieldDataMeta test_field_meta;
+    test_field_meta.collection_id = 100;
+    test_field_meta.partition_id = 101;
+    test_field_meta.segment_id = 102;
+    test_field_meta.field_id = 103;
+
+    storage::IndexMeta test_index_meta;
+    test_index_meta.segment_id = 102;
+    test_index_meta.field_id = 103;
+    test_index_meta.field_type = DataType::INT64;
+    test_index_meta.build_id = 1000;
+    auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
+                                                        serialized_bytes.size(),
+                                                        true,
+                                                        test_field_meta,
+                                                        test_index_meta);
 
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
@@ -697,11 +677,6 @@ TEST(storage, InsertDataString) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::VarChar);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -755,11 +730,6 @@ TEST(storage, InsertDataStringNullable) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::String);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -812,11 +782,6 @@ TEST(storage, InsertDataFloat) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Float);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -863,11 +828,6 @@ TEST(storage, InsertDataFloatNullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Float);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -917,11 +877,6 @@ TEST(storage, InsertDataDouble) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Double);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -968,11 +923,6 @@ TEST(storage, InsertDataDoubleNullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Double);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1024,11 +974,6 @@ TEST(storage, InsertDataTimestamptz) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::TimestampTZ);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -1076,11 +1021,6 @@ TEST(storage, InsertDataTimestamptzNullable) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::TimestampTZ);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1131,11 +1071,6 @@ TEST(storage, InsertDataFloatVector) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::FloatVector);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1190,11 +1125,6 @@ TEST(storage, InsertDataSparseFloat) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::SparseFloatVector);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1254,11 +1184,6 @@ TEST(storage, InsertDataBinaryVector) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::BinaryVector);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -1306,11 +1231,6 @@ TEST(storage, InsertDataFloat16Vector) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Float16Vector);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -1354,11 +1274,6 @@ TEST(storage, IndexData) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int8);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1411,11 +1326,6 @@ TEST(storage, InsertDataStringArray) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Array);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1480,11 +1390,6 @@ TEST(storage, InsertDataStringArrayNullable) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Array);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -1539,11 +1444,6 @@ TEST(storage, InsertDataJsonNullable) {
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::JSON);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
     test_index_meta.field_id = 103;
@@ -1589,11 +1489,6 @@ TEST(storage, InsertDataJsonFillWithNull) {
     test_field_meta.partition_id = 101;
     test_field_meta.segment_id = 102;
     test_field_meta.field_id = 103;
-
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::JSON);
-    field_schema.set_nullable(true);
-    test_field_meta.field_schema = field_schema;
 
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 102;
@@ -1645,11 +1540,6 @@ TEST(storage, DeserializeFileDataWithMetadata) {
     test_field_meta.segment_id = 6003;
     test_field_meta.field_id = 200;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int32);
-    field_schema.set_nullable(false);
-    test_field_meta.field_schema = field_schema;
-
     storage::IndexMeta test_index_meta;
     test_index_meta.segment_id = 6003;
     test_index_meta.field_id = 200;
@@ -1693,11 +1583,6 @@ TEST(storage, DeserializeFileDataWithDifferentMetadata) {
     new_field_meta.segment_id = 7777;
     new_field_meta.field_id = 6666;
 
-    auto field_schema = schemapb::FieldSchema();
-    field_schema.set_data_type(schemapb::DataType::Int64);
-    field_schema.set_nullable(false);
-    new_field_meta.field_schema = field_schema;
-
     storage::IndexMeta new_index_meta;
     new_index_meta.segment_id = 7777;
     new_index_meta.field_id = 6666;
@@ -1706,8 +1591,8 @@ TEST(storage, DeserializeFileDataWithDifferentMetadata) {
     auto new_insert_data = storage::DeserializeFileData(serialized_data_ptr,
                                                         serialized_bytes.size(),
                                                         true,
-                                                        &new_field_meta,
-                                                        &new_index_meta);
+                                                        new_field_meta,
+                                                        new_index_meta);
 
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     auto new_payload = new_insert_data->GetFieldData();
