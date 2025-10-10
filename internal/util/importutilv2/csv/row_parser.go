@@ -45,6 +45,7 @@ type rowParser struct {
 	structArraySubFields map[string]interface{}
 	pkField              *schemapb.FieldSchema
 	dynamicField         *schemapb.FieldSchema
+	allowInsertAutoID    bool
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
@@ -129,7 +130,6 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 				fmt.Sprintf("value of field is missed: '%s'", field.GetName()))
 		}
 	}
-
 	return &rowParser{
 		nullkey:              nullkey,
 		name2Dim:             name2Dim,
@@ -139,6 +139,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 		structArraySubFields: structArraySubFields,
 		pkField:              pkField,
 		dynamicField:         dynamicField,
+		allowInsertAutoID:    allowInsertAutoID,
 	}, nil
 }
 
@@ -235,6 +236,12 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 			row[field.GetFieldID()] = data
 		} else if r.dynamicField != nil {
 			dynamicValues[r.header[index]] = value
+		} else if r.pkField.GetName() == r.header[index] && r.pkField.GetAutoID() && r.allowInsertAutoID {
+			data, err := r.parseEntity(r.pkField, value, false)
+			if err != nil {
+				return nil, err
+			}
+			row[r.pkField.GetFieldID()] = data
 		} else {
 			// from v2.6, we don't intend to return error for redundant fields, just skip it
 			continue
