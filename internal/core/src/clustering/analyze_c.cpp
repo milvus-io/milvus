@@ -21,6 +21,7 @@
 #include "types.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
+#include "storage/StorageV2FSCache.h"
 #include "storage/Util.h"
 #include "pb/clustering.pb.h"
 #include "monitor/scope_metric.h"
@@ -78,9 +79,29 @@ Analyze(CAnalyze* res_analyze,
             get_storage_config(analyze_info->storage_config());
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::StorageV2FSCache::Instance().Get({
+            storage_config.address,
+            storage_config.bucket_name,
+            storage_config.access_key_id,
+            storage_config.access_key_value,
+            storage_config.root_path,
+            storage_config.storage_type,
+            storage_config.cloud_provider,
+            storage_config.iam_endpoint,
+            storage_config.log_level,
+            storage_config.region,
+            storage_config.useSSL,
+            storage_config.sslCACert,
+            storage_config.useIAM,
+            storage_config.useVirtualHost,
+            storage_config.requestTimeoutMs,
+            false,
+            storage_config.gcp_credential_json,
+            false,
+        });
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         if (field_type != DataType::VECTOR_FLOAT) {
             throw SegcoreError(

@@ -99,68 +99,6 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info,
 }
 
 CStatus
-appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
-        auto& index_params = load_index_info->index_params;
-
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = load_index_info->field_type;
-        index_info.index_engine_version = load_index_info->index_engine_version;
-
-        // get index type
-        AssertInfo(index_params.find("index_type") != index_params.end(),
-                   "index type is empty");
-        index_info.index_type = index_params.at("index_type");
-
-        // get metric type
-        AssertInfo(index_params.find("metric_type") != index_params.end(),
-                   "metric type is empty");
-        index_info.metric_type = index_params.at("metric_type");
-
-        // init file manager
-        milvus::storage::FieldDataMeta field_meta{
-            load_index_info->collection_id,
-            load_index_info->partition_id,
-            load_index_info->segment_id,
-            load_index_info->field_id};
-        milvus::storage::IndexMeta index_meta{load_index_info->segment_id,
-                                              load_index_info->field_id,
-                                              load_index_info->index_build_id,
-                                              load_index_info->index_version};
-        auto remote_chunk_manager =
-            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                .GetRemoteChunkManager();
-
-        auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
-        config["index_files"] = load_index_info->index_files;
-
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager);
-        fileManagerContext.set_for_loading_index(true);
-
-        load_index_info->index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, fileManagerContext);
-        load_index_info->index->Load(*binary_set, config);
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
 appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();
 
