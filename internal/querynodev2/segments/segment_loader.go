@@ -294,7 +294,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			log.Warn("request resource failed", zap.Error(err))
 			return nil, err
 		}
-		defer loader.freeRequest(requestResourceResult.Resource, requestResourceResult.LogicalResource)
+		defer loader.freeRequestResource(requestResourceResult)
 	}
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
@@ -504,12 +504,12 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 
 	result.ConcurrencyLevel = funcutil.Min(hardware.GetCPUNum(), len(infos))
 
-	// check logical resource first
-	lmu, ldu, err := loader.checkLogicalSegmentSize(ctx, infos, totalMemory)
-	if err != nil {
-		log.Warn("no sufficient logical resource to load segments", zap.Error(err))
-		return result, err
-	}
+	// TODO: disable logical resource checking for now
+	// lmu, ldu, err := loader.checkLogicalSegmentSize(ctx, infos, totalMemory)
+	// if err != nil {
+	// 	log.Warn("no sufficient logical resource to load segments", zap.Error(err))
+	// 	return result, err
+	// }
 
 	// then get physical resource usage for loading segments
 	mu, du, err := loader.checkSegmentSize(ctx, infos, totalMemory, physicalMemoryUsage, physicalDiskUsage)
@@ -520,11 +520,11 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 
 	result.Resource.MemorySize = mu
 	result.Resource.DiskSize = du
-	result.LogicalResource.MemorySize = lmu
-	result.LogicalResource.DiskSize = ldu
+	// result.LogicalResource.MemorySize = lmu
+	// result.LogicalResource.DiskSize = ldu
 
 	loader.committedResource.Add(result.Resource)
-	loader.committedLogicalResource.Add(result.LogicalResource)
+	// loader.committedLogicalResource.Add(result.LogicalResource)
 	log.Info("request resource for loading segments (unit in MiB)",
 		zap.Float64("memory", logutil.ToMB(float64(result.Resource.MemorySize))),
 		zap.Float64("committedMemory", logutil.ToMB(float64(loader.committedResource.MemorySize))),
@@ -535,10 +535,13 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	return result, nil
 }
 
-// freeRequest returns request memory & storage usage request.
-func (loader *segmentLoader) freeRequest(resource LoadResource, logicalResource LoadResource) {
+// freeRequestResource returns request memory & storage usage request.
+func (loader *segmentLoader) freeRequestResource(requestResourceResult requestResourceResult) {
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
+
+	resource := requestResourceResult.Resource
+	// logicalResource := requestResourceResult.LogicalResource
 
 	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
 		C.ReleaseLoadingResource(C.CResourceUsage{
@@ -548,7 +551,7 @@ func (loader *segmentLoader) freeRequest(resource LoadResource, logicalResource 
 	}
 
 	loader.committedResource.Sub(resource)
-	loader.committedLogicalResource.Sub(logicalResource)
+	// loader.committedLogicalResource.Sub(logicalResource)
 	loader.committedResourceNotifier.NotifyAll()
 }
 
@@ -1067,19 +1070,19 @@ func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
 	segment Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
-	resource, err := loader.requestResourceWithTimeout(ctx, loadInfo)
+	result, err := loader.requestResourceWithTimeout(ctx, loadInfo)
 	if err != nil {
 		log.Ctx(ctx).Warn("request resource failed", zap.Error(err))
 		return err
 	}
 	// NOTE: logical resource is not used for lazy load, so set it to zero
-	defer loader.freeRequest(resource, LoadResource{})
+	defer loader.freeRequestResource(result)
 
 	return loader.LoadSegment(ctx, segment, loadInfo)
 }
 
 // requestResourceWithTimeout requests memory & storage to load segments with a timeout and retry.
-func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResource, error) {
+func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
 	retryInterval := paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond)
 	timeoutStarted := false
 	for {
@@ -1087,7 +1090,7 @@ func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, inf
 
 		result, err := loader.requestResource(ctx, infos...)
 		if err == nil {
-			return result.Resource, nil
+			return result, nil
 		}
 
 		// start timeout if there's no committed resource in loading.
@@ -1106,7 +1109,7 @@ func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, inf
 		// if error is not caused by retry timeout, return it directly.
 		if err != nil && !errors.Is(err, errRetryTimerNotified) {
 			cancelWithRetryTimeout()
-			return LoadResource{}, err
+			return requestResourceResult{}, err
 		}
 		cancelWithRetryTimeout()
 	}
@@ -1442,7 +1445,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		log.Warn("request resource failed", zap.Error(err))
 		return err
 	}
-	defer loader.freeRequest(requestResourceResult.Resource, requestResourceResult.LogicalResource)
+	defer loader.freeRequestResource(requestResourceResult)
 	return loader.loadDeltalogs(ctx, segment, deltaLogs)
 }
 
@@ -2185,7 +2188,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	defer loader.freeRequest(requestResourceResult.Resource, requestResourceResult.LogicalResource)
+	defer loader.freeRequestResource(requestResourceResult)
 
 	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
 	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Inc()
