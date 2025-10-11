@@ -19,8 +19,8 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.metaKV == nil {
-		r.metaKV = mock_kv.NewMockMetaKv(t)
+	if r.watchKV == nil {
+		r.watchKV = mock_kv.NewMockWatchKV(t)
 	}
 	if r.catalog == nil {
 		r.catalog = mock_metastore.NewMockReplicationCatalog(t)

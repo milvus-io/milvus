@@ -20,7 +20,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
@@ -53,7 +52,7 @@ func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.Replicate
 	)
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	if !strings.Contains(replicateInfo.GetSourceChannelName(), currentClusterID) {
-		// current cluster is not source cluster, skip create replicator
+		// should be checked by controller, here is a redundant check
 		return
 	}
 	replicatorKey := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo)
@@ -69,19 +68,21 @@ func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.Replicate
 	logger.Info("created replicator for replicate pchannel")
 }
 
-func (r *replicateManager) RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta) {
-	targets := lo.KeyBy(targetReplicatePChannels, streamingcoord.BuildReplicatePChannelMetaKey)
-	for replicatorKey, replicator := range r.replicators {
-		if pchannelMeta, ok := targets[replicatorKey]; !ok {
-			replicator.StopReplicate()
-			delete(r.replicators, replicatorKey)
-			delete(r.replicatorPChannels, replicatorKey)
-			log.Info("removed replicator due to out of target",
-				zap.String("sourceChannel", pchannelMeta.GetSourceChannelName()),
-				zap.String("targetChannel", pchannelMeta.GetTargetChannelName()),
-			)
-		}
+func (r *replicateManager) RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
+	logger := log.With(
+		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),
+		zap.String("targetChannel", replicateInfo.GetTargetChannelName()),
+	)
+	replicatorKey := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo)
+	replicator, ok := r.replicators[replicatorKey]
+	if !ok {
+		logger.Info("replicator not found, skip remove")
+		return
 	}
+	replicator.StopReplicate()
+	delete(r.replicators, replicatorKey)
+	delete(r.replicatorPChannels, replicatorKey)
+	logger.Info("removed replicator for replicate pchannel")
 }
 
 func (r *replicateManager) Close() {
