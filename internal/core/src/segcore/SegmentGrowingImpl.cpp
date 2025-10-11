@@ -385,7 +385,8 @@ SegmentGrowingImpl::load_field_data_common(
 
     // build text match index
     if (field_meta.enable_match()) {
-        auto index = GetTextIndex(nullptr, field_id);
+        auto pinned = GetTextIndex(nullptr, field_id);
+        auto index = pinned.get();
         index->BuildIndexFromFieldData(field_data, field_meta.is_nullable());
         index->Commit();
         // Reload reader so that the index can be read immediately
@@ -1224,7 +1225,6 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 
 void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
-    std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
@@ -1239,7 +1239,8 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    auto text_indexes = text_indexes_.wlock();
+    text_indexes->emplace(field_id, std::move(index));
 }
 
 void
@@ -1258,14 +1259,23 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              const bool* texts_valid_data,
                              size_t n,
                              int64_t offset_begin) {
-    std::unique_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
+    auto text_indexes = text_indexes_.rlock();
+    auto iter = text_indexes->find(field_id);
+    if (iter == text_indexes->end()) {
         throw SegcoreError(
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
+    // only unique_ptr is supported for growing segment
+    if (auto p = std::get_if<std::unique_ptr<milvus::index::TextMatchIndex>>(
+            &iter->second)) {
+        (*p)->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
+    } else {
+        throw SegcoreError(ErrorCode::UnexpectedError,
+                           fmt::format("text index of growing segment is not a "
+                                       "unique_ptr for field {}",
+                                       field_id.get()));
+    }
 }
 
 void
