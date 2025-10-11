@@ -872,115 +872,234 @@ func TestSegmentCheckerSuite(t *testing.T) {
 }
 
 func TestGetSealedSegmentDiff_WithL0SegmentCheck(t *testing.T) {
-	mockey.PatchConvey("TestGetSealedSegmentDiff_WithL0SegmentCheck", t, func() {
-		// Test case 1: L0 segment exists
-		t.Run("L0_segment_exists", func(t *testing.T) {
-			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
-				return true // L0 segment exists
+	// Test case 1: L0 segment exists
+	t.Run("L0_segment_exists", func(t *testing.T) {
+		checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+			return true // L0 segment exists
+		}
+
+		// Create test segments
+		segments := []*datapb.SegmentInfo{
+			{
+				ID:           1,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L0,
+			},
+			{
+				ID:           2,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L1,
+			},
+		}
+
+		// Filter L0 segments with existence check
+		var level0Segments []*datapb.SegmentInfo
+		for _, segment := range segments {
+			if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+				level0Segments = append(level0Segments, segment)
 			}
+		}
 
-			// Create test segments
-			segments := []*datapb.SegmentInfo{
-				{
-					ID:           1,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L0,
-				},
-				{
-					ID:           2,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L1,
-				},
-			}
-
-			// Filter L0 segments with existence check
-			var level0Segments []*datapb.SegmentInfo
-			for _, segment := range segments {
-				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
-					level0Segments = append(level0Segments, segment)
-				}
-			}
-
-			// Verify: L0 segment should be included
-			assert.Equal(t, 1, len(level0Segments))
-			assert.Equal(t, int64(1), level0Segments[0].GetID())
-		})
-
-		// Test case 2: L0 segment does not exist
-		t.Run("L0_segment_not_exists", func(t *testing.T) {
-			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
-				return false // L0 segment does not exist
-			}
-
-			// Create test segments
-			segments := []*datapb.SegmentInfo{
-				{
-					ID:           1,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L0,
-				},
-				{
-					ID:           2,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L1,
-				},
-			}
-
-			// Filter L0 segments with existence check
-			var level0Segments []*datapb.SegmentInfo
-			for _, segment := range segments {
-				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
-					level0Segments = append(level0Segments, segment)
-				}
-			}
-
-			// Verify: L0 segment should be filtered out
-			assert.Equal(t, 0, len(level0Segments))
-		})
-
-		// Test case 3: Mixed L0 segments, only some exist
-		t.Run("Mixed_L0_segments", func(t *testing.T) {
-			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
-				return segmentID == 1 // Only segment 1 exists
-			}
-
-			// Create test segments
-			segments := []*datapb.SegmentInfo{
-				{
-					ID:           1,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L0,
-				},
-				{
-					ID:           2,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L0,
-				},
-				{
-					ID:           3,
-					CollectionID: 1,
-					PartitionID:  1,
-					Level:        datapb.SegmentLevel_L1,
-				},
-			}
-
-			// Filter L0 segments with existence check
-			var level0Segments []*datapb.SegmentInfo
-			for _, segment := range segments {
-				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
-					level0Segments = append(level0Segments, segment)
-				}
-			}
-
-			// Verify: Only existing L0 segment should be included
-			assert.Equal(t, 1, len(level0Segments))
-			assert.Equal(t, int64(1), level0Segments[0].GetID())
-		})
+		// Verify: L0 segment should be included
+		assert.Equal(t, 1, len(level0Segments))
+		assert.Equal(t, int64(1), level0Segments[0].GetID())
 	})
+
+	// Test case 2: L0 segment does not exist
+	t.Run("L0_segment_not_exists", func(t *testing.T) {
+		checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+			return false // L0 segment does not exist
+		}
+
+		// Create test segments
+		segments := []*datapb.SegmentInfo{
+			{
+				ID:           1,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L0,
+			},
+			{
+				ID:           2,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L1,
+			},
+		}
+
+		// Filter L0 segments with existence check
+		var level0Segments []*datapb.SegmentInfo
+		for _, segment := range segments {
+			if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+				level0Segments = append(level0Segments, segment)
+			}
+		}
+
+		// Verify: L0 segment should be filtered out
+		assert.Equal(t, 0, len(level0Segments))
+	})
+
+	// Test case 3: Mixed L0 segments, only some exist
+	t.Run("Mixed_L0_segments", func(t *testing.T) {
+		checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+			return segmentID == 1 // Only segment 1 exists
+		}
+
+		// Create test segments
+		segments := []*datapb.SegmentInfo{
+			{
+				ID:           1,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L0,
+			},
+			{
+				ID:           2,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L0,
+			},
+			{
+				ID:           3,
+				CollectionID: 1,
+				PartitionID:  1,
+				Level:        datapb.SegmentLevel_L1,
+			},
+		}
+
+		// Filter L0 segments with existence check
+		var level0Segments []*datapb.SegmentInfo
+		for _, segment := range segments {
+			if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+				level0Segments = append(level0Segments, segment)
+			}
+		}
+
+		// Verify: Only existing L0 segment should be included
+		assert.Equal(t, 1, len(level0Segments))
+		assert.Equal(t, int64(1), level0Segments[0].GetID())
+	})
+}
+
+// createTestSegmentChecker creates a test SegmentChecker with mocked dependencies
+func createTestSegmentChecker() (*SegmentChecker, *meta.Meta, *meta.DistributionManager, *session.NodeManager) {
+	nodeMgr := session.NewNodeManager()
+	metaManager := meta.NewMeta(nil, nil, nodeMgr)
+	distManager := meta.NewDistributionManager()
+	targetManager := meta.NewTargetManager(nil, metaManager)
+	getBalancerFunc := func() balance.Balance { return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil) }
+	checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+		return true
+	}
+	checker := NewSegmentChecker(metaManager, distManager, targetManager, nodeMgr, getBalancerFunc, checkSegmentExist)
+	return checker, metaManager, distManager, nodeMgr
+}
+
+func TestGetSealedSegmentDiff_L0SegmentMultipleDelegators(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	ctx := context.Background()
+
+	// Setup test data
+	collectionID := int64(1)
+	replicaID := int64(1)
+	partitionID := int64(1)
+	segmentID := int64(1)
+	channel := "test-insert-channel"
+	nodeID1 := int64(1)
+	nodeID2 := int64(2)
+
+	// Create test components
+	checker, _, _, _ := createTestSegmentChecker()
+
+	// Mock GetSealedSegmentsByCollection to return L0 segment
+	mockey.Mock((*meta.TargetManager).GetSealedSegmentsByCollection).To(func(ctx context.Context, collectionID int64, scope meta.TargetScope) map[int64]*datapb.SegmentInfo {
+		if scope == meta.CurrentTarget {
+			return map[int64]*datapb.SegmentInfo{
+				segmentID: {
+					ID:            segmentID,
+					CollectionID:  collectionID,
+					PartitionID:   partitionID,
+					InsertChannel: channel,
+					Level:         datapb.SegmentLevel_L0,
+				},
+			}
+		}
+		return make(map[int64]*datapb.SegmentInfo)
+	}).Build()
+
+	// Mock IsNextTargetExist to return false
+	mockey.Mock((*meta.TargetManager).IsNextTargetExist).Return(false).Build()
+
+	// Mock meta manager methods to avoid direct meta manipulation
+	// Mock Get method to return the test replica
+	testReplica := utils.CreateTestReplica(replicaID, collectionID, []int64{nodeID1, nodeID2})
+	mockey.Mock((*meta.ReplicaManager).Get).To(func(ctx context.Context, rid int64) *meta.Replica {
+		if rid == replicaID {
+			return testReplica
+		}
+		return nil
+	}).Build()
+
+	// Mock GetCollection to return test collection
+	testCollection := utils.CreateTestCollection(collectionID, 1)
+	mockey.Mock((*meta.Meta).GetCollection).To(func(ctx context.Context, cid int64) *meta.Collection {
+		if cid == collectionID {
+			return testCollection
+		}
+		return nil
+	}).Build()
+
+	// Mock NodeManager Get method to return compatible node versions
+	mockey.Mock((*session.NodeManager).Get).To(func(nodeID int64) *session.NodeInfo {
+		if nodeID == nodeID1 || nodeID == nodeID2 {
+			return session.NewNodeInfo(session.ImmutableNodeInfo{
+				NodeID:   nodeID,
+				Address:  "localhost",
+				Hostname: "localhost",
+				Version:  common.Version,
+			})
+		}
+		return nil
+	}).Build()
+
+	// Mock SegmentDistManager GetByFilter to return empty distribution initially
+	mockey.Mock((*meta.SegmentDistManager).GetByFilter).Return([]*meta.Segment{}).Build()
+
+	// Test case 1: Multiple delegators, one lacks the L0 segment
+	leaderView1 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{segmentID: nodeID1}, map[int64]*meta.Segment{}) // Has the segment
+	leaderView2 := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{}) // Missing the segment
+
+	// Mock LeaderViewManager GetByFilter to return leader views for L0 segment checking
+	mockGetByFilter := mockey.Mock((*meta.LeaderViewManager).GetByFilter).To(func(filters ...meta.LeaderViewFilter) []*meta.LeaderView {
+		// Return both leader views for L0 segment checking
+		return []*meta.LeaderView{leaderView1, leaderView2}
+	}).Build()
+	toLoad, toRelease := checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	mockGetByFilter.Release()
+
+	// Verify: L0 segment should be loaded for the delegator that lacks it
+	assert.Len(t, toLoad, 1, "Should load L0 segment for delegator that lacks it")
+	assert.Equal(t, segmentID, toLoad[0].GetID(), "Should load the correct L0 segment")
+	assert.Empty(t, toRelease, "Should not release any segments")
+
+	// Test case 2: All delegators have the L0 segment
+	leaderView2WithSegment := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{segmentID: nodeID2}, map[int64]*meta.Segment{}) // Now has the segment
+
+	// Update the mock to return leader views where both have the segment
+	mockey.Mock((*meta.LeaderViewManager).GetByFilter).To(func(filters ...meta.LeaderViewFilter) []*meta.LeaderView {
+		// Return both leader views, both now have the L0 segment
+		return []*meta.LeaderView{leaderView1, leaderView2WithSegment}
+	}).Build()
+
+	toLoad, toRelease = checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+
+	// Verify: No segments should be loaded when all delegators have the L0 segment
+	assert.Empty(t, toLoad, "Should not load L0 segment when all delegators have it")
+	assert.Empty(t, toRelease, "Should not release any segments")
 }
