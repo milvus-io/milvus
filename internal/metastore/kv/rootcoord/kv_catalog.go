@@ -346,9 +346,11 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	return kc.Snapshot.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
 }
 
-func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
+func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
-	v, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credential.EncryptedPassword})
+	credentialInfo := model.MarshalCredentialModel(credential)
+	credentialInfo.Username = ""
+	v, err := json.Marshal(credentialInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("create credential marshal fail", zap.String("key", k), zap.Error(err))
 		return err
@@ -359,12 +361,7 @@ func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 		log.Ctx(ctx).Error("create credential persist meta fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
-
 	return nil
-}
-
-func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
-	return kc.CreateCredential(ctx, credential)
 }
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
@@ -625,8 +622,9 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal credential info err:%w", err)
 	}
-
-	return &model.Credential{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
+	// we don't save the username in the credential info, so we need to set it manually from path.
+	credentialInfo.Username = username
+	return model.UnmarshalCredentialModel(&credentialInfo), nil
 }
 
 func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
@@ -1710,7 +1708,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 			return err
 		}
 		// restore user
-		err = kc.CreateCredential(ctx, &model.Credential{
+		err = kc.AlterCredential(ctx, &model.Credential{
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
 		})

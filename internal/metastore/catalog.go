@@ -40,8 +40,6 @@ type RootCoordCatalog interface {
 
 	// GetCredential gets the credential info for the username, returns error if no credential exists for this username.
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
-	// CreateCredential creates credential by Username and EncryptedPassword in crediential. Please make sure credential.Username isn't empty before calling this API. Credentials already exists will be altered.
-	CreateCredential(ctx context.Context, credential *model.Credential) error
 	// AlterCredential does exactly the same as CreateCredential
 	AlterCredential(ctx context.Context, credential *model.Credential) error
 	// DropCredential removes the credential of this username
