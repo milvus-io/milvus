@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -447,8 +448,8 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	// ArrayOfVector now implements the standard interface with elementType parameter
 	m[schemapb.DataType_ArrayOfVector] = serdeEntry{
-		arrowType: func(_ int, elementType schemapb.DataType) arrow.DataType {
-			return getArrayOfVectorArrowType(elementType)
+		arrowType: func(dim int, elementType schemapb.DataType) arrow.DataType {
+			return getArrayOfVectorArrowType(elementType, dim)
 		},
 		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
 			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
@@ -476,18 +477,98 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				if vf.GetFloatVector() == nil {
 					return false
 				}
-				valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
-				valueBuilder.AppendValues(vf.GetFloatVector().GetData(), nil)
+				valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				floatData := vf.GetFloatVector().GetData()
+				dim := vf.GetDim()
+
+				// Convert float data to binary
+				numVectors := len(floatData) / int(dim)
+				for i := 0; i < numVectors; i++ {
+					start := i * int(dim)
+					end := start + int(dim)
+					vectorSlice := floatData[start:end]
+
+					// Convert float slice to bytes
+					bytes := make([]byte, dim*4)
+					for j, f := range vectorSlice {
+						binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
+					}
+					valueBuilder.Append(bytes)
+				}
 				return true
 
 			case schemapb.DataType_BinaryVector:
-				panic("BinaryVector in VectorArray not implemented yet")
+				if vf.GetBinaryVector() == nil {
+					return false
+				}
+				valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				binaryData := vf.GetBinaryVector()
+				dim := vf.GetDim()
+
+				// BinaryVector data is already in byte format
+				bytesPerVector := (dim + 7) / 8
+				numVectors := len(binaryData) / int(bytesPerVector)
+				for i := 0; i < numVectors; i++ {
+					start := i * int(bytesPerVector)
+					end := start + int(bytesPerVector)
+					vectorSlice := binaryData[start:end]
+					valueBuilder.Append(vectorSlice)
+				}
+				return true
+
 			case schemapb.DataType_Float16Vector:
-				panic("Float16Vector in VectorArray not implemented yet")
+				if vf.GetFloat16Vector() == nil {
+					return false
+				}
+				valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				float16Data := vf.GetFloat16Vector()
+				dim := vf.GetDim()
+
+				// Float16 data is already in byte format
+				numVectors := len(float16Data) / (int(dim) * 2)
+				for i := 0; i < numVectors; i++ {
+					start := i * int(dim) * 2
+					end := start + int(dim)*2
+					vectorSlice := float16Data[start:end]
+					valueBuilder.Append(vectorSlice)
+				}
+				return true
+
 			case schemapb.DataType_BFloat16Vector:
-				panic("BFloat16Vector in VectorArray not implemented yet")
+				if vf.GetBfloat16Vector() == nil {
+					return false
+				}
+				valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				bfloat16Data := vf.GetBfloat16Vector()
+				dim := vf.GetDim()
+
+				// BFloat16 data is already in byte format
+				numVectors := len(bfloat16Data) / (int(dim) * 2)
+				for i := 0; i < numVectors; i++ {
+					start := i * int(dim) * 2
+					end := start + int(dim)*2
+					vectorSlice := bfloat16Data[start:end]
+					valueBuilder.Append(vectorSlice)
+				}
+				return true
+
 			case schemapb.DataType_Int8Vector:
-				panic("Int8Vector in VectorArray not implemented yet")
+				if vf.GetInt8Vector() == nil {
+					return false
+				}
+				valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				int8Data := vf.GetInt8Vector()
+				dim := vf.GetDim()
+
+				// Int8 data is already in byte format
+				numVectors := len(int8Data) / int(dim)
+				for i := 0; i < numVectors; i++ {
+					start := i * int(dim)
+					end := start + int(dim)
+					vectorSlice := int8Data[start:end]
+					valueBuilder.Append(vectorSlice)
+				}
+				return true
 			case schemapb.DataType_SparseFloatVector:
 				panic("SparseFloatVector in VectorArray not implemented yet")
 			default:
@@ -805,18 +886,18 @@ func (sfw *singleFieldRecordWriter) Close() error {
 }
 
 // getArrayOfVectorArrowType returns the appropriate Arrow type for ArrayOfVector based on element type
-func getArrayOfVectorArrowType(elementType schemapb.DataType) arrow.DataType {
+func getArrayOfVectorArrowType(elementType schemapb.DataType, dim int) arrow.DataType {
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		return arrow.ListOf(arrow.PrimitiveTypes.Float32)
+		return arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: dim * 4})
 	case schemapb.DataType_BinaryVector:
-		return arrow.ListOf(arrow.PrimitiveTypes.Uint8)
+		return arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: (dim + 7) / 8})
 	case schemapb.DataType_Float16Vector:
-		return arrow.ListOf(arrow.PrimitiveTypes.Uint8)
+		return arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: dim * 2})
 	case schemapb.DataType_BFloat16Vector:
-		return arrow.ListOf(arrow.PrimitiveTypes.Uint8)
+		return arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: dim * 2})
 	case schemapb.DataType_Int8Vector:
-		return arrow.ListOf(arrow.PrimitiveTypes.Int8)
+		return arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: dim})
 	case schemapb.DataType_SparseFloatVector:
 		return arrow.ListOf(arrow.BinaryTypes.Binary)
 	default:
@@ -841,34 +922,26 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 		return nil, false
 	}
 
-	// Validate dimension for vector types that have fixed dimensions
-	if dim > 0 && totalElements%dim != 0 {
-		// Dimension mismatch - data corruption or schema inconsistency
-		return nil, false
-	}
-
 	valuesArray := arr.ListValues()
-
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		floatArray, ok := valuesArray.(*array.Float32)
+		binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 		if !ok {
-			return nil, false
+			// empty array
+			return nil, true
 		}
 
-		// Handle data copying based on shouldCopy parameter
-		var floatData []float32
-		if shouldCopy {
-			// Explicitly requested copy
-			floatData = make([]float32, totalElements)
-			for j := start; j < end; j++ {
-				floatData[j-start] = floatArray.Value(int(j))
-			}
-		} else {
-			// Try to avoid copying - use a slice of the underlying data
-			// This creates a slice that references the same underlying array
-			allData := floatArray.Float32Values()
-			floatData = allData[start:end]
+		numVectors := int(totalElements)
+		totalFloats := numVectors * int(dim)
+
+		floatData := make([]float32, totalFloats)
+		for j := 0; j < numVectors; j++ {
+			vectorIndex := int(start) + j
+			binaryData := binaryArray.Value(vectorIndex)
+
+			vectorFloats := arrow.Float32Traits.CastFromBytes(binaryData)
+
+			copy(floatData[j*int(dim):], vectorFloats)
 		}
 
 		vectorField := &schemapb.VectorField{
@@ -882,13 +955,108 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 		return vectorField, true
 
 	case schemapb.DataType_BinaryVector:
-		panic("BinaryVector in VectorArray deserialization not implemented yet")
+		binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
+		if !ok {
+			// empty array
+			return nil, true
+		}
+
+		numVectors := int(totalElements)
+		bytesPerVector := (dim + 7) / 8
+		totalBytes := numVectors * int(bytesPerVector)
+		binaryData := make([]byte, totalBytes)
+
+		for j := 0; j < numVectors; j++ {
+			vectorIndex := int(start) + j
+			vectorData := binaryArray.Value(vectorIndex)
+			copy(binaryData[j*int(bytesPerVector):], vectorData)
+		}
+
+		vectorField := &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: binaryData,
+			},
+		}
+		return vectorField, true
+
 	case schemapb.DataType_Float16Vector:
-		panic("Float16Vector in VectorArray deserialization not implemented yet")
+		binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
+		if !ok {
+			// empty array
+			return nil, true
+		}
+
+		numVectors := int(totalElements)
+		bytesPerVector := dim * 2
+		totalBytes := numVectors * int(bytesPerVector)
+		float16Data := make([]byte, totalBytes)
+
+		for j := 0; j < numVectors; j++ {
+			vectorIndex := int(start) + j
+			vectorData := binaryArray.Value(vectorIndex)
+			copy(float16Data[j*int(bytesPerVector):], vectorData)
+		}
+
+		vectorField := &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Float16Vector{
+				Float16Vector: float16Data,
+			},
+		}
+		return vectorField, true
+
 	case schemapb.DataType_BFloat16Vector:
-		panic("BFloat16Vector in VectorArray deserialization not implemented yet")
+		binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
+		if !ok {
+			// empty array
+			return nil, true
+		}
+
+		numVectors := int(totalElements)
+		bytesPerVector := dim * 2
+		totalBytes := numVectors * int(bytesPerVector)
+		bfloat16Data := make([]byte, totalBytes)
+
+		for j := 0; j < numVectors; j++ {
+			vectorIndex := int(start) + j
+			vectorData := binaryArray.Value(vectorIndex)
+			copy(bfloat16Data[j*int(bytesPerVector):], vectorData)
+		}
+
+		vectorField := &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Bfloat16Vector{
+				Bfloat16Vector: bfloat16Data,
+			},
+		}
+		return vectorField, true
+
 	case schemapb.DataType_Int8Vector:
-		panic("Int8Vector in VectorArray deserialization not implemented yet")
+		binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
+		if !ok {
+			// empty array
+			return nil, true
+		}
+
+		numVectors := int(totalElements)
+		bytesPerVector := dim
+		totalBytes := numVectors * int(bytesPerVector)
+		int8Data := make([]byte, totalBytes)
+
+		for j := 0; j < numVectors; j++ {
+			vectorIndex := int(start) + j
+			vectorData := binaryArray.Value(vectorIndex)
+			copy(int8Data[j*int(bytesPerVector):], vectorData)
+		}
+
+		vectorField := &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Int8Vector{
+				Int8Vector: int8Data,
+			},
+		}
+		return vectorField, true
 	case schemapb.DataType_SparseFloatVector:
 		panic("SparseFloatVector in VectorArray deserialization not implemented yet")
 	default:

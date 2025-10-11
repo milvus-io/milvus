@@ -291,9 +291,11 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Metadata: arrow.Metadata{},
 		}), nil
 	case schemapb.DataType_ArrayOfVector:
-		// VectorArrayToArrowType now returns the element type (e.g., float32)
-		// We wrap it in a single list to get list<float32> (flattened)
-		elemType, err := storage.VectorArrayToArrowType(field.GetElementType())
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		elemType, err := storage.VectorArrayToArrowType(field.GetElementType(), int(dim))
 		if err != nil {
 			return nil, err
 		}

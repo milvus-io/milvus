@@ -241,65 +241,47 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             if (length > 0) {
                 auto element_type = vector_arrays[0].get_element_type();
 
+                // Validate element type
                 switch (element_type) {
-                    case DataType::VECTOR_FLOAT: {
-                        auto value_builder = static_cast<arrow::FloatBuilder*>(
-                            list_builder->value_builder());
-                        AssertInfo(value_builder != nullptr,
-                                   "value_builder must be FloatBuilder for "
-                                   "FloatVector");
-
-                        arrow::Status ast;
-                        for (int i = 0; i < length; ++i) {
-                            auto status = list_builder->Append();
-                            AssertInfo(status.ok(),
-                                       "Failed to append list: {}",
-                                       status.ToString());
-
-                            const auto& array = vector_arrays[i];
-                            AssertInfo(
-                                array.get_element_type() ==
-                                    DataType::VECTOR_FLOAT,
-                                "Inconsistent element types in VectorArray");
-
-                            int num_vectors = array.length();
-                            int dim = array.dim();
-
-                            for (int j = 0; j < num_vectors; ++j) {
-                                auto vec_data = array.get_data<float>(j);
-                                ast =
-                                    value_builder->AppendValues(vec_data, dim);
-                                AssertInfo(ast.ok(),
-                                           "Failed to append list: {}",
-                                           ast.ToString());
-                            }
-                        }
-                        break;
-                    }
+                    case DataType::VECTOR_FLOAT:
                     case DataType::VECTOR_BINARY:
-                        ThrowInfo(
-                            NotImplemented,
-                            "BinaryVector in VectorArray not implemented yet");
-                        break;
                     case DataType::VECTOR_FLOAT16:
-                        ThrowInfo(
-                            NotImplemented,
-                            "Float16Vector in VectorArray not implemented yet");
-                        break;
                     case DataType::VECTOR_BFLOAT16:
-                        ThrowInfo(NotImplemented,
-                                  "BFloat16Vector in VectorArray not "
-                                  "implemented yet");
-                        break;
                     case DataType::VECTOR_INT8:
-                        ThrowInfo(
-                            NotImplemented,
-                            "Int8Vector in VectorArray not implemented yet");
                         break;
                     default:
                         ThrowInfo(DataTypeInvalid,
                                   "Unsupported element type in VectorArray: {}",
                                   element_type);
+                }
+
+                // All supported vector types use FixedSizeBinaryBuilder
+                auto value_builder =
+                    static_cast<arrow::FixedSizeBinaryBuilder*>(
+                        list_builder->value_builder());
+                AssertInfo(value_builder != nullptr,
+                           "value_builder must be FixedSizeBinaryBuilder for "
+                           "VectorArray");
+
+                for (int i = 0; i < length; ++i) {
+                    auto status = list_builder->Append();
+                    AssertInfo(status.ok(),
+                               "Failed to append list: {}",
+                               status.ToString());
+
+                    const auto& array = vector_arrays[i];
+                    AssertInfo(array.get_element_type() == element_type,
+                               "Inconsistent element types in VectorArray");
+
+                    int num_vectors = array.length();
+                    // Batch append all vectors in this VectorArray
+                    // VectorArray stores data contiguously, so we can append all at once
+                    auto ast = value_builder->AppendValues(
+                        reinterpret_cast<const uint8_t*>(array.data()),
+                        num_vectors);
+                    AssertInfo(ast.ok(),
+                               "Failed to batch append vectors: {}",
+                               ast.ToString());
                 }
             }
             break;
@@ -427,7 +409,39 @@ CreateArrowBuilder(DataType data_type, DataType element_type, int dim) {
             std::shared_ptr<arrow::ArrayBuilder> value_builder;
             switch (element_type) {
                 case DataType::VECTOR_FLOAT: {
-                    value_builder = std::make_shared<arrow::FloatBuilder>();
+                    // Each vector is stored as a fixed-size binary chunk
+                    int byte_width = dim * sizeof(float);
+                    value_builder =
+                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                            arrow::fixed_size_binary(byte_width));
+                    break;
+                }
+                case DataType::VECTOR_BINARY: {
+                    int byte_width = (dim + 7) / 8;
+                    value_builder =
+                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                            arrow::fixed_size_binary(byte_width));
+                    break;
+                }
+                case DataType::VECTOR_FLOAT16: {
+                    int byte_width = dim * 2;
+                    value_builder =
+                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                            arrow::fixed_size_binary(byte_width));
+                    break;
+                }
+                case DataType::VECTOR_BFLOAT16: {
+                    int byte_width = dim * 2;
+                    value_builder =
+                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                            arrow::fixed_size_binary(byte_width));
+                    break;
+                }
+                case DataType::VECTOR_INT8: {
+                    int byte_width = dim;
+                    value_builder =
+                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                            arrow::fixed_size_binary(byte_width));
                     break;
                 }
                 default: {
@@ -608,7 +622,7 @@ CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
 
-    auto value_type = GetArrowDataTypeForVectorArray(element_type);
+    auto value_type = GetArrowDataTypeForVectorArray(element_type, dim);
     auto metadata = arrow::KeyValueMetadata::Make(
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});

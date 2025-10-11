@@ -453,7 +453,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
-                  const size_t* query_lims,
+                  const size_t* query_offsets,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,

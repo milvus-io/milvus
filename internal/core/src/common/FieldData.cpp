@@ -25,6 +25,7 @@
 #include "common/Exception.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "index/Utils.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus {
@@ -329,46 +330,50 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             std::vector<VectorArray> values(element_count);
 
             switch (element_type) {
-                case DataType::VECTOR_FLOAT: {
-                    auto float_array =
-                        std::dynamic_pointer_cast<arrow::FloatArray>(
+                case DataType::VECTOR_FLOAT:
+                case DataType::VECTOR_BINARY:
+                case DataType::VECTOR_FLOAT16:
+                case DataType::VECTOR_BFLOAT16:
+                case DataType::VECTOR_INT8: {
+                    // All vector types use FixedSizeBinaryArray and have the same serialization logic
+                    auto binary_array =
+                        std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                             values_array);
-                    AssertInfo(
-                        float_array != nullptr,
-                        "Expected FloatArray for VECTOR_FLOAT element type");
+                    AssertInfo(binary_array != nullptr,
+                               "Expected FixedSizeBinaryArray for VectorArray "
+                               "element");
+
+                    // Calculate bytes per vector using the unified function
+                    auto bytes_per_vec =
+                        milvus::vector_bytes_per_element(element_type, dim);
 
                     for (size_t index = 0; index < element_count; ++index) {
                         int64_t start_offset = list_array->value_offset(index);
                         int64_t end_offset =
                             list_array->value_offset(index + 1);
-                        int64_t num_floats = end_offset - start_offset;
-                        AssertInfo(num_floats % dim == 0,
-                                   "Invalid data: number of floats ({}) not "
-                                   "divisible by "
-                                   "dimension ({})",
-                                   num_floats,
-                                   dim);
+                        int64_t num_vectors = end_offset - start_offset;
 
-                        int num_vectors = num_floats / dim;
-                        const float* data_ptr =
-                            float_array->raw_values() + start_offset;
-                        values[index] =
-                            VectorArray(static_cast<const void*>(data_ptr),
-                                        num_vectors,
-                                        dim,
-                                        element_type);
+                        // Allocate memory for all vectors in this array
+                        auto data_size = num_vectors * bytes_per_vec;
+                        auto data_ptr = std::make_unique<uint8_t[]>(data_size);
+
+                        // Copy vector data directly
+                        for (int64_t i = 0; i < num_vectors; i++) {
+                            const uint8_t* binary_data =
+                                binary_array->GetValue(start_offset + i);
+                            uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
+                            std::memcpy(dest, binary_data, bytes_per_vec);
+                        }
+
+                        // VectorArray will copy the data
+                        values[index] = VectorArray(
+                            static_cast<const void*>(data_ptr.get()),
+                            num_vectors,
+                            dim,
+                            element_type);
                     }
                     break;
                 }
-                case DataType::VECTOR_BINARY:
-                case DataType::VECTOR_FLOAT16:
-                case DataType::VECTOR_BFLOAT16:
-                case DataType::VECTOR_INT8:
-                    ThrowInfo(
-                        NotImplemented,
-                        "Element type {} in VectorArray not implemented yet",
-                        GetDataTypeName(element_type));
-                    break;
                 default:
                     ThrowInfo(DataTypeInvalid,
                               "Unsupported element type {} in VectorArray",

@@ -963,12 +963,61 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 				return merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
 			}
 			if v.checkNAN {
-				return typeutil.VerifyFloats32(floatVector.GetData())
+				if err := typeutil.VerifyFloats32(floatVector.GetData()); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case schemapb.DataType_BinaryVector:
+		for _, vector := range data.GetData() {
+			binaryVector := vector.GetBinaryVector()
+			if binaryVector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need binary vector array", "got nil", msg)
+			}
+		}
+		return nil
+	case schemapb.DataType_Float16Vector:
+		for _, vector := range data.GetData() {
+			float16Vector := vector.GetFloat16Vector()
+			if float16Vector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need float16 vector array", "got nil", msg)
+			}
+			if v.checkNAN {
+				if err := typeutil.VerifyFloats16(float16Vector); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case schemapb.DataType_BFloat16Vector:
+		for _, vector := range data.GetData() {
+			bfloat16Vector := vector.GetBfloat16Vector()
+			if bfloat16Vector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need bfloat16 vector array", "got nil", msg)
+			}
+			if v.checkNAN {
+				if err := typeutil.VerifyBFloats16(bfloat16Vector); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case schemapb.DataType_Int8Vector:
+		for _, vector := range data.GetData() {
+			int8Vector := vector.GetInt8Vector()
+			if int8Vector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need int8 vector array", "got nil", msg)
 			}
 		}
 		return nil
 	default:
-		panic("not implemented")
+		msg := fmt.Sprintf("unsupported element type for ArrayOfVector: %v", fieldSchema.GetElementType())
+		return merr.WrapErrParameterInvalid("supported vector type", fieldSchema.GetElementType().String(), msg)
 	}
 }
 

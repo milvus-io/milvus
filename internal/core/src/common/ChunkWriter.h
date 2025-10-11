@@ -98,7 +98,7 @@ class ChunkWriter final : public ChunkWriterBase {
     }
 
     ChunkWriter(int dim, std::string file_path, bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
+        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim) {};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -262,9 +262,6 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
     finish() override;
 
  private:
-    void
-    writeFloatVectorArray(const arrow::ArrayVector& array_vec);
-
     size_t
     calculateTotalSize(const arrow::ArrayVector& array_vec);
 

@@ -44,6 +44,7 @@ enum VectorType {
   EmbListFloat16Vector = 7;
   EmbListBFloat16Vector = 8;
   EmbListInt8Vector = 9;
+  EmbListBinaryVector = 10;
 };
 
 message GenericValue {

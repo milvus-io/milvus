@@ -245,14 +245,22 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		switch elementType {
 		case schemapb.DataType_FloatVector:
 			vectorType = planpb.VectorType_EmbListFloatVector
+		case schemapb.DataType_BinaryVector:
+			vectorType = planpb.VectorType_EmbListBinaryVector
+		case schemapb.DataType_Float16Vector:
+			vectorType = planpb.VectorType_EmbListFloat16Vector
+		case schemapb.DataType_BFloat16Vector:
+			vectorType = planpb.VectorType_EmbListBFloat16Vector
+		case schemapb.DataType_Int8Vector:
+			vectorType = planpb.VectorType_EmbListInt8Vector
 		default:
-			log.Error("Invalid elementType", zap.Any("elementType", elementType))
-			return nil, err
+			log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
+			return nil, fmt.Errorf("unsupported element type for ArrayOfVector: %v", elementType)
 		}
 
 	default:
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
-		return nil, err
+		return nil, fmt.Errorf("unsupported vector data type: %v", dataType)
 	}
 
 	scorers, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
