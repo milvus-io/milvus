@@ -104,7 +104,7 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 }
 
 // Lock locks the resource keys.
-func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) (*lockGuards, error) {
+func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) *lockGuards {
 	// lock the keys in order to avoid deadlock.
 	sortResourceKeys(keys)
 	g := &lockGuards{}
@@ -116,7 +116,7 @@ func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) (*lockGuards, erro
 		}
 		g.append(&lockGuard{locker: r, key: key})
 	}
-	return g, nil
+	return g
 }
 
 // unlockWithKey unlocks the resource key.
