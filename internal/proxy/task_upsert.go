@@ -568,6 +568,20 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				sd.ArrayData.Data = ret
 			}
 
+		case *schemapb.ScalarField_GeometryData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.GeometryData.Data = make([][]byte, 0)
+			} else {
+				ret := make([][]byte, 0, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.GeometryData.Data[i])
+					}
+				}
+				sd.GeometryData.Data = ret
+			}
+
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
