@@ -595,12 +595,12 @@ class SegmentInternalInterface : public SegmentInterface {
     SkipIndex skip_index_;
 
     // text-indexes used to do match.
-    std::unordered_map<
+    mutable folly::Synchronized<std::unordered_map<
         FieldId,
         std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
                      std::shared_ptr<milvus::index::TextMatchIndexHolder>,
                      std::shared_ptr<milvus::cachinglayer::CacheSlot<
-                         milvus::index::TextMatchIndex>>>>
+                         milvus::index::TextMatchIndex>>>>>
         text_indexes_;
 
     // json stats cache (field_id -> CacheSlot of JsonKeyStats)

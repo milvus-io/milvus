@@ -442,9 +442,9 @@ SegmentInternalInterface::GetSkipIndex() const {
 PinWrapper<index::TextMatchIndex*>
 SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
                                        FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
+    auto text_indexes = text_indexes_.rlock();
+    auto iter = text_indexes->find(field_id);
+    if (iter == text_indexes->end()) {
         throw SegcoreError(
             milvus::ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));

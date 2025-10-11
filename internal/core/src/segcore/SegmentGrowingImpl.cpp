@@ -1225,7 +1225,6 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 
 void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
-    std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
@@ -1240,7 +1239,8 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    auto text_indexes = text_indexes_.wlock();
+    text_indexes->emplace(field_id, std::move(index));
 }
 
 void
@@ -1259,9 +1259,9 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              const bool* texts_valid_data,
                              size_t n,
                              int64_t offset_begin) {
-    std::unique_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
+    auto text_indexes = text_indexes_.rlock();
+    auto iter = text_indexes->find(field_id);
+    if (iter == text_indexes->end()) {
         throw SegcoreError(
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));

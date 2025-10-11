@@ -1616,8 +1616,6 @@ ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
-    std::unique_lock lck(mutex_);
-
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
@@ -1690,15 +1688,15 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
 
-    text_indexes_[field_id] =
-        std::make_shared<index::TextMatchIndexHolder>(std::move(index));
+    auto text_indexes = text_indexes_.wlock();
+    text_indexes->emplace(
+        field_id,
+        std::make_shared<index::TextMatchIndexHolder>(std::move(index)));
 }
 
 void
 ChunkedSegmentSealedImpl::LoadTextIndex(
     std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto) {
-    std::unique_lock lck(mutex_);
-
     milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
                                                    info_proto->partitionid(),
                                                    this->get_segment_id(),
@@ -1712,7 +1710,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+                  .GetArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is null");
 
     milvus::Config config;
@@ -1743,7 +1741,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     auto cache_slot =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator));
-    text_indexes_[field_id] = std::move(cache_slot);
+
+    auto text_indexes = text_indexes_.wlock();
+    text_indexes->emplace(field_id, std::move(cache_slot));
 }
 
 std::unique_ptr<DataArray>
