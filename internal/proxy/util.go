@@ -1465,10 +1465,11 @@ func AppendUserInfoForRPC(ctx context.Context) context.Context {
 }
 
 func GetRole(username string) ([]string, error) {
-	if globalMetaCache == nil {
+	privCache := privilege.GetPrivilegeCache()
+	if privCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	return privilege.GetPrivilegeCache().GetUserRole(username), nil
+	return privCache.GetUserRole(username), nil
 }
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
