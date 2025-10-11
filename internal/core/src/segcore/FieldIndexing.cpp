@@ -354,6 +354,8 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             auto chunk_manager =
                 milvus::storage::LocalChunkManagerSingleton::GetInstance()
                     .GetChunkManager();
+            auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                          .GetArrowFileSystem();
 
             // Create FieldDataMeta for RTree index
             storage::FieldDataMeta field_data_meta;
@@ -380,7 +382,7 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
 
             // Create FileManagerContext with all required components
             storage::FileManagerContext ctx(
-                field_data_meta, index_meta, chunk_manager);
+                field_data_meta, index_meta, chunk_manager, fs);
 
             index_ = std::make_unique<index::RTreeIndex<std::string>>(ctx);
             built_ = false;
