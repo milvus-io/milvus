@@ -304,10 +304,9 @@ class BsonView {
         AssertInfo(offset < size_, "bson offset out of range");
         const uint8_t* ptr = data_ + offset;
 
-        // check type
-        AssertInfo(static_cast<bsoncxx::type>(*ptr) == bsoncxx::type::k_array,
-                   "ParseAsArrayAtOffset expects an array at offset {}",
-                   offset);
+        if (static_cast<bsoncxx::type>(*ptr) != bsoncxx::type::k_array) {
+            return std::nullopt;
+        }
         ptr++;
 
         // skip key

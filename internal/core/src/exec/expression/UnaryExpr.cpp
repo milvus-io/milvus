@@ -663,7 +663,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
 
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecRangeVisitorImplJsonByStats<ExprValueType>();
     }
 
@@ -992,7 +993,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
         auto* index = pinned_json_stats_.get();
         Assert(index != nullptr);
-        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
+        cached_index_chunk_res_ =
+            (op_type == proto::plan::OpType::NotEqual)
+                ? std::make_shared<TargetBitmap>(active_count_, true)
+                : std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_, true);
         TargetBitmapView res_view(*cached_index_chunk_res_);
@@ -1117,14 +1121,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if (array_index != INVALID_ARRAY_INDEX) {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        res_view[row_id] = false;
+                        // For NotEqual: path not exists means "not equal", keep true
+                        // For Equal: path not exists means no match, set false
+                        res_view[row_id] =
+                            (op_type == proto::plan::OpType::NotEqual);
                         return;
                     }
                     auto sub_array = milvus::BsonView::GetNthElementInArray<
                         bsoncxx::array::view>(array_value.value().data(),
                                               array_index);
                     if (!sub_array.has_value()) {
-                        res_view[row_id] = false;
+                        res_view[row_id] =
+                            (op_type == proto::plan::OpType::NotEqual);
                         return;
                     }
                     res_view[row_id] =
@@ -1134,7 +1142,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 } else {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        res_view[row_id] = false;
+                        res_view[row_id] =
+                            (op_type == proto::plan::OpType::NotEqual);
                         return;
                     }
                     res_view[row_id] =
@@ -1147,7 +1156,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if (array_index != INVALID_ARRAY_INDEX) {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        res_view[row_id] = false;
+                        // Path not exists: NotEqual->true, others->false
+                        res_view[row_id] =
+                            (op_type == proto::plan::OpType::NotEqual);
                         return;
                     }
                     get_value = milvus::BsonView::GetNthElementInArray<GetType>(
@@ -1161,6 +1172,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             if (get_value.has_value()) {
                                 res_view[row_id] = UnaryCompare(
                                     get_value.value(), val, op_type);
+                            } else {
+                                // Type mismatch: NotEqual->true, others->false
+                                res_view[row_id] =
+                                    (op_type == proto::plan::OpType::NotEqual);
                             }
                             return;
                         }
@@ -1172,6 +1187,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             if (get_value.has_value()) {
                                 res_view[row_id] = UnaryCompare(
                                     get_value.value(), val, op_type);
+                            } else {
+                                res_view[row_id] =
+                                    (op_type == proto::plan::OpType::NotEqual);
                             }
                             return;
                         }
@@ -1187,6 +1205,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             if (get_value.has_value()) {
                                 res_view[row_id] = UnaryCompare(
                                     get_value.value(), val, op_type);
+                            } else {
+                                res_view[row_id] =
+                                    (op_type == proto::plan::OpType::NotEqual);
                             }
                             return;
                         }
@@ -1197,13 +1218,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             if (get_value.has_value()) {
                                 res_view[row_id] = UnaryCompare(
                                     get_value.value(), val, op_type);
+                            } else {
+                                res_view[row_id] =
+                                    (op_type == proto::plan::OpType::NotEqual);
                             }
                             return;
                         }
                     }
                 }
                 if (!get_value.has_value()) {
-                    res_view[row_id] = false;
+                    res_view[row_id] =
+                        (op_type == proto::plan::OpType::NotEqual);
                     return;
                 }
                 res_view[row_id] =

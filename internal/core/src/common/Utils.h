@@ -213,6 +213,20 @@ Join(const std::vector<T>& items, const std::string& delimiter) {
     return ss.str();
 }
 
+inline bool
+IsInteger(const std::string& str) {
+    if (str.empty())
+        return false;
+
+    try {
+        size_t pos;
+        std::stoi(str, &pos);
+        return pos == str.length();
+    } catch (...) {
+        return false;
+    }
+}
+
 inline std::string
 PrintBitsetTypeView(const BitsetTypeView& view) {
     std::stringstream ss;
