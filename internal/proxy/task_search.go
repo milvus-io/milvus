@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -240,6 +242,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// update actual consistency level
+	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
@@ -382,12 +387,28 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	t.needRequery = len(t.request.OutputFields) > 0 || len(t.functionScore.GetAllInputFieldNames()) > 0
+	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
 	}
+
+	switch strings.ToLower(paramtable.Get().CommonCfg.HybridSearchRequeryPolicy.GetValue()) {
+	case "always":
+		t.needRequery = true
+	case "outputvector":
+		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
+		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
+	case "outputfields":
+		fallthrough
+	default:
+		t.needRequery = len(t.request.GetOutputFields()) > 0
+	}
+	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
 
 	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
 		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
@@ -452,8 +473,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
 		}
 
-		plan.OutputFieldIds = nil
-		plan.DynamicFields = nil
+		if t.needRequery {
+			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+		} else {
+			primaryFieldSchema, err := t.schema.GetPkField()
+			if err != nil {
+				return err
+			}
+			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
+			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+			allFieldIDs.Insert(primaryFieldSchema.FieldID)
+			plan.OutputFieldIds = allFieldIDs.Collect()
+			plan.DynamicFields = t.userDynamicFields
+		}
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
@@ -472,7 +504,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
 		if err != nil {
 			return err
 		}
@@ -591,7 +623,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
 		if err != nil {
 			return err
 		}
@@ -812,6 +844,24 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
+
+	fieldsData := t.result.GetResults().GetFieldsData()
+	for i, fieldData := range fieldsData {
+		if fieldData.Type == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&fieldsData[i]); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
+		}
+	}
+	if t.result.GetResults().GetGroupByFieldValue() != nil &&
+		t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Geometry {
+		if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
+			log.Warn("fail to validate geometry field search result", zap.Error(err))
+			return err
+		}
+	}
+
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())

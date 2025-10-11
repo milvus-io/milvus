@@ -254,19 +254,9 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	usedMem := hardware.GetUsedMemoryCount()
 	totalMem := hardware.GetMemoryCount()
 
-	// TieredEvictionEnabled is enabled, use the logical resource memory size
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		usedMem = node.manager.Segment.GetLogicalResource().MemorySize
-	}
-
 	usedDiskGB, totalDiskGB, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
-	}
-
-	// TieredEvictionEnabled is enabled, use the logical resource disk size
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		usedDiskGB = float64(node.manager.Segment.GetLogicalResource().DiskSize) / 1e9
 	}
 
 	ioWait, err := hardware.GetIOWait()

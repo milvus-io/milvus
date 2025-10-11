@@ -116,13 +116,15 @@ V1SealedIndexTranslator::LoadVecIndex() {
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             index_load_info_.index_params);
         config["index_files"] = index_load_info_.index_files;
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, fs);
         fileManagerContext.set_for_loading_index(true);
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(

@@ -48,6 +48,7 @@
 #include "pb/segcore.pb.h"
 #include "Json.h"
 #include "type_c.h"
+#include "Geometry.h"
 
 #include "CustomBitset.h"
 
@@ -80,7 +81,7 @@ enum class DataType {
     VARCHAR = 21,
     ARRAY = 22,
     JSON = 23,
-    // GEOMETRY = 24 // reserved in proto
+    GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
 
@@ -181,6 +182,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::ARRAY:
         case DataType::JSON:
             return arrow::binary();
+        case DataType::GEOMETRY:
+            return arrow::binary();
         case DataType::VECTOR_FLOAT:
             return arrow::fixed_size_binary(dim * 4);
         case DataType::VECTOR_BINARY: {
@@ -270,6 +273,8 @@ GetDataTypeName(DataType data_type) {
             return "json";
         case DataType::TEXT:
             return "text";
+        case DataType::GEOMETRY:
+            return "geometry";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY:
@@ -310,6 +315,7 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     std::string>>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
+using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
@@ -364,13 +370,19 @@ IsJsonDataType(DataType data_type) {
 }
 
 inline bool
+IsGeometryDataType(DataType data_type) {
+    return data_type == DataType::GEOMETRY;
+}
+
+inline bool
 IsArrayDataType(DataType data_type) {
     return data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY;
 }
 
 inline bool
 IsBinaryDataType(DataType data_type) {
-    return IsJsonDataType(data_type) || IsArrayDataType(data_type);
+    return IsJsonDataType(data_type) || IsArrayDataType(data_type) ||
+           IsGeometryDataType(data_type);
 }
 
 inline bool
@@ -394,6 +406,11 @@ IsPrimitiveType(proto::schema::DataType type) {
 inline bool
 IsJsonType(proto::schema::DataType type) {
     return type == proto::schema::DataType::JSON;
+}
+
+inline bool
+IsGeometryType(DataType data_type) {
+    return data_type == DataType::GEOMETRY;
 }
 
 inline bool
@@ -681,6 +698,15 @@ struct TypeTraits<DataType::JSON> {
 };
 
 template <>
+struct TypeTraits<DataType::GEOMETRY> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::GEOMETRY;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "GEOMETRY";
+};
+
+template <>
 struct TypeTraits<DataType::ROW> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ROW;
@@ -805,6 +831,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::JSON:
                 name = "JSON";
+                break;
+            case milvus::DataType::GEOMETRY:
+                name = "GEOMETRY";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";

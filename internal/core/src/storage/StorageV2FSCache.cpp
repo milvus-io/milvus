@@ -50,11 +50,11 @@ StorageV2FSCache::Get(const Key& key) {
     conf.iam_endpoint = std::string(key.iam_endpoint);
     conf.log_level = std::string(key.log_level);
     conf.region = std::string(key.region);
-    conf.useSSL = key.useSSL;
-    conf.sslCACert = std::string(key.sslCACert);
-    conf.useIAM = key.useIAM;
-    conf.useVirtualHost = key.useVirtualHost;
-    conf.requestTimeoutMs = key.requestTimeoutMs;
+    conf.use_ssl = key.useSSL;
+    conf.ssl_ca_cert = std::string(key.sslCACert);
+    conf.use_iam = key.useIAM;
+    conf.use_virtual_host = key.useVirtualHost;
+    conf.request_timeout_ms = key.requestTimeoutMs;
     conf.gcp_credential_json = std::string(key.gcp_credential_json);
     conf.use_custom_part_upload = key.use_custom_part_upload;
     auto result = milvus_storage::CreateArrowFileSystem(conf);

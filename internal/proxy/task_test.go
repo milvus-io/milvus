@@ -73,6 +73,7 @@ const (
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
 	testStructArrayField = "structArray"
+	testGeometryField    = "geometry"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -89,6 +90,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testFloat16VecField,
 		testBFloat16VecField,
 		testStructArrayField,
+		testGeometryField,
 		testVecDim,
 		collectionName)
 }
@@ -237,6 +239,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
 	floatVecField, binaryVecField, float16VecField, bfloat16VecField, structArrayField string,
+	geometryField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -350,6 +353,16 @@ func constructCollectionSchemaWithAllType(
 		IndexParams: nil,
 		AutoID:      false,
 	}
+	g := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         geometryField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Geometry,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
 
 	// StructArrayField schema for testing
 	structArrayFields := []*schemapb.StructArrayFieldSchema{
@@ -412,6 +425,7 @@ func constructCollectionSchemaWithAllType(
 			bVec,
 			f16Vec,
 			bf16Vec,
+			g,
 		}
 	} else {
 		schema.Fields = []*schemapb.FieldSchema{
@@ -422,6 +436,7 @@ func constructCollectionSchemaWithAllType(
 			d,
 			fVec,
 			// bVec,
+			g,
 		}
 	}
 
@@ -462,8 +477,8 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		err := InitMetaCache(ctx, root, mgr)
 		assert.NoError(t, err)
 
-		task := &alterCollectionFieldTask{
-			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
 				CollectionName: "allow_autoid_test",
@@ -484,8 +499,8 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		err := InitMetaCache(ctx, root, mgr)
 		assert.NoError(t, err)
 
-		task := &alterCollectionFieldTask{
-			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
 				CollectionName: "allow_autoid_test",
@@ -5214,21 +5229,22 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.Equal(t, testStructArrayField, structArrayField.Name)
 		assert.Len(t, structArrayField.Fields, 3)
 
-		// Verify sub-fields in StructArrayField
+		// Verify sub-fields in StructArrayField have been transformed to structName[fieldName] format
 		subFields := structArrayField.Fields
 
-		// sub_text_array
-		assert.Equal(t, "sub_text_array", subFields[0].Name)
+		// After PreExecute, field names should be transformed to structName[fieldName] format
+		// sub_text_array -> testStructArrayField[sub_text_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_text_array]", testStructArrayField), subFields[0].Name)
 		assert.Equal(t, schemapb.DataType_Array, subFields[0].DataType)
 		assert.Equal(t, schemapb.DataType_VarChar, subFields[0].ElementType)
 
-		// sub_int_array
-		assert.Equal(t, "sub_int_array", subFields[1].Name)
+		// sub_int_array -> testStructArrayField[sub_int_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_int_array]", testStructArrayField), subFields[1].Name)
 		assert.Equal(t, schemapb.DataType_Array, subFields[1].DataType)
 		assert.Equal(t, schemapb.DataType_Int32, subFields[1].ElementType)
 
-		// sub_float_vector_array
-		assert.Equal(t, "sub_float_vector_array", subFields[2].Name)
+		// sub_float_vector_array -> testStructArrayField[sub_float_vector_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_float_vector_array]", testStructArrayField), subFields[2].Name)
 		assert.Equal(t, schemapb.DataType_ArrayOfVector, subFields[2].DataType)
 		assert.Equal(t, schemapb.DataType_FloatVector, subFields[2].ElementType)
 
@@ -5238,6 +5254,130 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 
 		err = task.PostExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("test struct field name transformation with duplicate field names", func(t *testing.T) {
+		// Create a schema with multiple structs having the same sub-field names
+		schemaWithDuplicateNames := &schemapb.CollectionSchema{
+			Name: collectionName + "_duplicate_names",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         testInt64Field,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       false,
+				},
+				{
+					FieldID:  101,
+					Name:     testFloatVecField,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: strconv.Itoa(testVecDim),
+						},
+					},
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID:     102,
+					Name:        "struct1",
+					Description: "first struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "field_name", // Duplicate name
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+						{
+							FieldID:     1022,
+							Name:        "common_field", // Another duplicate name
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_VarChar,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.MaxLengthKey,
+									Value: "100",
+								},
+							},
+						},
+					},
+				},
+				{
+					FieldID:     103,
+					Name:        "struct2",
+					Description: "second struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1031,
+							Name:        "field_name", // Same name as struct1's field
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Float,
+						},
+						{
+							FieldID:     1032,
+							Name:        "common_field", // Same name as struct1's field
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Bool,
+						},
+					},
+				},
+			},
+		}
+
+		marshaledDuplicateSchema, err := proto.Marshal(schemaWithDuplicateNames)
+		assert.NoError(t, err)
+
+		duplicateTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName + "_duplicate_names",
+				Schema:         marshaledDuplicateSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
+		}
+
+		err = duplicateTask.OnEnqueue()
+		assert.NoError(t, err)
+
+		// PreExecute should succeed and transform the field names
+		err = duplicateTask.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// Verify that field names have been transformed to avoid conflicts
+		assert.NotNil(t, duplicateTask.schema)
+		assert.Len(t, duplicateTask.schema.StructArrayFields, 2)
+
+		// Check struct1's fields
+		struct1 := duplicateTask.schema.StructArrayFields[0]
+		assert.Equal(t, "struct1", struct1.Name)
+		assert.Equal(t, "struct1[field_name]", struct1.Fields[0].Name)
+		assert.Equal(t, "struct1[common_field]", struct1.Fields[1].Name)
+
+		// Check struct2's fields
+		struct2 := duplicateTask.schema.StructArrayFields[1]
+		assert.Equal(t, "struct2", struct2.Name)
+		assert.Equal(t, "struct2[field_name]", struct2.Fields[0].Name)
+		assert.Equal(t, "struct2[common_field]", struct2.Fields[1].Name)
+
+		// Verify that despite having the same original names, the transformed names are unique
+		allFieldNames := make(map[string]bool)
+		for _, structField := range duplicateTask.schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				// Each transformed name should be unique
+				assert.False(t, allFieldNames[field.Name], "Duplicate field name found: %s", field.Name)
+				allFieldNames[field.Name] = true
+			}
+		}
 	})
 
 	t.Run("validate struct array field constraints", func(t *testing.T) {
@@ -5341,7 +5481,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 	})
 }
 
-func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
+func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc, nil)
 	ctx := context.Background()
@@ -5364,11 +5504,10 @@ func TestAlterCollectionField_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	}
 	qc.CreateCollection(ctx, createColReq)
 
-	task := &alterCollectionFieldTask{
-		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
-			FieldName:      "",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: common.AllowInsertAutoIDKey, Value: "true"},
 			},

@@ -31,6 +31,7 @@
 #include "common/Slice.h"
 #include "common/Common.h"
 #include "common/Types.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/InsertData.h"
@@ -56,11 +57,14 @@ class DiskAnnFileManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        cm_ = storage::CreateChunkManager(get_default_local_storage_config());
+        auto storage_config = get_default_local_storage_config();
+        cm_ = storage::CreateChunkManager(storage_config);
+        fs_ = storage::InitArrowFileSystem(storage_config);
     }
 
  protected:
     ChunkManagerPtr cm_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
@@ -80,7 +84,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 
     int64_t slice_size = milvus::FILE_SLICE_SIZE;
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
@@ -106,14 +110,14 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
             storage::DataType::INT8, DataType::NONE, false);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
-        auto rawData = (uint8_t*)(index->Data());
+        auto rawData = static_cast<uint8_t*>(index->Data());
 
         EXPECT_EQ(rows, index_size);
         EXPECT_EQ(rawData[0], data[0]);
         EXPECT_EQ(rawData[4], data[4]);
     }
 
-    for (auto file : local_files) {
+    for (auto& file : local_files) {
         cm_->Remove(file);
     }
 }
@@ -123,6 +127,9 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     conf.storage_type = "local";
     conf.root_path = "/tmp";
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
@@ -158,7 +165,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -222,7 +229,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 }
 
 int
-test_worker(string s) {
+test_worker(const string& s) {
     std::cout << s << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(1));
     std::cout << s << std::endl;
@@ -316,15 +323,16 @@ const FieldDataMeta kOptVecFieldDataMeta = {1, 2, 3, 100};
 using OffsetT = uint32_t;
 
 auto
-CreateFileManager(const ChunkManagerPtr& cm)
+CreateFileManager(const ChunkManagerPtr& cm,
+                  milvus_storage::ArrowFileSystemPtr fs)
     -> std::shared_ptr<DiskFileManagerImpl> {
     // collection_id: 1, partition_id: 2, segment_id: 3
     // field_id: 100, index_build_id: 1000, index_version: 1
     IndexMeta index_meta = {
         3, 100, 1000, 1, "opt_fields", "field_name", DataType::VECTOR_FLOAT, 1};
     int64_t slice_size = milvus::FILE_SLICE_SIZE;
-    return std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(kOptVecFieldDataMeta, index_meta, cm));
+    return std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
+        kOptVecFieldDataMeta, index_meta, cm, std::move(fs)));
 }
 
 template <typename T>
@@ -450,7 +458,7 @@ CheckOptFieldCorrectness(
 }  // namespace
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
-    auto file_manager = CreateFileManager(cm_);
+    auto file_manager = CreateFileManager(cm_, fs_);
     const auto insert_file_path =
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
     OptFieldT opt_fields =
@@ -465,7 +473,7 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
-    auto file_manager = CreateFileManager(cm_);
+    auto file_manager = CreateFileManager(cm_, fs_);
     const auto insert_file_path =
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
     auto opt_fields =
@@ -479,7 +487,7 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
 
 #define TEST_TYPE(NAME, TYPE, NATIVE_TYPE, RANGE)                            \
     TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskCorrect##NAME) {       \
-        auto file_manager = CreateFileManager(cm_);                          \
+        auto file_manager = CreateFileManager(cm_, fs_);                     \
         auto insert_file_path = PrepareInsertData<TYPE, NATIVE_TYPE>(RANGE); \
         auto opt_fields =                                                    \
             PrepareOptionalField<TYPE>(file_manager, insert_file_path);      \
@@ -502,7 +510,7 @@ TEST_TYPE(VARCHAR, DataType::VARCHAR, std::string, 100);
 #undef TEST_TYPE
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
-    auto file_manager = CreateFileManager(cm_);
+    auto file_manager = CreateFileManager(cm_, fs_);
     {
         const auto insert_file_path =
             PrepareInsertData<DataType::INT64, int64_t>(1);
@@ -524,7 +532,7 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 
     {
-        auto file_manager = CreateFileManager(cm_);
+        auto file_manager = CreateFileManager(cm_, fs_);
 
         auto random_file_suffix = std::to_string(rand());
         local_text_index_file_path =

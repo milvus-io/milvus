@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -50,7 +50,7 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
+	balance.Register(b)
 
 	channels := []*meta.DmChannel{
 		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel_v1"}},

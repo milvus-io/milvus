@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -23,7 +24,6 @@ var ErrStreamingServiceNotReady = errors.New("streaming service is not ready, ma
 func newStreamingNodeManager() *StreamingNodeManager {
 	snm := &StreamingNodeManager{
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
-		balancer:            syncutil.NewFuture[balancer.Balancer](),
 		cond:                syncutil.NewContextCond(&sync.Mutex{}),
 		latestAssignments:   make(map[string]types.PChannelInfoAssigned),
 		nodeChangedNotifier: syncutil.NewVersionedNotifier(),
@@ -63,9 +63,7 @@ func (s *StreamingReadyNotifier) IsReady() bool {
 // StreamingNodeManager is a manager for manage the querynode that embedded into streaming node.
 // StreamingNodeManager is exclusive with ResourceManager.
 type StreamingNodeManager struct {
-	notifier *syncutil.AsyncTaskNotifier[struct{}]
-	balancer *syncutil.Future[balancer.Balancer]
-	// The coord is merged after 2.6, so we don't need to make distribution safe.
+	notifier            *syncutil.AsyncTaskNotifier[struct{}]
 	cond                *syncutil.ContextCond
 	latestAssignments   map[string]types.PChannelInfoAssigned // The latest assignments info got from streaming coord balance module.
 	nodeChangedNotifier *syncutil.VersionedNotifier           // used to notify that node in streaming node manager has been changed.
@@ -73,14 +71,18 @@ type StreamingNodeManager struct {
 
 // GetBalancer returns the balancer of the streaming node manager.
 func (s *StreamingNodeManager) GetBalancer() balancer.Balancer {
-	return s.balancer.Get()
+	b, err := balance.GetWithContext(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 // Return -1 and error if the vchannel is not found or context is canceled.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	balancer, err := s.balancer.GetWithContext(ctx)
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return -1, err
 	}
@@ -107,7 +109,7 @@ func (s *StreamingNodeManager) CheckIfStreamingServiceReady(ctx context.Context)
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 func (s *StreamingNodeManager) RegisterStreamingEnabledListener(ctx context.Context, notifier *StreamingReadyNotifier) error {
-	balancer, err := s.balancer.GetWithContext(ctx)
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -134,7 +136,7 @@ func (s *StreamingNodeManager) GetWALLocated(vChannel string) int64 {
 
 // GetStreamingQueryNodeIDs returns the server ids of the streaming query nodes.
 func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
-	balancer, err := s.balancer.GetWithContext(context.Background())
+	balancer, err := balance.GetWithContext(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -154,15 +156,10 @@ func (s *StreamingNodeManager) ListenNodeChanged() *syncutil.VersionedListener {
 	return s.nodeChangedNotifier.Listen(syncutil.VersionedListenAtEarliest)
 }
 
-// SetBalancerReady set the balancer ready for the streaming node manager from streamingcoord initialization.
-func (s *StreamingNodeManager) SetBalancerReady(b balancer.Balancer) {
-	s.balancer.Set(b)
-}
-
 func (s *StreamingNodeManager) execute() (err error) {
 	defer s.notifier.Finish(struct{}{})
 
-	b, err := s.balancer.GetWithContext(s.notifier.Context())
+	b, err := balance.GetWithContext(s.notifier.Context())
 	if err != nil {
 		return errors.Wrap(err, "failed to wait balancer ready")
 	}
@@ -181,4 +178,9 @@ func (s *StreamingNodeManager) execute() (err error) {
 			return err
 		}
 	}
+}
+
+func (s *StreamingNodeManager) Close() {
+	s.notifier.Cancel()
+	s.notifier.BlockUntilFinish()
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -525,6 +526,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// update actual consistency level
+	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
@@ -587,62 +591,6 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-// FieldsData in results are flattened, so we need to reconstruct the struct fields
-func reconstructStructFieldData(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
-	if len(results.OutputFields) == 1 && results.OutputFields[0] == "count(*)" {
-		return
-	}
-
-	if len(schema.StructArrayFields) == 0 {
-		return
-	}
-
-	regularFieldIDs := make(map[int64]interface{})
-	subFieldToStructMap := make(map[int64]int64)
-	groupedStructFields := make(map[int64][]*schemapb.FieldData)
-	structFieldNames := make(map[int64]string)
-	reconstructedOutputFields := make([]string, 0, len(results.FieldsData))
-
-	// record all regular field IDs
-	for _, field := range schema.Fields {
-		regularFieldIDs[field.GetFieldID()] = nil
-	}
-
-	// build the mapping from sub-field ID to struct field ID
-	for _, structField := range schema.StructArrayFields {
-		for _, subField := range structField.GetFields() {
-			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
-		}
-		structFieldNames[structField.GetFieldID()] = structField.GetName()
-	}
-
-	fieldsData := make([]*schemapb.FieldData, 0, len(results.FieldsData))
-	for _, field := range results.FieldsData {
-		fieldID := field.GetFieldId()
-		if _, ok := regularFieldIDs[fieldID]; ok {
-			fieldsData = append(fieldsData, field)
-			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
-		} else {
-			structFieldID := subFieldToStructMap[fieldID]
-			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
-		}
-	}
-
-	for structFieldID, fields := range groupedStructFields {
-		fieldData := &schemapb.FieldData{
-			FieldName: structFieldNames[structFieldID],
-			FieldId:   structFieldID,
-			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
-		}
-		fieldsData = append(fieldsData, fieldData)
-		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
-	}
-
-	results.FieldsData = fieldsData
-	results.OutputFields = reconstructedOutputFields
-}
-
 func (t *queryTask) PostExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
@@ -685,6 +633,14 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
+	}
+	for i, fieldData := range t.result.FieldsData {
+		if fieldData.Type == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
+		}
 	}
 	t.result.OutputFields = t.userOutputFields
 	if !t.reQuery {

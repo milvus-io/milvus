@@ -42,6 +42,7 @@
 #include "exec/expression/ExprCache.h"
 #include "monitor/Monitor.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
+#include "common/GeometryCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -476,6 +477,9 @@ LoadTextIndex(CSegmentInterface c_segment,
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        AssertInfo(fs != nullptr, "arrow file system is null");
 
         milvus::Config config;
         std::vector<std::string> files;
@@ -486,7 +490,7 @@ LoadTextIndex(CSegmentInterface c_segment,
         config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
         config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
         milvus::storage::FileManagerContext ctx(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, fs);
 
         auto index = std::make_unique<milvus::index::TextMatchIndex>(ctx);
         index->Load(config);
@@ -535,6 +539,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        AssertInfo(fs != nullptr, "arrow file system is null");
 
         milvus::Config config;
         std::vector<std::string> files;
@@ -555,7 +562,7 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             info_proto->fieldid(),
             info_proto->stats_size()};
         milvus::storage::FileManagerContext file_ctx(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, fs);
 
         std::unique_ptr<
             milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>

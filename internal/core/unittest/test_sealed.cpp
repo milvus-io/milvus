@@ -499,6 +499,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
     auto int8_nullable_id =
@@ -679,6 +680,7 @@ TEST(Sealed, ClearData) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -784,6 +786,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -1945,6 +1948,7 @@ TEST(Sealed, QueryAllFields) {
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -1996,6 +2000,7 @@ TEST(Sealed, QueryAllFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
+    auto geometry_values = dataset.get_col<std::string>(geometry_field);
     auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
     auto long_array_values =
         dataset.get_col<ScalarFieldProto>(long_array_field);
@@ -2031,6 +2036,8 @@ TEST(Sealed, QueryAllFields) {
         nullptr, varchar_field, ids_ds->GetIds(), dataset_size);
     auto json_result = segment->bulk_subscript(
         nullptr, json_field, ids_ds->GetIds(), dataset_size);
+    auto geometry_result = segment->bulk_subscript(
+        nullptr, geometry_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2062,6 +2069,8 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
               dataset_size);
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+              dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(float16_vec_result->vectors().float16_vector().size(),
@@ -2114,6 +2123,8 @@ TEST(Sealed, QueryAllNullableFields) {
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
+    auto geometry_field =
+        schema->AddDebugField("geometry", DataType::GEOMETRY, true);
     auto int_array_field = schema->AddDebugField(
         "int_array", DataType::ARRAY, DataType::INT8, true);
     auto long_array_field = schema->AddDebugField(
@@ -2159,6 +2170,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
+    auto geometry_values = dataset.get_col<std::string>(geometry_field);
     auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
     auto long_array_values =
         dataset.get_col<ScalarFieldProto>(long_array_field);
@@ -2180,6 +2192,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_valid_values = dataset.get_col_valid(double_field);
     auto varchar_valid_values = dataset.get_col_valid(varchar_field);
     auto json_valid_values = dataset.get_col_valid(json_field);
+    auto geometry_valid_values = dataset.get_col_valid(geometry_field);
     auto int_array_valid_values = dataset.get_col_valid(int_array_field);
     auto long_array_valid_values = dataset.get_col_valid(long_array_field);
     auto bool_array_valid_values = dataset.get_col_valid(bool_array_field);
@@ -2206,6 +2219,8 @@ TEST(Sealed, QueryAllNullableFields) {
         nullptr, varchar_field, ids_ds->GetIds(), dataset_size);
     auto json_result = segment->bulk_subscript(
         nullptr, json_field, ids_ds->GetIds(), dataset_size);
+    auto geometry_result = segment->bulk_subscript(
+        nullptr, geometry_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2231,6 +2246,8 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
               dataset_size);
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+              dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
@@ -2254,6 +2271,7 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(double_result->valid_data_size(), dataset_size);
     EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
     EXPECT_EQ(json_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(geometry_result->valid_data_size(), dataset_size);
     EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
@@ -2434,6 +2452,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     std::string root_path = "/tmp/test-vector-array/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
@@ -2476,7 +2495,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     std::vector<std::string> index_files;
 
     // create index
@@ -2490,7 +2509,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto emb_list_hnsw_index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm));
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
 
     // build index
     Config config;

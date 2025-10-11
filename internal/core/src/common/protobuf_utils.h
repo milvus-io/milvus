@@ -19,6 +19,7 @@
 #include <string>
 #include <map>
 #include <google/protobuf/text_format.h>
+#include <google/protobuf/repeated_field.h>
 
 #include "pb/schema.pb.h"
 #include "common/EasyAssert.h"
@@ -26,6 +27,11 @@
 using std::string;
 
 namespace milvus {
+
+template <typename T>
+using ProtoRepeated = google::protobuf::RepeatedPtrField<T>;
+using ProtoParams = ProtoRepeated<proto::common::KeyValuePair>;
+
 static std::map<string, string>
 RepeatedKeyValToMap(
     const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>&

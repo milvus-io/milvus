@@ -240,6 +240,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
 				} else if typeutil.IsJSONType(dataType) {
 					return Params.AutoIndexConfig.ScalarJSONIndexType.GetValue(), nil
+				} else if typeutil.IsGeometryType(dataType) {
+					return Params.AutoIndexConfig.ScalarGeometryIndexType.GetValue(), nil
 				}
 				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()
@@ -287,7 +289,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
 				// override int vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+				for k, v := range Params.AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap() {
 					indexParamsMap[k] = v
 				}
 			}
@@ -361,7 +363,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsIntVectorType(cit.fieldSchema.ElementType)) {
 				// override int vector index params by autoindex
-				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+				config = Params.AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap()
 			}
 			if !exist {
 				if err := handle(0, config); err != nil {
@@ -522,6 +524,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().AutoIndexConfig.BitmapCardinalityLimit.GetValue()
 		}
 	}
+
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Ctx(ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))

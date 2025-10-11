@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -81,6 +82,66 @@ const (
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
+
+func ConcatStructFieldName(structName string, fieldName string) string {
+	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
+// transformStructFieldNames transforms struct field names to structName[fieldName] format
+// This ensures global uniqueness while allowing same field names across different structs
+func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
+	for _, structArrayField := range schema.StructArrayFields {
+		structName := structArrayField.Name
+		for _, field := range structArrayField.Fields {
+			// Create transformed name: structName[fieldName]
+			newName := ConcatStructFieldName(structName, field.Name)
+			field.Name = newName
+		}
+	}
+
+	return nil
+}
+
+// restoreStructFieldNames restores original field names from structName[fieldName] format
+// This is used when returning schema information to users (e.g., in describe collection)
+func restoreStructFieldNames(schema *schemapb.CollectionSchema) error {
+	for _, structArrayField := range schema.StructArrayFields {
+		structName := structArrayField.Name
+		expectedPrefix := structName + "["
+
+		for _, field := range structArrayField.Fields {
+			if strings.HasPrefix(field.Name, expectedPrefix) && strings.HasSuffix(field.Name, "]") {
+				// Extract fieldName: remove "structName[" prefix and "]" suffix
+				field.Name = field.Name[len(expectedPrefix) : len(field.Name)-1]
+			}
+		}
+	}
+	return nil
+}
+
+// extractOriginalFieldName extracts the original field name from structName[fieldName] format
+// This function should only be called on transformed struct field names
+func extractOriginalFieldName(transformedName string) (string, error) {
+	idx := strings.Index(transformedName, "[")
+	if idx == -1 {
+		return "", fmt.Errorf("not a transformed struct field name: %s", transformedName)
+	}
+
+	if !strings.HasSuffix(transformedName, "]") {
+		return "", fmt.Errorf("invalid struct field format: %s, missing closing bracket", transformedName)
+	}
+
+	if idx == 0 {
+		return "", fmt.Errorf("invalid struct field format: %s, missing struct name", transformedName)
+	}
+
+	fieldName := transformedName[idx+1 : len(transformedName)-1]
+	if fieldName == "" {
+		return "", fmt.Errorf("invalid struct field format: %s, empty field name", transformedName)
+	}
+
+	return fieldName, nil
+}
 
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
@@ -861,9 +922,6 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			if !ok {
 				return fmt.Errorf("function input field not found: %s", name)
 			}
-			if inputField.GetNullable() {
-				return fmt.Errorf("function input field cannot be nullable: function %s, field %s", function.GetName(), inputField.GetName())
-			}
 			inputFields = append(inputFields, inputField)
 		}
 
@@ -941,8 +999,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		if err := embedding.TextEmbeddingInputsCheck(function.GetName(), fields); err != nil {
+			return err
 		}
 	default:
 		return errors.New("check input field with unknown function type")
@@ -1830,7 +1888,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			continue
 		}
 
-		structSchema, ok := structSchemaMap[fieldData.FieldName]
+		structName := fieldData.FieldName
+		structSchema, ok := structSchemaMap[structName]
 		if !ok {
 			return fmt.Errorf("fieldName %v not exist in collection schema, fieldType %v, fieldId %v", fieldData.FieldName, fieldData.Type, fieldData.FieldId)
 		}
@@ -1839,13 +1898,13 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		structArrays, ok := fieldData.Field.(*schemapb.FieldData_StructArrays)
 		if !ok {
 			return fmt.Errorf("field convert FieldData_StructArrays fail in fieldData, fieldName: %s,"+
-				" collectionName:%s", fieldData.FieldName, schema.Name)
+				" collectionName:%s", structName, schema.Name)
 		}
 
 		if len(structArrays.StructArrays.Fields) != len(structSchema.GetFields()) {
 			return fmt.Errorf("length of fields of struct field mismatch length of the fields in schema, fieldName: %s,"+
 				" collectionName:%s, fieldData fields length:%d, schema fields length:%d",
-				fieldData.FieldName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
+				structName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
 		}
 
 		// Check the array length of the struct array field data
@@ -1859,27 +1918,36 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					currentArrayLen = len(scalarArray.Data)
 				} else {
 					return fmt.Errorf("scalar array data is nil in struct field '%s', sub-field '%s'",
-						fieldData.FieldName, subField.FieldName)
+						structName, subField.FieldName)
 				}
 			case *schemapb.FieldData_Vectors:
 				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
 					currentArrayLen = len(vectorArray.Data)
 				} else {
 					return fmt.Errorf("vector array data is nil in struct field '%s', sub-field '%s'",
-						fieldData.FieldName, subField.FieldName)
+						structName, subField.FieldName)
 				}
 			default:
-				return fmt.Errorf("unexpected field data type in struct array field, fieldName: %s", fieldData.FieldName)
+				return fmt.Errorf("unexpected field data type in struct array field, fieldName: %s", structName)
 			}
 
 			if expectedArrayLen == -1 {
 				expectedArrayLen = currentArrayLen
 			} else if currentArrayLen != expectedArrayLen {
 				return fmt.Errorf("inconsistent array length in struct field '%s': expected %d, got %d for sub-field '%s'",
-					fieldData.FieldName, expectedArrayLen, currentArrayLen, subField.FieldName)
+					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 
-			flattenedFields = append(flattenedFields, subField)
+			transformedFieldName := ConcatStructFieldName(structName, subField.FieldName)
+			subFieldCopy := &schemapb.FieldData{
+				FieldName: transformedFieldName,
+				FieldId:   subField.FieldId,
+				Type:      subField.Type,
+				Field:     subField.Field,
+				IsDynamic: subField.IsDynamic,
+			}
+
+			flattenedFields = append(flattenedFields, subFieldCopy)
 		}
 	}
 
@@ -2420,6 +2488,9 @@ func SetReportValue(status *commonpb.Status, value int) {
 }
 
 func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
+	if !Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		return
+	}
 	if storageCost.ScannedTotalBytes <= 0 {
 		return
 	}
@@ -2448,6 +2519,45 @@ func GetCostValue(status *commonpb.Status) int {
 		return 0
 	}
 	return value
+}
+
+// final return value means value is valid or not
+func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
+	if status == nil || status.ExtraInfo == nil {
+		return 0, 0, 0, false
+	}
+	var scannedRemoteBytes int64
+	var scannedTotalBytes int64
+	var cacheHitRatio float64
+	var err error
+	if value, ok := status.ExtraInfo["scanned_remote_bytes"]; ok {
+		scannedRemoteBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_remote_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["scanned_total_bytes"]; ok {
+		scannedTotalBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("scanned_total_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	if value, ok := status.ExtraInfo["cache_hit_ratio"]; ok {
+		cacheHitRatio, err = strconv.ParseFloat(value, 64)
+		if err != nil {
+			log.Warn("cache_hit_ratio is not a valid float64", zap.String("value", value), zap.Error(err))
+			return 0, 0, 0, false
+		}
+	} else {
+		return 0, 0, 0, false
+	}
+	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
@@ -2624,6 +2734,16 @@ func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	return fields
 }
 
+func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			fields = append(fields, fSchema.OutputFieldNames...)
+		}
+	}
+	return fields
+}
+
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	properties := make(map[string]string)
 	for _, pair := range pairs {
@@ -2689,11 +2809,29 @@ func reconstructStructFieldDataCommon(
 	}
 
 	for structFieldID, fields := range groupedStructFields {
+		// Create deep copies of fields to avoid modifying original data
+		// and restore original field names for user-facing response
+		copiedFields := make([]*schemapb.FieldData, len(fields))
+		for i, field := range fields {
+			copiedFields[i] = proto.Clone(field).(*schemapb.FieldData)
+			// Extract original field name from structName[fieldName] format
+			originalName, err := extractOriginalFieldName(copiedFields[i].FieldName)
+			if err != nil {
+				// This should not happen in normal operation - indicates a bug
+				log.Error("failed to extract original field name from struct field",
+					zap.String("fieldName", copiedFields[i].FieldName),
+					zap.Error(err))
+				// Keep the transformed name to avoid data corruption
+			} else {
+				copiedFields[i].FieldName = originalName
+			}
+		}
+
 		fieldData := &schemapb.FieldData{
 			FieldName: structFieldNames[structFieldID],
 			FieldId:   structFieldID,
 			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: copiedFields}},
 		}
 		newFieldsData = append(newFieldsData, fieldData)
 		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
@@ -2967,6 +3105,35 @@ func extractFieldsFromResults(results []*schemapb.FieldData, precedenceTimezone 
 		}
 		fieldData.Type = schemapb.DataType_Array
 	}
+	return nil
+}
 
+func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, schema *schemaInfo, partialUpdate bool) error {
+	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
+	fieldIDs := lo.Map(insertMsg.FieldsData, func(fieldData *schemapb.FieldData, _ int) int64 {
+		id, _ := schema.MapFieldID(fieldData.FieldName)
+		return id
+	})
+
+	// Since PartialUpdate is supported, the field_data here may not be complete
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
+	if err != nil {
+		log.Ctx(ctx).Warn("Check upsert field error,", zap.String("collectionName", schema.Name), zap.Error(err))
+		return err
+	}
+
+	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
+		defer sp.End()
+		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions)
+		if err != nil {
+			return err
+		}
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessInsert(ctx, insertMsg); err != nil {
+			return err
+		}
+		sp.AddEvent("Call-function-udf")
+	}
 	return nil
 }

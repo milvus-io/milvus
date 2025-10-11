@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -18,17 +18,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var _ streamingpb.StreamingCoordAssignmentServiceServer = (*assignmentServiceImpl)(nil)
 
 // NewAssignmentService returns a new assignment service.
-func NewAssignmentService(
-	balancer *syncutil.Future[balancer.Balancer],
-) streamingpb.StreamingCoordAssignmentServiceServer {
+func NewAssignmentService() streamingpb.StreamingCoordAssignmentServiceServer {
 	assignmentService := &assignmentServiceImpl{
-		balancer:      balancer,
 		listenerTotal: metrics.StreamingCoordAssignmentListenerTotal.WithLabelValues(paramtable.GetStringNodeID()),
 	}
 	// TODO: after recovering from wal, add it to here.
@@ -44,7 +40,6 @@ type AssignmentService interface {
 type assignmentServiceImpl struct {
 	streamingpb.UnimplementedStreamingCoordAssignmentServiceServer
 
-	balancer      *syncutil.Future[balancer.Balancer]
 	listenerTotal prometheus.Gauge
 }
 
@@ -53,7 +48,7 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 	s.listenerTotal.Inc()
 	defer s.listenerTotal.Dec()
 
-	balancer, err := s.balancer.GetWithContext(server.Context())
+	balancer, err := balance.GetWithContext(server.Context())
 	if err != nil {
 		return err
 	}
@@ -91,7 +86,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 
 // validateReplicateConfiguration validates the replicate configuration.
 func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) (message.BroadcastMutableMessage, error) {
-	balancer, err := s.balancer.GetWithContext(ctx)
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +130,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 // AlterReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.
 func (s *assignmentServiceImpl) AlterReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
-	balancer, err := s.balancer.GetWithContext(ctx)
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -144,7 +139,7 @@ func (s *assignmentServiceImpl) AlterReplicateConfiguration(ctx context.Context,
 
 // UpdateWALBalancePolicy is used to update the WAL balance policy.
 func (s *assignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error) {
-	balancer, err := s.balancer.GetWithContext(ctx)
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -24,13 +24,11 @@ func TestMixCompactionTaskSuite(t *testing.T) {
 type MixCompactionTaskSuite struct {
 	suite.Suite
 
-	mockMeta    *MockCompactionMeta
-	mockSessMgr *session.MockDataNodeManager
+	mockMeta *MockCompactionMeta
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
-	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 }
 
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {

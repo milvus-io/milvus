@@ -445,6 +445,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_Array] = eagerArrayEntry
 	m[schemapb.DataType_JSON] = byteEntry
+	m[schemapb.DataType_Geometry] = byteEntry
 
 	// ArrayOfVector now implements the standard interface with elementType parameter
 	m[schemapb.DataType_ArrayOfVector] = serdeEntry{

@@ -28,10 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -68,9 +66,8 @@ type ddNode struct {
 	collectionID typeutil.UniqueID
 	vChannelName string
 
-	dropMode           atomic.Value
-	compactionExecutor compactor.Executor
-	msgHandler         util.MsgHandler
+	dropMode   atomic.Value
+	msgHandler util.MsgHandler
 
 	// for recovery
 	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
@@ -154,11 +151,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
 				log.Info("Receiving DropCollection msg", zap.String("channel", ddn.vChannelName))
 				ddn.dropMode.Store(true)
-
-				log.Info("Stop compaction for dropped channel", zap.String("channel", ddn.vChannelName))
-				if !streamingutil.IsStreamingServiceEnabled() {
-					ddn.compactionExecutor.DiscardByDroppedChannel(ddn.vChannelName)
-				}
 				fgMsg.dropCollection = true
 			}
 
@@ -347,22 +339,21 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compactor.Executor, handler util.MsgHandler,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, handler util.MsgHandler,
 ) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	dd := &ddNode{
-		ctx:                ctx,
-		BaseNode:           baseNode,
-		collectionID:       collID,
-		sealedSegInfo:      make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
-		growingSegInfo:     make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
-		droppedSegmentIDs:  droppedSegmentIDs,
-		vChannelName:       vChannelName,
-		compactionExecutor: executor,
-		msgHandler:         handler,
+		ctx:               ctx,
+		BaseNode:          baseNode,
+		collectionID:      collID,
+		sealedSegInfo:     make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
+		growingSegInfo:    make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
+		droppedSegmentIDs: droppedSegmentIDs,
+		vChannelName:      vChannelName,
+		msgHandler:        handler,
 	}
 
 	dd.dropMode.Store(false)

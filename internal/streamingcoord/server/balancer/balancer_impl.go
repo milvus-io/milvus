@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -91,6 +92,11 @@ func (b *balancerImpl) GetLatestChannelAssignment() (*WatchChannelAssignmentsCal
 	defer b.lifetime.Done()
 
 	return b.channelMetaManager.GetLatestChannelAssignment()
+}
+
+// ReplicateRole returns the replicate role of the balancer.
+func (b *balancerImpl) ReplicateRole() replicateutil.Role {
+	return b.channelMetaManager.ReplicateRole()
 }
 
 // GetAllStreamingNodes fetches all streaming node info.
