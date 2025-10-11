@@ -118,15 +118,17 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
 
         if (large_is_better) {
             std::sort(idx.begin(), idx.end(), [&](size_t i, size_t j) {
-                return result.distances_[i] > result.distances_[j] ||
-                       (result.seg_offsets_[j] >= 0 &&
-                        result.seg_offsets_[j] < 0);
+                if (result.seg_offsets_[j] < 0 || result.seg_offsets_[i] < 0) {
+                    return result.seg_offsets_[i] >= 0;
+                }
+                return result.distances_[i] > result.distances_[j];
             });
         } else {
             std::sort(idx.begin(), idx.end(), [&](size_t i, size_t j) {
-                return result.distances_[i] < result.distances_[j] ||
-                       (result.seg_offsets_[j] >= 0 &&
-                        result.seg_offsets_[j] < 0);
+                if (result.seg_offsets_[j] < 0 || result.seg_offsets_[i] < 0) {
+                    return result.seg_offsets_[i] >= 0;
+                }
+                return result.distances_[i] < result.distances_[j];
             });
         }
         for (auto i : idx) {
