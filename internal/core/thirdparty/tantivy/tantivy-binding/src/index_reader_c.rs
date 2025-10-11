@@ -44,6 +44,12 @@ pub extern "C" fn tantivy_index_count(ptr: *mut c_void) -> RustResult {
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_index_size_bytes(ptr: *mut c_void) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe { (*real).index_size_bytes().into() }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_terms_query_bool(
     ptr: *mut c_void,
     terms: *const bool,
