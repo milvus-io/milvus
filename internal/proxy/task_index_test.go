@@ -398,6 +398,103 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 	})
 }
 
+func Test_deduplicate_parseIndexParams(t *testing.T) {
+	cit1 := &createIndexTask{
+		Condition: nil,
+		req: &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         "",
+			CollectionName: "",
+			FieldName:      "",
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   MetricTypeKey,
+					Value: "MHJACCARD",
+				},
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			},
+			IndexName: "",
+		},
+		ctx:            nil,
+		rootCoord:      nil,
+		result:         nil,
+		newIndexParams: nil,
+		newTypeParams:  nil,
+		collectionID:   0,
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         "FieldID",
+			IsPrimaryKey: false,
+			Description:  "field no.1",
+			DataType:     schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   MetricTypeKey,
+					Value: "MHJACCARD",
+				},
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			},
+		},
+	}
+
+	t.Run("test default config", func(t *testing.T) {
+		err := cit1.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "MINHASH_LSH",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "MHJACCARD",
+				},
+			}, cit1.newIndexParams)
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{}, cit1.newTypeParams)
+	})
+
+	t.Run("disable autoindex", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+
+		err := cit1.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("disable autoindex", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.Deduplicate.Enable.Key, "true")
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.Deduplicate.Enable.Key)
+
+		err := cit1.parseIndexParams(context.TODO())
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "MINHASH_LSH",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "MHJACCARD",
+				},
+			}, cit1.newIndexParams)
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{}, cit1.newTypeParams)
+	})
+}
+
 func Test_parseIndexParams(t *testing.T) {
 	cit := &createIndexTask{
 		Condition: nil,
