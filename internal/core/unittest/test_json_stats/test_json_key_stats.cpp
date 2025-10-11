@@ -18,6 +18,7 @@
 
 #include "common/Tracer.h"
 #include "index/BitmapIndex.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
@@ -134,7 +135,8 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         chunk_manager_->Write(
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
-        storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager_);
+        storage::FileManagerContext ctx(
+            field_meta, index_meta, chunk_manager_, fs_);
         std::vector<std::string> index_files;
 
         Config config;
@@ -183,6 +185,8 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         conf.storage_type = "local";
         conf.root_path = "/tmp/test-jsonkey-stats/arrow-fs";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
         Init(collection_id,
              partition_id,
@@ -206,6 +210,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
     std::vector<milvus::Json> data_;
     std::vector<std::string> json_col;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 INSTANTIATE_TEST_SUITE_P(JsonKeyStatsTestSuite,
@@ -348,6 +353,8 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         conf.storage_type = "local";
         conf.root_path = "/tmp/test-jsonkey-stats-upload-load/arrow-fs";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
     }
 
     void
@@ -402,7 +409,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
         storage::FileManagerContext ctx(
-            field_meta_, index_meta_, chunk_manager_);
+            field_meta_, index_meta_, chunk_manager_, fs_);
 
         Config config;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
@@ -421,7 +428,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     void
     Load() {
         storage::FileManagerContext ctx(
-            field_meta_, index_meta_, chunk_manager_);
+            field_meta_, index_meta_, chunk_manager_, fs_);
         Config config;
         config["index_files"] = index_files_;
         config[milvus::index::ENABLE_MMAP] = true;
@@ -475,6 +482,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     std::shared_ptr<JsonKeyStats> build_index_;
     std::shared_ptr<JsonKeyStats> load_index_;
     std::vector<std::string> index_files_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 TEST_F(JsonKeyStatsUploadLoadTest, TestSimpleJson) {
