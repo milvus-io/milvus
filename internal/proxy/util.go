@@ -1468,11 +1468,11 @@ func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	return privilegeCache.GetUserRole(username), nil
+	return privilege.GetPrivilegeCache().GetUserRole(username), nil
 }
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
-	return passwordVerify(ctx, username, rawPwd, privilegeCache)
+	return passwordVerify(ctx, username, rawPwd, privilege.GetPrivilegeCache())
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
@@ -1489,7 +1489,7 @@ func VerifyAPIKey(rawToken string) (string, error) {
 func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache privilege.PrivilegeCache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
-	credInfo, err := privilegeCache.GetCredentialInfo(ctx, username)
+	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
 		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false

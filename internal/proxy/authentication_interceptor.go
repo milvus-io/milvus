@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -111,7 +112,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			} else {
 				// username+password authentication
 				username, password := parseMD(rawToken)
-				if !passwordVerify(ctx, username, password, privilegeCache) {
+				if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
 					log.Warn("fail to verify password", zap.String("username", username))
 					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")

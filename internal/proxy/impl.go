@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -4689,8 +4690,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 
 	username := request.Username
-	if privilegeCache != nil {
-		privilegeCache.RemoveCredential(username) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to invalidate credential cache")
 
@@ -4715,8 +4717,9 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		Username:       request.Username,
 		Sha256Password: request.Password,
 	}
-	if privilegeCache != nil {
-		privilegeCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to update credential cache")
 
@@ -4820,7 +4823,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}
 	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilegeCache) {
+	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
 		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
 		return merr.Status(err), nil
 	}
@@ -5347,8 +5350,9 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 		return merr.Status(err), nil
 	}
 
-	if privilegeCache != nil {
-		err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
 		})

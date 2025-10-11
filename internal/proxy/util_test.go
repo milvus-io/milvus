@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -816,8 +815,6 @@ func TestPasswordVerify(t *testing.T) {
 	username := "user-test00"
 	password := "PasswordVerify"
 
-	// credential does not exist within cache
-	credCache := make(map[string]*internalpb.CredentialInfo, 0)
 	invokedCount := 0
 
 	mockedRootCoord := NewMixCoordMock()
@@ -827,9 +824,6 @@ func TestPasswordVerify(t *testing.T) {
 	}
 
 	privilegeCache := privilege.NewPrivilegeCache(mockedRootCoord)
-	ret, ok := credCache[username]
-	assert.False(t, ok)
-	assert.Nil(t, ret)
 	assert.False(t, passwordVerify(context.TODO(), username, password, privilegeCache))
 	assert.Equal(t, 1, invokedCount)
 
@@ -848,7 +842,7 @@ func TestPasswordVerify(t *testing.T) {
 
 	assert.True(t, passwordVerify(context.TODO(), username, password, privilegeCache))
 
-	ret, err = privilegeCache.GetCredentialInfo(context.TODO(), username)
+	ret, err := privilegeCache.GetCredentialInfo(context.TODO(), username)
 	assert.NoError(t, err)
 	assert.NotNil(t, ret)
 	assert.Equal(t, username, ret.Username)

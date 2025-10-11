@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -27,7 +28,7 @@ func TestValidAuth(t *testing.T) {
 		if username == "" || password == "" {
 			return false
 		}
-		return passwordVerify(ctx, username, password, privilegeCache)
+		return passwordVerify(ctx, username, password, privilege.GetPrivilegeCache())
 	}
 
 	ctx := context.Background()

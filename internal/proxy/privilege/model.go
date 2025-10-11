@@ -78,7 +78,7 @@ func GetEnforcer() *casbin.SyncedEnforcer {
 			log.Panic("failed to create casbin enforcer", zap.Error(err))
 		}
 		casbinModel := GetPolicyModel(ModelStr)
-		adapter := NewMetaCacheCasbinAdapter(func() PrivilegeCache { return /*TODO*/ nil })
+		adapter := NewMetaCacheCasbinAdapter(func() PrivilegeCache { return GetPrivilegeCache() })
 		e.InitWithModelAndAdapter(casbinModel, adapter)
 		e.AddFunction("dbMatch", DBMatchFunc)
 		e.AddFunction("privilegeGroupContains", PrivilegeGroupContains)

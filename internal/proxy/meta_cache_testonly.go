@@ -22,6 +22,8 @@
 package proxy
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 
@@ -33,14 +35,14 @@ import (
 )
 
 func AddRootUserToAdminRole() {
-	err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
 }
 
 func RemoveRootUserFromAdminRole() {
-	err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +58,7 @@ func InitEmptyGlobalCache() {
 	if err != nil {
 		panic(err)
 	}
-	privilegeCache = privilege.NewPrivilegeCache(mixcoord)
+	privilege.InitPrivilegeCache(context.Background(), mixcoord)
 }
 
 func SetGlobalMetaCache(metaCache *MetaCache) {

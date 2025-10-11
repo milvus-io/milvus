@@ -368,11 +368,8 @@ type MetaCache struct {
 	collectionCacheVersion map[UniqueID]uint64 // collectionID -> cacheVersion
 }
 
-var (
-	// globalMetaCache is singleton instance of Cache
-	globalMetaCache Cache
-	privilegeCache  privilege.PrivilegeCache
-)
+// globalMetaCache is singleton instance of Cache
+var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
 func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient, shardMgr shardClientMgr) error {
@@ -383,16 +380,12 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient, shardMgr 
 	}
 	expr.Register("cache", globalMetaCache)
 
-	privilegeCache = privilege.NewPrivilegeCache(mixCoord)
-	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
-	resp, err := mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Error("fail to init meta cache", zap.Error(err))
+	err = privilege.InitPrivilegeCache(ctx, mixCoord)
+	if err != nil {
+		log.Error("failed to init privilege cache", zap.Error(err))
 		return err
 	}
-	privilegeCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 
-	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
 
