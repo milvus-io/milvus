@@ -375,8 +375,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
-    std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const override;
+    void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     bool
     HasIndex(FieldId field_id) const {
