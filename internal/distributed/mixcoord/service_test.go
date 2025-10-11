@@ -760,4 +760,22 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+
+	t.Run("RunAnalyzer", func(t *testing.T) {
+		req := &querypb.RunAnalyzerRequest{}
+		mockMixCoord.EXPECT().RunAnalyzer(mock.Anything, req).Return(&milvuspb.RunAnalyzerResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+		resp, err := server.RunAnalyzer(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("ValidateAnalyzer", func(t *testing.T) {
+		req := &querypb.ValidateAnalyzerRequest{}
+		mockMixCoord.EXPECT().ValidateAnalyzer(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		resp, err := server.ValidateAnalyzer(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
 }

@@ -43,7 +43,7 @@ func Init() error {
 
 	exp, err := CreateTracerExporter(params)
 	if err != nil {
-		log.Warn("Init tracer faield", zap.Error(err))
+		log.Warn("Init tracer failed", zap.Error(err))
 		return err
 	}
 

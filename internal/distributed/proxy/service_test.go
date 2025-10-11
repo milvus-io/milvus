@@ -688,6 +688,14 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("RunAnalyzer", func(t *testing.T) {
+		mockProxy.EXPECT().RunAnalyzer(mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+		_, err := server.RunAnalyzer(ctx, &milvuspb.RunAnalyzerRequest{})
+		assert.NoError(t, err)
+	})
+
 	t.Run("Run with different config", func(t *testing.T) {
 		mockProxy.EXPECT().Init().Return(nil)
 		mockProxy.EXPECT().Start().Return(nil)
