@@ -255,6 +255,15 @@ struct ForwardOpsImpl {
            const size_t size) {
         return false;
     }
+
+    static inline bool
+    op_set_indices(ElementT* const __restrict data,
+                   const size_t start,
+                   const size_t n,
+                   const uint32_t* const __restrict indices,
+                   const size_t n_indices) {
+        return false;
+    }
 };
 
 #define DECLARE_PARTIAL_FORWARD_OPS(ELEMENTTYPE)                     \
@@ -303,6 +312,13 @@ struct ForwardOpsImpl {
                const size_t start_left,                              \
                const size_t start_right,                             \
                const size_t size);                                   \
+                                                                     \
+        static bool                                                  \
+        op_set_indices(ELEMENTTYPE* const __restrict data,           \
+                       const size_t start,                           \
+                       const size_t n,                               \
+                       const uint32_t* const __restrict indices,     \
+                       const size_t n_indices);                      \
     };
 
 ALL_FORWARD_TYPES_1(DECLARE_PARTIAL_FORWARD_OPS)

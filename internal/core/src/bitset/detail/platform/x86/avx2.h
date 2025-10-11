@@ -79,6 +79,10 @@ struct VectorizedAvx2 {
     template <typename ElementT>
     static constexpr inline auto forward_op_sub =
         avx2::ForwardOpsImpl<ElementT>::op_sub;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_set_indices =
+        avx2::ForwardOpsImpl<ElementT>::op_set_indices;
 };
 
 }  // namespace x86

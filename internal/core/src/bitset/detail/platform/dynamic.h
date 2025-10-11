@@ -242,6 +242,15 @@ struct ForwardOpsImpl {
            const size_t size) {
         return false;
     }
+
+    static inline bool
+    op_set_indices(ElementT* const __restrict data,
+                   const size_t start,
+                   const size_t n,
+                   const uint32_t* const __restrict indices,
+                   const size_t n_indices) {
+        return false;
+    }
 };
 
 #define DECLARE_PARTIAL_FORWARD_OPS(ELEMENTTYPE)                     \
@@ -290,6 +299,13 @@ struct ForwardOpsImpl {
                const size_t start_left,                              \
                const size_t start_right,                             \
                const size_t size);                                   \
+                                                                     \
+        static bool                                                  \
+        op_set_indices(ELEMENTTYPE* const __restrict data,           \
+                       const size_t start,                           \
+                       const size_t n,                               \
+                       const uint32_t* const __restrict indices,     \
+                       const size_t n_indices);                      \
     };
 
 ALL_FORWARD_TYPES_1(DECLARE_PARTIAL_FORWARD_OPS)
@@ -369,7 +385,9 @@ struct VectorizedDynamic {
     }
 
     // The following functions just forward parameters to the reference code,
-    //   generated for a particular platform.
+    //   generated for a particular platform. Alternatively, they may fully
+    //   reimplement the code.
+    // The reference 'platform' is just a default platform.
 
     template <typename ElementT>
     static inline bool
@@ -437,6 +455,17 @@ struct VectorizedDynamic {
                    const size_t size) {
         return dynamic::ForwardOpsImpl<ElementT>::op_sub(
             left, right, start_left, start_right, size);
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_set_indices(ElementT* const __restrict data,
+                           const size_t start,
+                           const size_t n,
+                           const uint32_t* const __restrict indices,
+                           const size_t n_indices) {
+        return dynamic::ForwardOpsImpl<ElementT>::op_set_indices(
+            data, start, n, indices, n_indices);
     }
 };
 
