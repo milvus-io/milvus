@@ -2396,6 +2396,7 @@ TEST(Sealed, SearchVectorArray) {
     std::string root_path = "/tmp/test-vector-array/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
@@ -2438,7 +2439,7 @@ TEST(Sealed, SearchVectorArray) {
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     std::vector<std::string> index_files;
 
     // create index
@@ -2452,7 +2453,7 @@ TEST(Sealed, SearchVectorArray) {
     auto emb_list_hnsw_index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm));
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
 
     // build index
     Config config;
