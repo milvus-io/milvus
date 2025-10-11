@@ -283,11 +283,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     virtual PinWrapper<const size_t*>
-    VectorArrayLims(milvus::OpContext* op_ctx,
-                    int64_t chunk_id) const override {
+    VectorArrayOffsets(milvus::OpContext* op_ctx,
+                       int64_t chunk_id) const override {
         ThrowInfo(
             ErrorCode::Unsupported,
-            "VectorArrayLims only supported for ChunkedVectorArrayColumn");
+            "VectorArrayOffsets only supported for ChunkedVectorArrayColumn");
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -691,13 +691,13 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
     }
 
     PinWrapper<const size_t*>
-    VectorArrayLims(milvus::OpContext* op_ctx,
-                    int64_t chunk_id) const override {
+    VectorArrayOffsets(milvus::OpContext* op_ctx,
+                       int64_t chunk_id) const override {
         auto ca = SemiInlineGet(
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<const size_t*>(
-            ca, static_cast<VectorArrayChunk*>(chunk)->Lims());
+            ca, static_cast<VectorArrayChunk*>(chunk)->Offsets());
     }
 };
 

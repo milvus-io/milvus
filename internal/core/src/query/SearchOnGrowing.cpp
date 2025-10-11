@@ -73,7 +73,7 @@ void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const SearchInfo& info,
                 const void* query_data,
-                const size_t* query_lims,
+                const size_t* query_offsets,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,
@@ -141,7 +141,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                               round_decimal,
                                               dim,
                                               query_data,
-                                              query_lims};
+                                              query_offsets};
         int32_t current_chunk_id = 0;
 
         // get K1 and B from index for bm25 brute force
@@ -222,8 +222,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             if (data_type == DataType::VECTOR_ARRAY) {
                 AssertInfo(
-                    query_lims != nullptr,
-                    "query_lims is nullptr, but data_type is vector array");
+                    query_offsets != nullptr,
+                    "query_offsets is nullptr, but data_type is vector array");
             }
 
             if (milvus::exec::UseVectorIterator(info)) {

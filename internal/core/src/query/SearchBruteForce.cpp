@@ -89,21 +89,25 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
                  DataType data_type) {
     auto base_dataset =
         knowhere::GenDataSet(raw_ds.num_raw_data, raw_ds.dim, raw_ds.raw_data);
-    if (raw_ds.raw_data_lims != nullptr) {
+    if (raw_ds.raw_data_offsets != nullptr) {
         // knowhere::DataSet count vectors in a flattened manner where as the num_raw_data here is the number
         // of embedding lists where each embedding list contains multiple vectors. So we should use the last element
-        // in lims which equals to the total number of vectors.
-        base_dataset->SetLims(raw_ds.raw_data_lims);
-        // the length of lims equals to the number of embedding lists + 1
-        base_dataset->SetRows(raw_ds.raw_data_lims[raw_ds.num_raw_data]);
+        // in offsets which equals to the total number of vectors.
+        base_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                          raw_ds.raw_data_offsets);
+
+        // the length of offsets equals to the number of embedding lists + 1
+        base_dataset->SetRows(raw_ds.raw_data_offsets[raw_ds.num_raw_data]);
     }
 
     auto query_dataset = knowhere::GenDataSet(
         query_ds.num_queries, query_ds.dim, query_ds.query_data);
-    if (query_ds.query_lims != nullptr) {
+    if (query_ds.query_offsets != nullptr) {
         // ditto
-        query_dataset->SetLims(query_ds.query_lims);
-        query_dataset->SetRows(query_ds.query_lims[query_ds.num_queries]);
+        query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                           query_ds.query_offsets);
+
+        query_dataset->SetRows(query_ds.query_offsets[query_ds.num_queries]);
     }
 
     if (data_type == DataType::VECTOR_SPARSE_U32_F32) {

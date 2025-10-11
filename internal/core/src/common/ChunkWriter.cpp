@@ -339,34 +339,9 @@ VectorArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
         target_ = std::make_shared<MemChunkTarget>(total_size);
     }
 
-    switch (element_type_) {
-        case milvus::DataType::VECTOR_FLOAT:
-            writeFloatVectorArray(array_vec);
-            break;
-        case milvus::DataType::VECTOR_BINARY:
-            ThrowInfo(NotImplemented,
-                      "BinaryVector in VectorArray not implemented yet");
-        case milvus::DataType::VECTOR_FLOAT16:
-            ThrowInfo(NotImplemented,
-                      "Float16Vector in VectorArray not implemented yet");
-        case milvus::DataType::VECTOR_BFLOAT16:
-            ThrowInfo(NotImplemented,
-                      "BFloat16Vector in VectorArray not implemented yet");
-        case milvus::DataType::VECTOR_INT8:
-            ThrowInfo(NotImplemented,
-                      "Int8Vector in VectorArray not implemented yet");
-        default:
-            ThrowInfo(NotImplemented,
-                      "Unsupported element type in VectorArray: {}",
-                      static_cast<int>(element_type_));
-    }
-}
-
-void
-VectorArrayChunkWriter::writeFloatVectorArray(
-    const arrow::ArrayVector& array_vec) {
+    // Seirialization, the format is: [offsets_lens][all_vector_data_concatenated]
     std::vector<uint32_t> offsets_lens;
-    std::vector<const float*> float_data_ptrs;
+    std::vector<const uint8_t*> vector_data_ptrs;
     std::vector<size_t> data_sizes;
 
     uint32_t current_offset =
@@ -375,25 +350,27 @@ VectorArrayChunkWriter::writeFloatVectorArray(
     for (const auto& array_data : array_vec) {
         auto list_array =
             std::static_pointer_cast<arrow::ListArray>(array_data);
-        auto float_values =
-            std::static_pointer_cast<arrow::FloatArray>(list_array->values());
-        const float* raw_floats = float_values->raw_values();
+        auto binary_values =
+            std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                list_array->values());
         const int32_t* list_offsets = list_array->raw_value_offsets();
+        int byte_width = binary_values->byte_width();
 
         // Generate offsets and lengths for each row
-        // Each list contains multiple float vectors which are flattened, so the float count
-        // in each list is vector count * dim.
+        // Each list contains multiple vectors, each stored as a fixed-size binary chunk
         for (int64_t i = 0; i < list_array->length(); i++) {
             auto start_idx = list_offsets[i];
             auto end_idx = list_offsets[i + 1];
-            auto vector_count = (end_idx - start_idx) / dim_;
-            auto byte_size = (end_idx - start_idx) * sizeof(float);
+            auto vector_count = end_idx - start_idx;
+            auto byte_size = vector_count * byte_width;
 
             offsets_lens.push_back(current_offset);
             offsets_lens.push_back(static_cast<uint32_t>(vector_count));
 
-            float_data_ptrs.push_back(raw_floats + start_idx);
-            data_sizes.push_back(byte_size);
+            for (int j = start_idx; j < end_idx; j++) {
+                vector_data_ptrs.push_back(binary_values->GetValue(j));
+                data_sizes.push_back(byte_width);
+            }
 
             current_offset += byte_size;
         }
@@ -409,8 +386,8 @@ VectorArrayChunkWriter::writeFloatVectorArray(
     }
     target_->write(&offsets_lens.back(), sizeof(uint32_t));  // final offset
 
-    for (size_t i = 0; i < float_data_ptrs.size(); i++) {
-        target_->write(float_data_ptrs[i], data_sizes[i]);
+    for (size_t i = 0; i < vector_data_ptrs.size(); i++) {
+        target_->write(vector_data_ptrs[i], data_sizes[i]);
     }
 }
 
@@ -427,19 +404,18 @@ VectorArrayChunkWriter::calculateTotalSize(
             std::static_pointer_cast<arrow::ListArray>(array_data);
 
         switch (element_type_) {
-            case milvus::DataType::VECTOR_FLOAT: {
-                auto float_values = std::static_pointer_cast<arrow::FloatArray>(
-                    list_array->values());
-                total_size += float_values->length() * sizeof(float);
-                break;
-            }
+            case milvus::DataType::VECTOR_FLOAT:
             case milvus::DataType::VECTOR_BINARY:
             case milvus::DataType::VECTOR_FLOAT16:
             case milvus::DataType::VECTOR_BFLOAT16:
-            case milvus::DataType::VECTOR_INT8:
-                ThrowInfo(NotImplemented,
-                          "Element type {} in VectorArray not implemented yet",
-                          static_cast<int>(element_type_));
+            case milvus::DataType::VECTOR_INT8: {
+                auto binary_values =
+                    std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                        list_array->values());
+                total_size +=
+                    binary_values->length() * binary_values->byte_width();
+                break;
+            }
             default:
                 ThrowInfo(DataTypeInvalid,
                           "Invalid element type {} for VectorArray",

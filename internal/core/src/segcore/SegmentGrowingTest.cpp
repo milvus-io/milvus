@@ -581,7 +581,7 @@ TEST(GrowingTest, SearchVectorArray) {
     config.set_enable_interim_segment_index(true);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
+        {"index_type", knowhere::IndexEnum::INDEX_HNSW},
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {
@@ -612,11 +612,11 @@ TEST(GrowingTest, SearchVectorArray) {
     int vec_num = 10;  // Total number of query vectors
     std::vector<float> query_vec = generate_float_vector(vec_num, dim);
 
-    // Create query dataset with lims for VectorArray
-    std::vector<size_t> query_vec_lims;
-    query_vec_lims.push_back(0);  // First query has 3 vectors
-    query_vec_lims.push_back(3);
-    query_vec_lims.push_back(10);  // Second query has 7 vectors
+    // Create query dataset with offsets for VectorArray
+    std::vector<size_t> query_vec_offsets;
+    query_vec_offsets.push_back(0);  // First query has 3 vectors
+    query_vec_offsets.push_back(3);
+    query_vec_offsets.push_back(10);  // Second query has 7 vectors
 
     // Create search plan
     const char* raw_plan = R"(vector_anns: <
@@ -636,7 +636,7 @@ TEST(GrowingTest, SearchVectorArray) {
 
     // Use CreatePlaceholderGroupFromBlob for VectorArray
     auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-        vec_num, dim, query_vec.data(), query_vec_lims);
+        vec_num, dim, query_vec.data(), query_vec_offsets);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 

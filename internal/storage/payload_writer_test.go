@@ -309,6 +309,7 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 		vectorArrayData := &VectorArrayFieldData{
 			Data:        make([]*schemapb.VectorField, numRows),
 			ElementType: schemapb.DataType_FloatVector,
+			Dim:         int64(dim),
 		}
 
 		for i := 0; i < numRows; i++ {
@@ -408,6 +409,7 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 			batchData := &VectorArrayFieldData{
 				Data:        make([]*schemapb.VectorField, batchSize),
 				ElementType: schemapb.DataType_FloatVector,
+				Dim:         int64(dim),
 			}
 
 			for i := 0; i < batchSize; i++ {
@@ -454,6 +456,7 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 		vectorArrayData := &VectorArrayFieldData{
 			Data:        make([]*schemapb.VectorField, numRows),
 			ElementType: schemapb.DataType_FloatVector,
+			Dim:         int64(dim),
 		}
 
 		for i := 0; i < numRows; i++ {
@@ -480,6 +483,159 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 
 		err = w.FinishPayloadWriter()
 		require.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, numRows, length)
+	})
+
+	t.Run("Test ArrayOfFloat16Vector - Basic", func(t *testing.T) {
+		dim := 64
+		numRows := 50
+		vectorsPerRow := 4
+
+		// Create test data
+		vectorArrayData := &VectorArrayFieldData{
+			Data:        make([]*schemapb.VectorField, numRows),
+			ElementType: schemapb.DataType_Float16Vector,
+			Dim:         int64(dim),
+		}
+
+		for i := 0; i < numRows; i++ {
+			// Float16 vectors are stored as bytes (2 bytes per element)
+			byteData := make([]byte, vectorsPerRow*dim*2)
+			for j := 0; j < len(byteData); j++ {
+				byteData[j] = byte((i*1000 + j) % 256)
+			}
+
+			vectorArrayData.Data[i] = &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Float16Vector{
+					Float16Vector: byteData,
+				},
+			}
+		}
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_Float16Vector),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddVectorArrayFieldDataToPayload(vectorArrayData)
+		require.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		// Verify results
+		buffer, err := w.GetPayloadBufferFromWriter()
+		require.NoError(t, err)
+		require.NotEmpty(t, buffer)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, numRows, length)
+	})
+
+	t.Run("Test ArrayOfBinaryVector - Basic", func(t *testing.T) {
+		dim := 128 // Must be multiple of 8
+		numRows := 50
+		vectorsPerRow := 3
+
+		// Create test data
+		vectorArrayData := &VectorArrayFieldData{
+			Data:        make([]*schemapb.VectorField, numRows),
+			ElementType: schemapb.DataType_BinaryVector,
+			Dim:         int64(dim),
+		}
+
+		for i := 0; i < numRows; i++ {
+			// Binary vectors use 1 bit per dimension, so dim/8 bytes per vector
+			byteData := make([]byte, vectorsPerRow*dim/8)
+			for j := 0; j < len(byteData); j++ {
+				byteData[j] = byte((i + j) % 256)
+			}
+
+			vectorArrayData.Data[i] = &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: byteData,
+				},
+			}
+		}
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_BinaryVector),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddVectorArrayFieldDataToPayload(vectorArrayData)
+		require.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		// Verify results
+		buffer, err := w.GetPayloadBufferFromWriter()
+		require.NoError(t, err)
+		require.NotEmpty(t, buffer)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		require.NoError(t, err)
+		require.Equal(t, numRows, length)
+	})
+
+	t.Run("Test ArrayOfBFloat16Vector - Basic", func(t *testing.T) {
+		dim := 64
+		numRows := 50
+		vectorsPerRow := 4
+
+		// Create test data
+		vectorArrayData := &VectorArrayFieldData{
+			Data:        make([]*schemapb.VectorField, numRows),
+			ElementType: schemapb.DataType_BFloat16Vector,
+			Dim:         int64(dim),
+		}
+
+		for i := 0; i < numRows; i++ {
+			// BFloat16 vectors are stored as bytes (2 bytes per element)
+			byteData := make([]byte, vectorsPerRow*dim*2)
+			for j := 0; j < len(byteData); j++ {
+				byteData[j] = byte((i*100 + j) % 256)
+			}
+
+			vectorArrayData.Data[i] = &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: byteData,
+				},
+			}
+		}
+
+		w, err := NewPayloadWriter(
+			schemapb.DataType_ArrayOfVector,
+			WithDim(dim),
+			WithElementType(schemapb.DataType_BFloat16Vector),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddVectorArrayFieldDataToPayload(vectorArrayData)
+		require.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		// Verify results
+		buffer, err := w.GetPayloadBufferFromWriter()
+		require.NoError(t, err)
+		require.NotEmpty(t, buffer)
 
 		length, err := w.GetPayloadLengthFromWriter()
 		require.NoError(t, err)

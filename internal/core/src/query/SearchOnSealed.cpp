@@ -31,7 +31,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const segcore::SealedIndexingRecord& record,
                     const SearchInfo& search_info,
                     const void* query_data,
-                    const size_t* query_lims,
+                    const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& bitset,
                     milvus::OpContext* op_context,
@@ -55,15 +55,15 @@ SearchOnSealedIndex(const Schema& schema,
                search_info.metric_type_);
 
     knowhere::DataSetPtr dataset;
-    if (query_lims == nullptr) {
+    if (query_offsets == nullptr) {
         dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     } else {
         // Rather than non-embedding list search where num_queries equals to the number of vectors,
-        // in embedding list search, multiple vectors form an embedding list and the last element of query_lims
+        // in embedding list search, multiple vectors form an embedding list and the last element of query_offsets
         // stands for the total number of vectors.
-        auto num_vectors = query_lims[num_queries];
+        auto num_vectors = query_offsets[num_queries];
         dataset = knowhere::GenDataSet(num_vectors, dim, query_data);
-        dataset->SetLims(query_lims);
+        dataset->Set(knowhere::meta::EMB_LIST_OFFSET, query_offsets);
     }
 
     dataset->SetIsSparse(is_sparse);
@@ -107,7 +107,7 @@ SearchOnSealedColumn(const Schema& schema,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
                      const void* query_data,
-                     const size_t* query_lims,
+                     const size_t* query_offsets,
                      int64_t num_queries,
                      int64_t row_count,
                      const BitsetView& bitview,
@@ -128,7 +128,7 @@ SearchOnSealedColumn(const Schema& schema,
                                                 search_info.round_decimal_,
                                                 dim,
                                                 query_data,
-                                                query_lims};
+                                                query_offsets};
 
     CheckBruteForceSearchParam(field, search_info);
 
@@ -158,13 +158,14 @@ SearchOnSealedColumn(const Schema& schema,
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 
-        PinWrapper<const size_t*> lims_pw;
+        PinWrapper<const size_t*> offsets_pw;
         if (data_type == DataType::VECTOR_ARRAY) {
-            AssertInfo(query_lims != nullptr,
-                       "query_lims is nullptr, but data_type is vector array");
+            AssertInfo(
+                query_offsets != nullptr,
+                "query_offsets is nullptr, but data_type is vector array");
 
-            lims_pw = column->VectorArrayLims(op_context, i);
-            raw_dataset.raw_data_lims = lims_pw.get();
+            offsets_pw = column->VectorArrayOffsets(op_context, i);
+            raw_dataset.raw_data_offsets = offsets_pw.get();
         }
 
         if (milvus::exec::UseVectorIterator(search_info)) {

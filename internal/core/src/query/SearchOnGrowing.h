@@ -21,7 +21,7 @@ void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const SearchInfo& info,
                 const void* query_data,
-                const size_t* query_lims,
+                const size_t* query_offsets,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,

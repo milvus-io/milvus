@@ -41,16 +41,8 @@ class VectorArray : public milvus::VectorTrait {
         assert(num_vectors > 0);
         assert(dim > 0);
 
-        switch (element_type) {
-            case DataType::VECTOR_FLOAT:
-                size_ = num_vectors * dim * sizeof(float);
-                break;
-            default:
-                ThrowInfo(NotImplemented,
-                          "Direct VectorArray construction only supports "
-                          "VECTOR_FLOAT, got {}",
-                          GetDataTypeName(element_type));
-        }
+        size_ =
+            num_vectors * milvus::vector_bytes_per_element(element_type, dim);
 
         data_ = std::make_unique<char[]>(size_);
         std::memcpy(data_.get(), data, size_);
@@ -73,8 +65,49 @@ class VectorArray : public milvus::VectorTrait {
                 data_ = std::unique_ptr<char[]>(reinterpret_cast<char*>(data));
                 break;
             }
+            case VectorFieldProto::kBinaryVector: {
+                element_type_ = DataType::VECTOR_BINARY;
+                int bytes_per_vector = (dim_ + 7) / 8;
+                length_ =
+                    vector_field.binary_vector().size() / bytes_per_vector;
+                size_ = vector_field.binary_vector().size();
+                data_ = std::make_unique<char[]>(size_);
+                std::memcpy(
+                    data_.get(), vector_field.binary_vector().data(), size_);
+                break;
+            }
+            case VectorFieldProto::kFloat16Vector: {
+                element_type_ = DataType::VECTOR_FLOAT16;
+                int bytes_per_element = 2;  // 2 bytes per float16
+                length_ = vector_field.float16_vector().size() /
+                          (dim_ * bytes_per_element);
+                size_ = vector_field.float16_vector().size();
+                data_ = std::make_unique<char[]>(size_);
+                std::memcpy(
+                    data_.get(), vector_field.float16_vector().data(), size_);
+                break;
+            }
+            case VectorFieldProto::kBfloat16Vector: {
+                element_type_ = DataType::VECTOR_BFLOAT16;
+                int bytes_per_element = 2;  // 2 bytes per bfloat16
+                length_ = vector_field.bfloat16_vector().size() /
+                          (dim_ * bytes_per_element);
+                size_ = vector_field.bfloat16_vector().size();
+                data_ = std::make_unique<char[]>(size_);
+                std::memcpy(
+                    data_.get(), vector_field.bfloat16_vector().data(), size_);
+                break;
+            }
+            case VectorFieldProto::kInt8Vector: {
+                element_type_ = DataType::VECTOR_INT8;
+                length_ = vector_field.int8_vector().size() / dim_;
+                size_ = vector_field.int8_vector().size();
+                data_ = std::make_unique<char[]>(size_);
+                std::memcpy(
+                    data_.get(), vector_field.int8_vector().data(), size_);
+                break;
+            }
             default: {
-                // TODO(SpadeA): add other vector types
                 ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(vector_field.data_case()));
@@ -160,8 +193,24 @@ class VectorArray : public milvus::VectorTrait {
                 return reinterpret_cast<VectorElement*>(data_.get()) +
                        index * dim_;
             }
+            case DataType::VECTOR_BINARY: {
+                // Binary vectors are packed bits
+                int bytes_per_vector = (dim_ + 7) / 8;
+                return reinterpret_cast<VectorElement*>(
+                    data_.get() + index * bytes_per_vector);
+            }
+            case DataType::VECTOR_FLOAT16:
+            case DataType::VECTOR_BFLOAT16: {
+                // Float16/BFloat16 are 2 bytes per element
+                return reinterpret_cast<VectorElement*>(data_.get() +
+                                                        index * dim_ * 2);
+            }
+            case DataType::VECTOR_INT8: {
+                // Int8 is 1 byte per element
+                return reinterpret_cast<VectorElement*>(data_.get() +
+                                                        index * dim_);
+            }
             default: {
-                // TODO(SpadeA): add other vector types
                 ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
@@ -180,8 +229,23 @@ class VectorArray : public milvus::VectorTrait {
                     data, data + length_ * dim_);
                 break;
             }
+            case DataType::VECTOR_BINARY: {
+                vector_field.set_binary_vector(data_.get(), size_);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                vector_field.set_float16_vector(data_.get(), size_);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                vector_field.set_bfloat16_vector(data_.get(), size_);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                vector_field.set_int8_vector(data_.get(), size_);
+                break;
+            }
             default: {
-                // TODO(SpadeA): add other vector types
                 ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
@@ -300,8 +364,23 @@ class VectorArrayView {
                               "VectorElement must be float for VECTOR_FLOAT");
                 return reinterpret_cast<VectorElement*>(data_) + index * dim_;
             }
+            case DataType::VECTOR_BINARY: {
+                // Binary vectors are packed bits
+                int bytes_per_vector = (dim_ + 7) / 8;
+                return reinterpret_cast<VectorElement*>(
+                    data_ + index * bytes_per_vector);
+            }
+            case DataType::VECTOR_FLOAT16:
+            case DataType::VECTOR_BFLOAT16: {
+                // Float16/BFloat16 are 2 bytes per element
+                return reinterpret_cast<VectorElement*>(data_ +
+                                                        index * dim_ * 2);
+            }
+            case DataType::VECTOR_INT8: {
+                // Int8 is 1 byte per element
+                return reinterpret_cast<VectorElement*>(data_ + index * dim_);
+            }
             default: {
-                // TODO(SpadeA): add other vector types.
                 ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
@@ -320,8 +399,23 @@ class VectorArrayView {
                     data, data + length_ * dim_);
                 break;
             }
+            case DataType::VECTOR_BINARY: {
+                vector_array.set_binary_vector(data_, size_);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                vector_array.set_float16_vector(data_, size_);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                vector_array.set_bfloat16_vector(data_, size_);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                vector_array.set_int8_vector(data_, size_);
+                break;
+            }
             default: {
-                // TODO(SpadeA): add other vector types
                 ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
