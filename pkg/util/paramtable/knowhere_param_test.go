@@ -239,3 +239,75 @@ func TestGetKeyFromSlice(t *testing.T) {
 	assert.Equal(t, "value2", GetKeyFromSlice(indexParams, "key2"))
 	assert.Equal(t, "", GetKeyFromSlice(indexParams, "non_existent_key"))
 }
+
+func TestKnowhereConfig_UpdateIndexParams_WithOverride(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	// Set some initial config for both original and override index types
+	indexParams := map[string]interface{}{
+		"knowhere.IVF_FLAT.build.nlist":            1024,
+		"knowhere.IVF_FLAT.build.num_build_thread": 12,
+		"knowhere.HNSW.build.M":                    16,
+		"knowhere.HNSW.build.efConstruction":       360,
+	}
+
+	for key, val := range indexParams {
+		valStr, _ := json.Marshal(val)
+		bt.Save(key, string(valStr))
+	}
+
+	tests := []struct {
+		name           string
+		indexType      string
+		stage          string
+		inputParams    []*commonpb.KeyValuePair
+		expectedParams map[string]string
+	}{
+		{
+			name:      "Override index type from IVF_FLAT to HNSW",
+			indexType: "IVF_FLAT",
+			stage:     BuildStage,
+			inputParams: []*commonpb.KeyValuePair{
+				{Key: "index_type", Value: "IVF_FLAT"},
+				{Key: "override_index_type", Value: "HNSW"},
+				{Key: "existing_key", Value: "existing_value"},
+			},
+			expectedParams: map[string]string{
+				"existing_key":     "existing_value",
+				"index_type":       "HNSW", // Should be overridden
+				"nlist":            "1024", // From original IVF_FLAT
+				"num_build_thread": "12",   // From original IVF_FLAT
+				"M":                "16",   // From override HNSW
+				"efConstruction":   "360",  // From override HNSW
+			},
+		},
+		{
+			name:      "No override index type",
+			indexType: "IVF_FLAT",
+			stage:     BuildStage,
+			inputParams: []*commonpb.KeyValuePair{
+				{Key: "index_type", Value: "IVF_FLAT"},
+				{Key: "existing_key", Value: "existing_value"},
+			},
+			expectedParams: map[string]string{
+				"existing_key":     "existing_value",
+				"index_type":       "IVF_FLAT", // Should remain unchanged
+				"nlist":            "1024",
+				"num_build_thread": "12",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := cfg.UpdateIndexParams(tt.indexType, tt.stage, tt.inputParams)
+			assert.NoError(t, err)
+
+			for key, expectedValue := range tt.expectedParams {
+				assert.Equal(t, expectedValue, GetKeyFromSlice(result, key), "The value for key %s should match the expected value", key)
+			}
+		})
+	}
+}
