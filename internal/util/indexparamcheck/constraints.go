@@ -52,12 +52,12 @@ const (
 )
 
 var (
-	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
-	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}                                                                       // const
-	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD} // const
-	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
-	EmbListMetrics           = []string{metric.MaxSim, metric.MaxSimCosine, metric.MaxSimL2, metric.MaxSimIP,
-		metric.MaxSimHamming, metric.MaxSimJaccard} // const
+	// all consts
+	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}
+	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}
+	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD}
+	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}
+	EmbListMetrics           = []string{metric.MaxSim, metric.MaxSimCosine, metric.MaxSimL2, metric.MaxSimIP, metric.MaxSimHamming, metric.MaxSimJaccard}
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.

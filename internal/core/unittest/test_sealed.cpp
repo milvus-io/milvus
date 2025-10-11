@@ -2743,17 +2743,22 @@ INSTANTIATE_TEST_SUITE_P(
     VectorArrayTypes,
     SealedVectorArrayTest,
     ::testing::Values(
-        std::make_tuple(DataType::VECTOR_FLOAT, "MAX_SIM", 4, "float_max_sim")
-        // std::make_tuple(DataType::VECTOR_FLOAT, "L2", 4, "float_l2"),
-        // std::make_tuple(DataType::VECTOR_FLOAT16, "MAX_SIM", 4, "float16_max_sim"),
-        // std::make_tuple(DataType::VECTOR_FLOAT16, "L2", 4, "float16_l2"),
-        // std::make_tuple(DataType::VECTOR_BFLOAT16, "MAX_SIM", 4, "bfloat16_max_sim"),
-        // std::make_tuple(DataType::VECTOR_BFLOAT16, "L2", 4, "bfloat16_l2"),
-        // std::make_tuple(DataType::VECTOR_INT8, "MAX_SIM", 4, "int8_max_sim"),
-        // std::make_tuple(DataType::VECTOR_INT8, "L2", 4, "int8_l2"),
-        // std::make_tuple(DataType::VECTOR_BINARY, "HAMMING", 32, "binary_hamming"),
-        // std::make_tuple(DataType::VECTOR_BINARY, "JACCARD", 32, "binary_jaccard")
-        ),
+        std::make_tuple(DataType::VECTOR_FLOAT, "MAX_SIM", 4, "float_max_sim"),
+        std::make_tuple(DataType::VECTOR_FLOAT, "MAX_SIM_L2", 4, "float_l2"),
+        std::make_tuple(
+            DataType::VECTOR_FLOAT16, "MAX_SIM", 4, "float16_max_sim"),
+        std::make_tuple(
+            DataType::VECTOR_FLOAT16, "MAX_SIM_L2", 4, "float16_l2"),
+        std::make_tuple(
+            DataType::VECTOR_BFLOAT16, "MAX_SIM", 4, "bfloat16_max_sim"),
+        std::make_tuple(
+            DataType::VECTOR_BFLOAT16, "MAX_SIM_L2", 4, "bfloat16_l2"),
+        std::make_tuple(DataType::VECTOR_INT8, "MAX_SIM", 4, "int8_max_sim"),
+        std::make_tuple(DataType::VECTOR_INT8, "MAX_SIM_L2", 4, "int8_l2"),
+        std::make_tuple(
+            DataType::VECTOR_BINARY, "MAX_SIM_HAMMING", 32, "binary_hamming"),
+        std::make_tuple(
+            DataType::VECTOR_BINARY, "MAX_SIM_JACCARD", 32, "binary_jaccard")),
     [](const ::testing::TestParamInfo<VectorArrayTestParam>& info) {
         return std::get<3>(info.param);
     });

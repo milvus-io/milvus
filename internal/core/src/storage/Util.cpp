@@ -274,8 +274,6 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                "Inconsistent element types in VectorArray");
 
                     int num_vectors = array.length();
-                    // Batch append all vectors in this VectorArray
-                    // VectorArray stores data contiguously, so we can append all at once
                     auto ast = value_builder->AppendValues(
                         reinterpret_cast<const uint8_t*>(array.data()),
                         num_vectors);
@@ -410,7 +408,6 @@ CreateArrowBuilder(DataType data_type, DataType element_type, int dim) {
             std::shared_ptr<arrow::ArrayBuilder> value_builder;
             switch (element_type) {
                 case DataType::VECTOR_FLOAT: {
-                    // Each vector is stored as a fixed-size binary chunk
                     int byte_width = dim * sizeof(float);
                     value_builder =
                         std::make_shared<arrow::FixedSizeBinaryBuilder>(

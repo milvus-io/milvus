@@ -372,11 +372,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
-                        // Allocate memory for all vectors in this array
                         auto data_size = num_vectors * bytes_per_vec;
                         auto data_ptr = std::make_unique<uint8_t[]>(data_size);
 
-                        // Copy vector data directly
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const uint8_t* binary_data =
                                 binary_array->GetValue(start_offset + i);
@@ -384,7 +382,6 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             std::memcpy(dest, binary_data, bytes_per_vec);
                         }
 
-                        // VectorArray will copy the data
                         values[index] = VectorArray(
                             static_cast<const void*>(data_ptr.get()),
                             num_vectors,
