@@ -18,7 +18,10 @@
 
 package requestutil
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+)
 
 type CollectionNameGetter interface {
 	GetCollectionName() string
@@ -166,6 +169,19 @@ func GetConsistencyLevelFromRequst(req interface{}) (commonpb.ConsistencyLevel, 
 		return 0, false
 	}
 	return getter.GetConsistencyLevel(), true
+}
+
+// TemplateValuesGetter is the common interface for getting expr template values from milvus requests.
+type TemplateValuesGetter interface {
+	GetExprTemplateValues() map[string]*schemapb.TemplateValue
+}
+
+func GetExprTemplateValues(req any) (map[string]*schemapb.TemplateValue, bool) {
+	getter, ok := req.(TemplateValuesGetter)
+	if !ok {
+		return nil, false
+	}
+	return getter.GetExprTemplateValues(), true
 }
 
 var TraceLogBaseInfoFuncMap = map[string]func(interface{}) (any, bool){
