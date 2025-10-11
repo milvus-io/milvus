@@ -311,6 +311,13 @@ ALL_FORWARD_TYPES_1(DECLARE_PARTIAL_FORWARD_OPS)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// bitset_batch_set neon implementation
+template <typename ElementType>
+void
+bitset_batch_set_neon(ElementType* data, const uint32_t* idxs, const size_t n);
+
+///////////////////////////////////////////////////////////////////////////
+
 #undef ALL_DATATYPES_1
 #undef ALL_FORWARD_TYPES_1
 
