@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -825,34 +826,38 @@ func TestPasswordVerify(t *testing.T) {
 		return nil, errors.New("get cred not found credential")
 	}
 
-	metaCache := &MetaCache{
-		credMap:  credCache,
-		mixCoord: mockedRootCoord,
-	}
+	privilegeCache := privilege.NewPrivilegeCache(mockedRootCoord)
 	ret, ok := credCache[username]
 	assert.False(t, ok)
 	assert.Nil(t, ret)
-	assert.False(t, passwordVerify(context.TODO(), username, password, metaCache))
+	assert.False(t, passwordVerify(context.TODO(), username, password, privilegeCache))
 	assert.Equal(t, 1, invokedCount)
 
 	// Sha256Password has not been filled into cache during establish connection firstly
 	encryptedPwd, err := crypto.PasswordEncrypt(password)
 	assert.NoError(t, err)
-	credCache[username] = &internalpb.CredentialInfo{
-		Username:          username,
-		EncryptedPassword: encryptedPwd,
+	privilegeCache.RemoveCredential(username)
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+		invokedCount++
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: encryptedPwd,
+		}, nil
 	}
-	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
-	ret, ok = credCache[username]
-	assert.True(t, ok)
+
+	assert.True(t, passwordVerify(context.TODO(), username, password, privilegeCache))
+
+	ret, err = privilegeCache.GetCredentialInfo(context.TODO(), username)
+	assert.NoError(t, err)
 	assert.NotNil(t, ret)
 	assert.Equal(t, username, ret.Username)
 	assert.NotNil(t, ret.Sha256Password)
-	assert.Equal(t, 1, invokedCount)
+	assert.Equal(t, 2, invokedCount)
 
 	// Sha256Password already exists within cache
-	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
-	assert.Equal(t, 1, invokedCount)
+	assert.True(t, passwordVerify(context.TODO(), username, password, privilegeCache))
+	assert.Equal(t, 2, invokedCount)
 }
 
 func Test_isCollectionIsLoaded(t *testing.T) {

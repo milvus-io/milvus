@@ -111,7 +111,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			} else {
 				// username+password authentication
 				username, password := parseMD(rawToken)
-				if !passwordVerify(ctx, username, password, globalMetaCache) {
+				if !passwordVerify(ctx, username, password, privilegeCache) {
 					log.Warn("fail to verify password", zap.String("username", username))
 					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")

@@ -4689,8 +4689,8 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 
 	username := request.Username
-	if globalMetaCache != nil {
-		globalMetaCache.RemoveCredential(username) // no need to return error, though credential may be not cached
+	if privilegeCache != nil {
+		privilegeCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to invalidate credential cache")
 
@@ -4715,8 +4715,8 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		Username:       request.Username,
 		Sha256Password: request.Password,
 	}
-	if globalMetaCache != nil {
-		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
+	if privilegeCache != nil {
+		privilegeCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to update credential cache")
 
@@ -4820,7 +4820,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}
 	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
+	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilegeCache) {
 		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
 		return merr.Status(err), nil
 	}
@@ -5347,8 +5347,8 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 		return merr.Status(err), nil
 	}
 
-	if globalMetaCache != nil {
-		err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{
+	if privilegeCache != nil {
+		err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
 		})

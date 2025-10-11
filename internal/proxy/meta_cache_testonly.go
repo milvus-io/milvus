@@ -26,20 +26,21 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func AddRootUserToAdminRole() {
-	err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
 }
 
 func RemoveRootUserFromAdminRole() {
-	err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilegeCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
@@ -55,6 +56,7 @@ func InitEmptyGlobalCache() {
 	if err != nil {
 		panic(err)
 	}
+	privilegeCache = privilege.NewPrivilegeCache(mixcoord)
 }
 
 func SetGlobalMetaCache(metaCache *MetaCache) {

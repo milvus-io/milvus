@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -1467,11 +1468,11 @@ func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	return globalMetaCache.GetUserRole(username), nil
+	return privilegeCache.GetUserRole(username), nil
 }
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
-	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
+	return passwordVerify(ctx, username, rawPwd, privilegeCache)
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
@@ -1485,10 +1486,10 @@ func VerifyAPIKey(rawToken string) (string, error) {
 }
 
 // PasswordVerify verify password
-func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
+func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache privilege.PrivilegeCache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
-	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
+	credInfo, err := privilegeCache.GetCredentialInfo(ctx, username)
 	if err != nil {
 		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
@@ -1509,7 +1510,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
 	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
-	globalMetaCache.UpdateCredential(credInfo)
+	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
 

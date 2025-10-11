@@ -27,7 +27,7 @@ func TestValidAuth(t *testing.T) {
 		if username == "" || password == "" {
 			return false
 		}
-		return passwordVerify(ctx, username, password, globalMetaCache)
+		return passwordVerify(ctx, username, password, privilegeCache)
 	}
 
 	ctx := context.Background()
