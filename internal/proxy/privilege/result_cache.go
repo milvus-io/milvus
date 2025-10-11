@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package privilege
 
 import (
 	"fmt"
@@ -28,11 +28,11 @@ import (
 var (
 	priCacheInitOnce sync.Once
 	priCacheMut      sync.RWMutex
-	priCache         *PrivilegeCache
+	priCache         *resultCache
 	ver              atomic.Int64
 )
 
-func getPriCache() *PrivilegeCache {
+func getPriCache() *resultCache {
 	priCacheMut.RLock()
 	c := priCache
 	priCacheMut.RUnlock()
@@ -41,7 +41,7 @@ func getPriCache() *PrivilegeCache {
 		priCacheInitOnce.Do(func() {
 			priCacheMut.Lock()
 			defer priCacheMut.Unlock()
-			priCache = &PrivilegeCache{
+			priCache = &resultCache{
 				version: ver.Inc(),
 				values:  typeutil.ConcurrentMap[string, bool]{},
 			}
@@ -57,20 +57,20 @@ func getPriCache() *PrivilegeCache {
 func CleanPrivilegeCache() {
 	priCacheMut.Lock()
 	defer priCacheMut.Unlock()
-	priCache = &PrivilegeCache{
+	priCache = &resultCache{
 		version: ver.Inc(),
 		values:  typeutil.ConcurrentMap[string, bool]{},
 	}
 }
 
-func GetPrivilegeCache(roleName, object, objectPrivilege string) (isPermit, cached bool, version int64) {
+func GetResultCache(roleName, object, objectPrivilege string) (isPermit, cached bool, version int64) {
 	key := fmt.Sprintf("%s_%s_%s", roleName, object, objectPrivilege)
 	c := getPriCache()
 	isPermit, cached = c.values.Get(key)
 	return isPermit, cached, c.version
 }
 
-func SetPrivilegeCache(roleName, object, objectPrivilege string, isPermit bool, version int64) {
+func SetResultCache(roleName, object, objectPrivilege string, isPermit bool, version int64) {
 	key := fmt.Sprintf("%s_%s_%s", roleName, object, objectPrivilege)
 	c := getPriCache()
 	if c.version == version {
@@ -80,7 +80,7 @@ func SetPrivilegeCache(roleName, object, objectPrivilege string, isPermit bool, 
 
 // PrivilegeCache is a cache for privilege enforce result
 // version provides version control when any policy updates
-type PrivilegeCache struct {
+type resultCache struct {
 	values  typeutil.ConcurrentMap[string, bool]
 	version int64
 }

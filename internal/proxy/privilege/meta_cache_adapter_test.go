@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package privilege
 
 import (
 	"testing"
@@ -26,36 +26,36 @@ import (
 type MetaCacheCasbinAdapterSuite struct {
 	suite.Suite
 
-	cache   *MockCache
+	cache   *MockPrivilegeCache
 	adapter *MetaCacheCasbinAdapter
 }
 
 func (s *MetaCacheCasbinAdapterSuite) SetupTest() {
-	s.cache = NewMockCache(s.T())
+	s.cache = NewMockPrivilegeCache(s.T())
 
-	s.adapter = NewMetaCacheCasbinAdapter(func() Cache { return s.cache })
+	s.adapter = NewMetaCacheCasbinAdapter(func() PrivilegeCache { return s.cache })
 }
 
 func (s *MetaCacheCasbinAdapterSuite) TestLoadPolicy() {
 	s.Run("normal_load", func() {
 		s.cache.EXPECT().GetPrivilegeInfo(mock.Anything).Return([]string{})
 
-		m := getPolicyModel(ModelStr)
+		m := GetPolicyModel(ModelStr)
 		err := s.adapter.LoadPolicy(m)
 		s.NoError(err)
 	})
 
 	s.Run("source_return_nil", func() {
-		adapter := NewMetaCacheCasbinAdapter(func() Cache { return nil })
+		adapter := NewMetaCacheCasbinAdapter(func() PrivilegeCache { return nil })
 
-		m := getPolicyModel(ModelStr)
+		m := GetPolicyModel(ModelStr)
 		err := adapter.LoadPolicy(m)
 		s.Error(err)
 	})
 }
 
 func (s *MetaCacheCasbinAdapterSuite) TestSavePolicy() {
-	m := getPolicyModel(ModelStr)
+	m := GetPolicyModel(ModelStr)
 	s.Error(s.adapter.SavePolicy(m))
 }
 
