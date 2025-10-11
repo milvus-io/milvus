@@ -295,6 +295,11 @@ RustResult tantivy_ngram_match_query(void *ptr,
 
 RustResult tantivy_match_query(void *ptr, const char *query, void *bitset);
 
+RustResult tantivy_match_query_with_minimum(void *ptr,
+                                            const char *query,
+                                            uintptr_t min_should_match,
+                                            void *bitset);
+
 RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop, void *bitset);
 
 RustResult tantivy_register_tokenizer(void *ptr,

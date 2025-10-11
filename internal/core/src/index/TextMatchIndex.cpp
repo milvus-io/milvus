@@ -317,6 +317,19 @@ TextMatchIndex::MatchQuery(const std::string& query) {
 }
 
 TargetBitmap
+TextMatchIndex::MatchQueryWithMinimum(const std::string& query, uint32_t min_should_match) {
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    TargetBitmap bitset{static_cast<size_t>(Count())};
+    wrapper_->match_query_with_minimum(query, min_should_match, &bitset);
+    
+    return bitset;
+}
+
+TargetBitmap
 TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     if (shouldTriggerCommit()) {
         Commit();
