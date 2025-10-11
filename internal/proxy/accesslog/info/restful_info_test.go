@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -251,6 +252,29 @@ func (s *RestfulAccessInfoSuite) TestQueryParams() {
 	}
 
 	s.Equal(kvsToString(params), Get(s.info, "$query_params")[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestTemplateValueLength() {
+	exprTemplValues := map[string]*schemapb.TemplateValue{
+		"store_id": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{0, 1},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl:                "store_id in {store_id}",
+		ExprTemplateValues: exprTemplValues,
+	}
+
+	s.Equal(`map[store_id:2]`, Get(s.info, "$template_value_length")[0])
 }
 
 func TestRestfulAccessInfo(t *testing.T) {
