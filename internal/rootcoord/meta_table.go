@@ -733,8 +733,8 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	coll, err := mt.catalog.GetCollectionByName(ctx1, db.ID, collectionName, ts)
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	coll, err := mt.catalog.GetCollectionByName(ctx, db.ID, db.Name, collectionName, ts)
 	if err != nil {
 		return nil, err
 	}

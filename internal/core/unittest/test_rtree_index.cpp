@@ -111,6 +111,8 @@ class RTreeIndexTest : public ::testing::Test {
         storage_config_.root_path = temp_path_.get().string();
         chunk_manager_ = milvus::storage::CreateChunkManager(storage_config_);
 
+        fs_ = milvus::storage::InitArrowFileSystem(storage_config_);
+
         // prepare field & index meta – minimal info for DiskFileManagerImpl
         field_meta_ = milvus::storage::FieldDataMeta{1, 1, 1, 100};
         // set geometry data type in field schema for index schema checks
@@ -170,12 +172,13 @@ class RTreeIndexTest : public ::testing::Test {
     milvus::storage::FieldDataMeta field_meta_;
     milvus::storage::IndexMeta index_meta_;
     milvus::test::TmpPath temp_path_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 TEST_F(RTreeIndexTest, Build_Upload_Load) {
     // ---------- Build via BuildWithRawDataForUT ----------
     milvus::storage::FileManagerContext ctx_build(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree_build(ctx_build);
 
     std::vector<std::string> wkbs = {CreatePointWKB(1.0, 1.0),
@@ -191,7 +194,7 @@ TEST_F(RTreeIndexTest, Build_Upload_Load) {
 
     // ---------- Load back ----------
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -207,7 +210,7 @@ TEST_F(RTreeIndexTest, Build_Upload_Load) {
 TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
     // Build & upload first
     milvus::storage::FileManagerContext ctx_build(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree_build(ctx_build);
 
     std::vector<std::string> wkbs2 = {CreatePointWKB(10.0, 10.0),
@@ -228,7 +231,7 @@ TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
 
     // Load using filename only list
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -243,7 +246,7 @@ TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
 
 TEST_F(RTreeIndexTest, Build_EmptyInput_ShouldThrow) {
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     std::vector<std::string> empty;
@@ -253,7 +256,7 @@ TEST_F(RTreeIndexTest, Build_EmptyInput_ShouldThrow) {
 
 TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     std::string bad = CreatePointWKB(0.0, 0.0);
@@ -267,7 +270,7 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
     auto stats = rtree.Upload({});
 
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -282,7 +285,7 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
 
 TEST_F(RTreeIndexTest, Build_VariousGeometries) {
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     std::vector<std::string> wkbs = {
@@ -299,7 +302,7 @@ TEST_F(RTreeIndexTest, Build_VariousGeometries) {
     ASSERT_FALSE(stats->GetIndexFiles().empty());
 
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -317,7 +320,7 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
     auto remote_file = (temp_path_.get() / "geom.parquet").string();
     WriteGeometryInsertFile(chunk_manager_, field_meta_, remote_file, wkbs);
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     nlohmann::json build_cfg;
@@ -328,7 +331,7 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
 
     // Cache remote index files locally
     milvus::storage::DiskFileManagerImpl diskfm(
-        {field_meta_, index_meta_, chunk_manager_});
+        {field_meta_, index_meta_, chunk_manager_, fs_});
     auto index_files = stats->GetIndexFiles();
     auto load_priority =
         milvus::index::GetValueFromConfig<milvus::proto::common::LoadPriority>(
@@ -376,7 +379,7 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
 TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
     // Build and upload
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
     std::vector<std::string> wkbs = {CreatePointWKB(6.0, 6.0),
                                      CreatePointWKB(7.0, 7.0)};
@@ -389,7 +392,7 @@ TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
     mixed[0] = boost::filesystem::path(mixed[0]).filename().string();
 
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -402,7 +405,7 @@ TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
 
 TEST_F(RTreeIndexTest, Load_NonexistentRemote_ShouldThrow) {
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -422,7 +425,7 @@ TEST_F(RTreeIndexTest, Build_EndToEnd_FromInsertFiles) {
     WriteGeometryInsertFile(chunk_manager_, field_meta_, remote_file, wkbs);
 
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     nlohmann::json build_cfg;
@@ -434,7 +437,7 @@ TEST_F(RTreeIndexTest, Build_EndToEnd_FromInsertFiles) {
     auto stats = rtree.Upload({});
 
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
@@ -461,7 +464,7 @@ TEST_F(RTreeIndexTest, Build_Upload_Load_LargeDataset) {
 
     // Build from insert_files (not using BuildWithRawDataForUT)
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     nlohmann::json build_cfg;
@@ -477,7 +480,7 @@ TEST_F(RTreeIndexTest, Build_Upload_Load_LargeDataset) {
 
     // Load index back and verify
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -515,7 +518,7 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     // build (default to bulk load)
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     nlohmann::json build_cfg;
@@ -531,7 +534,7 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
     ASSERT_GT(stats->GetIndexFiles().size(), 0);
 
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
@@ -548,7 +551,7 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 TEST_F(RTreeIndexTest, Query_CoarseAndExact_Equals_Intersects_Within) {
     // Build a small index in-memory (via UT API)
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     // Prepare simple geometries: two points and a square polygon
@@ -564,7 +567,7 @@ TEST_F(RTreeIndexTest, Query_CoarseAndExact_Equals_Intersects_Within) {
     // Upload and then load into a new index instance for querying
     auto stats = rtree.Upload({});
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
@@ -622,7 +625,7 @@ TEST_F(RTreeIndexTest, Query_CoarseAndExact_Equals_Intersects_Within) {
 
 TEST_F(RTreeIndexTest, Query_Touches_Contains_Crosses_Overlaps) {
     milvus::storage::FileManagerContext ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     milvus::index::RTreeIndex<std::string> rtree(ctx);
 
     // Two overlapping squares and one disjoint square
@@ -640,7 +643,7 @@ TEST_F(RTreeIndexTest, Query_Touches_Contains_Crosses_Overlaps) {
     // Upload and load a new instance for querying
     auto stats = rtree.Upload({});
     milvus::storage::FileManagerContext ctx_load(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
@@ -762,7 +765,7 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
 
     // build index files by invoking RTreeIndex::Build
     milvus::storage::FileManagerContext fm_ctx(
-        field_meta_, index_meta_, chunk_manager_);
+        field_meta_, index_meta_, chunk_manager_, fs_);
     auto rtree_index =
         std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
     nlohmann::json build_cfg;

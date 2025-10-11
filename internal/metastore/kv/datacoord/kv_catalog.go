@@ -338,7 +338,8 @@ func (kc *Catalog) SaveByBatch(ctx context.Context, kvs map[string]string) error
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(ctx, partialKvs)
 	}
-	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, saveFn)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to save by batch", zap.Error(err))
 		return err
@@ -390,7 +391,8 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(ctx, partialKvs)
 	}
-	if err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn); err != nil {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, saveFn); err != nil {
 		return err
 	}
 

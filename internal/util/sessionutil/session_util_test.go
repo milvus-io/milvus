@@ -196,18 +196,27 @@ func TestUpdateSessions(t *testing.T) {
 	sessionEvents := []*SessionEvent{}
 	addEventLen := 0
 	delEventLen := 0
-	eventLength := len(eventCh)
-	for i := 0; i < eventLength; i++ {
-		sessionEvent := <-eventCh
-		if sessionEvent.EventType == SessionAddEvent {
-			addEventLen++
+
+	ch := time.After(time.Second * 5)
+LOOP:
+	for {
+		select {
+		case <-ch:
+			t.FailNow()
+		case sessionEvent := <-eventCh:
+
+			if sessionEvent.EventType == SessionAddEvent {
+				addEventLen++
+			}
+			if sessionEvent.EventType == SessionDelEvent {
+				delEventLen++
+			}
+			sessionEvents = append(sessionEvents, sessionEvent)
+			if len(sessionEvents) == 20 {
+				break LOOP
+			}
 		}
-		if sessionEvent.EventType == SessionDelEvent {
-			delEventLen++
-		}
-		sessionEvents = append(sessionEvents, sessionEvent)
 	}
-	assert.Equal(t, len(sessionEvents), 20)
 	assert.Equal(t, addEventLen, 10)
 	assert.Equal(t, delEventLen, 10)
 }

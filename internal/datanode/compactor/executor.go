@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -40,94 +39,137 @@ type Executor interface {
 	Start(ctx context.Context)
 	Enqueue(task Compactor) (bool, error)
 	Slots() int64
-	RemoveTask(planID int64)
-	GetResults(planID int64) []*datapb.CompactionPlanResult
+	RemoveTask(planID int64)                                // Deprecated in 2.6
+	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
+}
+
+// taskState represents the state of a compaction task
+// State transitions:
+//   - executing -> completed (success)
+//   - executing -> failed (error)
+//
+// Once a task reaches completed/failed state, it stays there until removed
+type taskState struct {
+	compactor Compactor
+	state     datapb.CompactionTaskState
+	result    *datapb.CompactionPlanResult
 }
 
 type executor struct {
-	executing          *typeutil.ConcurrentMap[int64, Compactor]                    // planID to compactor
-	completedCompactor *typeutil.ConcurrentMap[int64, Compactor]                    // planID to compactor
-	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
-	taskCh             chan Compactor
-	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
-	usingSlots         int64
-	slotMu             sync.RWMutex
+	mu sync.RWMutex
 
-	// To prevent concurrency of release channel and compaction get results
-	// all released channel's compaction tasks will be discarded
-	resultGuard sync.RWMutex
+	tasks map[int64]*taskState // planID -> task state
+
+	// Task queue for pending work
+	taskCh chan Compactor
+
+	// Slot tracking for resource management
+	usingSlots int64
+
+	// Slots(Slots Cap for DataCoord), ExecPool(MaxCompactionConcurrency) are all trying to control concurrency and resource usage,
+	// which creates unnecessary complexity. We should use a single resource pool instead.
 }
 
 func NewExecutor() *executor {
 	return &executor{
-		executing:          typeutil.NewConcurrentMap[int64, Compactor](),
-		completedCompactor: typeutil.NewConcurrentMap[int64, Compactor](),
-		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
-		taskCh:             make(chan Compactor, maxTaskQueueNum),
-		dropped:            typeutil.NewConcurrentSet[string](),
-		usingSlots:         0,
+		tasks:      make(map[int64]*taskState),
+		taskCh:     make(chan Compactor, maxTaskQueueNum),
+		usingSlots: 0,
 	}
 }
 
-func (e *executor) Enqueue(task Compactor) (bool, error) {
-	e.slotMu.Lock()
-	defer e.slotMu.Unlock()
-	newSlotUsage := task.GetSlotUsage()
+func getTaskSlotUsage(task Compactor) int64 {
+	// Calculate slot usage
+	taskSlotUsage := task.GetSlotUsage()
 	// compatible for old datacoord or unexpected request
-	if task.GetSlotUsage() <= 0 {
+	if taskSlotUsage <= 0 {
 		switch task.GetCompactionType() {
 		case datapb.CompactionType_ClusteringCompaction:
-			newSlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+			taskSlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 		case datapb.CompactionType_MixCompaction:
-			newSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+			taskSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 		case datapb.CompactionType_Level0DeleteCompaction:
-			newSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+			taskSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
 		}
-		log.Warn("illegal task slot usage, change it to a default value", zap.Int64("illegalSlotUsage", task.GetSlotUsage()), zap.Int64("newSlotUsage", newSlotUsage))
+		log.Warn("illegal task slot usage, change it to a default value",
+			zap.Int64("illegalSlotUsage", task.GetSlotUsage()),
+			zap.Int64("defaultSlotUsage", taskSlotUsage),
+			zap.String("type", task.GetCompactionType().String()))
 	}
-	e.usingSlots = e.usingSlots + newSlotUsage
-	_, ok := e.executing.GetOrInsert(task.GetPlanID(), task)
-	if ok {
+
+	return taskSlotUsage
+}
+
+func (e *executor) Enqueue(task Compactor) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	planID := task.GetPlanID()
+
+	// Check for duplicate task
+	if _, exists := e.tasks[planID]; exists {
 		log.Warn("duplicated compaction task",
-			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64("planID", planID),
 			zap.String("channel", task.GetChannelName()))
 		return false, merr.WrapErrDuplicatedCompactionTask()
 	}
+
+	// Update slots and add task
+	e.usingSlots += getTaskSlotUsage(task)
+	e.tasks[planID] = &taskState{
+		compactor: task,
+		state:     datapb.CompactionTaskState_executing,
+		result:    nil,
+	}
+
 	e.taskCh <- task
 	return true, nil
 }
 
-// Slots returns the available slots for compaction
+// Slots returns the used slots for compaction
 func (e *executor) Slots() int64 {
-	return e.getUsingSlots()
-}
-
-func (e *executor) getUsingSlots() int64 {
-	e.slotMu.RLock()
-	defer e.slotMu.RUnlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.usingSlots
 }
 
-func (e *executor) toCompleteState(task Compactor) {
-	task.Complete()
-	e.getAndRemoveExecuting(task.GetPlanID())
-}
+// completeTask updates task state to completed and adjusts slot usage
+func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-func (e *executor) getAndRemoveExecuting(planID typeutil.UniqueID) (Compactor, bool) {
-	task, ok := e.executing.GetAndRemove(planID)
-	if ok {
-		e.slotMu.Lock()
-		e.usingSlots = e.usingSlots - task.GetSlotUsage()
-		e.slotMu.Unlock()
+	if task, exists := e.tasks[planID]; exists {
+		task.compactor.Complete()
+
+		// Update state based on result
+		if result != nil {
+			task.state = datapb.CompactionTaskState_completed
+			task.result = result
+		} else {
+			task.state = datapb.CompactionTaskState_failed
+		}
+
+		// Adjust slot usage
+		e.usingSlots -= getTaskSlotUsage(task.compactor)
+		if e.usingSlots < 0 {
+			e.usingSlots = 0
+		}
 	}
-	return task, ok
 }
 
 func (e *executor) RemoveTask(planID int64) {
-	e.completed.GetAndRemove(planID)
-	task, loaded := e.completedCompactor.GetAndRemove(planID)
-	if loaded {
-		log.Info("Compaction task removed", zap.Int64("planID", planID), zap.String("channel", task.GetChannelName()))
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if task, exists := e.tasks[planID]; exists {
+		// Only remove completed/failed tasks, not executing ones
+		if task.state != datapb.CompactionTaskState_executing {
+			log.Info("Compaction task removed",
+				zap.Int64("planID", planID),
+				zap.String("channel", task.compactor.GetChannelName()),
+				zap.String("state", task.state.String()))
+			delete(e.tasks, planID)
+		}
 	}
 }
 
@@ -148,24 +190,24 @@ func (e *executor) Start(ctx context.Context) {
 func (e *executor) executeTask(task Compactor) {
 	log := log.With(
 		zap.Int64("planID", task.GetPlanID()),
-		zap.Int64("Collection", task.GetCollection()),
+		zap.Int64("collection", task.GetCollection()),
 		zap.String("channel", task.GetChannelName()),
+		zap.String("type", task.GetCompactionType().String()),
 	)
-
-	defer func() {
-		e.toCompleteState(task)
-	}()
 
 	log.Info("start to execute compaction")
 
 	result, err := task.Compact()
 	if err != nil {
 		log.Warn("compaction task failed", zap.Error(err))
+		e.completeTask(task.GetPlanID(), nil)
 		return
 	}
-	e.completed.Insert(result.GetPlanID(), result)
-	e.completedCompactor.Insert(result.GetPlanID(), task)
 
+	// Update task with result
+	e.completeTask(task.GetPlanID(), result)
+
+	// Emit metrics
 	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
 		count := int64(0)
 		for _, binlog := range binlogs {
@@ -195,14 +237,6 @@ func (e *executor) executeTask(task Compactor) {
 	log.Info("end to execute compaction")
 }
 
-func (e *executor) stopTask(planID int64) {
-	task, loaded := e.getAndRemoveExecuting(planID)
-	if loaded {
-		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.GetChannelName()))
-		task.Stop()
-	}
-}
-
 func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {
 	if planID != 0 {
 		result := e.getCompactionResult(planID)
@@ -212,61 +246,60 @@ func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {
 }
 
 func (e *executor) getCompactionResult(planID int64) *datapb.CompactionPlanResult {
-	e.resultGuard.RLock()
-	defer e.resultGuard.RUnlock()
-	_, ok := e.executing.Get(planID)
-	if ok {
-		result := &datapb.CompactionPlanResult{
-			State:  datapb.CompactionTaskState_executing,
-			PlanID: planID,
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if task, exists := e.tasks[planID]; exists {
+		if task.result != nil {
+			return task.result
 		}
-		return result
-	}
-	result, ok2 := e.completed.Get(planID)
-	if !ok2 {
 		return &datapb.CompactionPlanResult{
+			State:  task.state,
 			PlanID: planID,
-			State:  datapb.CompactionTaskState_failed,
 		}
 	}
-	return result
+
+	// Task not found, return failed state
+	return &datapb.CompactionPlanResult{
+		PlanID: planID,
+		State:  datapb.CompactionTaskState_failed,
+	}
 }
 
 func (e *executor) getAllCompactionResults() []*datapb.CompactionPlanResult {
-	e.resultGuard.RLock()
-	defer e.resultGuard.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	var (
 		executing          []int64
 		completed          []int64
 		completedLevelZero []int64
 	)
+
 	results := make([]*datapb.CompactionPlanResult, 0)
-	// get executing results
-	e.executing.Range(func(planID int64, task Compactor) bool {
-		executing = append(executing, planID)
-		results = append(results, &datapb.CompactionPlanResult{
-			State:  datapb.CompactionTaskState_executing,
-			PlanID: planID,
-		})
-		return true
-	})
 
-	// get completed results
-	e.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
-		completed = append(completed, planID)
-		results = append(results, result)
+	// Collect results from all tasks
+	for planID, task := range e.tasks {
+		if task.state == datapb.CompactionTaskState_executing {
+			executing = append(executing, planID)
+			results = append(results, &datapb.CompactionPlanResult{
+				State:  datapb.CompactionTaskState_executing,
+				PlanID: planID,
+			})
+		} else if task.result != nil {
+			completed = append(completed, planID)
+			results = append(results, task.result)
 
-		if result.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-			completedLevelZero = append(completedLevelZero, planID)
+			if task.result.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+				completedLevelZero = append(completedLevelZero, planID)
+			}
 		}
-		return true
-	})
+	}
 
-	// remove level zero results
-	lo.ForEach(completedLevelZero, func(planID int64, _ int) {
-		e.completed.Remove(planID)
-		e.completedCompactor.Remove(planID)
-	})
+	// Remove completed level zero compaction tasks
+	for _, planID := range completedLevelZero {
+		delete(e.tasks, planID)
+	}
 
 	if len(results) > 0 {
 		log.Info("DataNode Compaction results",

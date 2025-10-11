@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
@@ -198,18 +199,19 @@ func (s *TestArrayStructSuite) run() {
 
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, vecFieldName)
 
+	subFieldName := proxy.ConcatStructFieldName(structFieldName, structSubVecFieldName)
 	// create index for struct sub-vector field
 	createIndexResult, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
-		FieldName:      structSubVecFieldName,
+		FieldName:      subFieldName,
 		IndexName:      "array_of_vector_index",
 		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	s.Require().NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, structSubVecFieldName)
+	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, subFieldName)
 
 	// load
 	_, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -224,10 +226,10 @@ func (s *TestArrayStructSuite) run() {
 	nq := s.nq
 	topk := s.topK
 
-	outputFields := []string{structSubVecFieldName}
+	outputFields := []string{subFieldName}
 	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructEmbeddingListSearchRequest(s.dbName, collection, "",
-		structSubVecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
+		subFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
 	searchResp, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
 	s.Require().NoError(err)
@@ -251,6 +253,6 @@ func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_FloatVector() {
 }
 
 func TestGetVectorArrayStruct(t *testing.T) {
-	t.Skip("Skip integration test, need to refactor integration test framework.")
+	// t.Skip("Skip integration test, need to refactor integration test framework.")
 	suite.Run(t, new(TestArrayStructSuite))
 }

@@ -331,27 +331,6 @@ func CheckCheckPointsHealth(meta *meta) error {
 	return nil
 }
 
-func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
-	collIDs := meta.ListCollections()
-	for _, collID := range collIDs {
-		collInfo := meta.GetCollection(collID)
-		if collInfo == nil {
-			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
-			continue
-		}
-
-		for _, channelName := range collInfo.VChannelNames {
-			_, err := channelManager.FindWatcher(channelName)
-			if err != nil {
-				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
-					zap.String("channelName", channelName), zap.Error(err))
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func createStorageConfig() *indexpb.StorageConfig {
 	var storageConfig *indexpb.StorageConfig
 

@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 )
 
@@ -81,4 +82,14 @@ func timeFromName(filename, prefix, ext string) (time.Time, error) {
 	}
 	ts := filename[len(prefix) : len(filename)-len(ext)]
 	return time.Parse(timeNameFormat, ts)
+}
+
+func SetActualConsistencyLevel(ctx context.Context, acl commonpb.ConsistencyLevel) {
+	if ctx != nil {
+		v := ctx.Value(AccessKey{})
+		info, ok := v.(info.AccessInfo)
+		if ok && info != nil {
+			info.SetActualConsistencyLevel(acl)
+		}
+	}
 }

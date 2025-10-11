@@ -28,10 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -144,20 +142,8 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
 	segments := s.meta.getSegmentsMetrics(-1)
-	var channels []*metricsinfo.DmChannel
-	for nodeID, ch := range s.channelManager.GetChannelWatchInfos() {
-		for _, chInfo := range ch {
-			dmChannel := metrics.NewDMChannelFrom(chInfo.GetVchan())
-			dmChannel.NodeID = nodeID
-			dmChannel.WatchState = chInfo.State.String()
-			dmChannel.StartWatchTS = typeutil.TimestampToString(uint64(chInfo.GetStartTs()))
-			channels = append(channels, dmChannel)
-		}
-	}
-
 	dist := &metricsinfo.DataCoordDist{
-		Segments:   segments,
-		DMChannels: channels,
+		Segments: segments,
 	}
 
 	bs, err := json.Marshal(dist)
@@ -186,7 +172,7 @@ func (s *Server) getSystemInfoMetrics(
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
-	nodes := s.cluster.GetSessions()
+	nodes := s.nodeManager.GetClientIDs()
 	clusterTopology := metricsinfo.DataClusterTopology{
 		Self:               s.getDataCoordMetrics(ctx),
 		ConnectedDataNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
@@ -264,18 +250,14 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 
 // getDataNodeMetrics composes DataNode infos
 // this function will invoke GetMetrics with DataNode specified in NodeInfo
-func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *session.Session) (metricsinfo.DataNodeInfos, error) {
+func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node int64) (metricsinfo.DataNodeInfos, error) {
 	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,
 			ID:       int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 		},
 	}
-	if node == nil {
-		return infos, errors.New("DataNode is nil")
-	}
-
-	cli, err := node.GetOrCreateClient(ctx)
+	cli, err := s.nodeManager.GetClient(node)
 	if err != nil {
 		return infos, err
 	}
@@ -355,16 +337,16 @@ func getMetrics[T any](s *Server, ctx context.Context, req *milvuspb.GetMetricsR
 	var mu sync.Mutex
 	errorGroup, ctx := errgroup.WithContext(ctx)
 
-	nodes := s.cluster.GetSessions()
+	nodes := s.nodeManager.GetClientIDs()
 	for _, node := range nodes {
 		errorGroup.Go(func() error {
-			cli, err := node.GetOrCreateClient(ctx)
+			cli, err := s.nodeManager.GetClient(node)
 			if err != nil {
 				return err
 			}
 			resp, err := cli.GetMetrics(ctx, req)
 			if err != nil {
-				log.Warn("failed to get metric from DataNode", zap.Int64("nodeID", node.NodeID()))
+				log.Warn("failed to get metric from DataNode", zap.Int64("nodeID", node))
 				return err
 			}
 

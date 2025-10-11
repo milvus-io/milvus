@@ -53,11 +53,11 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
         conf.iam_endpoint = std::string(c_storage_config.iam_endpoint);
         conf.log_level = std::string(c_storage_config.log_level);
         conf.region = std::string(c_storage_config.region);
-        conf.useSSL = c_storage_config.useSSL;
-        conf.sslCACert = std::string(c_storage_config.sslCACert);
-        conf.useIAM = c_storage_config.useIAM;
-        conf.useVirtualHost = c_storage_config.useVirtualHost;
-        conf.requestTimeoutMs = c_storage_config.requestTimeoutMs;
+        conf.use_ssl = c_storage_config.useSSL;
+        conf.ssl_ca_cert = std::string(c_storage_config.sslCACert);
+        conf.use_iam = c_storage_config.useIAM;
+        conf.use_virtual_host = c_storage_config.useVirtualHost;
+        conf.request_timeout_ms = c_storage_config.requestTimeoutMs;
         conf.gcp_credential_json =
             std::string(c_storage_config.gcp_credential_json);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;

@@ -43,6 +43,9 @@ misc:
   - when_build_success: &WHEN_BUILD_SUCCESS
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
       - 'status-success=ci-v2/build'
+  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/code-check'
   
   # Branch configurations
   - branch: &BRANCHES
@@ -99,7 +102,7 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker MacOS 13'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
@@ -117,7 +120,7 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker MacOS 13'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
@@ -161,7 +164,7 @@ pull_request_rules:
       - or: *BRANCHES
       - *only_go_unittest_files
       - or: *WHEN_BUILD_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker MacOS 13'
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
     actions:
@@ -198,7 +201,7 @@ pull_request_rules:
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker MacOS 13'
       - *source_code_files
     actions:
@@ -262,9 +265,16 @@ pull_request_rules:
           - or:
               - status-failure = cpp-unit-test
               - status-failure = ci-v2/ut-cpp
-        # Code checker: always required (no migration logic)
+        # Code checker Ubuntu: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker AMD64 Ubuntu 22.04
+                  - status-success = ci-v2/code-check
+            - or:
+                - status-failure = Code Checker AMD64 Ubuntu 22.04
+                - status-failure = ci-v2/code-check
         - or:
-          - status-success != Code Checker AMD64 Ubuntu 22.04
           - status-success != Code Checker MacOS 13
         # E2E tests: regular case - remove if no success AND has failure
         - and:

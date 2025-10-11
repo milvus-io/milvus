@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -64,6 +65,7 @@ type deleteTask struct {
 	// result
 	count       int64
 	allQueryCnt int64
+	storageCost segcore.StorageCost
 
 	sessionTS Timestamp
 }
@@ -255,6 +257,9 @@ type deleteRunner struct {
 
 	allQueryCnt atomic.Int64
 	sessionTS   atomic.Uint64
+
+	scannedRemoteBytes atomic.Int64
+	scannedTotalBytes  atomic.Int64
 }
 
 func (dr *deleteRunner) Init(ctx context.Context) error {
@@ -459,6 +464,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			close(taskCh)
 		}()
 		var allQueryCnt int64
+		var scannedRemoteBytes int64
+		var scannedTotalBytes int64
 		// wait all task finish
 		var sessionTS uint64
 		for task := range taskCh {
@@ -468,6 +475,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			}
 			dr.count.Add(task.count)
 			allQueryCnt += task.allQueryCnt
+			scannedRemoteBytes += task.storageCost.ScannedRemoteBytes
+			scannedTotalBytes += task.storageCost.ScannedTotalBytes
 			if sessionTS < task.sessionTS {
 				sessionTS = task.sessionTS
 			}
@@ -479,6 +488,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 		dr.allQueryCnt.Add(allQueryCnt)
 		dr.sessionTS.Store(sessionTS)
+		dr.scannedRemoteBytes.Add(scannedRemoteBytes)
+		dr.scannedTotalBytes.Add(scannedTotalBytes)
 		return nil
 	}
 }
@@ -522,6 +533,10 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
+		task.storageCost = segcore.StorageCost{
+			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  result.GetScannedTotalBytes(),
+		}
 
 		taskCh <- task
 	}

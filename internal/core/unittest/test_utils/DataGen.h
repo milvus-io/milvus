@@ -1587,8 +1587,9 @@ GenVecIndexing(int64_t N,
     storage_config.storage_type = "local";
     storage_config.root_path = TestRemotePath;
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs);
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         DataType::NONE,
         index_type,

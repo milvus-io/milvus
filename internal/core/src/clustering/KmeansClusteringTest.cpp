@@ -189,6 +189,7 @@ test_run() {
     std::string root_path = "/tmp/test-kmeans-clustering/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
 
     std::vector<T> data_gen(nb * dim);
     for (int64_t i = 0; i < nb * dim; ++i) {
@@ -216,7 +217,7 @@ test_run() {
     auto log_path = get_binlog_path(0);
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
 
     std::map<int64_t, std::vector<std::string>> remote_files;
     std::map<int64_t, int64_t> num_rows;

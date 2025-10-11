@@ -200,6 +200,10 @@ func (s *BulkInsertSuite) runForStructArray() {
 	s.NoError(err)
 	s.Equal(int32(0), createCollectionStatus.GetCode())
 
+	// adjust struct field name
+	schema.StructArrayFields[0].Fields[0].Name = "struct_with_vector_array[vector_array_field]"
+	schema.StructArrayFields[0].Fields[1].Name = "struct_with_vector_array[scalar_array_field]"
+
 	var files []*internalpb.ImportFile
 
 	options := []*commonpb.KeyValuePair{}
@@ -257,7 +261,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 	// Create index for vector array field
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      "vector_array_field",
+		FieldName:      "struct_with_vector_array[vector_array_field]",
 		IndexName:      "_default_idx",
 		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
@@ -277,10 +281,10 @@ func (s *BulkInsertSuite) runForStructArray() {
 	nq := 10
 	topk := 10
 
-	outputFields := []string{"vector_array_field"}
+	outputFields := []string{"struct_with_vector_array[vector_array_field]"}
 	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, "",
-		"vector_array_field", s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
+		"struct_with_vector_array[vector_array_field]", s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
 	searchResp, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
 	s.Require().NoError(err)

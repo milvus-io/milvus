@@ -86,6 +86,8 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
+	initcore.InitLocalArrowFileSystem(suite.rootPath)
+	initcore.InitRemoteArrowFileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)

@@ -77,6 +77,7 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     storage_config.storage_type = "local";
     storage_config.root_path = root_path;
     auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
 
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(
         milvus_storage::ArrowFileSystemConfig{
@@ -94,7 +95,7 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     chunk_manager->Write(
         log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
 
     Config build_config;
     build_config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};

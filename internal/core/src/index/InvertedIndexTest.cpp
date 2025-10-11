@@ -96,6 +96,7 @@ test_run() {
     std::string root_path = "/tmp/test-inverted-index/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
 
     size_t nb = 10000;
     std::vector<T> data_gen;
@@ -160,7 +161,7 @@ test_run() {
     auto cm_w = test::ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     std::vector<std::string> index_files;
 
     {
@@ -498,6 +499,7 @@ test_string() {
     std::string root_path = "/tmp/test-inverted-index/";
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
 
     size_t nb = 10000;
     boost::container::vector<T> data;
@@ -553,7 +555,7 @@ test_string() {
     auto cm_w = test::ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     std::vector<std::string> index_files;
 
     {

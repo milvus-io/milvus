@@ -19,6 +19,7 @@
 #include "common/Tracer.h"
 #include "expr/ITypeExpr.h"
 #include "index/JsonFlatIndex.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -82,6 +83,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         std::string root_path = "/tmp/test-json-flat-index/";
         auto storage_config = gen_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
+        fs_ = storage::InitArrowFileSystem(storage_config);
 
         json_data_ = {
             R"({"profile": {"name": {"first": "Alice", "last": "Smith", "preferred_name": "Al"}, "team": {"name": "Engineering", "supervisor": {"name": "Bob"}}, "is_active": true, "employee_id": 1001, "skills": ["cpp", "rust", "python"], "scores": [95, 88, 92]}})",
@@ -121,7 +123,7 @@ class JsonFlatIndexTest : public ::testing::Test {
             log_path_, serialized_bytes.data(), serialized_bytes.size());
 
         ctx_ = std::make_unique<storage::FileManagerContext>(
-            field_meta_, index_meta_, cm_);
+            field_meta_, index_meta_, cm_, fs_);
 
         // Build index
         Config config;
@@ -166,6 +168,7 @@ class JsonFlatIndexTest : public ::testing::Test {
     storage::FieldDataMeta field_meta_;
     storage::IndexMeta index_meta_;
     storage::ChunkManagerPtr cm_;
+    milvus_storage::ArrowFileSystemPtr fs_;
     std::unique_ptr<test::ChunkManagerWrapper> cm_w_;
     std::unique_ptr<storage::FileManagerContext> ctx_;
     std::string log_path_;

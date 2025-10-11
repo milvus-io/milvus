@@ -109,7 +109,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                          false);
         auto index_meta = gen_index_meta(
             segment_id, int64_field.get(), index_build_id, index_version);
-        storage::FileManagerContext ctx(field_meta, index_meta, cm_);
+        storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
             milvus::DataType::INT64, config, ctx);
@@ -148,7 +148,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
             collection_id, partition_id, segment_id, float_field.get()};
         auto file_manager =
             std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                storage::FileManagerContext(field_data_meta, index_meta, cm_));
+                storage::FileManagerContext(
+                    field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
         ASSERT_EQ(res, "/tmp/milvus/local_data/raw_datas/3/105/raw_data");
     }
@@ -175,7 +176,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         FieldDataMeta field_data_meta = {
             collection_id, partition_id, segment_id, int32_field.get()};
         auto ctx =
-            storage::FileManagerContext(field_data_meta, index_meta, cm_);
+            storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         auto int32_index = milvus::index::CreateScalarIndexSort<int32_t>(ctx);
         int32_index->Build(config);
@@ -204,7 +205,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         FieldDataMeta field_data_meta = {
             collection_id, partition_id, segment_id, varchar_field.get()};
         auto ctx =
-            storage::FileManagerContext(field_data_meta, index_meta, cm_);
+            storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         auto string_index =
             std::make_unique<milvus::index::StringIndexMarisa>(ctx);
@@ -237,7 +238,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         FieldDataMeta field_data_meta = {
             collection_id, partition_id, segment_id, vec_field.get()};
         auto ctx =
-            storage::FileManagerContext(field_data_meta, index_meta, cm_);
+            storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         try {
             auto vec_index =

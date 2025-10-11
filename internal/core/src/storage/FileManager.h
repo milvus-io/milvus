@@ -33,17 +33,17 @@ namespace milvus::storage {
 struct FileManagerContext {
     FileManagerContext() : chunkManagerPtr(nullptr) {
     }
-    FileManagerContext(const ChunkManagerPtr& chunkManagerPtr)
+    explicit FileManagerContext(const ChunkManagerPtr& chunkManagerPtr)
         : chunkManagerPtr(chunkManagerPtr) {
     }
     FileManagerContext(const FieldDataMeta& fieldDataMeta,
                        const IndexMeta& indexMeta,
                        const ChunkManagerPtr& chunkManagerPtr,
-                       milvus_storage::ArrowFileSystemPtr fs = nullptr)
+                       milvus_storage::ArrowFileSystemPtr fs)
         : fieldDataMeta(fieldDataMeta),
           indexMeta(indexMeta),
           chunkManagerPtr(chunkManagerPtr),
-          fs(fs) {
+          fs(std::move(fs)) {
     }
 
     bool

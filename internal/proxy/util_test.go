@@ -2608,7 +2608,7 @@ func TestValidateFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "output field not found")
 	})
 
-	t.Run("Invalid function schema - nullable input field", func(t *testing.T) {
+	t.Run("Valid function schema - nullable input field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
@@ -2624,8 +2624,7 @@ func TestValidateFunction(t *testing.T) {
 			},
 		}
 		err := validateFunction(schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "function input field cannot be nullable")
+		assert.NoError(t, err)
 	})
 
 	t.Run("Invalid function schema - output field is primary key", func(t *testing.T) {
@@ -3485,8 +3484,8 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 2)
-		assert.Equal(t, "age_array", insertMsg.FieldsData[0].FieldName)
-		assert.Equal(t, "score_array", insertMsg.FieldsData[1].FieldName)
+		assert.Equal(t, "user_info[age_array]", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "user_info[score_array]", insertMsg.FieldsData[1].FieldName)
 	})
 
 	t.Run("success - valid struct array field with vector arrays", func(t *testing.T) {
@@ -3514,7 +3513,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 1)
-		assert.Equal(t, "embeddings", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "embedding_info[embeddings]", insertMsg.FieldsData[0].FieldName)
 		assert.Equal(t, schemapb.DataType_ArrayOfVector, insertMsg.FieldsData[0].Type)
 	})
 
@@ -3557,9 +3556,9 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		for i, field := range insertMsg.FieldsData {
 			fieldNames[i] = field.FieldName
 		}
-		assert.Contains(t, fieldNames, "field1")
-		assert.Contains(t, fieldNames, "field2")
-		assert.Contains(t, fieldNames, "field3")
+		assert.Contains(t, fieldNames, "struct1[field1]")
+		assert.Contains(t, fieldNames, "struct2[field2]")
+		assert.Contains(t, fieldNames, "struct2[field3]")
 	})
 
 	t.Run("success - mixed normal and struct fields", func(t *testing.T) {
@@ -3592,7 +3591,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 			fieldNames[i] = field.FieldName
 		}
 		assert.Contains(t, fieldNames, "id")
-		assert.Contains(t, fieldNames, "tags")
+		assert.Contains(t, fieldNames, "metadata[tags]")
 	})
 
 	t.Run("success - empty struct array fields", func(t *testing.T) {
@@ -3837,7 +3836,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, insertMsg.FieldsData, 1)
-		assert.Equal(t, "single_field", insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, "single_element_struct[single_field]", insertMsg.FieldsData[0].FieldName)
 	})
 }
 
@@ -4113,7 +4112,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     1021,
-							Name:        "sub_field",
+							Name:        "test_struct[sub_field]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 						},
@@ -4132,6 +4131,66 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		// Should not modify anything for count(*) query
 		assert.Equal(t, originalFieldsData, resultFieldsData)
 		assert.Equal(t, originalOutputFields, resultOutputFields)
+	})
+
+	t.Run("struct field query - should reconstruct struct field", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "test_struct[sub_field]",
+				FieldId:   1021, // Use the correct field ID that matches the schema
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data: []*schemapb.ScalarField{
+									{
+										Data: &schemapb.ScalarField_IntData{
+											IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		outputFields := []string{"test_struct[sub_field]"}
+
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "test_struct[sub_field]",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+
+		// Should reconstruct the struct field with the restored field name
+		assert.Len(t, resultFieldsData, 1)
+		assert.Equal(t, "test_struct", resultFieldsData[0].FieldName)
+		assert.Equal(t, int64(102), resultFieldsData[0].FieldId)
+		assert.Equal(t, schemapb.DataType_ArrayOfStruct, resultFieldsData[0].Type)
+
+		// Check that the sub-field name has been restored
+		structArrayField := resultFieldsData[0].GetStructArrays()
+		assert.NotNil(t, structArrayField)
+		assert.Len(t, structArrayField.Fields, 1)
+		assert.Equal(t, "sub_field", structArrayField.Fields[0].FieldName) // Name should be restored
+
+		assert.Equal(t, []string{"test_struct"}, resultOutputFields)
 	})
 
 	t.Run("no struct array fields - should return early", func(t *testing.T) {
@@ -4166,9 +4225,9 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 	})
 
 	t.Run("reconstruct single struct field", func(t *testing.T) {
-		// Create mock data
+		// Create mock data with transformed field names (as they would be internally)
 		subField1Data := &schemapb.FieldData{
-			FieldName: "sub_int_array",
+			FieldName: "test_struct[sub_int_array]",
 			FieldId:   1021,
 			Type:      schemapb.DataType_Array,
 			Field: &schemapb.FieldData_Scalars{
@@ -4190,7 +4249,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 
 		subField2Data := &schemapb.FieldData{
-			FieldName: "sub_text_array",
+			FieldName: "test_struct[sub_text_array]",
 			FieldId:   1022,
 			Type:      schemapb.DataType_Array,
 			Field: &schemapb.FieldData_Scalars{
@@ -4212,7 +4271,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 
 		fieldsData := []*schemapb.FieldData{subField1Data, subField2Data}
-		outputFields := []string{"sub_int_array", "sub_text_array"}
+		outputFields := []string{"test_struct[sub_int_array]", "test_struct[sub_text_array]"}
 
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -4230,13 +4289,13 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     1021,
-							Name:        "sub_int_array",
+							Name:        "test_struct[sub_int_array]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 						},
 						{
 							FieldID:     1022,
-							Name:        "sub_text_array",
+							Name:        "test_struct[sub_text_array]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_VarChar,
 						},
@@ -4295,9 +4354,9 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		// Create struct sub field data
+		// Create struct sub field data with transformed name
 		subFieldData := &schemapb.FieldData{
-			FieldName: "sub_field",
+			FieldName: "test_struct[sub_field]",
 			FieldId:   1021,
 			Type:      schemapb.DataType_Array,
 			Field: &schemapb.FieldData_Scalars{
@@ -4319,7 +4378,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 
 		fieldsData := []*schemapb.FieldData{regularField, subFieldData}
-		outputFields := []string{"regular_field", "sub_field"}
+		outputFields := []string{"regular_field", "test_struct[sub_field]"}
 
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -4336,7 +4395,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     1021,
-							Name:        "sub_field",
+							Name:        "test_struct[sub_field]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 						},
@@ -4374,7 +4433,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 	t.Run("multiple struct fields", func(t *testing.T) {
 		// Create sub field for first struct
 		struct1SubField := &schemapb.FieldData{
-			FieldName: "struct1_sub",
+			FieldName: "struct1[struct1_sub]",
 			FieldId:   1021,
 			Type:      schemapb.DataType_Array,
 			Field: &schemapb.FieldData_Scalars{
@@ -4391,7 +4450,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 
 		// Create sub fields for second struct
 		struct2SubField1 := &schemapb.FieldData{
-			FieldName: "struct2_sub1",
+			FieldName: "struct2[struct2_sub1]",
 			FieldId:   1031,
 			Type:      schemapb.DataType_Array,
 			Field: &schemapb.FieldData_Scalars{
@@ -4407,7 +4466,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 
 		struct2SubField2 := &schemapb.FieldData{
-			FieldName: "struct2_sub2",
+			FieldName: "struct2[struct2_sub2]",
 			FieldId:   1032,
 			Type:      schemapb.DataType_VarChar,
 			Field: &schemapb.FieldData_Scalars{
@@ -4420,7 +4479,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 
 		fieldsData := []*schemapb.FieldData{struct1SubField, struct2SubField1, struct2SubField2}
-		outputFields := []string{"struct1_sub", "struct2_sub1", "struct2_sub2"}
+		outputFields := []string{"struct1[struct1_sub]", "struct2[struct2_sub1]", "struct2[struct2_sub2]"}
 
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -4438,7 +4497,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     1021,
-							Name:        "struct1_sub",
+							Name:        "struct1[struct1_sub]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 						},
@@ -4450,13 +4509,13 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     1031,
-							Name:        "struct2_sub1",
+							Name:        "struct2[struct2_sub1]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 						},
 						{
 							FieldID:  1032,
-							Name:     "struct2_sub2",
+							Name:     "struct2[struct2_sub2]",
 							DataType: schemapb.DataType_VarChar,
 						},
 					},
@@ -4492,6 +4551,115 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		}
 		assert.True(t, foundStruct1, "Should find struct1")
 		assert.True(t, foundStruct2, "Should find struct2")
+	})
+
+	t.Run("partial struct fields query - only return queried fields", func(t *testing.T) {
+		// Create a struct with 3 fields, but only query 2 of them
+		// This tests that we only return what the user requested
+
+		// Create mock data for only 2 out of 3 struct fields
+		clipStrData := &schemapb.FieldData{
+			FieldName: "clip[str]",
+			FieldId:   2001,
+			Type:      schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"text1", "text2"}},
+					},
+				},
+			},
+		}
+
+		clipIntData := &schemapb.FieldData{
+			FieldName: "clip[int]",
+			FieldId:   2002,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200}},
+					},
+				},
+			},
+		}
+
+		// Note: clip[embedding] is NOT included in query results
+		fieldsData := []*schemapb.FieldData{clipStrData, clipIntData}
+		outputFields := []string{"clip[str]", "clip[int]"}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 200,
+					Name:    "clip",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:  2001,
+							Name:     "clip[str]",
+							DataType: schemapb.DataType_VarChar,
+						},
+						{
+							FieldID:  2002,
+							Name:     "clip[int]",
+							DataType: schemapb.DataType_Int32,
+						},
+						{
+							FieldID:  2003,
+							Name:     "clip[embedding]",
+							DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: "dim", Value: "128"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+
+		// Check result
+		assert.Len(t, resultFieldsData, 1, "Should have one reconstructed struct field")
+		assert.Len(t, resultOutputFields, 1, "Output fields should have one")
+
+		structField := resultFieldsData[0]
+		assert.Equal(t, "clip", structField.FieldName)
+		assert.Equal(t, int64(200), structField.FieldId)
+		assert.Equal(t, schemapb.DataType_ArrayOfStruct, structField.Type)
+		assert.Equal(t, "clip", resultOutputFields[0])
+
+		// Check that struct only contains the 2 queried fields, NOT the embedding field
+		structArrays := structField.GetStructArrays()
+		assert.NotNil(t, structArrays)
+		assert.Len(t, structArrays.Fields, 2, "Struct should only contain 2 queried fields, not 3")
+
+		// Verify the field names have been restored to original names
+		var foundStr, foundInt bool
+		for _, field := range structArrays.Fields {
+			switch field.FieldId {
+			case 2001:
+				assert.Equal(t, "str", field.FieldName, "Field name should be restored to original")
+				assert.Equal(t, schemapb.DataType_VarChar, field.Type)
+				foundStr = true
+			case 2002:
+				assert.Equal(t, "int", field.FieldName, "Field name should be restored to original")
+				assert.Equal(t, schemapb.DataType_Int32, field.Type)
+				foundInt = true
+			case 2003:
+				assert.Fail(t, "Should not include embedding field as it was not queried")
+			}
+		}
+		assert.True(t, foundStr, "Should find str field")
+		assert.True(t, foundInt, "Should find int field")
 	})
 }
 
@@ -4593,4 +4761,86 @@ func TestLackOfFieldsDataBySchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetStorageCost(t *testing.T) {
+	// nil and empty cases
+	t.Run("nil or empty status", func(t *testing.T) {
+		{
+			remote, total, ratio, ok := GetStorageCost(nil)
+			assert.Equal(t, int64(0), remote)
+			assert.Equal(t, int64(0), total)
+			assert.Equal(t, 0.0, ratio)
+			assert.False(t, ok)
+		}
+		{
+			remote, total, ratio, ok := GetStorageCost(&commonpb.Status{})
+			assert.Equal(t, int64(0), remote)
+			assert.Equal(t, int64(0), total)
+			assert.Equal(t, 0.0, ratio)
+			assert.False(t, ok)
+		}
+	})
+
+	// missing keys should result in zeros
+	t.Run("missing keys", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+	})
+
+	// invalid number formats should result in zeros
+	t.Run("invalid formats", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "x",
+			"scanned_total_bytes":  "200",
+			"cache_hit_ratio":      "0.5",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+
+		st = &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+			"scanned_total_bytes":  "y",
+			"cache_hit_ratio":      "0.5",
+		}}
+		remote, total, ratio, ok = GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+
+		st = &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "100",
+			"scanned_total_bytes":  "200",
+			"cache_hit_ratio":      "abc",
+		}}
+		remote, total, ratio, ok = GetStorageCost(st)
+		assert.Equal(t, int64(0), remote)
+		assert.Equal(t, int64(0), total)
+		assert.Equal(t, 0.0, ratio)
+		assert.False(t, ok)
+	})
+
+	// success case
+	t.Run("success", func(t *testing.T) {
+		st := &commonpb.Status{ExtraInfo: map[string]string{
+			"scanned_remote_bytes": "123",
+			"scanned_total_bytes":  "456",
+			"cache_hit_ratio":      "0.27",
+		}}
+		remote, total, ratio, ok := GetStorageCost(st)
+		assert.Equal(t, int64(123), remote)
+		assert.Equal(t, int64(456), total)
+		assert.InDelta(t, 0.27, ratio, 1e-9)
+		assert.True(t, ok)
+	})
 }

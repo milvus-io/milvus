@@ -26,6 +26,9 @@ extraConfigFiles:
         dir: /var/lib/milvus/etcd
     common:
       storageType: local
+    queryNode:
+      segcore:
+        exprEvalBatchSize: 512
 image:
   all:
     pullPolicy: Always

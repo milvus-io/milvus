@@ -66,10 +66,10 @@ func TestRotateWriter_Basic(t *testing.T) {
 	err = logger.Rotate()
 	assert.NoError(t, err)
 
-	time.Sleep(time.Duration(1) * time.Second)
-	logfiles, err := logger.handler.listAll()
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(logfiles))
+	assert.Eventually(t, func() bool {
+		logfiles, err := logger.handler.listAll()
+		return err == nil && len(logfiles) == 1
+	}, time.Second*5, time.Millisecond*200)
 }
 
 func TestRotateWriter_TimeRotate(t *testing.T) {
@@ -96,10 +96,10 @@ func TestRotateWriter_TimeRotate(t *testing.T) {
 	assert.Equal(t, num, n)
 	assert.NoError(t, err)
 
-	time.Sleep(time.Duration(4) * time.Second)
-	logfiles, err := logger.handler.listAll()
-	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, len(logfiles), 1)
+	assert.Eventually(t, func() bool {
+		logfiles, err := logger.handler.listAll()
+		return err == nil && len(logfiles) >= 1
+	}, time.Second*5, time.Millisecond*200)
 }
 
 func TestRotateWriter_SizeRotate(t *testing.T) {
@@ -135,9 +135,10 @@ func TestRotateWriter_SizeRotate(t *testing.T) {
 
 	// assert minio files
 	time.Sleep(time.Duration(1) * time.Second)
-	remoteFiles, err := logger.handler.listAll()
-	assert.NoError(t, err)
-	assert.Equal(t, fileNum, len(remoteFiles))
+	assert.Eventually(t, func() bool {
+		remoteFiles, err := logger.handler.listAll()
+		return err == nil && len(remoteFiles) == fileNum
+	}, time.Second*5, time.Microsecond*200)
 
 	// assert local sealed files num
 	localFields, err := logger.oldLogFiles()
@@ -169,11 +170,11 @@ func TestRotateWriter_LocalRetention(t *testing.T) {
 	logger.Rotate()
 	logger.Write([]byte("Test"))
 	logger.Rotate()
-	time.Sleep(time.Duration(1) * time.Second)
 
-	logFiles, err := logger.oldLogFiles()
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(logFiles))
+	assert.Eventually(t, func() bool {
+		logFiles, err := logger.oldLogFiles()
+		return err == nil && len(logFiles) == 1
+	}, time.Second*5, time.Millisecond*200)
 }
 
 func TestRotateWriter_BasicError(t *testing.T) {

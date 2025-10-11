@@ -433,29 +433,25 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 // getCollectionStartPos returns collection start position.
 func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosition {
 	log := log.With(zap.String("channel", channel.GetName()))
+	if channel.GetStartPosition() != nil {
+		return channel.GetStartPosition()
+	}
 	// use collection start position when segment position is not found
-	var startPosition *msgpb.MsgPosition
-	if channel.GetStartPositions() == nil {
-		collection, err := h.GetCollection(h.s.ctx, channel.GetCollectionID())
-		if collection != nil && err == nil {
-			startPosition = getCollectionStartPosition(channel.GetName(), collection)
-		}
+	collection, err := h.GetCollection(h.s.ctx, channel.GetCollectionID())
+	if collection != nil && err == nil {
+		startPosition := toMsgPosition(channel.GetName(), collection.StartPositions)
+		// We should not set the timestamp to collectionInfo.CreatedAt
+		// because after enabling streaming arch, every shard has its own timetick, no comparison can be applied cross shards timetick.
+		// because when using the collection start position, we don't perform any sync operation of data,
+		// so we can just use 0 here without introducing any repeated data to avoid filtering some DML whose timetick is less than collectionInfo.CreatedAt.
+		// And after enabling new DDL framework, the collection start position will have its own timestamp, so we can use it directly.
 		log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
 			zap.Uint64("posTs", startPosition.GetTimestamp()),
 			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
 		)
-	} else {
-		// use passed start positions, skip to ask RootCoord.
-		startPosition = toMsgPosition(channel.GetName(), channel.GetStartPositions())
-		if startPosition != nil {
-			startPosition.Timestamp = channel.GetCreateTimestamp()
-		}
-		log.Info("segment position not found, setting channel seek position to channel start position",
-			zap.Uint64("posTs", startPosition.GetTimestamp()),
-			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
-		)
+		return startPosition
 	}
-	return startPosition
+	return nil
 }
 
 // GetChannelSeekPosition gets channel seek position from:
@@ -492,14 +488,6 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 
 	log.Warn("get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
 	return nil
-}
-
-func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *msgpb.MsgPosition {
-	position := toMsgPosition(channel, collectionInfo.StartPositions)
-	if position != nil {
-		position.Timestamp = collectionInfo.CreatedAt
-	}
-	return position
 }
 
 func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *msgpb.MsgPosition {

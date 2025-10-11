@@ -158,6 +158,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		)
 
 		mockC := compactor.NewMockCompactor(s.T())
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 		mockC.EXPECT().GetPlanID().Return(int64(1))
 		mockC.EXPECT().GetCollection().Return(collection)
 		mockC.EXPECT().GetChannelName().Return(channel)
@@ -170,6 +171,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
+		mockC2.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 		mockC2.EXPECT().GetPlanID().Return(int64(2))
 		mockC2.EXPECT().GetCollection().Return(collection)
 		mockC2.EXPECT().GetChannelName().Return(channel)

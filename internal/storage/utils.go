@@ -764,8 +764,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
 			validData := srcField.GetValidData()
 			fieldData = &GeometryFieldData{
-				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		default:

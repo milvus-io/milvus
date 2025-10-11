@@ -1293,9 +1293,9 @@ func (_c *RootCoordCatalog_GetCollectionByID_Call) RunAndReturn(run func(context
 	return _c
 }
 
-// GetCollectionByName provides a mock function with given fields: ctx, dbID, collectionName, ts
-func (_m *RootCoordCatalog) GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts uint64) (*model.Collection, error) {
-	ret := _m.Called(ctx, dbID, collectionName, ts)
+// GetCollectionByName provides a mock function with given fields: ctx, dbID, dbName, collectionName, ts
+func (_m *RootCoordCatalog) GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts uint64) (*model.Collection, error) {
+	ret := _m.Called(ctx, dbID, dbName, collectionName, ts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollectionByName")
@@ -1303,19 +1303,19 @@ func (_m *RootCoordCatalog) GetCollectionByName(ctx context.Context, dbID int64,
 
 	var r0 *model.Collection
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, string, uint64) (*model.Collection, error)); ok {
-		return rf(ctx, dbID, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, string, uint64) (*model.Collection, error)); ok {
+		return rf(ctx, dbID, dbName, collectionName, ts)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, string, uint64) *model.Collection); ok {
-		r0 = rf(ctx, dbID, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, string, uint64) *model.Collection); ok {
+		r0 = rf(ctx, dbID, dbName, collectionName, ts)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.Collection)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, string, uint64) error); ok {
-		r1 = rf(ctx, dbID, collectionName, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, string, string, uint64) error); ok {
+		r1 = rf(ctx, dbID, dbName, collectionName, ts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1331,15 +1331,16 @@ type RootCoordCatalog_GetCollectionByName_Call struct {
 // GetCollectionByName is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dbID int64
+//   - dbName string
 //   - collectionName string
 //   - ts uint64
-func (_e *RootCoordCatalog_Expecter) GetCollectionByName(ctx interface{}, dbID interface{}, collectionName interface{}, ts interface{}) *RootCoordCatalog_GetCollectionByName_Call {
-	return &RootCoordCatalog_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbID, collectionName, ts)}
+func (_e *RootCoordCatalog_Expecter) GetCollectionByName(ctx interface{}, dbID interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *RootCoordCatalog_GetCollectionByName_Call {
+	return &RootCoordCatalog_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbID, dbName, collectionName, ts)}
 }
 
-func (_c *RootCoordCatalog_GetCollectionByName_Call) Run(run func(ctx context.Context, dbID int64, collectionName string, ts uint64)) *RootCoordCatalog_GetCollectionByName_Call {
+func (_c *RootCoordCatalog_GetCollectionByName_Call) Run(run func(ctx context.Context, dbID int64, dbName string, collectionName string, ts uint64)) *RootCoordCatalog_GetCollectionByName_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(uint64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(string), args[4].(uint64))
 	})
 	return _c
 }
@@ -1349,7 +1350,7 @@ func (_c *RootCoordCatalog_GetCollectionByName_Call) Return(_a0 *model.Collectio
 	return _c
 }
 
-func (_c *RootCoordCatalog_GetCollectionByName_Call) RunAndReturn(run func(context.Context, int64, string, uint64) (*model.Collection, error)) *RootCoordCatalog_GetCollectionByName_Call {
+func (_c *RootCoordCatalog_GetCollectionByName_Call) RunAndReturn(run func(context.Context, int64, string, string, uint64) (*model.Collection, error)) *RootCoordCatalog_GetCollectionByName_Call {
 	_c.Call.Return(run)
 	return _c
 }

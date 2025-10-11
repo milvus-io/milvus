@@ -17,6 +17,7 @@
 
 #include "common/Tracer.h"
 #include "index/BitmapIndex.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
@@ -225,7 +226,8 @@ class ArrayBitmapIndexTest : public testing::Test {
         chunk_manager_->Write(
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
-        storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager_);
+        storage::FileManagerContext ctx(
+            field_meta, index_meta, chunk_manager_, fs_);
         std::vector<std::string> index_files;
 
         Config config;
@@ -297,6 +299,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         storage_config.storage_type = "local";
         storage_config.root_path = root_path;
         chunk_manager_ = storage::CreateChunkManager(storage_config);
+        fs_ = storage::InitArrowFileSystem(storage_config);
 
         Init(collection_id,
              partition_id,
@@ -350,6 +353,7 @@ class ArrayBitmapIndexTest : public testing::Test {
 
  private:
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 
  public:
     DataType type_;

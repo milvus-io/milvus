@@ -369,6 +369,17 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
 
+	// Check if task exists in meta
+	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
+	if !exist || segIndex == nil {
+		log.Info("index task has not exist in meta table, removing task")
+		if it.tryDropTaskOnWorker(cluster) != nil {
+			return
+		}
+		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
+		return
+	}
+
 	results, err := cluster.QueryIndex(it.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.BuildID},

@@ -336,8 +336,7 @@ type DataNodeInfos struct {
 }
 
 type DataCoordDist struct {
-	Segments   []*Segment   `json:"segments,omitempty"`
-	DMChannels []*DmChannel `json:"dm_channels,omitempty"`
+	Segments []*Segment `json:"segments,omitempty"`
 }
 
 // DataCoordConfiguration records the configuration of DataCoord.
