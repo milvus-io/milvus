@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -55,7 +56,7 @@ using HighPrecisionType =
 
 // False positive rate for Bloom filter
 static constexpr double FPR = 0.01;
-static constexpr int64_t NGRAM_SIZE = 3;
+static constexpr size_t NGRAM_SIZE = 3;
 // static constexpr int64_t MIN_ROWS_TO_BUILD_METRICS = 10;
 static constexpr double CARDINALITY_RATIO_FOR_SET = 0.1;
 static constexpr double METADATA_BUDGET_RATIO = 0.01;
@@ -75,7 +76,6 @@ struct MetricsInfo {
     ankerl::unordered_dense::set<std::string_view> ngram_values_;
 
     size_t string_length_ = 0;
-    size_t max_string_length_ = 0;
     size_t total_string_length_ = 0;
 };
 
@@ -136,6 +136,9 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
 
     bool
     CanSkipUnaryRange(OpType op_type, const T& val) const {
+        if (!hasValue_) {
+            return false;
+        }
         auto [lower_bound, upper_bound] = GetMinMax();
         if (lower_bound == MetricsDataType<T>() ||
             upper_bound == MetricsDataType<T>()) {
@@ -159,6 +162,9 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
+        if (!hasValue_) {
+            return false;
+        }
         auto [lower_bound, upper_bound] = GetMinMax();
         if (lower_bound == MetricsDataType<T>() ||
             upper_bound == MetricsDataType<T>()) {
@@ -269,7 +275,6 @@ class SetFieldChunkMetric : public FieldChunkMetric {
         std::stringstream ss(data, std::ios::binary | std::ios::in);
         uint32_t count;
         ss.read(reinterpret_cast<char*>(&count), sizeof(count));
-        unique_values_.reserve(count);
 
         for (uint32_t i = 0; i < count; ++i) {
             T value;
@@ -315,7 +320,7 @@ class SetFieldChunkMetric : public FieldChunkMetric {
     std::string
     Serialize() const override {
         std::stringstream ss(std::ios::binary | std::ios::out);
-        uint64_t count = unique_values_.size();
+        uint32_t count = unique_values_.size();
         ss.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
         for (const auto& value : unique_values_) {
@@ -348,7 +353,7 @@ class SetFieldChunkMetric<std::string> : public FieldChunkMetric {
         unique_values_.reserve(count);
 
         for (uint32_t i = 0; i < count; ++i) {
-            uint64_t len;
+            uint32_t len;
             ss.read(reinterpret_cast<char*>(&len), sizeof(len));
             std::string value(len, '\0');
             ss.read(value.data(), len);
@@ -359,7 +364,7 @@ class SetFieldChunkMetric<std::string> : public FieldChunkMetric {
 
     static uint64_t
     EstimateCost(const MetricsInfo<std::string>& info) {
-        return info.total_string_length_;
+        return info.string_length_;
     }
 
     bool
@@ -393,11 +398,11 @@ class SetFieldChunkMetric<std::string> : public FieldChunkMetric {
     std::string
     Serialize() const override {
         std::stringstream ss(std::ios::binary | std::ios::out);
-        uint64_t count = unique_values_.size();
+        uint32_t count = unique_values_.size();
         ss.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
         for (const auto& value : unique_values_) {
-            uint64_t len = value.length();
+            uint32_t len = value.length();
             ss.write(reinterpret_cast<const char*>(&len), sizeof(len));
             ss.write(value.data(), len);
         }
@@ -485,25 +490,6 @@ class BloomFilter {
 
     template <typename T>
     static std::unique_ptr<BloomFilter>
-    Build(const std::vector<T>& items) {
-        auto n = items.size();
-        if (n == 0) {
-            return nullptr;
-        }
-        auto bit_size = EstimateBitSize(n);
-        auto hash_count = EstimateHashCount(n, bit_size);
-        auto bit_array = std::vector<uint64_t>{};
-        bit_array.assign(bit_size / 64, 0);
-        auto bloom_filter =
-            std::make_unique<BloomFilter>(hash_count, bit_size, bit_array);
-        for (const auto& item : items) {
-            bloom_filter->template Add<T>(item);
-        }
-        return bloom_filter;
-    }
-
-    template <typename T>
-    static std::unique_ptr<BloomFilter>
     Build(const ankerl::unordered_dense::set<T>& items) {
         auto n = items.size();
         if (n == 0) {
@@ -513,17 +499,20 @@ class BloomFilter {
         auto hash_count = EstimateHashCount(n, bit_size);
         auto bit_array = std::vector<uint64_t>{};
         bit_array.assign(bit_size / 64, 0);
-        auto bloom_filter =
-            std::make_unique<BloomFilter>(hash_count, bit_size, bit_array);
         for (const auto& item : items) {
-            bloom_filter->template Add<T>(item);
+            uint64_t hash1 = Hash(item, 0x9e3779b9);
+            uint64_t hash2 = Hash(item, hash1);
+            for (size_t i = 0; i < hash_count; ++i) {
+                size_t bit_pos = (hash1 + i * hash2) % bit_size;
+                bit_array[bit_pos / 64] |= (1ULL << (bit_pos % 64));
+            }
         }
-        return bloom_filter;
+        return std::make_unique<BloomFilter>(hash_count, bit_size, bit_array);
     }
 
     static uint64_t
     EstimateCost(size_t n) {
-        return EstimateBitSize(n) + sizeof(uint64_t) * 2;
+        return EstimateBitSize(n) / 8 + sizeof(uint64_t) * 2;
     }
 
     template <typename T>
@@ -532,8 +521,8 @@ class BloomFilter {
         if (bit_size_ == 0) {
             return true;
         }
-        uint64_t hash1 = Hash<T>(item, 0x9e3779b9);
-        uint64_t hash2 = Hash<T>(item, hash1);
+        uint64_t hash1 = Hash(item, 0x9e3779b9);
+        uint64_t hash2 = Hash(item, hash1);
         for (size_t i = 0; i < hash_count_; ++i) {
             size_t bit_pos = (hash1 + i * hash2) % bit_size_;
             if (!(bit_array_[bit_pos / 64] & (1ULL << (bit_pos % 64)))) {
@@ -606,7 +595,7 @@ class BloomFilter {
             -1.0 * n * std::log(FPR) / (std::log(2) * std::log(2));
         auto bit_size = static_cast<uint64_t>(bit_size_double);
         // Align to 64 bits (8 bytes)
-        return ((bit_size + 63) / 64) * 8;
+        return ((bit_size + 63) / 64) * 64;
     }
 
     static uint64_t
@@ -626,22 +615,8 @@ class BloomFilter {
     }
 
     template <typename T>
-    void
-    Add(const T& item) {
-        if (bit_size_ == 0) {
-            return;
-        }
-        uint64_t hash1 = Hash<T>(item, 0x9e3779b9);
-        uint64_t hash2 = Hash<T>(item, hash1);
-        for (size_t i = 0; i < hash_count_; ++i) {
-            size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            bit_array_[bit_pos / 64] |= (1ULL << (bit_pos % 64));
-        }
-    }
-
-    template <typename T>
-    uint64_t
-    Hash(const T& item, uint64_t seed) const {
+    static uint64_t
+    Hash(const T& item, uint64_t seed) {
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
             return XXH64(item.data(), item.size(), seed);
@@ -725,6 +700,9 @@ class NgramFilterFieldChunkMetric : public FieldChunkMetric {
 
  public:
     explicit NgramFilterFieldChunkMetric(const MetricsInfo<std::string>& info) {
+        if (info.ngram_values_.empty()) {
+            return;
+        }
         filter_ = BloomFilter::Build<std::string_view>(info.ngram_values_);
         hasValue_ = filter_->IsValid();
     }
@@ -738,15 +716,8 @@ class NgramFilterFieldChunkMetric : public FieldChunkMetric {
     }
 
     static uint64_t
-    EstimateCost(
-        const ankerl::unordered_dense::set<std::string_view>& unique_values) {
-        size_t total_ngrams = 0;
-        for (const auto& text : unique_values) {
-            if (text.length() >= 3) {
-                total_ngrams += (text.length() - 3 + 1);
-            }
-        }
-        return BloomFilter::EstimateCost(total_ngrams);
+    EstimateCost(const MetricsInfo<std::string>& info) {
+        return BloomFilter::EstimateCost(info.ngram_values_.size());
     }
 
     bool
@@ -865,7 +836,6 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
         }
         auto field_schema = batches[0]->schema();
         for (int col_idx = 0; col_idx < field_schema->num_fields(); ++col_idx) {
-            auto field_schema = batches[0]->schema();
             auto field_id =
                 std::stoll(field_schema->field(col_idx)
                                ->metadata()
@@ -1095,25 +1065,22 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
                                                     METADATA_BUDGET_RATIO);
         metrics.emplace_back(
             std::make_unique<MinMaxFieldChunkMetric<std::string>>(info));
-        remaining_budget -=
-            sizeof(size_t) * 2 + info.min_.size() + info.max_.size();
 
         auto bf_cost =
             BloomFilterFieldChunkMetric<std::string>::EstimateCost(info);
         auto set_cost = SetFieldChunkMetric<std::string>::EstimateCost(info);
-        if (set_cost < bf_cost && set_cost < remaining_budget) {
+        if (set_cost < bf_cost) {
             metrics.emplace_back(
                 std::make_unique<SetFieldChunkMetric<std::string>>(info));
-            remaining_budget -= set_cost;
-        } else if (bf_cost < remaining_budget) {
+        } else {
             metrics.emplace_back(
                 std::make_unique<BloomFilterFieldChunkMetric<std::string>>(
                     info));
-            remaining_budget -= bf_cost;
         }
-
-        metrics.emplace_back(
-            std::make_unique<NgramFilterFieldChunkMetric>(info));
+        if (!info.ngram_values_.empty()) {
+            metrics.emplace_back(
+                std::make_unique<NgramFilterFieldChunkMetric>(info));
+        }
         return metrics;
     }
 
@@ -1222,15 +1189,14 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
                         info.max_ = value;
                     }
                 }
-
-                for (size_t j = 0; j <= length - NGRAM_SIZE; ++j) {
-                    std::string_view ngram = value.substr(j, NGRAM_SIZE);
-                    info.ngram_values_.insert(ngram);
+                if (length >= NGRAM_SIZE) {
+                    for (size_t j = 0; j + NGRAM_SIZE <= length; ++j) {
+                        std::string_view ngram = value.substr(j, NGRAM_SIZE);
+                        info.ngram_values_.insert(ngram);
+                    }
                 }
                 info.unique_values_.insert(value);
                 info.string_length_ += length;
-                info.max_string_length_ =
-                    std::max(info.max_string_length_, length);
             }
             info.total_rows_ += string_array->length();
         }
@@ -1388,34 +1354,50 @@ class SkipIndex {
         }
         switch (op_type) {
             case OpType::Equal: {
+                if (auto minmax_metrics =
+                        field_chunk_skipindex
+                            ->GetMetric<MinMaxFieldChunkMetric<T>>(
+                                FieldChunkMetricType::MINMAX);
+                    minmax_metrics &&
+                    minmax_metrics->CanSkipUnaryRange(op_type, val)) {
+                    return true;
+                }
                 if (auto set_metrics = field_chunk_skipindex
                                            ->GetMetric<SetFieldChunkMetric<T>>(
                                                FieldChunkMetricType::SET);
-                    set_metrics) {
-                    return set_metrics->CanSkipEqual(val);
+                    set_metrics && set_metrics->CanSkipEqual(val)) {
+                    return true;
                 }
                 if (auto bloom_metrics =
                         field_chunk_skipindex
                             ->GetMetric<BloomFilterFieldChunkMetric<T>>(
                                 FieldChunkMetricType::BLOOM_FILTER);
-                    bloom_metrics) {
-                    return bloom_metrics->CanSkipEqual(val);
+                    bloom_metrics && bloom_metrics->CanSkipEqual(val)) {
+                    return true;
                 }
                 break;
             }
             case OpType::NotEqual: {
+                if (auto minmax_metrics =
+                        field_chunk_skipindex
+                            ->GetMetric<MinMaxFieldChunkMetric<T>>(
+                                FieldChunkMetricType::MINMAX);
+                    minmax_metrics &&
+                    minmax_metrics->CanSkipUnaryRange(op_type, val)) {
+                    return true;
+                }
                 if (auto set_metrics = field_chunk_skipindex
                                            ->GetMetric<SetFieldChunkMetric<T>>(
                                                FieldChunkMetricType::SET);
-                    set_metrics) {
-                    return set_metrics->CanSkipNotEqual(val);
+                    set_metrics && set_metrics->CanSkipNotEqual(val)) {
+                    return true;
                 }
                 if (auto bloom_metrics =
                         field_chunk_skipindex
                             ->GetMetric<BloomFilterFieldChunkMetric<T>>(
                                 FieldChunkMetricType::BLOOM_FILTER);
-                    bloom_metrics) {
-                    return bloom_metrics->CanSkipNotEqual(val);
+                    bloom_metrics && bloom_metrics->CanSkipNotEqual(val)) {
+                    return true;
                 }
                 break;
             }
@@ -1427,8 +1409,9 @@ class SkipIndex {
                         field_chunk_skipindex
                             ->GetMetric<MinMaxFieldChunkMetric<T>>(
                                 FieldChunkMetricType::MINMAX);
-                    minmax_metrics) {
-                    return minmax_metrics->CanSkipUnaryRange(op_type, val);
+                    minmax_metrics &&
+                    minmax_metrics->CanSkipUnaryRange(op_type, val)) {
+                    return true;
                 }
                 break;
             }
@@ -1451,8 +1434,8 @@ class SkipIndex {
         if (auto minmax_metrics =
                 field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
                     FieldChunkMetricType::MINMAX);
-            minmax_metrics) {
-            return minmax_metrics->CanSkipUnaryRange(op_type, val);
+            minmax_metrics && minmax_metrics->CanSkipUnaryRange(op_type, val)) {
+            return true;
         }
         return false;
     }
@@ -1481,9 +1464,10 @@ class SkipIndex {
         if (auto minmax_metric =
                 field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
                     FieldChunkMetricType::MINMAX);
-            minmax_metric) {
-            return minmax_metric->CanSkipBinaryRange(
-                lower_val, upper_val, lower_inclusive, upper_inclusive);
+            minmax_metric &&
+            minmax_metric->CanSkipBinaryRange(
+                lower_val, upper_val, lower_inclusive, upper_inclusive)) {
+            return true;
         }
         return false;
     }
@@ -1583,22 +1567,25 @@ class SkipIndex {
 
         if (auto set_metric =
                 field_chunk_skipindex->GetMetric<SetFieldChunkMetric<T>>(
-                    FieldChunkMetricType::SET)) {
-            return set_metric->CanSkipIn(values);
+                    FieldChunkMetricType::SET);
+            set_metric && set_metric->CanSkipIn(values)) {
+            return true;
         }
 
         if constexpr (!std::is_same_v<T, bool>) {
             if (auto bloom_metric =
                     field_chunk_skipindex
                         ->GetMetric<BloomFilterFieldChunkMetric<T>>(
-                            FieldChunkMetricType::BLOOM_FILTER)) {
-                return bloom_metric->CanSkipIn(values);
+                            FieldChunkMetricType::BLOOM_FILTER);
+                bloom_metric && bloom_metric->CanSkipIn(values)) {
+                return true;
             }
 
             if (auto minmax_metric =
                     field_chunk_skipindex->GetMetric<MinMaxFieldChunkMetric<T>>(
-                        FieldChunkMetricType::MINMAX)) {
-                return minmax_metric->CanSkipIn(values);
+                        FieldChunkMetricType::MINMAX);
+                minmax_metric && minmax_metric->CanSkipIn(values)) {
+                return true;
             }
         }
         return false;

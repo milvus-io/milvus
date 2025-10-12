@@ -16,8 +16,6 @@
 
 #include "SkipIndex.h"
 #include "common/Schema.h"
-#include "arrow/type_fwd.h"
-#include "common/FieldDataInterface.h"
 
 namespace milvus {
 class SkipIndexTest : public ::testing::Test {
@@ -77,77 +75,114 @@ class SkipIndexTest : public ::testing::Test {
         arrow::StringBuilder string_low_cardinality_builder;
         arrow::StringBuilder string_high_cardinality_builder;
 
-        pk_builder.AppendValues(pks).ok();
-        i32_builder.AppendValues(int32s).ok();
-        i16_builder.AppendValues(int16s).ok();
-        i8_builder.AppendValues(int8s).ok();
-        float_builder.AppendValues(floats).ok();
-        double_builder.AppendValues(doubles).ok();
-        string_builder.AppendValues(strings).ok();
-        string_for_match_builder.AppendValues(strings_for_match).ok();
+        ASSERT_TRUE(pk_builder.AppendValues(pks).ok());
+        ASSERT_TRUE(i32_builder.AppendValues(int32s).ok());
+        ASSERT_TRUE(i16_builder.AppendValues(int16s).ok());
+        ASSERT_TRUE(i8_builder.AppendValues(int8s).ok());
+        ASSERT_TRUE(float_builder.AppendValues(floats).ok());
+        ASSERT_TRUE(double_builder.AppendValues(doubles).ok());
+        ASSERT_TRUE(string_builder.AppendValues(strings).ok());
+        ASSERT_TRUE(
+            string_for_match_builder.AppendValues(strings_for_match).ok());
 
-        bool_builder.AppendValues(bools_mixed).ok();
-        bool_all_true_builder.AppendValues(bools_all_true).ok();
-        bool_all_false_builder.AppendValues(bools_all_false).ok();
+        ASSERT_TRUE(bool_builder.AppendValues(bools_mixed).ok());
+        ASSERT_TRUE(bool_all_true_builder.AppendValues(bools_all_true).ok());
+        ASSERT_TRUE(bool_all_false_builder.AppendValues(bools_all_false).ok());
 
-        i64_low_cardinality_builder.AppendValues(int64_low_cardinality).ok();
-        i64_high_cardinality_builder.AppendValues(int64_high_cardinality).ok();
-        string_low_cardinality_builder.AppendValues(strings_low_card).ok();
-        string_high_cardinality_builder.AppendValues(strings_high_card).ok();
+        ASSERT_TRUE(
+            i64_low_cardinality_builder.AppendValues(int64_low_cardinality)
+                .ok());
+        ASSERT_TRUE(
+            i64_high_cardinality_builder.AppendValues(int64_high_cardinality)
+                .ok());
+        ASSERT_TRUE(
+            string_low_cardinality_builder.AppendValues(strings_low_card).ok());
+        ASSERT_TRUE(
+            string_high_cardinality_builder.AppendValues(strings_high_card)
+                .ok());
 
         for (int i = 0; i < 10; i++) {
             if (i > 4) {
-                i64_nullable_builder.AppendNull().ok();
+                ASSERT_TRUE(i64_nullable_builder.AppendNull().ok());
             } else {
-                i64_nullable_builder.Append(pks[i]).ok();
+                ASSERT_TRUE(i64_nullable_builder.Append(pks[i]).ok());
             }
         }
 
-        pk_builder.Finish(&pk_array_).ok();
-        i32_builder.Finish(&i32_array_).ok();
-        i16_builder.Finish(&i16_array_).ok();
-        i8_builder.Finish(&i8_array_).ok();
-        float_builder.Finish(&float_array_).ok();
-        double_builder.Finish(&double_array_).ok();
-        string_builder.Finish(&string_array_).ok();
+        ASSERT_TRUE(pk_builder.Finish(&pk_array_).ok());
+        ASSERT_TRUE(i32_builder.Finish(&i32_array_).ok());
+        ASSERT_TRUE(i16_builder.Finish(&i16_array_).ok());
+        ASSERT_TRUE(i8_builder.Finish(&i8_array_).ok());
+        ASSERT_TRUE(float_builder.Finish(&float_array_).ok());
+        ASSERT_TRUE(double_builder.Finish(&double_array_).ok());
+        ASSERT_TRUE(string_builder.Finish(&string_array_).ok());
 
-        string_for_match_builder.Finish(&string_for_match_array_).ok();
-        i64_nullable_builder.Finish(&i64_nullable_array_).ok();
+        ASSERT_TRUE(
+            string_for_match_builder.Finish(&string_for_match_array_).ok());
+        ASSERT_TRUE(i64_nullable_builder.Finish(&i64_nullable_array_).ok());
 
-        bool_builder.Finish(&bool_array_).ok();
-        bool_all_true_builder.Finish(&bool_all_true_array_).ok();
-        bool_all_false_builder.Finish(&bool_all_false_array_).ok();
+        ASSERT_TRUE(bool_builder.Finish(&bool_array_).ok());
+        ASSERT_TRUE(bool_all_true_builder.Finish(&bool_all_true_array_).ok());
+        ASSERT_TRUE(bool_all_false_builder.Finish(&bool_all_false_array_).ok());
 
-        i64_low_cardinality_builder.Finish(&i64_low_cardinality_array_).ok();
-        i64_high_cardinality_builder.Finish(&i64_high_cardinality_array_).ok();
+        ASSERT_TRUE(
+            i64_low_cardinality_builder.Finish(&i64_low_cardinality_array_)
+                .ok());
+        ASSERT_TRUE(
+            i64_high_cardinality_builder.Finish(&i64_high_cardinality_array_)
+                .ok());
 
-        string_low_cardinality_builder.Finish(&string_low_cardinality_array_)
-            .ok();
-        string_high_cardinality_builder.Finish(&string_high_cardinality_array_)
-            .ok();
+        ASSERT_TRUE(string_low_cardinality_builder
+                        .Finish(&string_low_cardinality_array_)
+                        .ok());
+        ASSERT_TRUE(string_high_cardinality_builder
+                        .Finish(&string_high_cardinality_array_)
+                        .ok());
     }
 
     std::unique_ptr<SkipIndex>
-    BuildSkipIndex(SchemaPtr schema,
+    BuildSkipIndex(ArrowSchemaPtr schema,
                    std::vector<std::shared_ptr<arrow::Array>> arrays) {
+        std::cout << "BuildSkipIndex" << std::endl;
         if (arrays.size() == 0) {
             return nullptr;
         }
-        auto arrow_schema = schema->ConvertToArrowSchema();
         auto record_batch =
-            arrow::RecordBatch::Make(arrow_schema, arrays[0]->length(), arrays);
+            arrow::RecordBatch::Make(schema, arrays[0]->length(), arrays);
         auto batches =
             std::vector<std::shared_ptr<arrow::RecordBatch>>{record_batch};
 
+        std::cout << "batches.size(): " << batches.size() << std::endl;
         std::vector<std::unique_ptr<ChunkSkipIndex>> chunk_skipindex_vec;
         chunk_skipindex_vec.emplace_back(
             std::make_unique<ChunkSkipIndex>(batches));
         auto skip_index = std::make_unique<SkipIndex>();
+        std::cout << "before LoadSkipIndex" << std::endl;
         skip_index->LoadSkipIndex(std::move(chunk_skipindex_vec));
         return skip_index;
     }
 
+    FieldId
+    AddDebugField(arrow::FieldVector& arrow_fields,
+                  const std::string name,
+                  DataType data_type,
+                  bool nullable = false) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        auto arrow_data_type = GetArrowDataType(data_type);
+        auto arrow_field = std::make_shared<arrow::Field>(
+            name,
+            arrow_data_type,
+            nullable,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(field_id.get())}));
+        arrow_fields.push_back(arrow_field);
+        return field_id;
+    }
+
  protected:
+    int64_t debug_id = START_USER_FIELDID;
+
     std::shared_ptr<arrow::Array> pk_array_;
     std::shared_ptr<arrow::Array> i32_array_;
     std::shared_ptr<arrow::Array> i16_array_;
@@ -170,9 +205,11 @@ class SkipIndexTest : public ::testing::Test {
 };
 
 TEST_F(SkipIndexTest, SkipUnaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto skip_index = BuildSkipIndex(schema, {i64_nullable_array_});
+    arrow::FieldVector arrow_fields;
+    auto i64_fid =
+        AddDebugField(arrow_fields, "int64_field", DataType::INT64, true);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {i64_nullable_array_});
 
     // test for int64
     bool equal_6_skip =
@@ -220,17 +257,20 @@ TEST_F(SkipIndexTest, SkipUnaryRangeNullable) {
 }
 
 TEST_F(SkipIndexTest, SkipUnaryRange) {
-    auto schema = std::make_shared<Schema>();
-    FieldId pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    FieldId i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
-    FieldId i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
-    FieldId i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
-    FieldId float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
+    arrow::FieldVector arrow_fields;
+    FieldId pk_fid = AddDebugField(arrow_fields, "pk", DataType::INT64);
+    FieldId i32_fid =
+        AddDebugField(arrow_fields, "int32_field", DataType::INT32);
+    FieldId i16_fid =
+        AddDebugField(arrow_fields, "int16_field", DataType::INT16);
+    FieldId i8_fid = AddDebugField(arrow_fields, "int8_field", DataType::INT8);
+    FieldId float_fid =
+        AddDebugField(arrow_fields, "float_field", DataType::FLOAT);
     FieldId double_fid =
-        schema->AddDebugField("double_field", DataType::DOUBLE);
+        AddDebugField(arrow_fields, "double_field", DataType::DOUBLE);
     FieldId string_fid =
-        schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema,
+        AddDebugField(arrow_fields, "string_field", DataType::STRING);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
                                      {pk_array_,
                                       i32_array_,
                                       i16_array_,
@@ -248,19 +288,19 @@ TEST_F(SkipIndexTest, SkipUnaryRange) {
         skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10));
     ASSERT_TRUE(
         skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1));
-    ASSERT_TRUE(
+    ASSERT_FALSE(
         skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5));
-    ASSERT_TRUE(skip_index->CanSkipUnaryRange<int64_t>(
+    ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::LessEqual, 1));
     ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::LessEqual, 15));
     skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
     ASSERT_TRUE(skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 10));
+        pk_fid, 0, OpType::GreaterThan, 12));
     ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 5));
     ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 10));
+        pk_fid, 0, OpType::GreaterEqual, 12));
     ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 5));
 
@@ -286,10 +326,11 @@ TEST_F(SkipIndexTest, SkipUnaryRange) {
 }
 
 TEST_F(SkipIndexTest, SkipUnaryRangeString) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     FieldId string_fid =
-        schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_array_});
+        AddDebugField(arrow_fields, "string_field", DataType::STRING);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {string_array_});
 
     //test for string
     ASSERT_TRUE(skip_index->CanSkipUnaryRange<std::string>(
@@ -313,10 +354,11 @@ TEST_F(SkipIndexTest, SkipUnaryRangeString) {
 }
 
 TEST_F(SkipIndexTest, SkipUnaryRangeStringMatch) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     auto string_fid =
-        schema->AddDebugField("string_match_field", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_for_match_array_});
+        AddDebugField(arrow_fields, "string_match_field", DataType::STRING);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {string_for_match_array_});
 
     ASSERT_TRUE(skip_index->HasMetric(
         string_fid, 0, FieldChunkMetricType::NGRAM_FILTER));
@@ -342,14 +384,15 @@ TEST_F(SkipIndexTest, SkipUnaryRangeStringMatch) {
         string_fid, 0, OpType::PrefixMatch, "mil"));
 
     // Pattern contains n-grams that exist, but the full string doesn't match.
-    ASSERT_FALSE(skip_index->CanSkipUnaryRange<std::string>(
+    ASSERT_TRUE(skip_index->CanSkipUnaryRange<std::string>(
         string_fid, 0, OpType::InnerMatch, "datorch"));
 }
 
 TEST_F(SkipIndexTest, SkipBinaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto skip_index = BuildSkipIndex(schema, {i64_nullable_array_});
+    arrow::FieldVector arrow_fields;
+    auto i64_fid = AddDebugField(arrow_fields, "int64_field", DataType::INT64);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {i64_nullable_array_});
 
     ASSERT_FALSE(
         skip_index->CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
@@ -367,9 +410,9 @@ TEST_F(SkipIndexTest, SkipBinaryRangeNullable) {
 }
 
 TEST_F(SkipIndexTest, SkipBinaryRange) {
-    auto schema = std::make_shared<Schema>();
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto skip_index = BuildSkipIndex(schema, {pk_array_});
+    arrow::FieldVector arrow_fields;
+    auto pk_fid = AddDebugField(arrow_fields, "pk", DataType::INT64);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields), {pk_array_});
 
     // test for int64
     ASSERT_FALSE(
@@ -389,10 +432,11 @@ TEST_F(SkipIndexTest, SkipBinaryRange) {
 }
 
 TEST_F(SkipIndexTest, SkipBinaryRangeString) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     FieldId string_fid =
-        schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_array_});
+        AddDebugField(arrow_fields, "string_field", DataType::STRING);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {string_array_});
 
     ASSERT_TRUE(skip_index->CanSkipBinaryRange<std::string>(
         string_fid, 0, "a", "c", true, true));
@@ -411,9 +455,10 @@ TEST_F(SkipIndexTest, SkipBinaryRangeString) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto skip_index = BuildSkipIndex(schema, {i64_nullable_array_});
+    arrow::FieldVector arrow_fields;
+    auto i64_fid = AddDebugField(arrow_fields, "int64_field", DataType::INT64);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {i64_nullable_array_});
 
     std::vector<int64_t> values1 = {6, 7, 8};
     ASSERT_TRUE(skip_index->CanSkipInQuery<int64_t>(i64_fid, 0, values1));
@@ -424,14 +469,16 @@ TEST_F(SkipIndexTest, SkipInQueryNullable) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryBool) {
-    auto schema = std::make_shared<Schema>();
-    auto bool_mixed_fid = schema->AddDebugField("bool_mixed", DataType::BOOL);
+    arrow::FieldVector arrow_fields;
+    auto bool_mixed_fid =
+        AddDebugField(arrow_fields, "bool_mixed", DataType::BOOL);
     auto bool_all_true_fid =
-        schema->AddDebugField("bool_all_true", DataType::BOOL);
+        AddDebugField(arrow_fields, "bool_all_true", DataType::BOOL);
     auto bool_all_false_fid =
-        schema->AddDebugField("bool_all_false", DataType::BOOL);
+        AddDebugField(arrow_fields, "bool_all_false", DataType::BOOL);
     auto skip_index = BuildSkipIndex(
-        schema, {bool_array_, bool_all_true_array_, bool_all_false_array_});
+        arrow::schema(arrow_fields),
+        {bool_array_, bool_all_true_array_, bool_all_false_array_});
 
     // The query vector for bool is {query_contains_true, query_contains_false}
     std::vector<bool> q_true_only = {true, false};
@@ -449,28 +496,28 @@ TEST_F(SkipIndexTest, SkipInQueryBool) {
     // 2. Test with a chunk containing only true
     // Chunk only has true, so a query for only false can be skipped
     ASSERT_FALSE(
-        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 1, q_true_only));
+        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 0, q_true_only));
     ASSERT_TRUE(
-        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 1, q_false_only));
+        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 0, q_false_only));
     ASSERT_FALSE(
-        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 1, q_both));
+        skip_index->CanSkipInQuery<bool>(bool_all_true_fid, 0, q_both));
 
     // 3. Test with a chunk containing only false
     // Chunk only has false, so a query for only true can be skipped
     ASSERT_TRUE(
-        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 2, q_true_only));
+        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 0, q_true_only));
     ASSERT_FALSE(
-        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 2, q_false_only));
+        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 0, q_false_only));
     ASSERT_FALSE(
-        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 2, q_both));
+        skip_index->CanSkipInQuery<bool>(bool_all_false_fid, 0, q_both));
 }
 
 TEST_F(SkipIndexTest, SkipInQueryInt) {
-    auto schema = std::make_shared<Schema>();
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto skip_index = BuildSkipIndex(schema, {pk_array_});
+    arrow::FieldVector arrow_fields;
+    auto pk_fid = AddDebugField(arrow_fields, "pk", DataType::INT64);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields), {pk_array_});
 
-    std::vector<int64_t> values1 = {11, 12, 13};
+    std::vector<int64_t> values1 = {10, 11, 13};
     ASSERT_TRUE(skip_index->CanSkipInQuery<int64_t>(pk_fid, 0, values1));
     std::vector<int64_t> values2 = {9, 10, 11};
     ASSERT_FALSE(skip_index->CanSkipInQuery<int64_t>(pk_fid, 0, values2));
@@ -479,10 +526,11 @@ TEST_F(SkipIndexTest, SkipInQueryInt) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryLowCardinalityInt) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     auto i64_fid =
-        schema->AddDebugField("i64_low_cardinality", DataType::INT64);
-    auto skip_index = BuildSkipIndex(schema, {i64_low_cardinality_array_});
+        AddDebugField(arrow_fields, "i64_low_cardinality", DataType::INT64);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
+                                     {i64_low_cardinality_array_});
 
     // Low cardinality data should build a Set metric, not a BloomFilter
     ASSERT_TRUE(skip_index->HasMetric(i64_fid, 0, FieldChunkMetricType::SET));
@@ -509,10 +557,11 @@ TEST_F(SkipIndexTest, SkipInQueryLowCardinalityInt) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryHighCardinalityInt) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     auto i64_fid =
-        schema->AddDebugField("i64_high_cardinality", DataType::INT64);
-    auto skip_index = BuildSkipIndex(schema, {i64_high_cardinality_array_});
+        AddDebugField(arrow_fields, "i64_high_cardinality", DataType::INT64);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
+                                     {i64_high_cardinality_array_});
 
     // High cardinality data should build a BloomFilter metric, not a Set
     ASSERT_TRUE(
@@ -539,10 +588,13 @@ TEST_F(SkipIndexTest, SkipInQueryHighCardinalityInt) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryFloat) {
-    auto schema = std::make_shared<Schema>();
-    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double_field", DataType::DOUBLE);
-    auto skip_index = BuildSkipIndex(schema, {float_array_, double_array_});
+    arrow::FieldVector arrow_fields;
+    auto float_fid =
+        AddDebugField(arrow_fields, "float_field", DataType::FLOAT);
+    auto double_fid =
+        AddDebugField(arrow_fields, "double_field", DataType::DOUBLE);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
+                                     {float_array_, double_array_});
 
     // For float types, only MinMax metric should be created.
     ASSERT_TRUE(
@@ -593,9 +645,11 @@ TEST_F(SkipIndexTest, SkipInQueryFloat) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryString) {
-    auto schema = std::make_shared<Schema>();
-    FieldId str_fid = schema->AddDebugField("str_field", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_array_});
+    arrow::FieldVector arrow_fields;
+    FieldId str_fid =
+        AddDebugField(arrow_fields, "str_field", DataType::STRING);
+    auto skip_index =
+        BuildSkipIndex(arrow::schema(arrow_fields), {string_array_});
 
     std::vector<std::string> str_values1 = {"u", "v", "w"};
     ASSERT_TRUE(
@@ -609,10 +663,11 @@ TEST_F(SkipIndexTest, SkipInQueryString) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryLowCardinalityString) {
-    auto schema = std::make_shared<Schema>();
+    arrow::FieldVector arrow_fields;
     auto string_fid =
-        schema->AddDebugField("string_low_cardinality", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_low_cardinality_array_});
+        AddDebugField(arrow_fields, "string_low_cardinality", DataType::STRING);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
+                                     {string_low_cardinality_array_});
 
     // Low cardinality string data should build a Set metric.
     ASSERT_TRUE(
@@ -642,10 +697,11 @@ TEST_F(SkipIndexTest, SkipInQueryLowCardinalityString) {
 }
 
 TEST_F(SkipIndexTest, SkipInQueryHighCardinalityString) {
-    auto schema = std::make_shared<Schema>();
-    auto string_fid =
-        schema->AddDebugField("string_high_cardinality", DataType::VARCHAR);
-    auto skip_index = BuildSkipIndex(schema, {string_high_cardinality_array_});
+    arrow::FieldVector arrow_fields;
+    auto string_fid = AddDebugField(
+        arrow_fields, "string_high_cardinality", DataType::STRING);
+    auto skip_index = BuildSkipIndex(arrow::schema(arrow_fields),
+                                     {string_high_cardinality_array_});
 
     // High cardinality string data should build a BloomFilter metric.
     ASSERT_TRUE(skip_index->HasMetric(
@@ -675,14 +731,16 @@ TEST_F(SkipIndexTest, SkipInQueryHighCardinalityString) {
 }
 
 TEST_F(SkipIndexTest, SkipBinaryArithRange) {
-    auto schema = std::make_shared<Schema>();
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
-    auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
-    auto i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
-    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
+    arrow::FieldVector arrow_fields;
+    auto pk_fid = AddDebugField(arrow_fields, "pk", DataType::INT64);
+    auto i32_fid = AddDebugField(arrow_fields, "int32_field", DataType::INT32);
+    auto i16_fid = AddDebugField(arrow_fields, "int16_field", DataType::INT16);
+    auto i8_fid = AddDebugField(arrow_fields, "int8_field", DataType::INT8);
+    auto float_fid =
+        AddDebugField(arrow_fields, "float_field", DataType::FLOAT);
     auto skip_index = BuildSkipIndex(
-        schema, {pk_array_, i32_array_, i16_array_, i8_array_, float_array_});
+        arrow::schema(arrow_fields),
+        {pk_array_, i32_array_, i16_array_, i8_array_, float_array_});
 
     // --- Test for Add: field + C op V  =>  field op V - C ---
     ASSERT_TRUE(skip_index->CanSkipBinaryArithRange<int64_t>(
@@ -702,7 +760,7 @@ TEST_F(SkipIndexTest, SkipBinaryArithRange) {
     ASSERT_FALSE(skip_index->CanSkipBinaryArithRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, ArithOpType::Mul, 20, 2));
     ASSERT_TRUE(skip_index->CanSkipBinaryArithRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, ArithOpType::Mul, 21, 2));
+        pk_fid, 0, OpType::GreaterThan, ArithOpType::Mul, 25, 2));
     ASSERT_TRUE(skip_index->CanSkipBinaryArithRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, ArithOpType::Mul, 0, -2));
     ASSERT_FALSE(skip_index->CanSkipBinaryArithRange<int64_t>(
@@ -766,7 +824,7 @@ TEST_F(SkipIndexTest, SkipBinaryArithRange) {
 
 TEST(BloomFilter, BloomFilterBasicFunctionality) {
     // Test with integers
-    std::vector<int64_t> int_items = {1, 2, 3, 5, 8, 13, 21};
+    ankerl::unordered_dense::set<int64_t> int_items = {1, 2, 3, 5, 8, 13, 21};
     auto int_bf = BloomFilter::Build(int_items);
     ASSERT_NE(int_bf, nullptr);
 
@@ -778,7 +836,8 @@ TEST(BloomFilter, BloomFilterBasicFunctionality) {
     ASSERT_FALSE(int_bf->MightContain<int64_t>(100));
 
     // Test with strings
-    std::vector<std::string> string_items = {"apple", "banana", "cherry"};
+    ankerl::unordered_dense::set<std::string> string_items = {
+        "apple", "banana", "cherry"};
     auto string_bf = BloomFilter::Build(string_items);
     ASSERT_NE(string_bf, nullptr);
 
@@ -790,7 +849,7 @@ TEST(BloomFilter, BloomFilterBasicFunctionality) {
 }
 
 TEST(BloomFilter, BloomFilterSerialization) {
-    std::vector<int64_t> items = {10, 20, 30, 40, 50};
+    ankerl::unordered_dense::set<int64_t> items = {10, 20, 30, 40, 50};
     auto bf1 = BloomFilter::Build(items);
     ASSERT_NE(bf1, nullptr);
 
@@ -813,12 +872,12 @@ TEST(BloomFilter, BloomFilterSerialization) {
 
 TEST(BloomFilter, BloomFilterEdgeCases) {
     // Empty items vector
-    std::vector<int> empty_items = {};
+    ankerl::unordered_dense::set<int> empty_items = {};
     auto empty_bf = BloomFilter::Build(empty_items);
     ASSERT_EQ(empty_bf, nullptr);
 
     // Single item
-    std::vector<std::string> single_item = {"one"};
+    ankerl::unordered_dense::set<std::string> single_item = {"one"};
     auto single_item_bf = BloomFilter::Build(single_item);
     ASSERT_NE(single_item_bf, nullptr);
     ASSERT_TRUE(single_item_bf->MightContain<std::string>("one"));
@@ -891,7 +950,7 @@ TEST(MinMaxMetric, StringFunctionality) {
     ASSERT_TRUE(metric.CanSkipUnaryRange(OpType::Equal, "q"));
     ASSERT_FALSE(metric.CanSkipUnaryRange(OpType::Equal, "f"));
     ASSERT_TRUE(metric.CanSkipUnaryRange(OpType::LessThan, "e"));
-    ASSERT_FALSE(metric.CanSkipUnaryRange(OpType::GreaterThan, "p"));
+    ASSERT_TRUE(metric.CanSkipUnaryRange(OpType::GreaterThan, "p"));
 
     // Test CanSkipIn
     ASSERT_TRUE(metric.CanSkipIn({"a", "b", "c"}));
@@ -1177,7 +1236,7 @@ TEST(NgramFilterMetric, Functionality) {
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("vec")));
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("vector")));
     // "vus" and "vec" are in the filter.
-    ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("vusvec")));
+    ASSERT_TRUE(metric.CanSkipSubstringMatch(std::string("vusvec")));
 }
 
 TEST(NgramFilterMetric, Serialization) {

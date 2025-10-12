@@ -369,8 +369,8 @@ void
 ChunkedSegmentSealedImpl::load_field_data_internal(
     const LoadFieldDataInfo& load_info) {
     SCOPE_CGO_CALL_METRIC();
-
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
+
     AssertInfo(
         !num_rows_.has_value() || num_rows_ == num_rows,
         "num_rows_ is set but not equal to num_rows of LoadFieldDataInfo");

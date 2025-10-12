@@ -27,6 +27,7 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tes
 file(GLOB_RECURSE SOURCE_TEST_FILES
     "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
     "${CMAKE_HOME_DIRECTORY}/src/**/*_test.cpp"
+    # "${CMAKE_HOME_DIRECTORY}/src/index/SkipIndexTest.cpp"
 )
 
 # TODO: better to use ls/find pattern
