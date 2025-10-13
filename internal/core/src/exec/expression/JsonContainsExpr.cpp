@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "JsonContainsExpr.h"
+#include <cmath>
 #include <utility>
 #include "common/Types.h"
 
@@ -339,6 +340,17 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
             for (auto&& it : array) {
                 auto val = it.template get<GetType>();
                 if (val.error()) {
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        auto double_val = it.template get<double>();
+                        if (!double_val.error() &&
+                            double_val.value() ==
+                                std::floor(double_val.value())) {
+                            if (elements->In(static_cast<int64_t>(
+                                    double_val.value())) > 0) {
+                                return true;
+                            }
+                        }
+                    }
                     continue;
                 }
                 if (elements->In(val.value()) > 0) {
@@ -843,6 +855,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             for (auto&& it : array) {
                 auto val = it.template get<GetType>();
                 if (val.error()) {
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        auto double_val = it.template get<double>();
+                        if (!double_val.error() &&
+                            double_val.value() ==
+                                std::floor(double_val.value())) {
+                            tmp_elements.erase(
+                                static_cast<int64_t>(double_val.value()));
+                            if (tmp_elements.size() == 0) {
+                                return true;
+                            }
+                        }
+                    }
                     continue;
                 }
                 tmp_elements.erase(val.value());
@@ -965,6 +989,22 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
                     element.get_value());
                 if (!value.has_value()) {
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        auto double_value =
+                            milvus::BsonView::GetValueFromBsonView<double>(
+                                element.get_value());
+                        if (double_value.has_value()) {
+                            if (double_value.value() ==
+                                std::floor(double_value.value())) {
+                                tmp_elements.erase(
+                                    static_cast<int64_t>(double_value.value()));
+                            }
+                            if (tmp_elements.size() == 0) {
+                                res_view[row_offset] = true;
+                                return;
+                            }
+                        }
+                    }
                     continue;
                 }
                 tmp_elements.erase(value.value());
@@ -1058,6 +1098,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                         case proto::plan::GenericValue::kInt64Val: {
                             auto val = it.template get<int64_t>();
                             if (val.error()) {
+                                auto double_val = it.template get<double>();
+                                if (!double_val.error() &&
+                                    double_val.value() == element.int64_val()) {
+                                    tmp_elements_index.erase(i);
+                                }
                                 continue;
                             }
                             if (val.value() == element.int64_val()) {
@@ -1237,8 +1282,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
+                            // get double/int64 from bson
                             auto val =
-                                milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                milvus::BsonView::GetValueFromBsonView<double>(
                                     sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
@@ -1588,6 +1634,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                         case proto::plan::GenericValue::kInt64Val: {
                             auto val = it.template get<int64_t>();
                             if (val.error()) {
+                                auto double_val = it.template get<double>();
+                                if (!double_val.error() &&
+                                    double_val.value() == element.int64_val()) {
+                                    return true;
+                                }
                                 continue;
                             }
                             if (val.value() == element.int64_val()) {
@@ -1751,7 +1802,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                         }
                         case proto::plan::GenericValue::kInt64Val: {
                             auto val =
-                                milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                milvus::BsonView::GetValueFromBsonView<double>(
                                     sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
