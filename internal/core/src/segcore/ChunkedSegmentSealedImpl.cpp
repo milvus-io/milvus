@@ -2454,6 +2454,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
+        if (!is_proxy_column &&
+            (!IsVariableDataType(data_type) || IsStringDataType(data_type))) {
+            LoadSkipIndex(field_id, data_type, column);
+        }
         if (IsVariableDataType(data_type)) {
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
