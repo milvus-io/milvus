@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package privilege
 
 import (
 	"testing"
@@ -32,9 +32,9 @@ func (s *PrivilegeCacheSuite) TearDownTest() {
 
 func (s *PrivilegeCacheSuite) TestGetPrivilege() {
 	// get current version
-	_, _, version := GetPrivilegeCache("", "", "")
-	SetPrivilegeCache("test-role", "test-object", "read", true, version)
-	SetPrivilegeCache("test-role", "test-object", "delete", false, version)
+	_, _, version := GetResultCache("", "", "")
+	SetResultCache("test-role", "test-object", "read", true, version)
+	SetResultCache("test-role", "test-object", "delete", false, version)
 
 	type testCase struct {
 		tag            string
@@ -51,7 +51,7 @@ func (s *PrivilegeCacheSuite) TestGetPrivilege() {
 
 	for _, tc := range testCases {
 		s.Run(tc.tag, func() {
-			isPermit, exists, _ := GetPrivilegeCache(tc.input[0], tc.input[1], tc.input[2])
+			isPermit, exists, _ := GetResultCache(tc.input[0], tc.input[1], tc.input[2])
 			s.Equal(tc.expectIsPermit, isPermit)
 			s.Equal(tc.expectExists, exists)
 		})
@@ -60,12 +60,12 @@ func (s *PrivilegeCacheSuite) TestGetPrivilege() {
 
 func (s *PrivilegeCacheSuite) TestSetPrivilegeVersion() {
 	// get current version
-	_, _, version := GetPrivilegeCache("", "", "")
+	_, _, version := GetResultCache("", "", "")
 	CleanPrivilegeCache()
 
-	SetPrivilegeCache("test-role", "test-object", "read", true, version)
+	SetResultCache("test-role", "test-object", "read", true, version)
 
-	isPermit, exists, nextVersion := GetPrivilegeCache("test-role", "test-object", "read")
+	isPermit, exists, nextVersion := GetResultCache("test-role", "test-object", "read")
 	s.False(isPermit)
 	s.False(exists)
 	s.NotEqual(version, nextVersion)
