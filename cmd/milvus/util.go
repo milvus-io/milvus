@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -138,7 +137,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
 	case typeutil.StreamingNodeRole:
-		streamingutil.EnableEmbededQueryNode()
+		sessionutil.EnableEmbededQueryNodeLabel()
 		role.EnableStreamingNode = true
 		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
@@ -149,9 +148,9 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableStreamingNode = true
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
+		sessionutil.EnableStandaloneLabel()
 	case typeutil.MixCoordRole:
 		role.EnableMixCoord = true
-
 	case typeutil.MixtureRole:
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
@@ -162,7 +161,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableStreamingNode = enableStreamingNode
 		if enableStreamingNode && !enableQueryNode {
 			role.EnableQueryNode = true
-			streamingutil.EnableEmbededQueryNode()
+			sessionutil.EnableEmbededQueryNodeLabel()
 		}
 
 	case typeutil.CDCRole:
