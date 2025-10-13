@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -293,6 +294,30 @@ func (s *GrpcAccessInfoSuite) TestClientRequestTime() {
 	})
 	s.info.ctx = ctx
 	s.NotEqual(Unknown, Get(s.info, "$client_request_time")[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestTemplateValueLength() {
+	// params := []*commonpb.KeyValuePair{{Key: "test_key", Value: "test_value"}}
+	exprTemplValues := map[string]*schemapb.TemplateValue{
+		"store_id": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{0, 1},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl:                "store_id in {store_id}",
+		ExprTemplateValues: exprTemplValues,
+	}
+
+	s.Equal(`map[store_id:2]`, Get(s.info, "$template_value_length")[0])
 }
 
 func TestGrpcAccssInfo(t *testing.T) {

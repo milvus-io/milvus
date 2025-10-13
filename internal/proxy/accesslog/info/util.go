@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -100,6 +101,29 @@ func getAnnsFieldFromKvs(kvs []*commonpb.KeyValuePair) string {
 		return "default"
 	}
 	return field
+}
+
+func getLengthFromTemplateValue(tv *schemapb.TemplateValue) int {
+	arrayValues := tv.GetArrayVal()
+	// other single value data type
+	if arrayValues == nil {
+		return 1
+	}
+	switch arrayValues.GetData().(type) {
+	case *schemapb.TemplateArrayValue_BoolData:
+		return len(arrayValues.GetBoolData().GetData())
+	case *schemapb.TemplateArrayValue_LongData:
+		return len(arrayValues.GetLongData().GetData())
+	case *schemapb.TemplateArrayValue_DoubleData:
+		return len(arrayValues.GetDoubleData().GetData())
+	case *schemapb.TemplateArrayValue_StringData:
+		return len(arrayValues.GetStringData().GetData())
+	case *schemapb.TemplateArrayValue_JsonData:
+		return len(arrayValues.GetJsonData().GetData())
+	default:
+		// undefined
+		return -1
+	}
 }
 
 func listToString(strs []string) string {
