@@ -424,7 +424,7 @@ func (m *ChannelDistManager) checkIfStreamingNode(nodeID int64) bool {
 	if node == nil {
 		return false
 	}
-	return node.IsEmbeddedQueryNodeInStreamingNode()
+	return node.IsEmbeddedQueryNodeInStreamingNode() || node.IsInStandalone()
 }
 
 func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.DmChannel {
