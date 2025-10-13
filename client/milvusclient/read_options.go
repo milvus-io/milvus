@@ -48,7 +48,6 @@ const (
 	spGroupBy         = `group_by_field`
 	spGroupSize       = `group_size`
 	spStrictGroupSize = `strict_group_size`
-	spMinShouldMatch  = `min_should_match`
 )
 
 type SearchOption interface {
@@ -64,7 +63,6 @@ type searchOption struct {
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
-	minShouldMatch             int
 }
 
 type AnnRequest struct {
@@ -306,13 +304,6 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
 
-	if opt.minShouldMatch >= 1 {
-		// Convert existing search params to map, add min_should_match, then convert back
-		searchParams := entity.KvPairsMap(request.SearchParams)
-		searchParams[spMinShouldMatch] = strconv.Itoa(opt.minShouldMatch)
-		request.SearchParams = entity.MapKvPairs(searchParams)
-	}
-
 	return request, nil
 }
 
@@ -364,17 +355,6 @@ func (opt *searchOption) WithGroupSize(groupSize int) *searchOption {
 
 func (opt *searchOption) WithStrictGroupSize(strictGroupSize bool) *searchOption {
 	opt.annRequest.WithStrictGroupSize(strictGroupSize)
-	return opt
-}
-
-func (opt *searchOption) WithMinShouldMatch(minShouldMatch int) *searchOption {
-	if minShouldMatch <= 0 {
-		opt.minShouldMatch = 1
-	} else if minShouldMatch > 1000 {
-		opt.minShouldMatch = 1000
-	} else {
-		opt.minShouldMatch = minShouldMatch
-	}
 	return opt
 }
 

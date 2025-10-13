@@ -1255,7 +1255,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 OpTypeInvalid,
                 fmt::format("match query does not support iterative filter"));
         }
-        return ExecTextMatch(context);
+        return ExecTextMatch();
     } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
@@ -1714,7 +1714,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
 }
 
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecTextMatch(EvalCtx& context) {
+PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
