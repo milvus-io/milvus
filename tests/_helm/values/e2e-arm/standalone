@@ -50,7 +50,8 @@ etcd:
       cpu: "1"
       memory: 4Gi
   image:
-    repository: "harbor-us-vdc.zilliz.cc/milvusdb/etcd"
+    registry: "harbor-us-vdc.zilliz.cc"
+    repository: "milvusdb/etcd"
   tolerations:
   - effect: NoSchedule
     key: jenkins-e2e-arm
