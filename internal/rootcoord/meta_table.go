@@ -1914,8 +1914,8 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 	if err != nil {
 		return err
 	}
-	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, struct{}) {
-		return group.GroupName, struct{}{}
+	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
 	})
 	if _, ok := currenctGroups[req.GroupName]; !ok {
 		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] defined in system to operate", req.GroupName)
@@ -1930,6 +1930,15 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 	}
 	if len(req.Privileges) == 0 {
 		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
+	}
+	if req.Type == milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup {
+		// Check if all privileges are the same privilege level
+		privilegeLevels := lo.SliceToMap(lo.Union(req.Privileges, currenctGroups[req.GroupName]), func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+			return util.GetPrivilegeLevel(p.Name), struct{}{}
+		})
+		if len(privilegeLevels) > 1 {
+			return merr.WrapErrParameterInvalidMsg("privileges are not the same privilege level")
+		}
 	}
 	return nil
 }

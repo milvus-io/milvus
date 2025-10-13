@@ -144,14 +144,6 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
 					return p.Name
 				})
-
-				// check if privileges are the same privilege level
-				privilegeLevels := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
-					return util.GetPrivilegeLevel(p.Name), struct{}{}
-				})
-				if len(privilegeLevels) > 1 {
-					return errors.New("privileges are not the same privilege level")
-				}
 			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 				newPrivs, _ := lo.Difference(v, in.Privileges)
 				newGroups[k] = newPrivs
