@@ -49,6 +49,8 @@ etcd:
     limits:
       cpu: "1"
       memory: 4Gi
+  image:
+    repository: "harbor-us-vdc.zilliz.cc/milvusdb/etcd"
   tolerations:
   - effect: NoSchedule
     key: jenkins-e2e-arm
@@ -62,6 +64,8 @@ minio:
   nodeSelector:
     jenkins-e2e-arm: "true"
   mode: standalone
+  image:
+    repository: "harbor-us-vdc.zilliz.cc/milvusdb/minio"
   resources:
     requests:
       cpu: "0.2"
