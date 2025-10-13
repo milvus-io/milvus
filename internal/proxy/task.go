@@ -388,11 +388,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate whether field names duplicates
-	if err := validateDuplicatedFieldName(t.schema); err != nil {
-		return err
-	}
-
 	// validate primary key definition
 	if err := validatePrimaryKey(t.schema); err != nil {
 		return err
@@ -438,6 +433,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		if err := ValidateStructArrayField(structArrayField, t.schema); err != nil {
 			return err
 		}
+	}
+
+	// Transform struct field names to ensure global uniqueness
+	// This allows different structs to have fields with the same name
+	err = transformStructFieldNames(t.schema)
+	if err != nil {
+		return fmt.Errorf("failed to transform struct field names: %v", err)
+	}
+
+	// validate whether field names duplicates (after transformation)
+	if err := validateDuplicatedFieldName(t.schema); err != nil {
+		return err
 	}
 
 	if err := validateMultipleVectorFields(t.schema); err != nil {
@@ -890,6 +897,11 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	for _, function := range result.Schema.Functions {
 		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 	}
+
+	if err := restoreStructFieldNames(t.result.Schema); err != nil {
+		return fmt.Errorf("failed to restore struct field names: %v", err)
+	}
+
 	return nil
 }
 

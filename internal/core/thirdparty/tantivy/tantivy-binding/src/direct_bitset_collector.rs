@@ -1,8 +1,7 @@
 use tantivy::{
     collector::{Collector, SegmentCollector},
     schema::IndexRecordOption,
-    DocId, DocSet, Score, SegmentOrdinal, SegmentReader, Term, COLLECT_BLOCK_BUFFER_LEN,
-    TERMINATED,
+    DocId, DocSet, Score, SegmentOrdinal, SegmentReader, Term, TERMINATED,
 };
 
 use crate::bitset_wrapper::BitsetWrapper;
@@ -21,7 +20,7 @@ impl Collector for DirectBitsetCollector {
 
     fn collect_segment(
         &self,
-        weight: &dyn tantivy::query::Weight,
+        _weight: &dyn tantivy::query::Weight,
         _segment_ord: u32,
         reader: &SegmentReader,
     ) -> tantivy::Result<<Self::Child as SegmentCollector>::Fruit> {

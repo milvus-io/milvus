@@ -67,6 +67,7 @@ metastore:
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds
+  maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
@@ -1035,7 +1036,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONKeyStats: true # Indicates sealedsegment whether to enable JSON key stats
+  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility

@@ -51,6 +51,7 @@ import (
 	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -1743,16 +1744,20 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
+	fmt.Println("create index for binVec field")
 
+	fieldName := ConcatStructFieldName(structField, subFieldFVec)
 	wg.Add(1)
 	t.Run("create index for embedding list field", func(t *testing.T) {
 		defer wg.Done()
-		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_ArrayOfVector, subFieldFVec, dim, nlist)
+		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_ArrayOfVector, fieldName, dim, nlist)
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
+
+	fmt.Println("create index for embedding list field")
 
 	wg.Add(1)
 	t.Run("alter index for embedding list field", func(t *testing.T) {
@@ -1773,6 +1778,7 @@ func TestProxy(t *testing.T) {
 		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
 	})
+	fmt.Println("alter index for embedding list field")
 
 	wg.Add(1)
 	t.Run("describe index for embedding list field", func(t *testing.T) {
@@ -1781,7 +1787,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      subFieldFVec,
+			FieldName:      fieldName,
 			IndexName:      testStructFVecIndexName,
 		})
 		err = merr.CheckRPCCall(resp, err)
@@ -1790,6 +1796,7 @@ func TestProxy(t *testing.T) {
 		enableMmap, _ := common.IsMmapDataEnabled(resp.IndexDescriptions[0].GetParams()...)
 		assert.True(t, enableMmap, "params: %+v", resp.IndexDescriptions[0])
 	})
+	fmt.Println("describe index for embedding list field")
 
 	wg.Add(1)
 	t.Run("describe index with indexName for embedding list field", func(t *testing.T) {
@@ -1798,13 +1805,14 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      subFieldFVec,
+			FieldName:      fieldName,
 			IndexName:      testStructFVecIndexName,
 		})
 		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+	fmt.Println("describe index with indexName for embedding list field")
 
 	wg.Add(1)
 	t.Run("get index statistics for embedding list field", func(t *testing.T) {
@@ -1827,7 +1835,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      subFieldFVec,
+			FieldName:      fieldName,
 			IndexName:      testStructFVecIndexName,
 		})
 		assert.NoError(t, err)
@@ -1841,7 +1849,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      subFieldFVec,
+			FieldName:      fieldName,
 			IndexName:      testStructFVecIndexName,
 		})
 		assert.NoError(t, err)
@@ -2038,7 +2046,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("embedding list search", func(t *testing.T) {
 		defer wg.Done()
-		req := constructTestEmbeddingListSearchRequest(dbName, collectionName, subFieldFVec, expr, nq, nprobe, topk, roundDecimal, dim)
+		req := constructTestEmbeddingListSearchRequest(dbName, collectionName, fieldName, expr, nq, nprobe, topk, roundDecimal, dim)
 
 		resp, err := proxy.Search(ctx, req)
 		assert.NoError(t, err)
@@ -2830,7 +2838,7 @@ func TestProxy(t *testing.T) {
 		getResp, err := rootCoordClient.GetCredential(ctx, getCredentialReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, getResp.GetStatus().GetErrorCode())
-		assert.True(t, passwordVerify(ctx, username, newPassword, globalMetaCache))
+		assert.True(t, passwordVerify(ctx, username, newPassword, privilege.GetPrivilegeCache()))
 
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)

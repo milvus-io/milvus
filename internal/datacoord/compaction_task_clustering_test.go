@@ -57,7 +57,6 @@ type ClusteringCompactionTaskSuite struct {
 	meta      *meta
 	handler   *NMockHandler
 
-	mockSessionMgr   *session.MockDataNodeManager
 	analyzeScheduler task.GlobalScheduler
 }
 
@@ -86,7 +85,6 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.handler = NewNMockHandler(s.T())
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	// TODO @xiaocai2333: use mock cluster
-	s.mockSessionMgr = session.NewMockDataNodeManager(s.T())
 	cluster := session.NewMockCluster(s.T())
 
 	scheduler := task.NewGlobalTaskScheduler(ctx, cluster)

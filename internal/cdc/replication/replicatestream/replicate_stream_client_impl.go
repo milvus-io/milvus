@@ -35,7 +35,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
-const pendingMessageQueueLength = 128
+const (
+	// TODO: sheep, make these parameters configurable
+	pendingMessageQueueLength  = 128
+	pendingMessageQueueMaxSize = 128 * 1024 * 1024
+)
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
@@ -56,17 +60,22 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 	ctx1, cancel := context.WithCancel(ctx)
 	ctx1 = contextutil.WithClusterID(ctx1, replicateInfo.GetTargetCluster().GetClusterId())
 
+	options := MsgQueueOptions{
+		Capacity: pendingMessageQueueLength,
+		MaxSize:  pendingMessageQueueMaxSize,
+	}
+	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{
 		clusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		replicateInfo:   replicateInfo,
-		pendingMessages: NewMsgQueue(pendingMessageQueueLength),
+		pendingMessages: pendingMessages,
 		metrics:         NewReplicateMetrics(replicateInfo),
 		ctx:             ctx1,
 		cancel:          cancel,
 		finishedCh:      make(chan struct{}),
 	}
 
-	rs.metrics.OnConnect()
+	rs.metrics.OnInitiate()
 	go rs.startInternal()
 	return rs
 }
@@ -78,7 +87,7 @@ func (r *replicateStreamClient) startInternal() {
 	)
 
 	defer func() {
-		r.metrics.OnDisconnect()
+		r.metrics.OnClose()
 		logger.Info("replicate stream client closed")
 		close(r.finishedCh)
 	}()
@@ -107,6 +116,7 @@ func (r *replicateStreamClient) startInternal() {
 			continue
 		}
 		logger.Info("replicate stream client service started")
+		r.metrics.OnConnect()
 
 		// reset client and pending messages
 		r.client = client
@@ -142,6 +152,14 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	case <-r.ctx.Done():
 		return nil
 	default:
+		// TODO: Should be done at streamingnode, but after move it into streamingnode, the metric need to be adjusted.
+		if msg.MessageType().IsSelfControlled() {
+			if r.pendingMessages.Len() == 0 {
+				// if there is no pending messages, there's no lag between source and target.
+				r.metrics.OnNoIncomingMessages()
+			}
+			return ErrReplicateIgnored
+		}
 		r.metrics.StartReplicate(msg)
 		r.pendingMessages.Enqueue(r.ctx, msg)
 		return nil

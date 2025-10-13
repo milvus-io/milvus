@@ -455,7 +455,7 @@ func Test_AlterSegments(t *testing.T) {
 			})
 		assert.NoError(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
-		assert.Equal(t, 3, opGroupCount)
+		assert.Equal(t, 5, opGroupCount)
 
 		adjustedSeg, err := catalog.LoadFromSegmentPath(context.TODO(), segmentXL.CollectionID, segmentXL.PartitionID, segmentXL.ID)
 		assert.NoError(t, err)
@@ -611,7 +611,7 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 		kvSize = 0
 		err := catalog.SaveDroppedSegmentsInBatch(context.TODO(), segments2)
 		assert.NoError(t, err)
-		assert.Equal(t, 2, count)
+		assert.Equal(t, 3, count)
 		assert.Equal(t, 129, kvSize)
 	}
 }

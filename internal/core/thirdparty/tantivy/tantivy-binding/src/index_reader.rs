@@ -9,7 +9,7 @@ use tantivy::query::{
 };
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
-use tantivy::{Index, IndexReader, ReloadPolicy, Term};
+use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
@@ -97,6 +97,24 @@ impl IndexReaderWrapper {
             }
         }
         Ok(sum)
+    }
+
+    pub fn index_size_bytes(&self) -> Result<u64> {
+        let dir = self.index.directory();
+        let mut total: u64 = 0;
+        for path in dir.list_managed_files() {
+            match dir.open_read(&path) {
+                Ok(file_slice) => {
+                    total += file_slice.len() as u64;
+                }
+                Err(_e) => {
+                    // Some legacy/unsupported files may fail to open (e.g., old tantivy versions).
+                    // Skip unreadable files to provide a best-effort byte-size estimation instead of failing hard.
+                    continue;
+                }
+            }
+        }
+        Ok(total)
     }
 
     pub(crate) fn search(&self, q: &dyn Query, bitset: *mut c_void) -> Result<()> {

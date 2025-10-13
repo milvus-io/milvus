@@ -73,6 +73,8 @@ func NewReader(ctx context.Context,
 	switch fileType {
 	case JSON:
 		return json.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
+	case JSONLines:
+		return json.NewLinesReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
 	case Numpy:
 		return numpy.NewReader(ctx, cm, schema, importFile.GetPaths(), bufferSize)
 	case Parquet:

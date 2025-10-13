@@ -277,9 +277,12 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		vchannel := "ch_no_segment_1"
 		pchannel := funcutil.ToPhysicalChannel(vchannel)
 		infos := svr.handler.GetQueryVChanPositions(&channelMeta{
-			Name:           vchannel,
-			CollectionID:   0,
-			StartPositions: []*commonpb.KeyDataPair{{Key: pchannel, Data: []byte{14, 15, 16}}},
+			Name:         vchannel,
+			CollectionID: 0,
+			StartPosition: &msgpb.MsgPosition{
+				ChannelName: pchannel,
+				MsgID:       []byte{14, 15, 16},
+			},
 		})
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
@@ -1502,9 +1505,12 @@ func TestGetDataVChanPositions(t *testing.T) {
 		vchannel := "ch_no_segment_1"
 		pchannel := funcutil.ToPhysicalChannel(vchannel)
 		infos := svr.handler.GetDataVChanPositions(&channelMeta{
-			Name:           vchannel,
-			CollectionID:   0,
-			StartPositions: []*commonpb.KeyDataPair{{Key: pchannel, Data: []byte{14, 15, 16}}},
+			Name:         vchannel,
+			CollectionID: 0,
+			StartPosition: &msgpb.MsgPosition{
+				ChannelName: pchannel,
+				MsgID:       []byte{14, 15, 16},
+			},
 		}, allPartitionID)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)

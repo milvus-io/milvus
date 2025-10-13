@@ -16,8 +16,11 @@
 
 package info
 
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 const (
 	Unknown            = "Unknown"
+	NotAny             = "n/a"
 	timeFormat         = "2006/01/02 15:04:05.000 -07:00"
 	ClientRequestIDKey = "client_request_id"
 )
@@ -26,32 +29,33 @@ type getMetricFunc func(i AccessInfo) string
 
 // supported metrics
 var MetricFuncMap = map[string]getMetricFunc{
-	"$method_name":         getMethodName,
-	"$method_status":       getMethodStatus,
-	"$trace_id":            getTraceID,
-	"$user_addr":           getAddr,
-	"$user_name":           getUserName,
-	"$response_size":       getResponseSize,
-	"$error_code":          getErrorCode,
-	"$error_msg":           getErrorMsg,
-	"$error_type":          getErrorType,
-	"$database_name":       getDbName,
-	"$collection_name":     getCollectionName,
-	"$partition_name":      getPartitionName,
-	"$time_cost":           getTimeCost,
-	"$time_now":            getTimeNow,
-	"$time_start":          getTimeStart,
-	"$time_end":            getTimeEnd,
-	"$method_expr":         getExpr,
-	"$output_fields":       getOutputFields,
-	"$sdk_version":         getSdkVersion,
-	"$cluster_prefix":      getClusterPrefix,
-	"$consistency_level":   getConsistencyLevel,
-	"$anns_field":          getAnnsField,
-	"$nq":                  getNq,
-	"$search_params":       getSearchParams,
-	"$query_params":        getQueryParams,
-	"$client_request_time": getClientRequestTime,
+	"$method_name":           getMethodName,
+	"$method_status":         getMethodStatus,
+	"$trace_id":              getTraceID,
+	"$user_addr":             getAddr,
+	"$user_name":             getUserName,
+	"$response_size":         getResponseSize,
+	"$error_code":            getErrorCode,
+	"$error_msg":             getErrorMsg,
+	"$error_type":            getErrorType,
+	"$database_name":         getDbName,
+	"$collection_name":       getCollectionName,
+	"$partition_name":        getPartitionName,
+	"$time_cost":             getTimeCost,
+	"$time_now":              getTimeNow,
+	"$time_start":            getTimeStart,
+	"$time_end":              getTimeEnd,
+	"$method_expr":           getExpr,
+	"$output_fields":         getOutputFields,
+	"$sdk_version":           getSdkVersion,
+	"$cluster_prefix":        getClusterPrefix,
+	"$consistency_level":     getConsistencyLevel,
+	"$anns_field":            getAnnsField,
+	"$nq":                    getNq,
+	"$search_params":         getSearchParams,
+	"$query_params":          getQueryParams,
+	"$client_request_time":   getClientRequestTime,
+	"$template_value_length": getTemplateValueLength,
 }
 
 type AccessInfo interface {
@@ -80,6 +84,8 @@ type AccessInfo interface {
 	SearchParams() string
 	QueryParams() string
 	ClientRequestTime() string
+	TemplateValueLength() string
+	SetActualConsistencyLevel(commonpb.ConsistencyLevel)
 }
 
 func Get(i AccessInfo, keys ...string) []any {
@@ -197,4 +203,8 @@ func getQueryParams(i AccessInfo) string {
 
 func getClientRequestTime(i AccessInfo) string {
 	return i.ClientRequestTime()
+}
+
+func getTemplateValueLength(i AccessInfo) string {
+	return i.TemplateValueLength()
 }

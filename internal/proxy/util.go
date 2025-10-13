@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -82,6 +83,66 @@ const (
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
+
+func ConcatStructFieldName(structName string, fieldName string) string {
+	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
+// transformStructFieldNames transforms struct field names to structName[fieldName] format
+// This ensures global uniqueness while allowing same field names across different structs
+func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
+	for _, structArrayField := range schema.StructArrayFields {
+		structName := structArrayField.Name
+		for _, field := range structArrayField.Fields {
+			// Create transformed name: structName[fieldName]
+			newName := ConcatStructFieldName(structName, field.Name)
+			field.Name = newName
+		}
+	}
+
+	return nil
+}
+
+// restoreStructFieldNames restores original field names from structName[fieldName] format
+// This is used when returning schema information to users (e.g., in describe collection)
+func restoreStructFieldNames(schema *schemapb.CollectionSchema) error {
+	for _, structArrayField := range schema.StructArrayFields {
+		structName := structArrayField.Name
+		expectedPrefix := structName + "["
+
+		for _, field := range structArrayField.Fields {
+			if strings.HasPrefix(field.Name, expectedPrefix) && strings.HasSuffix(field.Name, "]") {
+				// Extract fieldName: remove "structName[" prefix and "]" suffix
+				field.Name = field.Name[len(expectedPrefix) : len(field.Name)-1]
+			}
+		}
+	}
+	return nil
+}
+
+// extractOriginalFieldName extracts the original field name from structName[fieldName] format
+// This function should only be called on transformed struct field names
+func extractOriginalFieldName(transformedName string) (string, error) {
+	idx := strings.Index(transformedName, "[")
+	if idx == -1 {
+		return "", fmt.Errorf("not a transformed struct field name: %s", transformedName)
+	}
+
+	if !strings.HasSuffix(transformedName, "]") {
+		return "", fmt.Errorf("invalid struct field format: %s, missing closing bracket", transformedName)
+	}
+
+	if idx == 0 {
+		return "", fmt.Errorf("invalid struct field format: %s, missing struct name", transformedName)
+	}
+
+	fieldName := transformedName[idx+1 : len(transformedName)-1]
+	if fieldName == "" {
+		return "", fmt.Errorf("invalid struct field format: %s, empty field name", transformedName)
+	}
+
+	return fieldName, nil
+}
 
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
@@ -1404,14 +1465,15 @@ func AppendUserInfoForRPC(ctx context.Context) context.Context {
 }
 
 func GetRole(username string) ([]string, error) {
-	if globalMetaCache == nil {
+	privCache := privilege.GetPrivilegeCache()
+	if privCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	return globalMetaCache.GetUserRole(username), nil
+	return privCache.GetUserRole(username), nil
 }
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
-	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
+	return passwordVerify(ctx, username, rawPwd, privilege.GetPrivilegeCache())
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
@@ -1425,10 +1487,10 @@ func VerifyAPIKey(rawToken string) (string, error) {
 }
 
 // PasswordVerify verify password
-func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
+func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache privilege.PrivilegeCache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
-	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
+	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
 		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
@@ -1449,7 +1511,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
 	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
-	globalMetaCache.UpdateCredential(credInfo)
+	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
 
@@ -1828,7 +1890,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			continue
 		}
 
-		structSchema, ok := structSchemaMap[fieldData.FieldName]
+		structName := fieldData.FieldName
+		structSchema, ok := structSchemaMap[structName]
 		if !ok {
 			return fmt.Errorf("fieldName %v not exist in collection schema, fieldType %v, fieldId %v", fieldData.FieldName, fieldData.Type, fieldData.FieldId)
 		}
@@ -1837,13 +1900,13 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		structArrays, ok := fieldData.Field.(*schemapb.FieldData_StructArrays)
 		if !ok {
 			return fmt.Errorf("field convert FieldData_StructArrays fail in fieldData, fieldName: %s,"+
-				" collectionName:%s", fieldData.FieldName, schema.Name)
+				" collectionName:%s", structName, schema.Name)
 		}
 
 		if len(structArrays.StructArrays.Fields) != len(structSchema.GetFields()) {
 			return fmt.Errorf("length of fields of struct field mismatch length of the fields in schema, fieldName: %s,"+
 				" collectionName:%s, fieldData fields length:%d, schema fields length:%d",
-				fieldData.FieldName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
+				structName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
 		}
 
 		// Check the array length of the struct array field data
@@ -1857,27 +1920,36 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					currentArrayLen = len(scalarArray.Data)
 				} else {
 					return fmt.Errorf("scalar array data is nil in struct field '%s', sub-field '%s'",
-						fieldData.FieldName, subField.FieldName)
+						structName, subField.FieldName)
 				}
 			case *schemapb.FieldData_Vectors:
 				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
 					currentArrayLen = len(vectorArray.Data)
 				} else {
 					return fmt.Errorf("vector array data is nil in struct field '%s', sub-field '%s'",
-						fieldData.FieldName, subField.FieldName)
+						structName, subField.FieldName)
 				}
 			default:
-				return fmt.Errorf("unexpected field data type in struct array field, fieldName: %s", fieldData.FieldName)
+				return fmt.Errorf("unexpected field data type in struct array field, fieldName: %s", structName)
 			}
 
 			if expectedArrayLen == -1 {
 				expectedArrayLen = currentArrayLen
 			} else if currentArrayLen != expectedArrayLen {
 				return fmt.Errorf("inconsistent array length in struct field '%s': expected %d, got %d for sub-field '%s'",
-					fieldData.FieldName, expectedArrayLen, currentArrayLen, subField.FieldName)
+					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 
-			flattenedFields = append(flattenedFields, subField)
+			transformedFieldName := ConcatStructFieldName(structName, subField.FieldName)
+			subFieldCopy := &schemapb.FieldData{
+				FieldName: transformedFieldName,
+				FieldId:   subField.FieldId,
+				Type:      subField.Type,
+				Field:     subField.Field,
+				IsDynamic: subField.IsDynamic,
+			}
+
+			flattenedFields = append(flattenedFields, subFieldCopy)
 		}
 	}
 
@@ -2739,11 +2811,29 @@ func reconstructStructFieldDataCommon(
 	}
 
 	for structFieldID, fields := range groupedStructFields {
+		// Create deep copies of fields to avoid modifying original data
+		// and restore original field names for user-facing response
+		copiedFields := make([]*schemapb.FieldData, len(fields))
+		for i, field := range fields {
+			copiedFields[i] = proto.Clone(field).(*schemapb.FieldData)
+			// Extract original field name from structName[fieldName] format
+			originalName, err := extractOriginalFieldName(copiedFields[i].FieldName)
+			if err != nil {
+				// This should not happen in normal operation - indicates a bug
+				log.Error("failed to extract original field name from struct field",
+					zap.String("fieldName", copiedFields[i].FieldName),
+					zap.Error(err))
+				// Keep the transformed name to avoid data corruption
+			} else {
+				copiedFields[i].FieldName = originalName
+			}
+		}
+
 		fieldData := &schemapb.FieldData{
 			FieldName: structFieldNames[structFieldID],
 			FieldId:   structFieldID,
 			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: copiedFields}},
 		}
 		newFieldsData = append(newFieldsData, fieldData)
 		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
