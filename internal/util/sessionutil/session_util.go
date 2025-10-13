@@ -53,8 +53,19 @@ const (
 	DefaultIDKey                        = "id"
 	SupportedLabelPrefix                = "MILVUS_SERVER_LABEL_"
 	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED"
+	LabelStandalone                     = "STANDALONE"
 	MilvusNodeIDForTesting              = "MILVUS_NODE_ID_FOR_TESTING"
 )
+
+// EnableEmbededQueryNodeLabel set server labels for embedded query node.
+func EnableEmbededQueryNodeLabel() {
+	os.Setenv(SupportedLabelPrefix+LabelStreamingNodeEmbeddedQueryNode, "1")
+}
+
+// EnableStandaloneLabel set server labels for standalone.
+func EnableStandaloneLabel() {
+	os.Setenv(SupportedLabelPrefix+LabelStandalone, "1")
+}
 
 // SessionEventType session event type
 type SessionEventType int
