@@ -4104,8 +4104,8 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool"])
-    @pytest.fixture(scope="function", params=["DOUBLE"])
+    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool", "ARRAY_DOUBLE"])
+    @pytest.fixture(scope="function", params=["DOUBLE", "ARRAY_DOUBLE"])
     def supported_json_cast_type(self, request):
         yield request.param
 
@@ -4167,10 +4167,11 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         # 3. flush if specified
         if is_flush:
             self.flush(client, collection_name)
+        time.sleep(300)
         # 4. query when there is no json path index under all expressions
         # skip negative expression for issue 40685
         # "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
-        express_list = cf.gen_json_field_expressions_all_single_operator()
+        express_list = cf.gen_json_field_expressions_all_single_operator(supported_json_cast_type)
         compare_dict = {}
         for i in range(len(express_list)):
             json_list = []
@@ -4195,11 +4196,15 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         # 6. prepare index params with json path index
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
-        json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
-                          f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
-                          f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
-                          f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
-                          f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
+        if supported_json_cast_type == "ARRAY_DOUBLE":
+            # For ARRAY_DOUBLE type, use array paths
+            json_path_list = [f"{json_field_name}['a']"]
+        else:
+            json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
+                              f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
+                              f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
+                              f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
+                              f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         for i in range(len(json_path_list)):
             index_params.add_index(field_name=json_field_name, index_name=index_name + f'{i}',
