@@ -241,7 +241,7 @@ class SegmentInternalInterface : public SegmentInterface {
             }
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), std::move(valid_data)});
+                pw, {std::move(res), std::move(valid_data)});
         }
     }
 
