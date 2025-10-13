@@ -51,6 +51,7 @@ import (
 	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -2837,7 +2838,7 @@ func TestProxy(t *testing.T) {
 		getResp, err := rootCoordClient.GetCredential(ctx, getCredentialReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, getResp.GetStatus().GetErrorCode())
-		assert.True(t, passwordVerify(ctx, username, newPassword, globalMetaCache))
+		assert.True(t, passwordVerify(ctx, username, newPassword, privilege.GetPrivilegeCache()))
 
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)

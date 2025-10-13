@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -167,7 +168,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		g.Wait()
 
 		assert.Panics(t, func() {
-			getPolicyModel("foo")
+			privilege.GetPolicyModel("foo")
 		})
 	})
 }
@@ -268,7 +269,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadOnly to single collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -287,7 +288,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -325,7 +326,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadOnly to all collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -344,7 +345,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -382,7 +383,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadWrite to single collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -401,7 +402,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -485,7 +486,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadWrite to all collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -504,7 +505,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -552,7 +553,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("Admin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -571,7 +572,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{})
 		assert.NoError(t, err)
@@ -593,7 +594,7 @@ func TestPrivilegeGroup(t *testing.T) {
 func TestBuiltinPrivilegeGroup(t *testing.T) {
 	t.Run("ClusterAdmin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx := GetContext(context.Background(), "fooo:123456")
@@ -615,7 +616,7 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 			}, nil
 		}
 		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SelectUserRequest{})
 		assert.NoError(t, err)
