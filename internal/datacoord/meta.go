@@ -497,8 +497,8 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			if ok {
 				collIDStr := fmt.Sprint(segment.GetCollectionID())
 				coll2DbName[collIDStr] = coll.DatabaseName
-				if _, ok := storedBinlogSize[coll.DatabaseName]; !ok {
-					storedBinlogSize[coll.DatabaseName] = make(map[string]int64)
+				if _, ok := storedBinlogSize[collIDStr]; !ok {
+					storedBinlogSize[collIDStr] = make(map[string]int64)
 				}
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
@@ -518,11 +518,15 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 		}
 	}
 
+	// Reset to remove dropped collection
+	metrics.DataCoordStoredBinlogSize.Reset()
 	for collectionID, state2Size := range storedBinlogSize {
 		for state, size := range state2Size {
 			metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
 		}
 	}
+	// Reset to remove dropped collection
+	metrics.DataCoordSegmentBinLogFileCount.Reset()
 	for collectionID, size := range binlogFileSize {
 		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
 	}
