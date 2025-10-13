@@ -476,8 +476,10 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	segments := m.segments.GetSegments()
 	var total int64
-	metrics.DataCoordStoredBinlogSize.Reset()
-	metrics.DataCoordSegmentBinLogFileCount.Reset()
+	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
+	binlogFileSize := make(map[string]int64)              // map[collectionID]size
+	coll2DbName := make(map[string]string)
+
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
@@ -493,10 +495,14 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 			coll, ok := m.collections.Get(segment.GetCollectionID())
 			if ok {
-				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-					fmt.Sprint(segment.GetCollectionID()), segment.GetState().String()).Add(float64(segmentSize))
-				metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(
-					fmt.Sprint(segment.GetCollectionID())).Add(float64(getBinlogFileCount(segment.SegmentInfo)))
+				collIDStr := fmt.Sprint(segment.GetCollectionID())
+				coll2DbName[collIDStr] = coll.DatabaseName
+				if _, ok := storedBinlogSize[collIDStr]; !ok {
+					storedBinlogSize[collIDStr] = make(map[string]int64)
+				}
+
+				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
+				binlogFileSize[collIDStr] += segmentSize
 			} else {
 				log.Ctx(context.TODO()).Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
@@ -510,6 +516,19 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
 			}
 		}
+	}
+
+	// Reset to remove dropped collection
+	metrics.DataCoordStoredBinlogSize.Reset()
+	for collectionID, state2Size := range storedBinlogSize {
+		for state, size := range state2Size {
+			metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
+		}
+	}
+	// Reset to remove dropped collection
+	metrics.DataCoordSegmentBinLogFileCount.Reset()
+	for collectionID, size := range binlogFileSize {
+		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
 	}
 
 	metrics.DataCoordNumStoredRows.Reset()
