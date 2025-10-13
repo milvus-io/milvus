@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
@@ -202,6 +203,10 @@ type SegmentManager interface {
 	AddLogicalResource(usage ResourceUsage)
 	SubLogicalResource(usage ResourceUsage)
 	GetLogicalResource() ResourceUsage
+
+	AddLoadedBinlogSize(size int64)
+	SubLoadedBinlogSize(size int64)
+	GetLoadedBinlogSize() int64
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -377,6 +382,9 @@ type segmentManager struct {
 	// only MemorySize and DiskSize are used, other fields are ignored.
 	logicalResource     ResourceUsage
 	logicalResourceLock sync.Mutex
+
+	// loadedBinlogSize stats the total binlog size of all loaded segments of this querynode.
+	loadedBinlogSize atomic.Int64
 }
 
 func NewSegmentManager() *segmentManager {
@@ -422,6 +430,39 @@ func (mgr *segmentManager) GetLogicalResource() ResourceUsage {
 	defer mgr.logicalResourceLock.Unlock()
 
 	return mgr.logicalResource
+}
+
+func (mgr *segmentManager) AddLoadedBinlogSize(size int64) {
+	mgr.loadedBinlogSize.Add(size)
+}
+
+func (mgr *segmentManager) SubLoadedBinlogSize(size int64) {
+	// Clamp to zero to avoid negative values on concurrent or duplicate subtractions
+	for {
+		current := mgr.loadedBinlogSize.Load()
+		newVal := current - size
+		if newVal < 0 {
+			newVal = 0
+		}
+		if mgr.loadedBinlogSize.CompareAndSwap(current, newVal) {
+			if current < size {
+				log.Warn("Loaded binlog size subtraction exceeds current value, clamped to 0",
+					zap.Int64("current", current),
+					zap.Int64("subtracted", size))
+			}
+			return
+		}
+		// retry on CompareAndSwap failure
+	}
+}
+
+func (mgr *segmentManager) GetLoadedBinlogSize() int64 {
+	current := mgr.loadedBinlogSize.Load()
+	if current < 0 {
+		log.Warn("Loaded binlog size is negative, returning 0", zap.Int64("current", current))
+		return 0
+	}
+	return current
 }
 
 // put is the internal put method updating both global segments and secondary index.
