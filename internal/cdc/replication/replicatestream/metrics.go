@@ -19,9 +19,11 @@ package replicatestream
 import (
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -31,9 +33,11 @@ type ReplicateMetrics interface {
 	StartReplicate(msg message.ImmutableMessage)
 	OnSent(msg message.ImmutableMessage)
 	OnConfirmed(msg message.ImmutableMessage)
+	OnNoIncomingMessages()
+	OnInitiate()
 	OnConnect()
 	OnDisconnect()
-	OnReconnect()
+	OnClose()
 }
 
 type msgMetrics struct {
@@ -96,10 +100,18 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 	).Set(float64(lag.Milliseconds()))
 }
 
-func (m *replicateMetrics) OnConnect() {
+// OnNoIncomingMessages is called when there are no incoming messages.
+func (m *replicateMetrics) OnNoIncomingMessages() {
+	metrics.CDCReplicateLag.WithLabelValues(
+		m.replicateInfo.GetSourceChannelName(),
+		m.replicateInfo.GetTargetChannelName(),
+	).Set(0)
+}
+
+func (m *replicateMetrics) OnInitiate() {
 	metrics.CDCStreamRPCConnections.WithLabelValues(
 		m.replicateInfo.GetTargetCluster().GetClusterId(),
-		metrics.CDCStatusConnected,
+		metrics.CDCStatusDisconnected,
 	).Inc()
 }
 
@@ -115,7 +127,7 @@ func (m *replicateMetrics) OnDisconnect() {
 	).Inc()
 }
 
-func (m *replicateMetrics) OnReconnect() {
+func (m *replicateMetrics) OnConnect() {
 	targetClusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
 	metrics.CDCStreamRPCConnections.WithLabelValues(
 		targetClusterID,
@@ -129,4 +141,10 @@ func (m *replicateMetrics) OnReconnect() {
 	metrics.CDCStreamRPCReconnectTimes.WithLabelValues(
 		targetClusterID,
 	).Inc()
+}
+
+func (m *replicateMetrics) OnClose() {
+	metrics.CDCStreamRPCConnections.DeletePartialMatch(prometheus.Labels{
+		metrics.CDCLabelTargetCluster: m.replicateInfo.GetTargetCluster().GetClusterId(),
+	})
 }
