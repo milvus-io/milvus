@@ -2848,7 +2848,11 @@ func (c *Core) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequ
 		return merr.Status(err), nil
 	}
 
-	if err := c.broadcastRestoreRBACV2(ctx, in.RBACMeta); err != nil {
+	if err := c.broadcastRestoreRBACV2(ctx, in); err != nil {
+		if errors.Is(err, errEmptyRBACMeta) {
+			ctxLog.Info("restoring rbac meta is empty, skip restore", zap.Error(err))
+			return merr.Success(), nil
+		}
 		errMsg := "fail to execute task when restore rbac meta data"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil

@@ -2309,23 +2309,49 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 		aliases: newNameDb(),
 		catalog: catalog,
 	}
-	err := mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	err := mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "pg1",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "Insert")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "Insert",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "pg2")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "pg2",
+	})
 	assert.NoError(t, err)
+	err = mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	assert.NoError(t, err)
+	// idempotency
+	err = mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	assert.NoError(t, err)
+
 	err = mt.DropPrivilegeGroup(context.TODO(), "")
 	assert.Error(t, err)
 	err = mt.DropPrivilegeGroup(context.TODO(), "pg1")
 	assert.NoError(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "ClusterReadOnly", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "ClusterReadOnly",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "pg3", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "pg3",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
 	_, err = mt.GetPrivilegeGroupRoles(context.TODO(), "")
 	assert.Error(t, err)

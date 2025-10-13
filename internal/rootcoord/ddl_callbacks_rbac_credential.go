@@ -35,7 +35,7 @@ func (c *Core) broadcastAlterUserForCreateCredential(ctx context.Context, credIn
 	credInfo.Username = strings.TrimSpace(credInfo.Username)
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -52,9 +52,8 @@ func (c *Core) broadcastAlterUserForCreateCredential(ctx context.Context, credIn
 		}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
-
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return errors.Wrap(err, "failed to broadcast")
+	return err
 }
 
 // broadcastAlterUserForUpdateCredential broadcasts the alter user message for update credential.
@@ -62,7 +61,7 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 	credInfo.Username = strings.TrimSpace(credInfo.Username)
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -79,9 +78,8 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 		}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
-
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return errors.Wrap(err, "failed to broadcast")
+	return err
 }
 
 // alterUserV2AckCallback is the ack callback function for the AlterUserMessageV2 message.
@@ -102,7 +100,7 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 	in.Username = strings.TrimSpace(in.Username)
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -118,7 +116,7 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return errors.Wrap(err, "failed to broadcast")
+	return err
 }
 
 // dropUserV2AckCallback is the ack callback function for the DeleteCredential message
@@ -136,26 +134,4 @@ func (c *DDLCallback) dropUserV2AckCallback(ctx context.Context, result message.
 		return errors.Wrap(err, "failed to refresh policy info cache")
 	}
 	return nil
-}
-
-func (c *Core) broadcastRestoreRBACV2(ctx context.Context, meta *milvuspb.RBACMeta) error {
-	broadcaster, err := startBroadcastWithRBACLock(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with resource keys")
-	}
-	defer broadcaster.Close()
-
-	msg := message.NewRestoreRBACMessageBuilderV2().
-		WithHeader(&message.RestoreRBACMessageHeader{}).
-		WithBody(&message.RestoreRBACMessageBody{
-			RbacMeta: meta,
-		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-		MustBuildBroadcast()
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return errors.Wrap(err, "failed to broadcast")
-}
-
-func (c *DDLCallback) restoreRBACV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreRBACMessageV2) error {
-	return executeRestoreRBACTaskSteps(ctx, c.Core, result.Message.MustBody().RbacMeta)
 }

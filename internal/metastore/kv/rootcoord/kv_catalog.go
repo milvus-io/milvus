@@ -1567,145 +1567,49 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 }
 
 func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
-	var err error
-	needRollbackUser := make([]*milvuspb.UserInfo, 0)
-	needRollbackRole := make([]*milvuspb.RoleEntity, 0)
-	needRollbackGrants := make([]*milvuspb.GrantEntity, 0)
-	needRollbackPrivilegeGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
-	defer func() {
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to restore rbac, try to rollback", zap.Error(err))
-			// roll back role
-			for _, role := range needRollbackRole {
-				err = kc.DropRole(ctx, tenant, role.GetName())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback roles after restore failed", zap.Error(err))
-				}
-			}
-
-			// roll back grant
-			for _, grant := range needRollbackGrants {
-				err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Revoke)
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback grants after restore failed", zap.Error(err))
-				}
-			}
-
-			for _, user := range needRollbackUser {
-				// roll back user
-				err = kc.DropCredential(ctx, user.GetUser())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback users after restore failed", zap.Error(err))
-				}
-			}
-
-			// roll back privilege group
-			for _, group := range needRollbackPrivilegeGroups {
-				err = kc.DropPrivilegeGroup(ctx, group.GetGroupName())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback privilege groups after restore failed", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	// restore role
-	existRoles, err := kc.ListRole(ctx, tenant, nil, false)
-	if err != nil {
-		return err
-	}
-	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
 	for _, role := range meta.GetRoles() {
-		if _, ok := existRoleMap[role.GetName()]; ok {
-			log.Ctx(ctx).Warn("failed to restore, role already exists", zap.String("role", role.GetName()))
-			err = errors.Newf("role [%s] already exists", role.GetName())
-			return err
+		if err := kc.CreateRole(ctx, tenant, role); err != nil {
+			return errors.Wrap(err, "failed to create role")
 		}
-		err = kc.CreateRole(ctx, tenant, role)
-		if err != nil {
-			return err
-		}
-		needRollbackRole = append(needRollbackRole, role)
 	}
 
-	// restore privilege group
-	existPrivGroups, err := kc.ListPrivilegeGroups(ctx)
-	if err != nil {
-		return err
-	}
-	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
 	for _, group := range meta.GetPrivilegeGroups() {
-		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
-			log.Ctx(ctx).Warn("failed to restore, privilege group already exists", zap.String("group", group.GetGroupName()))
-			err = errors.Newf("privilege group [%s] already exists", group.GetGroupName())
-			return err
+		if err := kc.SavePrivilegeGroup(ctx, group); err != nil {
+			return errors.Wrap(err, "failed to save privilege group")
 		}
-		err = kc.SavePrivilegeGroup(ctx, group)
-		if err != nil {
-			return err
-		}
-		needRollbackPrivilegeGroups = append(needRollbackPrivilegeGroups, group)
 	}
 
-	// restore grant, list latest privilege group first
-	existPrivGroups, err = kc.ListPrivilegeGroups(ctx)
-	if err != nil {
-		return err
-	}
-	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
 		if util.IsPrivilegeNameDefined(privName) {
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
-		} else if _, ok := existPrivGroupMap[privName]; ok {
-			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		} else {
-			log.Ctx(ctx).Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
-			err = errors.Newf("privilege group [%s] does not exist", privName)
-			return err
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
-		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
-		if err != nil {
-			return err
+		if err := kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant); err != nil {
+			return errors.Wrap(err, "failed to alter grant")
 		}
-		needRollbackGrants = append(needRollbackGrants, grant)
 	}
 
-	// need rollback user
-	existUser, err := kc.ListUser(ctx, tenant, nil, false)
-	if err != nil {
-		return err
-	}
-	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
 	for _, user := range meta.GetUsers() {
-		if _, ok := existUserMap[user.GetUser()]; ok {
-			log.Ctx(ctx).Info("failed to restore, user already exists", zap.String("user", user.GetUser()))
-			err = errors.Newf("user [%s] already exists", user.GetUser())
-			return err
-		}
-		// restore user
-		err = kc.AlterCredential(ctx, &model.Credential{
+		if err := kc.AlterCredential(ctx, &model.Credential{
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
-		})
-		if err != nil {
-			return err
+		}); err != nil {
+			return errors.Wrap(err, "failed to alter credential")
 		}
-		needRollbackUser = append(needRollbackUser, user)
 
 		// restore user role mapping
 		entity := &milvuspb.UserEntity{
 			Name: user.GetUser(),
 		}
 		for _, role := range user.GetRoles() {
-			err = kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole)
-			if err != nil {
-				return err
+			if err := kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole); err != nil {
+				return errors.Wrap(err, "failed to alter user role")
 			}
 		}
 	}
-
-	return err
+	return nil
 }
 
 func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*milvuspb.PrivilegeGroupInfo, error) {

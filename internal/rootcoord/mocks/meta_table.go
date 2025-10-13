@@ -811,6 +811,53 @@ func (_c *IMetaTable_CheckIfPrivilegeGroupCreatable_Call) RunAndReturn(run func(
 	return _c
 }
 
+// CheckIfRBACRestorable provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfRBACRestorable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreRBACMetaRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfRBACRestorable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfRBACRestorable'
+type IMetaTable_CheckIfRBACRestorable_Call struct {
+	*mock.Call
+}
+
+// CheckIfRBACRestorable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.RestoreRBACMetaRequest
+func (_e *IMetaTable_Expecter) CheckIfRBACRestorable(ctx interface{}, req interface{}) *IMetaTable_CheckIfRBACRestorable_Call {
+	return &IMetaTable_CheckIfRBACRestorable_Call{Call: _e.mock.On("CheckIfRBACRestorable", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfRBACRestorable_Call) Run(run func(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest)) *IMetaTable_CheckIfRBACRestorable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RestoreRBACMetaRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfRBACRestorable_Call) Return(_a0 error) *IMetaTable_CheckIfRBACRestorable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfRBACRestorable_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreRBACMetaRequest) error) *IMetaTable_CheckIfRBACRestorable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckIfUpdateCredential provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) CheckIfUpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) error {
 	ret := _m.Called(ctx, req)

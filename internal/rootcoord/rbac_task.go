@@ -116,20 +116,6 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 	return nil
 }
 
-func executeRestoreRBACTaskSteps(ctx context.Context, c *Core, meta *milvuspb.RBACMeta) error {
-	if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, meta); err != nil {
-		log.Ctx(ctx).Warn("fail to restore rbac meta data", zap.Any("in", meta), zap.Error(err))
-		return err
-	}
-	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-		OpType: int32(typeutil.CacheRefresh),
-	}); err != nil {
-		log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", meta), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
 func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *milvuspb.PrivilegeGroupInfo, operateType milvuspb.OperatePrivilegeGroupType) error {
 	if err := func() error {
 		groups, err := core.meta.ListPrivilegeGroups(ctx)

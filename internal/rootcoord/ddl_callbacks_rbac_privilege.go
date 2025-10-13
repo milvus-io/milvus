@@ -32,7 +32,7 @@ import (
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -81,7 +81,6 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 	default:
 		return errors.New("invalid operate privilege type")
 	}
-
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
@@ -98,7 +97,7 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 	in.GroupName = strings.TrimSpace(in.GroupName)
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -122,7 +121,7 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePrivilegeGroupRequest) error {
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -157,7 +156,6 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 	default:
 		return errors.New("invalid operate privilege group type")
 	}
-
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
@@ -172,7 +170,7 @@ func (c *DDLCallback) alterPrivilegeGroupV2AckCallback(ctx context.Context, resu
 func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivilegeGroupRequest) error {
 	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -185,7 +183,6 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 		WithBody(&message.DropPrivilegeGroupMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
-
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }

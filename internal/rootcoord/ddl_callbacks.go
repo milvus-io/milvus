@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -94,5 +96,9 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 
 // startBroadcastWithRBACLock starts a broadcast for rbac.
 func startBroadcastWithRBACLock(ctx context.Context) (broadcaster.BroadcastAPI, error) {
-	return broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	api, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with rbac lock")
+	}
+	return api, nil
 }

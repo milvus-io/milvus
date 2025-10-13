@@ -1741,6 +1741,72 @@ func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.R
 	return mt.catalog.BackupRBAC(ctx, tenant)
 }
 
+func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
+	meta := req.GetRBACMeta()
+	if len(meta.GetRoles()) == 0 && len(meta.GetPrivilegeGroups()) == 0 && len(meta.GetGrants()) == 0 && len(meta.GetUsers()) == 0 {
+		return errEmptyRBACMeta
+	}
+
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if role already exists
+	existRoles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	existRoleAfterRestoreMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	for _, role := range meta.GetRoles() {
+		if _, ok := existRoleMap[role.GetName()]; ok {
+			return errors.Newf("role [%s] already exists", role.GetName())
+		}
+		existRoleAfterRestoreMap[role.GetName()] = struct{}{}
+	}
+
+	// check if privilege group already exists
+	existPrivGroups, err := mt.catalog.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	existPrivGroupAfterRestoreMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	for _, group := range meta.GetPrivilegeGroups() {
+		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
+			return errors.Newf("privilege group [%s] already exists", group.GetGroupName())
+		}
+		existPrivGroupAfterRestoreMap[group.GetGroupName()] = struct{}{}
+	}
+
+	// check if grant can be restored
+	for _, grant := range meta.GetGrants() {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
+			return errors.Newf("privilege [%s] does not exist", privName)
+		}
+	}
+
+	// check if user can be restored
+	existUser, err := mt.catalog.ListUser(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
+	for _, user := range meta.GetUsers() {
+		if _, ok := existUserMap[user.GetUser()]; ok {
+			return errors.Newf("user [%s] already exists", user.GetUser())
+		}
+
+		// check if user-role can be restored
+		for _, role := range user.GetRoles() {
+			if _, ok := existRoleAfterRestoreMap[role.GetName()]; !ok {
+				return errors.Newf("role [%s] does not exist", role.GetName())
+			}
+		}
+	}
+	return nil
+}
+
 func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1851,6 +1917,9 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, struct{}) {
 		return group.GroupName, struct{}{}
 	})
+	if _, ok := currenctGroups[req.GroupName]; !ok {
+		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] defined in system to operate", req.GroupName)
+	}
 	for _, p := range req.Privileges {
 		if util.IsPrivilegeNameDefined(p.Name) {
 			continue
@@ -1858,6 +1927,9 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 		if _, ok := currenctGroups[p.Name]; !ok {
 			return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 		}
+	}
+	if len(req.Privileges) == 0 {
+		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
 	}
 	return nil
 }

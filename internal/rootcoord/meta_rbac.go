@@ -17,6 +17,8 @@ var (
 	errEmptyRoleName     = errors.New("role name is empty")
 	errRoleAlreadyExists = errors.New("role already exists")
 	errRoleNotExists     = errors.New("role not exists")
+
+	errEmptyRBACMeta = errors.New("rbac meta is empty")
 )
 
 type RBACChecker interface {
@@ -48,4 +50,7 @@ type RBACChecker interface {
 
 	// CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
 	CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error
+
+	// CheckIfRBACRestorable checks if the rbac meta data can be restored.
+	CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error
 }
