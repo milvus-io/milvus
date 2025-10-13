@@ -101,7 +101,7 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 		}).Build()
 
 		// Capture qt.request as well to ensure request namespace is wired
-		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, error) {
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			if qt.plan == nil || qt.plan.Namespace == nil || *qt.plan.Namespace != *tsk.request.Namespace {
 				t.Fatalf("requery plan namespace mismatch, got=%v want=%v", qt.plan.Namespace, *tsk.request.Namespace)
 			}
