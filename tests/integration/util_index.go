@@ -43,7 +43,6 @@ const (
 	IndexDISKANN             = "DISKANN"
 	IndexSparseInvertedIndex = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand          = "SPARSE_WAND"
-	IndexEmbListHNSW         = "EMB_LIST_HNSW"
 )
 
 func (s *MiniClusterSuite) WaitForIndexBuiltWithDB(ctx context.Context, dbName, collection, field string) {
@@ -169,15 +168,6 @@ func ConstructIndexParam(dim int, indexType string, metricType string) []*common
 			Key:   "efConstruction",
 			Value: "200",
 		})
-	case IndexEmbListHNSW:
-		params = append(params, &commonpb.KeyValuePair{
-			Key:   "M",
-			Value: "16",
-		})
-		params = append(params, &commonpb.KeyValuePair{
-			Key:   "efConstruction",
-			Value: "200",
-		})
 	case IndexSparseInvertedIndex:
 	case IndexSparseWand:
 	case IndexDISKANN:
@@ -195,7 +185,6 @@ func GetSearchParams(indexType string, metricType string) map[string]any {
 	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8, IndexFaissIvfPQ, IndexScaNN:
 		params["nprobe"] = 8
 	case IndexHNSW:
-	case IndexEmbListHNSW:
 		params["ef"] = 200
 	case IndexDISKANN:
 		params["search_list"] = 20

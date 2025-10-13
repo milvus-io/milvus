@@ -2530,19 +2530,23 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto vec_num = 10;
 
     // Generate query vectors based on element type
+    std::vector<uint8_t> query_vec_bin;
+    std::vector<float> query_vec_f32;
     knowhere::DataSetPtr query_dataset;
     if (element_type == DataType::VECTOR_BINARY) {
         auto byte_dim = (dim + 7) / 8;
         auto total_bytes = vec_num * byte_dim;
-        std::vector<uint8_t> query_vec(total_bytes);
+        query_vec_bin.resize(total_bytes);
         for (size_t i = 0; i < total_bytes; ++i) {
-            query_vec[i] = rand() % 256;
+            query_vec_bin[i] = rand() % 256;
         }
-        query_dataset = knowhere::GenDataSet(vec_num, dim, query_vec.data());
+        query_dataset =
+            knowhere::GenDataSet(vec_num, dim, query_vec_bin.data());
     } else {
         // For float-like types (FLOAT, FLOAT16, BFLOAT16, INT8)
-        std::vector<float> query_vec = generate_float_vector(vec_num, dim);
-        query_dataset = knowhere::GenDataSet(vec_num, dim, query_vec.data());
+        query_vec_f32 = generate_float_vector(vec_num, dim);
+        query_dataset =
+            knowhere::GenDataSet(vec_num, dim, query_vec_f32.data());
     }
     std::vector<size_t> query_vec_offsets;
     query_vec_offsets.push_back(0);
@@ -2568,18 +2572,6 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
 
     // brute force search
     {
-        // Map metric type to string
-        std::string metric_type_str;
-        if (metric_type == knowhere::metric::MAX_SIM) {
-            metric_type_str = "MAX_SIM";
-        } else if (metric_type == knowhere::metric::L2) {
-            metric_type_str = "L2";
-        } else if (metric_type == knowhere::metric::HAMMING) {
-            metric_type_str = "HAMMING";
-        } else if (metric_type == knowhere::metric::JACCARD) {
-            metric_type_str = "JACCARD";
-        }
-
         std::string raw_plan = fmt::format(R"(vector_anns: <
                                     field_id: 101
                                     query_info: <
@@ -2590,7 +2582,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
                                     >
                                     placeholder_tag: "$0"
         >)",
-                                           metric_type_str);
+                                           metric_type);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
@@ -2660,18 +2652,6 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
         sealed_segment->DropFieldData(array_vec);
         sealed_segment->LoadIndex(load_info);
 
-        // Map metric type to string
-        std::string metric_type_str;
-        if (metric_type == knowhere::metric::MAX_SIM) {
-            metric_type_str = "MAX_SIM";
-        } else if (metric_type == knowhere::metric::L2) {
-            metric_type_str = "L2";
-        } else if (metric_type == knowhere::metric::HAMMING) {
-            metric_type_str = "HAMMING";
-        } else if (metric_type == knowhere::metric::JACCARD) {
-            metric_type_str = "JACCARD";
-        }
-
         std::string raw_plan = fmt::format(R"(vector_anns: <
                                     field_id: 101
                                     query_info: <
@@ -2682,7 +2662,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
                                     >
                                     placeholder_tag: "$0"
         >)",
-                                           metric_type_str);
+                                           metric_type);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());

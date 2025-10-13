@@ -545,7 +545,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 auto chunk = group_chunk->GetChunk(field_id_);
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
                 auto value = static_cast<StringChunk*>(chunk.get())
-                                 ->operator[](offsets_in_chunk[i]);
+                                 ->
+                                 operator[](offsets_in_chunk[i]);
                 fn(value, i, valid);
             }
         }
@@ -573,7 +574,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto chunk = group_chunk->GetChunk(field_id_);
             auto valid = chunk->isValid(offsets_in_chunk[i]);
             auto str_view = static_cast<StringChunk*>(chunk.get())
-                                ->operator[](offsets_in_chunk[i]);
+                                ->
+                                operator[](offsets_in_chunk[i]);
             fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }
@@ -601,7 +603,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
             auto str_view = static_cast<StringChunk*>(chunk.get())
-                                ->operator[](offsets_in_chunk[i]);
+                                ->
+                                operator[](offsets_in_chunk[i]);
             fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
                         str_view.size()),
                row_offsets[i],

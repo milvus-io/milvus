@@ -34,8 +34,23 @@ bool
 check_data_type(const FieldMeta& field_meta,
                 const milvus::proto::common::PlaceholderType type) {
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        return type ==
-               milvus::proto::common::PlaceholderType::EmbListFloatVector;
+        if (field_meta.get_element_type() == DataType::VECTOR_FLOAT) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListFloatVector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_FLOAT16) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListFloat16Vector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_BFLOAT16) {
+            return type == milvus::proto::common::PlaceholderType::
+                               EmbListBFloat16Vector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_BINARY) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListBinaryVector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_INT8) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListInt8Vector;
+        }
+        return false;
     }
     return static_cast<int>(field_meta.get_data_type()) ==
            static_cast<int>(type);

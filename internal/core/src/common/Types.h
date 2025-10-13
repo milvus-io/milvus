@@ -547,7 +547,10 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::IP ||
            metric_type == knowhere::metric::COSINE ||
            metric_type == knowhere::metric::BM25 ||
-           metric_type == knowhere::metric::MAX_SIM;
+           metric_type == knowhere::metric::MAX_SIM ||
+           metric_type == knowhere::metric::MAX_SIM_COSINE ||
+           metric_type == knowhere::metric::MAX_SIM_IP ||
+           metric_type == knowhere::metric::MAX_SIM_L2;
 }
 
 inline bool
@@ -556,14 +559,20 @@ IsBinaryVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::JACCARD ||
            metric_type == knowhere::metric::SUPERSTRUCTURE ||
            metric_type == knowhere::metric::SUBSTRUCTURE ||
-           metric_type == knowhere::metric::MHJACCARD;
+           metric_type == knowhere::metric::MHJACCARD ||
+           metric_type == knowhere::metric::MAX_SIM_HAMMING ||
+           metric_type == knowhere::metric::MAX_SIM_JACCARD;
 }
 
 inline bool
 IsIntVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
-           metric_type == knowhere::metric::COSINE;
+           metric_type == knowhere::metric::COSINE ||
+           metric_type == knowhere::metric::MAX_SIM ||
+           metric_type == knowhere::metric::MAX_SIM_COSINE ||
+           metric_type == knowhere::metric::MAX_SIM_IP ||
+           metric_type == knowhere::metric::MAX_SIM_L2;
 }
 
 // Plus 1 because we can't use greater(>) symbol

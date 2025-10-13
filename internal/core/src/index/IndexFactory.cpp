@@ -641,6 +641,42 @@ IndexFactory::CreateVectorIndex(
                             version,
                             use_knowhere_build_pool,
                             file_manager_context);
+                    case DataType::VECTOR_FLOAT16: {
+                        return std::make_unique<VectorMemIndex<float16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_BFLOAT16: {
+                        return std::make_unique<VectorMemIndex<bfloat16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_BINARY: {
+                        return std::make_unique<VectorMemIndex<bin1>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_INT8: {
+                        return std::make_unique<VectorMemIndex<int8>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
                     default:
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented data type to "
