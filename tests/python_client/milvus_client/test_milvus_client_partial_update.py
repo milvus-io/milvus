@@ -187,7 +187,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
     
-     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_all_field_types_one_by_one(self):
         """
         Test partial update functionality with all field types
