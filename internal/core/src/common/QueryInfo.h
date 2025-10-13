@@ -46,7 +46,6 @@ struct SearchInfo {
     std::optional<std::string> json_path_;
     std::optional<milvus::DataType> json_type_;
     bool strict_cast_{false};
-    uint32_t min_should_match_{1};
 };
 
 using SearchInfoPtr = std::shared_ptr<SearchInfo>;

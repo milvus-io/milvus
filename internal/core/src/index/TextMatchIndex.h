@@ -82,10 +82,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     RegisterTokenizer(const char* tokenizer_name, const char* analyzer_params);
 
     TargetBitmap
-    MatchQuery(const std::string& query);
-
-    TargetBitmap
-    MatchQueryWithMinimum(const std::string& query, uint32_t min_should_match);
+    MatchQuery(const std::string& query, uint32_t min_should_match = 1);
 
     TargetBitmap
     PhraseMatchQuery(const std::string& query, uint32_t slop);

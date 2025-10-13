@@ -1757,34 +1757,18 @@ PhyUnaryRangeFilterExpr::ExecTextMatch(EvalCtx& context) {
         }
     }
 
-    // Extract min_should_match from search info
+    // Extract min_should_match from expression extra values
     uint32_t min_should_match = 1; // default value
-    if (op_type == proto::plan::OpType::TextMatch) {
-        auto exec_ctx = context.get_exec_context();
-        if (exec_ctx) {
-            auto query_ctx = exec_ctx->get_query_context();
-            if (query_ctx) {
-                auto search_info = query_ctx->get_search_info();
-                min_should_match = search_info.min_should_match_;
-                LOG_DEBUG("Using min_should_match from search_info: {}", min_should_match);
-            }
-        }
+    if (op_type == proto::plan::OpType::TextMatch && expr_->extra_values_.size() > 0) {
+        // min_should_match is stored in the first extra value
+        min_should_match = static_cast<uint32_t>(GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
     auto func = [op_type, slop, min_should_match](Index* index,
                                                   const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
-            if (min_should_match > 1) {
-                LOG_DEBUG("Using MatchQueryWithMinimum: query='{}', min_should_match={}", query, min_should_match);
-                auto result = index->MatchQueryWithMinimum(query, min_should_match);
-                LOG_DEBUG("MatchQueryWithMinimum result: {} hits found", result.count());
-                return result;
-            } else {
-                LOG_DEBUG("Using MatchQuery: query='{}', min_should_match={} (using default)", query, min_should_match);
-                auto result = index->MatchQuery(query);
-                LOG_DEBUG("MatchQuery result: {} hits found", result.count());
-                return result;
-            }
+            auto result = index->MatchQuery(query, min_should_match);
+            return result;
         } else if (op_type == proto::plan::OpType::PhraseMatch) {
             return index->PhraseMatchQuery(query, slop);
         } else {

@@ -85,7 +85,6 @@ message QueryInfo {
   string json_path = 14;
   schema.DataType json_type = 15;
   bool strict_cast = 16;
-  uint32 min_should_match = 17;
 }
 
 message ColumnInfo {

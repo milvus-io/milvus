@@ -254,23 +254,6 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		searchParamStr = ""
 	}
 
-	// 4.1. parse min_should_match parameter for text matching
-	var minShouldMatch uint32 = 1 // default value
-	minShouldMatchStr, err := funcutil.GetAttrByKeyFromRepeatedKV("min_should_match", searchParamsPair)
-	if err == nil && minShouldMatchStr != "" {
-		parsedValue, parseErr := strconv.ParseUint(minShouldMatchStr, 10, 32)
-		if parseErr != nil {
-			return nil, fmt.Errorf("failed to parse min_should_match parameter '%s': %w", minShouldMatchStr, parseErr)
-		}
-		if parsedValue < 1 {
-			return nil, fmt.Errorf("min_should_match must be >= 1, got %d", parsedValue)
-		}
-		if parsedValue > 1000 {
-			return nil, fmt.Errorf("min_should_match must be <= 1000, got %d", parsedValue)
-		}
-		minShouldMatch = uint32(parsedValue)
-	}
-
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
 	var strictGroupSize bool
@@ -345,7 +328,6 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonPath:             jsonPath,
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
-			MinShouldMatch:       minShouldMatch,
 		},
 		offset:       offset,
 		isIterator:   isIterator,
