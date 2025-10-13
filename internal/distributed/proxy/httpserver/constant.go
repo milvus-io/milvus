@@ -38,6 +38,7 @@ const (
 	ResourceGroupCategory   = "/resource_groups/"
 	SegmentCategory         = "/segments/"
 	QuotaCenterCategory     = "/quotacenter/"
+	CommonCategory          = "/common/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -77,6 +78,8 @@ const (
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 	TransferReplicaAction           = "transfer_replica"
+
+	RunAnalyzerAction = "run_analyzer"
 )
 
 const (
