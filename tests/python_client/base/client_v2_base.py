@@ -261,17 +261,18 @@ class TestMilvusClientV2Base(Base):
                                        **kwargs).run()
         return res, check_result
 
-    @trace()
-    def num_entities(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
-        timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
+    # No client.num_entities method
+    # @trace()
+    # def num_entities(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+    #     timeout = TIMEOUT if timeout is None else timeout
+    #     kwargs.update({"timeout": timeout})
 
-        func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.num_entities, collection_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       collection_name=collection_name,
-                                       **kwargs).run()
-        return res, check_result
+    #     func_name = sys._getframe().f_code.co_name
+    #     res, check = api_request([client.num_entities, collection_name], **kwargs)
+    #     check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+    #                                    collection_name=collection_name,
+    #                                    **kwargs).run()
+    #     return res, check_result
 
     @trace()
     def delete(self, client, collection_name, ids=None, timeout=None, filter=None, partition_name=None,
