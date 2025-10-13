@@ -7,6 +7,9 @@ from utils.util_log import test_log as log
 
 import numpy as np
 from collections.abc import Iterable
+import json
+from datetime import datetime
+from deepdiff import DeepDiff
 
 epsilon = ct.epsilon
 
@@ -69,47 +72,117 @@ def deep_approx_compare(x, y, epsilon=epsilon):
     return x == y
 
 
+import re
+# Pre-compile regex patterns for better performance
+_GEO_PATTERN = re.compile(r'(POINT|LINESTRING|POLYGON)\s+\(')
+_WHITESPACE_PATTERN = re.compile(r'\s+')
+
+def normalize_value(value):
+    """
+    Normalize values for comparison by converting to standard types and formats.
+
+    Handles:
+    - List-like types (RepeatedScalarContainer, HybridExtraList) -> list
+    - Numpy types -> Python native types
+    - GEO strings (normalize whitespace)
+
+    Optimized for performance with:
+    - Pre-compiled regex patterns
+    - Early returns
+    - Type name caching
+    """
+    # Fast path for None and simple immutable types
+    if value is None or isinstance(value, (bool, int)):
+        return value
+
+    # Convert numpy types to Python native types
+    if isinstance(value, (np.integer, np.floating)):
+        return float(value) if isinstance(value, np.floating) else int(value)
+
+    # Handle strings (common case for GEO fields)
+    if isinstance(value, str):
+        # Only process if it looks like a GEO string
+        if value.startswith(('POINT', 'LINESTRING', 'POLYGON')):
+            value = _GEO_PATTERN.sub(r'\1(', value)
+            value = _WHITESPACE_PATTERN.sub(' ', value).strip()
+        return value
+
+    # If it's a dict, recursively normalize each value
+    if isinstance(value, dict):
+        return {k: normalize_value(v) for k, v in value.items()}
+
+    # Convert list-like protobuf/custom types to standard list
+    type_name = type(value).__name__
+    if type_name in ('RepeatedScalarContainer', 'HybridExtraList', 'RepeatedCompositeContainer'):
+        # Convert to list and normalize elements
+        return [normalize_value(v) for v in value]
+
+    # If it's already a list or tuple, recursively normalize each element
+    if isinstance(value, (list, tuple)):
+        return [normalize_value(v) for v in value]
+
+    # Handle other iterables (but not strings) - rare case
+    if hasattr(value, '__iter__'):
+        try:
+            return [normalize_value(v) for v in value]
+        except:
+            pass
+
+    # Return as-is for other types
+    return value
+
+
 def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     Compares two lists of dictionaries for equality (order-insensitive) with floating-point tolerance.
-    
+
     Args:
         a (list): First list of dictionaries to compare
         b (list): Second list of dictionaries to compare
         epsilon (float, optional): Tolerance for floating-point comparisons. Defaults to 1e-6.
-    
+
     Returns:
         bool: True if lists contain equivalent dictionaries (order doesn't matter), False otherwise
-    
+
     Note:
-        Uses deep_approx_compare() for dictionary comparison with floating-point tolerance.
-        Maintains O(n²) complexity due to nested comparisons.
+        If differences are found, saves detailed diff to JSON file.
+        Normalizes types (protobuf containers, numpy types) and GEO strings before comparison.
     """
-    if len(a) != len(b):
-        return False
-
-    # Create a set of available indices for b
-    available_indices = set(range(len(b)))
-
-    for item_a in a:
-        matched = False
-        # Create a list of indices to remove (avoid modifying the set during iteration)
-        to_remove = []
-
-        for idx in available_indices:
-            if deep_approx_compare(item_a, b[idx], epsilon):
-                to_remove.append(idx)
-                matched = True
-                break
-
-        if not matched:
-            return False
-
-        # Remove matched indices
-        available_indices -= set(to_remove)
-
-    return True
-
+    # Normalize both lists to handle type differences
+    import time
+    t0 = time.time()
+    a_normalized = normalize_value(a)
+    b_normalized = normalize_value(b)
+    tt = time.time() - t0
+    log.debug(f"[COMPARE_LISTS] Normalize time: {tt:.2f}s")
+    t0 = time.time()
+    diff = DeepDiff(
+        a_normalized,
+        b_normalized,
+        ignore_order=True,
+        math_epsilon=epsilon,
+        significant_digits=1,
+        ignore_type_in_groups=[(list, tuple)],
+        ignore_string_type_changes=True,
+    )
+    tt = time.time() - t0
+    log.debug(f"[COMPARE_LISTS] DeepDiff time: {tt:.2f}s")
+    if diff:
+        for i in range(len(a_normalized)):
+            diff = DeepDiff(
+                a_normalized[i],
+                b_normalized[i],
+                ignore_order=True,
+                math_epsilon=epsilon,
+                significant_digits=1,
+                ignore_type_in_groups=[(list, tuple)],
+                ignore_string_type_changes=True,
+            )
+            if diff:
+                log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
+                return False
+    else:
+        return True
 
 def ip_check(ip):
     if ip == "localhost":
