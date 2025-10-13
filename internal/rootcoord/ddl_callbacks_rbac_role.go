@@ -24,11 +24,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -108,7 +108,7 @@ func (c *DDLCallback) dropRoleV2AckCallback(ctx context.Context, result message.
 }
 
 func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
 		return err
 	}
@@ -150,13 +150,29 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 }
 
 func (c *DDLCallback) alterUserRoleV2AckCallback(ctx context.Context, result message.BroadcastResultAlterUserRoleMessageV2) error {
-	username := result.Message.Header().RoleBinding.UserEntity.Name
-	roleName := result.Message.Header().RoleBinding.RoleEntity.Name
-	return executeOperateUserRoleTaskSteps(ctx, c.Core, username, roleName, milvuspb.OperateUserRoleType_AddUserToRole)
+	header := result.Message.Header()
+	if err := c.meta.OperateUserRole(ctx, util.DefaultTenant, header.RoleBinding.UserEntity, header.RoleBinding.RoleEntity, milvuspb.OperateUserRoleType_AddUserToRole); err != nil {
+		return errors.Wrap(err, "failed to operate user role")
+	}
+	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: int32(typeutil.CacheAddUserToRole),
+		OpKey:  funcutil.EncodeUserRoleCache(header.RoleBinding.UserEntity.Name, header.RoleBinding.RoleEntity.Name),
+	}); err != nil {
+		return errors.Wrap(err, "failed to refresh policy info cache")
+	}
+	return nil
 }
 
 func (c *DDLCallback) dropUserRoleV2AckCallback(ctx context.Context, result message.BroadcastResultDropUserRoleMessageV2) error {
-	username := result.Message.Header().RoleBinding.UserEntity.Name
-	roleName := result.Message.Header().RoleBinding.RoleEntity.Name
-	return executeOperateUserRoleTaskSteps(ctx, c.Core, username, roleName, milvuspb.OperateUserRoleType_RemoveUserFromRole)
+	header := result.Message.Header()
+	if err := c.meta.OperateUserRole(ctx, util.DefaultTenant, header.RoleBinding.UserEntity, header.RoleBinding.RoleEntity, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
+		return errors.Wrap(err, "failed to operate user role")
+	}
+	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: int32(typeutil.CacheRemoveUserFromRole),
+		OpKey:  funcutil.EncodeUserRoleCache(header.RoleBinding.UserEntity.Name, header.RoleBinding.RoleEntity.Name),
+	}); err != nil {
+		return errors.Wrap(err, "failed to refresh policy info cache")
+	}
+	return nil
 }

@@ -717,6 +717,100 @@ func (_c *IMetaTable_CheckIfOperateUserRole_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// CheckIfPrivilegeGroupAlterable provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfPrivilegeGroupAlterable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfPrivilegeGroupAlterable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfPrivilegeGroupAlterable'
+type IMetaTable_CheckIfPrivilegeGroupAlterable_Call struct {
+	*mock.Call
+}
+
+// CheckIfPrivilegeGroupAlterable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.OperatePrivilegeGroupRequest
+func (_e *IMetaTable_Expecter) CheckIfPrivilegeGroupAlterable(ctx interface{}, req interface{}) *IMetaTable_CheckIfPrivilegeGroupAlterable_Call {
+	return &IMetaTable_CheckIfPrivilegeGroupAlterable_Call{Call: _e.mock.On("CheckIfPrivilegeGroupAlterable", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupAlterable_Call) Run(run func(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest)) *IMetaTable_CheckIfPrivilegeGroupAlterable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.OperatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupAlterable_Call) Return(_a0 error) *IMetaTable_CheckIfPrivilegeGroupAlterable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupAlterable_Call) RunAndReturn(run func(context.Context, *milvuspb.OperatePrivilegeGroupRequest) error) *IMetaTable_CheckIfPrivilegeGroupAlterable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfPrivilegeGroupCreatable provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfPrivilegeGroupCreatable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfPrivilegeGroupCreatable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfPrivilegeGroupCreatable'
+type IMetaTable_CheckIfPrivilegeGroupCreatable_Call struct {
+	*mock.Call
+}
+
+// CheckIfPrivilegeGroupCreatable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.CreatePrivilegeGroupRequest
+func (_e *IMetaTable_Expecter) CheckIfPrivilegeGroupCreatable(ctx interface{}, req interface{}) *IMetaTable_CheckIfPrivilegeGroupCreatable_Call {
+	return &IMetaTable_CheckIfPrivilegeGroupCreatable_Call{Call: _e.mock.On("CheckIfPrivilegeGroupCreatable", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupCreatable_Call) Run(run func(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest)) *IMetaTable_CheckIfPrivilegeGroupCreatable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupCreatable_Call) Return(_a0 error) *IMetaTable_CheckIfPrivilegeGroupCreatable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupCreatable_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePrivilegeGroupRequest) error) *IMetaTable_CheckIfPrivilegeGroupCreatable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckIfUpdateCredential provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) CheckIfUpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) error {
 	ret := _m.Called(ctx, req)

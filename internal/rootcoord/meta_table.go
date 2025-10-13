@@ -1762,23 +1762,30 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 	return false, nil
 }
 
-func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
+func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
 		return errors.New("the privilege group name is empty")
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", groupName)
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", req.GetGroupName())
 	}
-	if util.IsPrivilegeNameDefined(groupName) {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", groupName)
+	if util.IsPrivilegeNameDefined(req.GetGroupName()) {
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", req.GetGroupName())
 	}
+	return nil
+}
+
+func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	data := &milvuspb.PrivilegeGroupInfo{
 		GroupName:  groupName,
 		Privileges: make([]*milvuspb.PrivilegeEntity, 0),
@@ -1832,25 +1839,33 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 	return mt.catalog.ListPrivilegeGroups(ctx)
 }
 
-func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
-	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+// CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
+func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	if util.IsBuiltinPrivilegeGroup(groupName) {
-		return merr.WrapErrParameterInvalidMsg("the privilege group name [%s] is defined by built in privilege groups in system", groupName)
-	}
-
-	// validate input params
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
 	if err != nil {
 		return err
 	}
-	if !definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] to operate", groupName)
+	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, struct{}) {
+		return group.GroupName, struct{}{}
+	})
+	for _, p := range req.Privileges {
+		if util.IsPrivilegeNameDefined(p.Name) {
+			continue
+		}
+		if _, ok := currenctGroups[p.Name]; !ok {
+			return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
+		}
 	}
+	return nil
+}
+
+func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
 	if err != nil {
 		return err
@@ -1864,7 +1879,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 			if group.GroupName == p.Name {
 				privileges = append(privileges, group.Privileges...)
 			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
+				break
 			}
 		}
 	}

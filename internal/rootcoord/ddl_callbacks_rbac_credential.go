@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -140,7 +139,7 @@ func (c *DDLCallback) dropUserV2AckCallback(ctx context.Context, result message.
 }
 
 func (c *Core) broadcastRestoreRBACV2(ctx context.Context, meta *milvuspb.RBACMeta) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to start broadcast with resource keys")
 	}

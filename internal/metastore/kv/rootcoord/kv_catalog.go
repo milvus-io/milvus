@@ -349,7 +349,7 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
 	credentialInfo := model.MarshalCredentialModel(credential)
-	credentialInfo.Username = ""
+	credentialInfo.Username = "" // Username is already save in the key, remove it from the value.
 	v, err := json.Marshal(credentialInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("create credential marshal fail", zap.String("key", k), zap.Error(err))
@@ -1048,18 +1048,6 @@ func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]st
 	return users, nil
 }
 
-func (kc *Catalog) save(ctx context.Context, k string) error {
-	var err error
-	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return err
-	}
-	if err == nil {
-		log.Ctx(ctx).Debug("the key has existed", zap.String("key", k))
-		return common.NewIgnorableError(fmt.Errorf("the key[%s] has existed", k))
-	}
-	return kc.Txn.Save(ctx, k, "")
-}
-
 func (kc *Catalog) remove(ctx context.Context, k string) error {
 	var err error
 	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1074,11 +1062,7 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 
 func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
-	err := kc.save(ctx, k)
-	if err != nil && !common.IsIgnorableError(err) {
-		log.Ctx(ctx).Warn("fail to save the role", zap.String("key", k), zap.Error(err))
-	}
-	return err
+	return kc.Txn.Save(ctx, k, "")
 }
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
@@ -1110,21 +1094,13 @@ func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string)
 
 func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", userEntity.Name, roleEntity.Name))
-	var err error
-	if operateType == milvuspb.OperateUserRoleType_AddUserToRole {
-		err = kc.save(ctx, k)
-		if err != nil {
-			log.Ctx(ctx).Error("fail to save the user-role", zap.String("key", k), zap.Error(err))
-		}
-	} else if operateType == milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		err = kc.remove(ctx, k)
-		if err != nil {
-			log.Ctx(ctx).Error("fail to remove the user-role", zap.String("key", k), zap.Error(err))
-		}
-	} else {
-		err = fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
+	switch operateType {
+	case milvuspb.OperateUserRoleType_AddUserToRole:
+		return kc.Txn.Save(ctx, k, "")
+	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
+		return kc.Txn.Remove(ctx, k)
 	}
-	return err
+	return fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
 }
 
 func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {

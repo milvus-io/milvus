@@ -42,4 +42,10 @@ type RBACChecker interface {
 
 	// CheckIfOperateUserRole checks if the user role can be operated.
 	CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error
+
+	// CheckIfPrivilegeGroupCreatable checks if the privilege group can be created.
+	CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error
+
+	// CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
+	CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error
 }

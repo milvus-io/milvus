@@ -18,22 +18,27 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
-	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
-		return err
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to start broadcast with rbac lock")
 	}
+	defer broadcaster.Close()
 
+	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
+		return errors.Wrap(err, "failed to operate privilege common check")
+	}
 	privName := in.Entity.Grantor.Privilege.Name
 	switch in.Version {
 	case "v2":
@@ -54,11 +59,6 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 			in.Entity.ObjectName = util.AnyWord
 		}
 	}
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
 
 	var msg message.BroadcastMutableMessage
 	switch in.Type {
@@ -95,11 +95,16 @@ func (c *DDLCallback) dropPrivilegeV2AckCallback(ctx context.Context, result mes
 }
 
 func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePrivilegeGroupRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	in.GroupName = strings.TrimSpace(in.GroupName)
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to start broadcast with rbac lock")
 	}
 	defer broadcaster.Close()
+
+	if err := c.meta.CheckIfPrivilegeGroupCreatable(ctx, in); err != nil {
+		return errors.Wrap(err, "failed to check if privilege group creatable")
+	}
 
 	msg := message.NewAlterPrivilegeGroupMessageBuilderV2().
 		WithHeader(&message.AlterPrivilegeGroupMessageHeader{
@@ -110,17 +115,20 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 		WithBody(&message.AlterPrivilegeGroupMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
-
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
 
 func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePrivilegeGroupRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to start broadcast with rbac lock")
 	}
 	defer broadcaster.Close()
+
+	if err := c.meta.CheckIfPrivilegeGroupAlterable(ctx, in); err != nil {
+		return errors.Wrap(err, "failed to check if privilege group alterable")
+	}
 
 	var msg message.BroadcastMutableMessage
 	switch in.Type {
@@ -162,9 +170,9 @@ func (c *DDLCallback) alterPrivilegeGroupV2AckCallback(ctx context.Context, resu
 }
 
 func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivilegeGroupRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to start broadcast with rbac lock")
 	}
 	defer broadcaster.Close()
 
