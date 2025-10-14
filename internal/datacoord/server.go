@@ -43,11 +43,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -401,11 +401,15 @@ func (s *Server) initMessageCallback() {
 		if err != nil {
 			return err
 		}
-		repConfig, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+		balancer, err := balance.GetWithContext(ctx)
 		if err != nil {
 			return err
 		}
-		if repConfig != nil && repConfig.GetCurrentCluster() != nil {
+		channelAssignment, err := balancer.GetLatestChannelAssignment()
+		if err != nil {
+			return err
+		}
+		if channelAssignment.ReplicateConfiguration != nil {
 			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
