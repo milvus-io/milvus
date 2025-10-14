@@ -6549,32 +6549,25 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	logger := log.Ctx(ctx).With(zap.String("sourceClusterID", req.GetSourceClusterId()))
+	logger := log.Ctx(ctx).With(
+		zap.String("sourceClusterID", req.GetSourceClusterId()),
+		zap.String("pchannel", req.GetTargetPchannel()),
+	)
 	logger.Info("GetReplicateInfo received")
 	defer func() {
 		if err != nil {
 			logger.Warn("GetReplicateInfo fail", zap.Error(err))
 		} else {
-			logger.Info("GetReplicateInfo success", zap.Any("checkpoints", resp.GetCheckpoints()))
+			logger.Info("GetReplicateInfo success", zap.Any("checkpoint", resp.GetCheckpoint()))
 		}
 	}()
 
-	configHelper, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+	checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
 		return nil, err
 	}
-	currentCluster := configHelper.GetCurrentCluster()
-
-	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
-	for _, pchannel := range currentCluster.GetPchannels() {
-		checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, pchannel)
-		if err != nil {
-			return nil, err
-		}
-		checkpoints = append(checkpoints, checkpoint.IntoProto())
-	}
 	return &milvuspb.GetReplicateInfoResponse{
-		Checkpoints: checkpoints,
+		Checkpoint: checkpoint.IntoProto(),
 	}, nil
 }
 

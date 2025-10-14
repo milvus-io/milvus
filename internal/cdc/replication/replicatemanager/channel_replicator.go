@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -157,18 +157,16 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 	defer milvusClient.Close(ctx)
 
 	sourceClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	replicateInfo, err := milvusClient.GetReplicateInfo(ctx, sourceClusterID)
+	req := &milvuspb.GetReplicateInfoRequest{
+		SourceClusterId: sourceClusterID,
+		TargetPchannel:  r.replicateInfo.GetTargetChannelName(),
+	}
+	replicateInfo, err := milvusClient.GetReplicateInfo(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	var checkpoint *commonpb.ReplicateCheckpoint
-	for _, cp := range replicateInfo.GetCheckpoints() {
-		if cp.GetPchannel() == r.replicateInfo.GetSourceChannelName() {
-			checkpoint = cp
-			break
-		}
-	}
+	checkpoint := replicateInfo.GetCheckpoint()
 	if checkpoint == nil || checkpoint.MessageId == nil {
 		initializedCheckpoint := utility.NewReplicateCheckpointFromProto(r.replicateInfo.InitializedCheckpoint)
 		logger.Info("channel not found in replicate info, will start from the beginning",

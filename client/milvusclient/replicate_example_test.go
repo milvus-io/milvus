@@ -21,6 +21,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -81,13 +82,16 @@ func ExampleClient_GetReplicateInfo() {
 	}
 
 	// Get replicate information for a specific source cluster
-	resp, err := cli.GetReplicateInfo(ctx, "source-cluster")
+	resp, err := cli.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
+		SourceClusterId: "source-cluster",
+		TargetPchannel:  "source-channel-dml_0",
+	})
 	if err != nil {
 		log.Printf("Failed to get replicate information: %v", err)
 		return
 	}
 
-	log.Printf("Replicate information retrieved successfully, checkpoint count: %d", len(resp.GetCheckpoints()))
+	log.Printf("Replicate information retrieved successfully, checkpoint: %v", resp.GetCheckpoint())
 }
 
 func ExampleClient_CreateReplicateStream() {
