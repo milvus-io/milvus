@@ -72,6 +72,7 @@ func (c *controller) recoverReplicatePChannelMeta(replicatePChannels []*streamin
 		// Replicate manager ensures the idempotency of the creation.
 		resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
 	}
+	resource.Resource().ReplicateManagerClient().RemoveOutdatedReplicators(replicatePChannels)
 }
 
 func (c *controller) watchEvents(revision int64) clientv3.WatchChan {

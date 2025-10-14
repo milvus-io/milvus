@@ -85,6 +85,24 @@ func (r *replicateManager) RemoveReplicator(replicateInfo *streamingpb.Replicate
 	logger.Info("removed replicator for replicate pchannel")
 }
 
+func (r *replicateManager) RemoveOutdatedReplicators(aliveReplicates []*streamingpb.ReplicatePChannelMeta) {
+	alivesMap := make(map[string]struct{})
+	for _, replicate := range aliveReplicates {
+		alivesMap[streamingcoord.BuildReplicatePChannelMetaKey(replicate)] = struct{}{}
+	}
+	for replicatorKey, replicator := range r.replicators {
+		if _, ok := alivesMap[replicatorKey]; !ok {
+			replicator.StopReplicate()
+			info := r.replicatorPChannels[replicatorKey]
+			delete(r.replicators, replicatorKey)
+			delete(r.replicatorPChannels, replicatorKey)
+			log.Info("removed replicator for replicate pchannel",
+				zap.String("sourceChannel", info.GetSourceChannelName()),
+				zap.String("targetChannel", info.GetTargetChannelName()))
+		}
+	}
+}
+
 func (r *replicateManager) Close() {
 	for _, replicator := range r.replicators {
 		replicator.StopReplicate()

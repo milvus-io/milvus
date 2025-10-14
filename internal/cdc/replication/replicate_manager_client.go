@@ -26,6 +26,9 @@ type ReplicateManagerClient interface {
 	// RemoveReplicator removes a replicator for the replicate pchannel.
 	RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
 
+	// RemoveOutdatedReplicators removes the outdated replicators.
+	RemoveOutdatedReplicators(aliveReplicates []*streamingpb.ReplicatePChannelMeta)
+
 	// Close closes the replicate manager client.
 	Close()
 }
