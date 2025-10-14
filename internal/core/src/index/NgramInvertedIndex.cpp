@@ -344,13 +344,14 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(
         final_result_count = bitset.count();
     }
 
-    auto root_span = tracer::GetRootSpan();
-    root_span->SetAttribute("need_post_filter", need_post_filter);
-    root_span->SetAttribute("ngram_hit_count",
-                            static_cast<int>(ngram_hit_count));
-    root_span->SetAttribute("final_result_count",
-                            static_cast<int>(final_result_count));
-    root_span->SetAttribute("total_count", static_cast<int>(bitset.size()));
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("need_post_filter", need_post_filter);
+        root_span->SetAttribute("ngram_hit_count",
+                                static_cast<int>(ngram_hit_count));
+        root_span->SetAttribute("final_result_count",
+                                static_cast<int>(final_result_count));
+        root_span->SetAttribute("total_count", static_cast<int>(bitset.size()));
+    }
 
     return std::optional<TargetBitmap>(std::move(bitset));
 }
