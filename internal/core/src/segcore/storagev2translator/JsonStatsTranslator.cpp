@@ -43,7 +43,7 @@ JsonStatsTranslator::JsonStatsTranslator(
                                              /* is_index */ true),
             milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ false) {
+            /* support_eviction */ true) {
 }
 
 size_t
