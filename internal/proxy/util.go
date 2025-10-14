@@ -83,6 +83,10 @@ const (
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
+func ConcatStructFieldName(structName string, fieldName string) string {
+	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
