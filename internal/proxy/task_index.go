@@ -351,10 +351,6 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {
-					if !Params.AutoIndexConfig.EnableDeduplicateIndex.GetAsBool() {
-						log.Ctx(ctx).Warn("Deduplicate index is not enabled, but metric type is deduplicate.")
-						return merr.WrapErrParameterInvalidMsg("Deduplicate index is not enabled, but metric type is deduplicate.")
-					}
 					config = Params.AutoIndexConfig.DeduplicateIndexParams.GetAsJSONMap()
 				} else {
 					// override binary vector index params by autoindex
