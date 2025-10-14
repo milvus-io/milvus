@@ -210,6 +210,8 @@ func (s *globalTaskScheduler) check() {
 			defer s.mu.RUnlock(task.GetTaskID())
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
+			case taskcommon.None:
+				s.runningTasks.Remove(task.GetTaskID())
 			case taskcommon.Init, taskcommon.Retry:
 				s.runningTasks.Remove(task.GetTaskID())
 				s.pendingTasks.Push(task)

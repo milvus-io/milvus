@@ -62,9 +62,11 @@
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "cachinglayer/CacheSlot.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -1688,17 +1690,60 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
 
-    text_indexes_[field_id] = std::move(index);
+    text_indexes_[field_id] =
+        std::make_shared<index::TextMatchIndexHolder>(std::move(index));
 }
 
 void
 ChunkedSegmentSealedImpl::LoadTextIndex(
-    FieldId field_id, std::unique_ptr<index::TextMatchIndex> index) {
+    std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto) {
     std::unique_lock lck(mutex_);
+
+    milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
+                                                   info_proto->partitionid(),
+                                                   this->get_segment_id(),
+                                                   info_proto->fieldid(),
+                                                   info_proto->schema()};
+    milvus::storage::IndexMeta index_meta{this->get_segment_id(),
+                                          info_proto->fieldid(),
+                                          info_proto->buildid(),
+                                          info_proto->version()};
+    auto remote_chunk_manager =
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    AssertInfo(fs != nullptr, "arrow file system is null");
+
+    milvus::Config config;
+    std::vector<std::string> files;
+    for (const auto& f : info_proto->files()) {
+        files.push_back(f);
+    }
+    config[milvus::index::INDEX_FILES] = files;
+    config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
+    config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+    milvus::storage::FileManagerContext file_ctx(
+        field_data_meta, index_meta, remote_chunk_manager, fs);
+
+    auto field_id = milvus::FieldId(info_proto->fieldid());
     const auto& field_meta = schema_->operator[](field_id);
-    index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    milvus::segcore::storagev1translator::TextMatchIndexLoadInfo load_info{
+        info_proto->enable_mmap(),
+        this->get_segment_id(),
+        info_proto->fieldid(),
+        field_meta.get_analyzer_params(),
+        info_proto->index_size()};
+
+    std::unique_ptr<
+        milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
+        translator = std::make_unique<
+            milvus::segcore::storagev1translator::TextMatchIndexTranslator>(
+            load_info, file_ctx, config);
+    auto cache_slot =
+        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+            std::move(translator));
+    text_indexes_[field_id] = std::move(cache_slot);
 }
 
 std::unique_ptr<DataArray>

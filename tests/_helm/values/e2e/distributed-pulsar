@@ -21,7 +21,7 @@ proxy:
 dataNode:
   resources:
     limits:
-      cpu: "2"
+      cpu: "4"
       memory: 8Gi
     requests:
       cpu: "0.5"

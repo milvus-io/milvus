@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.24.4
+go 1.24.6
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
@@ -24,7 +24,7 @@ require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.3
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
-	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
+	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81 // indirect
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0

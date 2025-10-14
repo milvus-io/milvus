@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package privilege
 
 import (
 	"context"
@@ -30,10 +30,10 @@ import (
 // MetaCacheCasbinAdapter is the implementation of `persist.Adapter` with Cache
 // Since the usage shall be read-only, it implements only `LoadPolicy` for now.
 type MetaCacheCasbinAdapter struct {
-	cacheSource func() Cache
+	cacheSource func() PrivilegeCache
 }
 
-func NewMetaCacheCasbinAdapter(cacheSource func() Cache) *MetaCacheCasbinAdapter {
+func NewMetaCacheCasbinAdapter(cacheSource func() PrivilegeCache) *MetaCacheCasbinAdapter {
 	return &MetaCacheCasbinAdapter{
 		cacheSource: cacheSource,
 	}

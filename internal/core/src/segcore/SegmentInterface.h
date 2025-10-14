@@ -142,7 +142,7 @@ class SegmentInterface {
     virtual void
     CreateTextIndex(FieldId field_id) = 0;
 
-    virtual index::TextMatchIndex*
+    virtual PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
@@ -241,7 +241,7 @@ class SegmentInternalInterface : public SegmentInterface {
             }
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), std::move(valid_data)});
+                pw, {std::move(res), std::move(valid_data)});
         }
     }
 
@@ -361,7 +361,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
 
-    index::TextMatchIndex*
+    PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
@@ -595,7 +595,12 @@ class SegmentInternalInterface : public SegmentInterface {
     SkipIndex skip_index_;
 
     // text-indexes used to do match.
-    std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
+    std::unordered_map<
+        FieldId,
+        std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
+                     std::shared_ptr<milvus::index::TextMatchIndexHolder>,
+                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                         milvus::index::TextMatchIndex>>>>
         text_indexes_;
 
     // json stats cache (field_id -> CacheSlot of JsonKeyStats)

@@ -86,6 +86,8 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
+	initcore.InitLocalArrowFileSystem(suite.rootPath)
+	initcore.InitRemoteArrowFileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
@@ -898,9 +900,9 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.Key, "500")
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.Key, "100")
-		resource, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
+		result, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
 		suite.NoError(err)
-		suite.EqualValues(1100000, resource.MemorySize)
+		suite.EqualValues(1100000, result.Resource.MemorySize)
 
 		suite.loader.committedResource.Add(LoadResource{
 			MemorySize: 1024 * 1024 * 1024 * 1024,
@@ -909,7 +911,7 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 		timeoutErr := errors.New("timeout")
 		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 1000*time.Millisecond, timeoutErr)
 		defer cancel()
-		resource, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
+		result, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
 		suite.Error(err)
 		suite.ErrorIs(err, timeoutErr)
 	})

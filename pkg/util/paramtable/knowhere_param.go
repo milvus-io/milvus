@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
@@ -17,6 +18,8 @@ const (
 	BuildStage  = "build"
 	LoadStage   = "load"
 	SearchStage = "search"
+
+	OverrideIndexTypeKey = "override_index_type"
 )
 
 const (
@@ -102,6 +105,26 @@ func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, index
 					Key:   key,
 					Value: val,
 				})
+		}
+	}
+
+	overrideIndexType := GetKeyFromSlice(indexParams, OverrideIndexTypeKey)
+	if overrideIndexType != "" {
+		overrideIndexParams := p.getIndexParam(overrideIndexType, stage)
+		for key, val := range overrideIndexParams {
+			indexParams = append(indexParams,
+				&commonpb.KeyValuePair{
+					Key:   key,
+					Value: val,
+				})
+		}
+
+		// Replace the original index_type with override_index_type
+		for i, param := range indexParams {
+			if param.Key == common.IndexTypeKey {
+				indexParams[i].Value = overrideIndexType
+				break
+			}
 		}
 	}
 

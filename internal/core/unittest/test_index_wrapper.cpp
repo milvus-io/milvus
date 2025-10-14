@@ -18,6 +18,7 @@
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "common/QueryResult.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -32,6 +33,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         storage_config_ = get_default_local_storage_config();
+        fs_ = storage::InitArrowFileSystem(storage_config_);
 
         auto param = GetParam();
         index_type = param.first;
@@ -98,6 +100,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     int64_t query_offset = 1;
     int64_t NB = 10;
     StorageConfig storage_config_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -126,7 +129,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
 
     storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     config[milvus::index::INDEX_ENGINE_VERSION] =
         std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(

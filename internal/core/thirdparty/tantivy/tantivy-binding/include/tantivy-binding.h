@@ -33,6 +33,7 @@ struct Value {
     RustArray,
     RustArrayI64,
     U32,
+    U64,
     Ptr,
   };
 
@@ -52,6 +53,10 @@ struct Value {
     uint32_t _0;
   };
 
+  struct U64_Body {
+    uint64_t _0;
+  };
+
   struct Ptr_Body {
     void *_0;
   };
@@ -62,6 +67,7 @@ struct Value {
     RustArray_Body rust_array;
     RustArrayI64_Body rust_array_i64;
     U32_Body u32;
+    U64_Body u64;
     Ptr_Body ptr;
   };
 };
@@ -127,6 +133,8 @@ void tantivy_free_index_reader(void *ptr);
 RustResult tantivy_reload_index(void *ptr);
 
 RustResult tantivy_index_count(void *ptr);
+
+RustResult tantivy_index_size_bytes(void *ptr);
 
 RustResult tantivy_terms_query_bool(void *ptr, const bool *terms, uintptr_t len, void *bitset);
 

@@ -89,7 +89,8 @@ TEST(TraverseJsonForBuildStatsTest,
     storage_config.storage_type = "local";
     storage_config.root_path = "/tmp/test-traverse-json-build-stats";
     auto cm = milvus::storage::CreateChunkManager(storage_config);
-    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     JsonKeyStats stats(ctx, true);
 
     int index = 0;

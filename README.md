@@ -167,7 +167,7 @@ Requirements:
 * Linux systems (Ubuntu 20.04 or later recommended):
   ```bash
   Go: >= 1.21
-  CMake: >= 3.26.4
+  CMake: >= 3.26.4 && CMake < 4
   GCC: 9.5
   Python: > 3.8 and  <= 3.11
   ```
@@ -175,7 +175,7 @@ Requirements:
 * MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
   ```bash
   Go: >= 1.21
-  CMake: >= 3.26.4
+  CMake: >= 3.26.4 && CMake < 4
   llvm: >= 15
   Python: > 3.8 and  <= 3.11
   ```
@@ -183,7 +183,7 @@ Requirements:
 * MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
   ```bash
   Go: >= 1.21 (Arch=ARM64)
-  CMake: >= 3.26.4
+  CMake: >= 3.26.4 && CMake < 4
   llvm: >= 15
   Python: > 3.8 and  <= 3.11
   ```
