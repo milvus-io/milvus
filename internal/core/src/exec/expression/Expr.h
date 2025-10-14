@@ -1407,8 +1407,22 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    CanUseJsonStats(EvalCtx& context, FieldId field_id) const {
-        return PlanUseJsonStats(context) && HasJsonStats(field_id);
+    CanUseJsonStats(EvalCtx& context,
+                    FieldId field_id,
+                    const std::vector<std::string>& nested_path) const {
+        // if path contains integer, we can't use json stats such as "a.1.b", "a.1",
+        // because we can't know the integer is a key or a array indice
+        auto path_contains_integer = [](const std::vector<std::string>& path) {
+            for (auto i = 0; i < path.size(); i++) {
+                if (milvus::IsInteger(path[i])) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        return PlanUseJsonStats(context) && HasJsonStats(field_id) &&
+               !path_contains_integer(nested_path);
     }
 
     virtual bool

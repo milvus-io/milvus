@@ -296,7 +296,8 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsByStats<ExprValueType>();
     }
 
@@ -521,7 +522,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsArrayByStats();
     }
     auto real_batch_size =
@@ -808,7 +810,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsAllByStats<ExprValueType>();
     }
     auto real_batch_size =
@@ -1031,7 +1034,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsAllWithDiffTypeByStats();
     }
     auto real_batch_size =
@@ -1361,7 +1365,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsAllArrayByStats();
     }
     auto real_batch_size =
@@ -1567,7 +1572,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonContainsWithDiffTypeByStats();
     }
     auto real_batch_size =
