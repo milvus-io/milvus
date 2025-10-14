@@ -2331,8 +2331,14 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	err = mt.CreatePrivilegeGroup(context.TODO(), "pg1")
 	assert.NoError(t, err)
 
-	err = mt.DropPrivilegeGroup(context.TODO(), "")
+	err = mt.CheckIfPrivilegeGroupDropable(context.TODO(), &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "",
+	})
 	assert.Error(t, err)
+	err = mt.CheckIfPrivilegeGroupDropable(context.TODO(), &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "pg1",
+	})
+	assert.NoError(t, err)
 	err = mt.DropPrivilegeGroup(context.TODO(), "pg1")
 	assert.NoError(t, err)
 	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{

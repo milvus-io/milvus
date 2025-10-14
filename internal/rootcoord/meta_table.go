@@ -1859,20 +1859,21 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 	return mt.catalog.SavePrivilegeGroup(ctx, data)
 }
 
-func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
+func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
 		return errors.New("the privilege group name is empty")
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if !definedByUsers {
-		return nil
+		return errNotCustomPrivilegeGroup
 	}
+
 	// check if the group is used by any role
 	roles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
@@ -1890,11 +1891,18 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 			return err
 		}
 		for _, grant := range grants {
-			if grant.Grantor.Privilege.Name == groupName {
-				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", groupName, role.GetName())
+			if grant.Grantor.Privilege.Name == req.GetGroupName() {
+				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", req.GetGroupName(), role.GetName())
 			}
 		}
 	}
+	return nil
+}
+
+func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	return mt.catalog.DropPrivilegeGroup(ctx, groupName)
 }
 

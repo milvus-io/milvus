@@ -811,6 +811,53 @@ func (_c *IMetaTable_CheckIfPrivilegeGroupCreatable_Call) RunAndReturn(run func(
 	return _c
 }
 
+// CheckIfPrivilegeGroupDropable provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfPrivilegeGroupDropable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropPrivilegeGroupRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfPrivilegeGroupDropable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfPrivilegeGroupDropable'
+type IMetaTable_CheckIfPrivilegeGroupDropable_Call struct {
+	*mock.Call
+}
+
+// CheckIfPrivilegeGroupDropable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.DropPrivilegeGroupRequest
+func (_e *IMetaTable_Expecter) CheckIfPrivilegeGroupDropable(ctx interface{}, req interface{}) *IMetaTable_CheckIfPrivilegeGroupDropable_Call {
+	return &IMetaTable_CheckIfPrivilegeGroupDropable_Call{Call: _e.mock.On("CheckIfPrivilegeGroupDropable", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupDropable_Call) Run(run func(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest)) *IMetaTable_CheckIfPrivilegeGroupDropable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropPrivilegeGroupRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupDropable_Call) Return(_a0 error) *IMetaTable_CheckIfPrivilegeGroupDropable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfPrivilegeGroupDropable_Call) RunAndReturn(run func(context.Context, *milvuspb.DropPrivilegeGroupRequest) error) *IMetaTable_CheckIfPrivilegeGroupDropable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckIfRBACRestorable provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
 	ret := _m.Called(ctx, req)

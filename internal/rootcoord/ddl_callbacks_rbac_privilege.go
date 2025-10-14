@@ -174,6 +174,10 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 	}
 	defer broadcaster.Close()
 
+	if err := c.meta.CheckIfPrivilegeGroupDropable(ctx, in); err != nil {
+		return errors.Wrap(err, "failed to check if privilege group dropable")
+	}
+
 	msg := message.NewDropPrivilegeGroupMessageBuilderV2().
 		WithHeader(&message.DropPrivilegeGroupMessageHeader{
 			PrivilegeGroupInfo: &milvuspb.PrivilegeGroupInfo{

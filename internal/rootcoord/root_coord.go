@@ -3028,6 +3028,10 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 	}
 
 	if err := c.broadcastDropPrivilegeGroup(ctx, in); err != nil {
+		if errors.Is(err, errNotCustomPrivilegeGroup) {
+			ctxLog.Info("privilege group is not custom privilege group, skip drop", zap.Error(err))
+			return merr.Success(), nil
+		}
 		ctxLog.Warn("fail to drop privilege group", zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
 	}
