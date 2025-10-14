@@ -980,6 +980,10 @@ func (w *NativePayloadWriter) AddVectorArrayFieldDataToPayload(data *VectorArray
 
 // addFloatVectorArrayToPayload handles FloatVector elements in VectorArray
 func (w *NativePayloadWriter) addFloatVectorArrayToPayload(builder *array.ListBuilder, data *VectorArrayFieldData) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrParameterInvalidMsg("vector dimension must be greater than 0")
+	}
+
 	valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 
 	// Each element in data.Data represents one row of VectorArray
@@ -1013,6 +1017,10 @@ func (w *NativePayloadWriter) addFloatVectorArrayToPayload(builder *array.ListBu
 
 // addBinaryVectorArrayToPayload handles BinaryVector elements in VectorArray
 func (w *NativePayloadWriter) addBinaryVectorArrayToPayload(builder *array.ListBuilder, data *VectorArrayFieldData) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrParameterInvalidMsg("vector dimension must be greater than 0")
+	}
+
 	valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 
 	// Each element in data.Data represents one row of VectorArray
@@ -1040,6 +1048,10 @@ func (w *NativePayloadWriter) addBinaryVectorArrayToPayload(builder *array.ListB
 
 // addFloat16VectorArrayToPayload handles Float16Vector elements in VectorArray
 func (w *NativePayloadWriter) addFloat16VectorArrayToPayload(builder *array.ListBuilder, data *VectorArrayFieldData) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrParameterInvalidMsg("vector dimension must be greater than 0")
+	}
+
 	valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 
 	// Each element in data.Data represents one row of VectorArray
@@ -1067,6 +1079,10 @@ func (w *NativePayloadWriter) addFloat16VectorArrayToPayload(builder *array.List
 
 // addBFloat16VectorArrayToPayload handles BFloat16Vector elements in VectorArray
 func (w *NativePayloadWriter) addBFloat16VectorArrayToPayload(builder *array.ListBuilder, data *VectorArrayFieldData) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrParameterInvalidMsg("vector dimension must be greater than 0")
+	}
+
 	valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 
 	// Each element in data.Data represents one row of VectorArray
@@ -1094,6 +1110,10 @@ func (w *NativePayloadWriter) addBFloat16VectorArrayToPayload(builder *array.Lis
 
 // addInt8VectorArrayToPayload handles Int8Vector elements in VectorArray
 func (w *NativePayloadWriter) addInt8VectorArrayToPayload(builder *array.ListBuilder, data *VectorArrayFieldData) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrParameterInvalidMsg("vector dimension must be greater than 0")
+	}
+
 	valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 
 	// Each element in data.Data represents one row of VectorArray

@@ -760,7 +760,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 
 			vectorArrayData.Dim = dim
 
-			bytesPerVector := int(fixedSizeBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
+			bytesPerVector := fixedSizeBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth
 
 			appendBinarySlice := func(data []byte, stride int) error {
 				if stride == 0 {
