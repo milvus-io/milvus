@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -96,15 +97,16 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
+	name := proxy.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
 	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      integration.StructSubFloatVecField,
+		FieldName:      name,
 		IndexName:      "array_of_vector_index",
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.MaxSim),
 	})
 	s.NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
-	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.StructSubFloatVecField)
+	s.WaitForIndexBuilt(context.TODO(), collectionName, name)
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
