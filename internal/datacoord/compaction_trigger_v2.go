@@ -38,6 +38,7 @@ type CompactionTriggerType int8
 const (
 	TriggerTypeLevelZeroViewChange CompactionTriggerType = iota + 1
 	TriggerTypeLevelZeroViewIDLE
+	TriggerTypeLevelZeroViewManual
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
 	TriggerTypeSingle
@@ -50,6 +51,8 @@ func (t CompactionTriggerType) String() string {
 		return "LevelZeroViewChange"
 	case TriggerTypeLevelZeroViewIDLE:
 		return "LevelZeroViewIDLE"
+	case TriggerTypeLevelZeroViewManual:
+		return "LevelZeroViewManual"
 	case TriggerTypeSegmentSizeViewChange:
 		return "SegmentSizeViewChange"
 	case TriggerTypeClustering:
@@ -67,7 +70,7 @@ type TriggerManager interface {
 	Start()
 	Stop()
 	OnCollectionUpdate(collectionID int64)
-	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error)
+	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool) (UniqueID, error)
 	GetPauseCompactionChan(jobID, collectionID int64) <-chan struct{}
 	GetResumeCompactionChan(jobID, collectionID int64) <-chan struct{}
 }
@@ -119,7 +122,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	}
 	m.l0SigLock = &sync.Mutex{}
 	m.l0TickSig = sync.NewCond(m.l0SigLock)
-	m.l0Policy = newL0CompactionPolicy(meta)
+	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 	return m
@@ -231,7 +234,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 				continue
 			}
 			m.setL0Triggering(true)
-			events, err := m.l0Policy.Trigger()
+			events, err := m.l0Policy.Trigger(ctx)
 			if err != nil {
 				log.Warn("Fail to trigger L0 policy", zap.Error(err))
 				m.setL0Triggering(false)
@@ -291,14 +294,27 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	}
 }
 
-func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error) {
-	log.Ctx(ctx).Info("receive manual trigger", zap.Int64("collectionID", collectionID))
-	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(ctx, collectionID, true)
+func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool) (UniqueID, error) {
+	log.Ctx(ctx).Info("receive manual trigger", zap.Int64("collectionID", collectionID),
+		zap.Bool("clusteringCompaction", clusteringCompaction), zap.Bool("l0Compaction", l0Compaction))
+
+	var triggerID UniqueID
+	var err error
+	var views []CompactionView
+
+	events := make(map[CompactionTriggerType][]CompactionView, 0)
+	if l0Compaction {
+		m.setL0Triggering(true)
+		defer m.setL0Triggering(false)
+		views, triggerID, err = m.l0Policy.triggerOneCollection(ctx, collectionID)
+		events[TriggerTypeLevelZeroViewManual] = views
+	} else if clusteringCompaction {
+		views, triggerID, err = m.clusteringPolicy.triggerOneCollection(ctx, collectionID, true)
+		events[TriggerTypeClustering] = views
+	}
 	if err != nil {
 		return 0, err
 	}
-	events := make(map[CompactionTriggerType][]CompactionView, 0)
-	events[TriggerTypeClustering] = views
 	if len(events) > 0 {
 		for triggerType, views := range events {
 			m.notify(ctx, triggerType, views)
@@ -307,31 +323,42 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 	return triggerID, nil
 }
 
+func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType CompactionTriggerType,
+	view CompactionView,
+) ([]CompactionView, string) {
+	if eventType == TriggerTypeLevelZeroViewIDLE {
+		view, reason := view.ForceTrigger()
+		return []CompactionView{view}, reason
+	} else if eventType == TriggerTypeLevelZeroViewManual {
+		return view.ForceTriggerAll()
+	}
+	outView, reason := view.Trigger()
+	return []CompactionView{outView}, reason
+}
+
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
 	log := log.Ctx(ctx)
 	log.Debug("Start to trigger compactions", zap.String("eventType", eventType.String()))
 	for _, view := range views {
-		outView, reason := view.Trigger()
-		if outView == nil && eventType == TriggerTypeLevelZeroViewIDLE {
-			log.Info("Start to force trigger a level zero compaction")
-			outView, reason = view.ForceTrigger()
-		}
+		outViews, reason := m.triggerViewForCompaction(ctx, eventType, view)
+		for _, outView := range outViews {
+			if outView != nil {
+				log.Info("Success to trigger a compaction, try to submit",
+					zap.String("eventType", eventType.String()),
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()),
+					zap.Int64("triggerID", outView.GetTriggerID()))
 
-		if outView != nil {
-			log.Info("Success to trigger a compaction, try to submit",
-				zap.String("eventType", eventType.String()),
-				zap.String("reason", reason),
-				zap.String("output view", outView.String()))
-
-			switch eventType {
-			case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE:
-				m.SubmitL0ViewToScheduler(ctx, outView)
-			case TriggerTypeClustering:
-				m.SubmitClusteringViewToScheduler(ctx, outView)
-			case TriggerTypeSingle:
-				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
-			case TriggerTypeSort:
-				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
+				switch eventType {
+				case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
+					m.SubmitL0ViewToScheduler(ctx, outView)
+				case TriggerTypeClustering:
+					m.SubmitClusteringViewToScheduler(ctx, outView)
+				case TriggerTypeSingle:
+					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
+				case TriggerTypeSort:
+					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
+				}
 			}
 		}
 	}
@@ -366,7 +393,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	})
 
 	task := &datapb.CompactionTask{
-		TriggerID:     taskID, // inner trigger, use task id as trigger id
+		TriggerID:     view.GetTriggerID(),
 		PlanID:        taskID,
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		StartTime:     time.Now().Unix(),

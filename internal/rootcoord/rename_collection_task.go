@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type renameCollectionTask struct {
@@ -63,13 +64,13 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", t.Req.GetOldName())
 	}
 
-	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetOldName())
-	if collID == 0 {
+	collInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetOldName(), typeutil.MaxTimestamp)
+	if err != nil {
 		return fmt.Errorf("collection not found in database, collection: %s, database: %s", t.Req.GetOldName(), t.Req.GetDbName())
 	}
 
 	// check old collection doesn't have aliases if renaming databases
-	aliases := t.core.meta.ListAliasesByID(ctx, collID)
+	aliases := t.core.meta.ListAliasesByID(ctx, collInfo.CollectionID)
 	if len(aliases) > 0 && targetDB != t.Req.GetDbName() {
 		return fmt.Errorf("fail to rename collection to different database, must drop all aliases of collection %s before rename", t.Req.GetOldName())
 	}
@@ -79,7 +80,8 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("cannot rename collection to an existing alias: %s", t.Req.GetNewName())
 	}
 
-	if existingCollID := t.core.meta.GetCollectionID(ctx, targetDB, t.Req.GetNewName()); existingCollID != 0 {
+	_, err = t.core.meta.GetCollectionByName(ctx, targetDB, t.Req.GetNewName(), typeutil.MaxTimestamp)
+	if err == nil {
 		return fmt.Errorf("duplicated new collection name %s in database %s with other collection name or alias", t.Req.GetNewName(), targetDB)
 	}
 
@@ -101,7 +103,7 @@ func (t *renameCollectionTask) Execute(ctx context.Context) error {
 		baseStep:        baseStep{core: t.core},
 		dbName:          t.Req.GetDbName(),
 		collectionNames: append(aliases, t.Req.GetOldName()),
-		collectionID:    collID,
+		collectionID:    collInfo.CollectionID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)},
 	})

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -242,7 +243,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 			return pchans[0], nil
 		}
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
+	balance.Register(b)
 	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
 	suite.observer.Start()
 

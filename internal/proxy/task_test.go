@@ -73,6 +73,7 @@ const (
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
 	testStructArrayField = "structArray"
+	testGeometryField    = "geometry"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -89,6 +90,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testFloat16VecField,
 		testBFloat16VecField,
 		testStructArrayField,
+		testGeometryField,
 		testVecDim,
 		collectionName)
 }
@@ -237,6 +239,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
 	floatVecField, binaryVecField, float16VecField, bfloat16VecField, structArrayField string,
+	geometryField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -350,6 +353,16 @@ func constructCollectionSchemaWithAllType(
 		IndexParams: nil,
 		AutoID:      false,
 	}
+	g := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         geometryField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Geometry,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
 
 	// StructArrayField schema for testing
 	structArrayFields := []*schemapb.StructArrayFieldSchema{
@@ -412,6 +425,7 @@ func constructCollectionSchemaWithAllType(
 			bVec,
 			f16Vec,
 			bf16Vec,
+			g,
 		}
 	} else {
 		schema.Fields = []*schemapb.FieldSchema{
@@ -422,10 +436,82 @@ func constructCollectionSchemaWithAllType(
 			d,
 			fVec,
 			// bVec,
+			g,
 		}
 	}
 
 	return schema
+}
+
+func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
+	ctx := context.Background()
+
+	buildRoot := func(autoID bool) *mocks.MockMixCoordClient {
+		root := mocks.NewMockMixCoordClient(t)
+		// InitMetaCache requires ListPolicy
+		root.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
+		// Meta cache update path fetches partitions info
+		root.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{Status: merr.Success()}, nil).Maybe()
+		// DescribeCollection returns a schema with PK autoID configurable
+		root.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+			DbName:       dbName,
+			Schema: &schemapb.CollectionSchema{
+				Name:   "allow_autoid_test",
+				AutoID: false,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: autoID},
+					{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+				},
+			},
+		}, nil).Maybe()
+		return root
+	}
+
+	t.Run("success when PK autoID=true and allow_insert_autoid=true", func(t *testing.T) {
+		cache := globalMetaCache
+		defer func() { globalMetaCache = cache }()
+		root := buildRoot(true)
+		mgr := newShardClientMgr()
+		err := InitMetaCache(ctx, root, mgr)
+		assert.NoError(t, err)
+
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+				DbName:         dbName,
+				CollectionName: "allow_autoid_test",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.AllowInsertAutoIDKey, Value: "true"},
+				},
+			},
+		}
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("error when PK autoID=false and allow_insert_autoid=true", func(t *testing.T) {
+		cache := globalMetaCache
+		defer func() { globalMetaCache = cache }()
+		root := buildRoot(false)
+		mgr := newShardClientMgr()
+		err := InitMetaCache(ctx, root, mgr)
+		assert.NoError(t, err)
+
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+				DbName:         dbName,
+				CollectionName: "allow_autoid_test",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.AllowInsertAutoIDKey, Value: "true"},
+				},
+			},
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
 }
 
 func constructPlaceholderGroup(
@@ -3530,6 +3616,11 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	paramtable.Init()
 
 	defer rc.Close()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithPartitionKey"
@@ -5092,6 +5183,11 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 // TestCreateCollectionTaskWithStructArrayField tests creating collections with StructArrayField
 func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 	mix := NewMixCoordMock()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithStructArrayField"
@@ -5133,21 +5229,22 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.Equal(t, testStructArrayField, structArrayField.Name)
 		assert.Len(t, structArrayField.Fields, 3)
 
-		// Verify sub-fields in StructArrayField
+		// Verify sub-fields in StructArrayField have been transformed to structName[fieldName] format
 		subFields := structArrayField.Fields
 
-		// sub_text_array
-		assert.Equal(t, "sub_text_array", subFields[0].Name)
+		// After PreExecute, field names should be transformed to structName[fieldName] format
+		// sub_text_array -> testStructArrayField[sub_text_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_text_array]", testStructArrayField), subFields[0].Name)
 		assert.Equal(t, schemapb.DataType_Array, subFields[0].DataType)
 		assert.Equal(t, schemapb.DataType_VarChar, subFields[0].ElementType)
 
-		// sub_int_array
-		assert.Equal(t, "sub_int_array", subFields[1].Name)
+		// sub_int_array -> testStructArrayField[sub_int_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_int_array]", testStructArrayField), subFields[1].Name)
 		assert.Equal(t, schemapb.DataType_Array, subFields[1].DataType)
 		assert.Equal(t, schemapb.DataType_Int32, subFields[1].ElementType)
 
-		// sub_float_vector_array
-		assert.Equal(t, "sub_float_vector_array", subFields[2].Name)
+		// sub_float_vector_array -> testStructArrayField[sub_float_vector_array]
+		assert.Equal(t, fmt.Sprintf("%s[sub_float_vector_array]", testStructArrayField), subFields[2].Name)
 		assert.Equal(t, schemapb.DataType_ArrayOfVector, subFields[2].DataType)
 		assert.Equal(t, schemapb.DataType_FloatVector, subFields[2].ElementType)
 
@@ -5157,6 +5254,130 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 
 		err = task.PostExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("test struct field name transformation with duplicate field names", func(t *testing.T) {
+		// Create a schema with multiple structs having the same sub-field names
+		schemaWithDuplicateNames := &schemapb.CollectionSchema{
+			Name: collectionName + "_duplicate_names",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         testInt64Field,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       false,
+				},
+				{
+					FieldID:  101,
+					Name:     testFloatVecField,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: strconv.Itoa(testVecDim),
+						},
+					},
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID:     102,
+					Name:        "struct1",
+					Description: "first struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "field_name", // Duplicate name
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+						{
+							FieldID:     1022,
+							Name:        "common_field", // Another duplicate name
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_VarChar,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.MaxLengthKey,
+									Value: "100",
+								},
+							},
+						},
+					},
+				},
+				{
+					FieldID:     103,
+					Name:        "struct2",
+					Description: "second struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1031,
+							Name:        "field_name", // Same name as struct1's field
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Float,
+						},
+						{
+							FieldID:     1032,
+							Name:        "common_field", // Same name as struct1's field
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Bool,
+						},
+					},
+				},
+			},
+		}
+
+		marshaledDuplicateSchema, err := proto.Marshal(schemaWithDuplicateNames)
+		assert.NoError(t, err)
+
+		duplicateTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName + "_duplicate_names",
+				Schema:         marshaledDuplicateSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
+		}
+
+		err = duplicateTask.OnEnqueue()
+		assert.NoError(t, err)
+
+		// PreExecute should succeed and transform the field names
+		err = duplicateTask.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// Verify that field names have been transformed to avoid conflicts
+		assert.NotNil(t, duplicateTask.schema)
+		assert.Len(t, duplicateTask.schema.StructArrayFields, 2)
+
+		// Check struct1's fields
+		struct1 := duplicateTask.schema.StructArrayFields[0]
+		assert.Equal(t, "struct1", struct1.Name)
+		assert.Equal(t, "struct1[field_name]", struct1.Fields[0].Name)
+		assert.Equal(t, "struct1[common_field]", struct1.Fields[1].Name)
+
+		// Check struct2's fields
+		struct2 := duplicateTask.schema.StructArrayFields[1]
+		assert.Equal(t, "struct2", struct2.Name)
+		assert.Equal(t, "struct2[field_name]", struct2.Fields[0].Name)
+		assert.Equal(t, "struct2[common_field]", struct2.Fields[1].Name)
+
+		// Verify that despite having the same original names, the transformed names are unique
+		allFieldNames := make(map[string]bool)
+		for _, structField := range duplicateTask.schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				// Each transformed name should be unique
+				assert.False(t, allFieldNames[field.Name], "Duplicate field name found: %s", field.Name)
+				allFieldNames[field.Name] = true
+			}
+		}
 	})
 
 	t.Run("validate struct array field constraints", func(t *testing.T) {
@@ -5258,4 +5479,43 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 		err = describeTask.PostExecute(ctx)
 		assert.NoError(t, err)
 	})
+}
+
+func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc, nil)
+	ctx := context.Background()
+	collectionName := "test_alter_allow_insert_autoid_autoid_false"
+
+	schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+	schemaBytes, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     200,
+			Timestamp: 200,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+		ShardsNum:      1,
+	}
+	qc.CreateCollection(ctx, createColReq)
+
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.AllowInsertAutoIDKey, Value: "true"},
+			},
+		},
+		mixCoord: qc,
+	}
+
+	err = task.PreExecute(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 }

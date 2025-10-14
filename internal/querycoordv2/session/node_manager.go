@@ -153,6 +153,11 @@ func (n *NodeInfo) Labels() map[string]string {
 	return n.immutableInfo.Labels
 }
 
+// IsInStandalone returns true if the node is in standalone.
+func (n *NodeInfo) IsInStandalone() bool {
+	return n.immutableInfo.Labels[sessionutil.LabelStandalone] == "1"
+}
+
 func (n *NodeInfo) IsEmbeddedQueryNodeInStreamingNode() bool {
 	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1"
 }

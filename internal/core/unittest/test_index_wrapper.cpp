@@ -18,6 +18,7 @@
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "common/QueryResult.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -32,6 +33,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         storage_config_ = get_default_local_storage_config();
+        fs_ = storage::InitArrowFileSystem(storage_config_);
 
         auto param = GetParam();
         index_type = param.first;
@@ -98,6 +100,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     int64_t query_offset = 1;
     int64_t NB = 10;
     StorageConfig storage_config_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -126,7 +129,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
 
     storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     config[milvus::index::INDEX_ENGINE_VERSION] =
         std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -186,7 +189,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
         auto xq_dataset =
             knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
-        result = vec_index->Query(xq_dataset, search_info, nullptr);
+        result = vec_index->Query(xq_dataset, search_info, nullptr, nullptr);
     } else if (vec_field_data_type == DataType::VECTOR_SPARSE_U32_F32) {
         auto dataset = GenFieldData(NQ, metric_type, vec_field_data_type);
         auto xb_data =
@@ -196,7 +199,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         auto xq_dataset =
             knowhere::GenDataSet(NQ, kTestSparseDim, xb_data.data());
         xq_dataset->SetIsSparse(true);
-        result = vec_index->Query(xq_dataset, search_info, nullptr);
+        result = vec_index->Query(xq_dataset, search_info, nullptr, nullptr);
     } else {
         auto nb_for_nq = NQ + query_offset;
         auto dataset = GenFieldData(
@@ -207,7 +210,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
             NQ,
             BINARY_DIM,
             xb_bin_data.data() + ((BINARY_DIM + 7) / 8) * query_offset);
-        result = vec_index->Query(xq_dataset, search_info, nullptr);
+        result = vec_index->Query(xq_dataset, search_info, nullptr, nullptr);
     }
 
     EXPECT_EQ(result->total_nq_, NQ);

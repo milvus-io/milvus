@@ -150,6 +150,7 @@ TEST_P(GrowingTest, FillData) {
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -195,40 +196,42 @@ TEST_P(GrowingTest, FillData) {
                         dataset.raw_);
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
-        auto bool_result =
-            segment->bulk_subscript(bool_field, ids_ds->GetIds(), num_inserted);
-        auto int8_result =
-            segment->bulk_subscript(int8_field, ids_ds->GetIds(), num_inserted);
+        auto bool_result = segment->bulk_subscript(
+            nullptr, bool_field, ids_ds->GetIds(), num_inserted);
+        auto int8_result = segment->bulk_subscript(
+            nullptr, int8_field, ids_ds->GetIds(), num_inserted);
         auto int16_result = segment->bulk_subscript(
-            int16_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int16_field, ids_ds->GetIds(), num_inserted);
         auto int32_result = segment->bulk_subscript(
-            int32_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int32_field, ids_ds->GetIds(), num_inserted);
         auto int64_result = segment->bulk_subscript(
-            int64_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int64_field, ids_ds->GetIds(), num_inserted);
         auto float_result = segment->bulk_subscript(
-            float_field, ids_ds->GetIds(), num_inserted);
+            nullptr, float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
-            double_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_field, ids_ds->GetIds(), num_inserted);
         auto timestamptz_result = segment->bulk_subscript(
-            timestamptz_field, ids_ds->GetIds(), num_inserted);
+            nullptr, timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
-            varchar_field, ids_ds->GetIds(), num_inserted);
-        auto json_result =
-            segment->bulk_subscript(json_field, ids_ds->GetIds(), num_inserted);
+            nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
+        auto json_result = segment->bulk_subscript(
+            nullptr, json_field, ids_ds->GetIds(), num_inserted);
+        auto geometry_result = segment->bulk_subscript(
+            nullptr, geometry_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
-            int_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
-            long_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, long_array_field, ids_ds->GetIds(), num_inserted);
         auto bool_array_result = segment->bulk_subscript(
-            bool_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, bool_array_field, ids_ds->GetIds(), num_inserted);
         auto string_array_result = segment->bulk_subscript(
-            string_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, string_array_field, ids_ds->GetIds(), num_inserted);
         auto double_array_result = segment->bulk_subscript(
-            double_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_array_field, ids_ds->GetIds(), num_inserted);
         auto float_array_result = segment->bulk_subscript(
-            float_array_field, ids_ds->GetIds(), num_inserted);
-        auto vec_result =
-            segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            nullptr, float_array_field, ids_ds->GetIds(), num_inserted);
+        auto vec_result = segment->bulk_subscript(
+            nullptr, vec, ids_ds->GetIds(), num_inserted);
         // checking result data
         EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
@@ -245,6 +248,8 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+                  num_inserted);
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);
@@ -348,40 +353,40 @@ TEST(Growing, FillNullableData) {
                         dataset.raw_);
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
-        auto bool_result =
-            segment->bulk_subscript(bool_field, ids_ds->GetIds(), num_inserted);
-        auto int8_result =
-            segment->bulk_subscript(int8_field, ids_ds->GetIds(), num_inserted);
+        auto bool_result = segment->bulk_subscript(
+            nullptr, bool_field, ids_ds->GetIds(), num_inserted);
+        auto int8_result = segment->bulk_subscript(
+            nullptr, int8_field, ids_ds->GetIds(), num_inserted);
         auto int16_result = segment->bulk_subscript(
-            int16_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int16_field, ids_ds->GetIds(), num_inserted);
         auto int32_result = segment->bulk_subscript(
-            int32_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int32_field, ids_ds->GetIds(), num_inserted);
         auto int64_result = segment->bulk_subscript(
-            int64_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int64_field, ids_ds->GetIds(), num_inserted);
         auto float_result = segment->bulk_subscript(
-            float_field, ids_ds->GetIds(), num_inserted);
+            nullptr, float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
-            double_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_field, ids_ds->GetIds(), num_inserted);
         auto timestamptz_result = segment->bulk_subscript(
-            timestamptz_field, ids_ds->GetIds(), num_inserted);
+            nullptr, timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
-            varchar_field, ids_ds->GetIds(), num_inserted);
-        auto json_result =
-            segment->bulk_subscript(json_field, ids_ds->GetIds(), num_inserted);
+            nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
+        auto json_result = segment->bulk_subscript(
+            nullptr, json_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
-            int_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
-            long_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, long_array_field, ids_ds->GetIds(), num_inserted);
         auto bool_array_result = segment->bulk_subscript(
-            bool_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, bool_array_field, ids_ds->GetIds(), num_inserted);
         auto string_array_result = segment->bulk_subscript(
-            string_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, string_array_field, ids_ds->GetIds(), num_inserted);
         auto double_array_result = segment->bulk_subscript(
-            double_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_array_field, ids_ds->GetIds(), num_inserted);
         auto float_array_result = segment->bulk_subscript(
-            float_array_field, ids_ds->GetIds(), num_inserted);
-        auto vec_result =
-            segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            nullptr, float_array_field, ids_ds->GetIds(), num_inserted);
+        auto vec_result = segment->bulk_subscript(
+            nullptr, vec, ids_ds->GetIds(), num_inserted);
 
         EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
@@ -460,9 +465,9 @@ TEST_P(GrowingTest, FillVectorArrayData) {
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto int64_result = segment->bulk_subscript(
-            int64_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int64_field, ids_ds->GetIds(), num_inserted);
         auto array_float_vector_result = segment->bulk_subscript(
-            array_float_vector, ids_ds->GetIds(), num_inserted);
+            nullptr, array_float_vector, ids_ds->GetIds(), num_inserted);
 
         EXPECT_EQ(int64_result->scalars().long_data().data_size(),
                   num_inserted);
@@ -527,10 +532,10 @@ TEST(GrowingTest, LoadVectorArrayData) {
         dataset.get_col<VectorFieldProto>(array_float_vector);
 
     auto ids_ds = GenRandomIds(dataset_size);
-    auto int64_result =
-        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
+    auto int64_result = segment->bulk_subscript(
+        nullptr, int64_field, ids_ds->GetIds(), dataset_size);
     auto array_float_vector_result = segment->bulk_subscript(
-        array_float_vector, ids_ds->GetIds(), dataset_size);
+        nullptr, array_float_vector, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
     EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),

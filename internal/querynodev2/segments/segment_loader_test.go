@@ -86,6 +86,8 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
+	initcore.InitLocalArrowFileSystem(suite.rootPath)
+	initcore.InitRemoteArrowFileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
@@ -238,12 +240,14 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Won't load bloom filter with sealed segments
+	// Will load bloom filter with sealed segments
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.MayPkExist(lc)
-			suite.Require().False(exist)
+			exist := segment.BloomFilterExist()
+			suite.Require().True(exist)
+			exist = segment.MayPkExist(lc)
+			suite.Require().True(exist)
 		}
 	}
 
@@ -277,7 +281,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.MayPkExist(lc)
+			exist := segment.BloomFilterExist()
+			suite.True(exist)
+			exist = segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}
@@ -363,7 +369,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 		})
 	}
 
-	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, 0, loadInfos...)
+	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfos...)
 	suite.NoError(err)
 
 	for _, bf := range bfs {
@@ -894,9 +900,9 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.Key, "500")
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.Key, "100")
-		resource, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
+		result, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
 		suite.NoError(err)
-		suite.EqualValues(1100000, resource.MemorySize)
+		suite.EqualValues(1100000, result.Resource.MemorySize)
 
 		suite.loader.committedResource.Add(LoadResource{
 			MemorySize: 1024 * 1024 * 1024 * 1024,
@@ -905,7 +911,7 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 		timeoutErr := errors.New("timeout")
 		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 1000*time.Millisecond, timeoutErr)
 		defer cancel()
-		resource, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
+		result, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
 		suite.Error(err)
 		suite.ErrorIs(err, timeoutErr)
 	})

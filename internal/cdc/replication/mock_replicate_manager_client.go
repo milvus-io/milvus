@@ -20,6 +20,38 @@ func (_m *MockReplicateManagerClient) EXPECT() *MockReplicateManagerClient_Expec
 	return &MockReplicateManagerClient_Expecter{mock: &_m.Mock}
 }
 
+// Close provides a mock function with no fields
+func (_m *MockReplicateManagerClient) Close() {
+	_m.Called()
+}
+
+// MockReplicateManagerClient_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockReplicateManagerClient_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockReplicateManagerClient_Expecter) Close() *MockReplicateManagerClient_Close_Call {
+	return &MockReplicateManagerClient_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockReplicateManagerClient_Close_Call) Run(run func()) *MockReplicateManagerClient_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockReplicateManagerClient_Close_Call) Return() *MockReplicateManagerClient_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockReplicateManagerClient_Close_Call) RunAndReturn(run func()) *MockReplicateManagerClient_Close_Call {
+	_c.Run(run)
+	return _c
+}
+
 // CreateReplicator provides a mock function with given fields: replicateInfo
 func (_m *MockReplicateManagerClient) CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
 	_m.Called(replicateInfo)
@@ -49,6 +81,39 @@ func (_c *MockReplicateManagerClient_CreateReplicator_Call) Return() *MockReplic
 }
 
 func (_c *MockReplicateManagerClient_CreateReplicator_Call) RunAndReturn(run func(*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_CreateReplicator_Call {
+	_c.Run(run)
+	return _c
+}
+
+// RemoveOutOfTargetReplicators provides a mock function with given fields: targetReplicatePChannels
+func (_m *MockReplicateManagerClient) RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta) {
+	_m.Called(targetReplicatePChannels)
+}
+
+// MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveOutOfTargetReplicators'
+type MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call struct {
+	*mock.Call
+}
+
+// RemoveOutOfTargetReplicators is a helper method to define mock.On call
+//   - targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta
+func (_e *MockReplicateManagerClient_Expecter) RemoveOutOfTargetReplicators(targetReplicatePChannels interface{}) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+	return &MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call{Call: _e.mock.On("RemoveOutOfTargetReplicators", targetReplicatePChannels)}
+}
+
+func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) Run(run func(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]*streamingpb.ReplicatePChannelMeta))
+	})
+	return _c
+}
+
+func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) Return() *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call) RunAndReturn(run func([]*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutOfTargetReplicators_Call {
 	_c.Run(run)
 	return _c
 }

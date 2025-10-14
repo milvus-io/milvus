@@ -14,13 +14,16 @@
 #include <google/protobuf/text_format.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "common/Geometry.h"
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "log/Log.h"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
@@ -130,29 +133,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         return search_info;
     };
 
-    auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        if (anns_proto.vector_type() ==
-            milvus::proto::plan::VectorType::BinaryVector) {
-            return std::make_unique<BinaryVectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::Float16Vector) {
-            return std::make_unique<Float16VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::BFloat16Vector) {
-            return std::make_unique<BFloat16VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::SparseFloatVector) {
-            return std::make_unique<SparseFloatVectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::Int8Vector) {
-            return std::make_unique<Int8VectorANNS>();
-        } else if (anns_proto.vector_type() ==
-                   milvus::proto::plan::VectorType::EmbListFloatVector) {
-            return std::make_unique<EmbListFloatVectorANNS>();
-        } else {
-            return std::make_unique<FloatVectorANNS>();
-        }
-    }();
+    auto plan_node = std::make_unique<VectorPlanNode>();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->search_info_ = std::move(search_info_parser());
 
@@ -237,7 +218,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         }
 
         plannode = std::make_shared<milvus::plan::RescoresNode>(
-            milvus::plan::GetNextPlanNodeId(), std::move(scorers), sources);
+            milvus::plan::GetNextPlanNodeId(),
+            std::move(scorers),
+            plan_node_proto.score_option(),
+            sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
@@ -421,6 +405,21 @@ ProtoParser::ParseBinaryRangeExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseTimestamptzArithCompareExprs(
+    const proto::plan::TimestamptzArithCompareExpr& expr_pb) {
+    auto& columnInfo = expr_pb.timestamptz_column();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema->operator[](field_id).get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    return std::make_shared<expr::TimestamptzArithCompareExpr>(
+        columnInfo,
+        expr_pb.arith_op(),
+        expr_pb.interval(),
+        expr_pb.compare_op(),
+        expr_pb.compare_value());
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
     std::vector<expr::TypedExprPtr> parameters;
     std::vector<DataType> func_param_type_list;
@@ -547,6 +546,19 @@ ProtoParser::ParseValueExprs(const proto::plan::ValueExpr& expr_pb) {
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseGISFunctionFilterExprs(
+    const proto::plan::GISFunctionFilterExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema->operator[](field_id).get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+
+    auto expr = std::make_shared<expr::GISFunctionFilterExpr>(
+        columnInfo, expr_pb.op(), expr_pb.wkt_string(), expr_pb.distance());
+    return expr;
+}
+
+expr::TypedExprPtr
 ProtoParser::CreateAlwaysTrueExprs() {
     return std::make_shared<expr::AlwaysTrueExpr>();
 }
@@ -615,6 +627,16 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             result = ParseNullExprs(expr_pb.null_expr());
             break;
         }
+        case ppe::kGisfunctionFilterExpr: {
+            result =
+                ParseGISFunctionFilterExprs(expr_pb.gisfunction_filter_expr());
+            break;
+        }
+        case ppe::kTimestamptzArithCompareExpr: {
+            result = ParseTimestamptzArithCompareExprs(
+                expr_pb.timestamptz_arith_compare_expr());
+            break;
+        }
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
@@ -631,12 +653,21 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
 
 std::shared_ptr<rescores::Scorer>
 ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
+    expr::TypedExprPtr expr = nullptr;
     if (function.has_filter()) {
-        auto expr = ParseExprs(function.filter());
-        return std::make_shared<rescores::WeightScorer>(expr,
-                                                        function.weight());
+        expr = ParseExprs(function.filter());
     }
-    return std::make_shared<rescores::WeightScorer>(nullptr, function.weight());
+
+    switch (function.type()) {
+        case proto::plan::FunctionTypeWeight:
+            return std::make_shared<rescores::WeightScorer>(expr,
+                                                            function.weight());
+        case proto::plan::FunctionTypeRandom:
+            return std::make_shared<rescores::RandomScorer>(
+                expr, function.weight(), function.params());
+        default:
+            ThrowInfo(UnexpectedError, "unknown function type");
+    }
 }
 
 }  // namespace milvus::query

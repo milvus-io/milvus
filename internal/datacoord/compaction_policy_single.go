@@ -307,3 +307,11 @@ func (v *MixSegmentView) Trigger() (CompactionView, string) {
 func (v *MixSegmentView) ForceTrigger() (CompactionView, string) {
 	panic("implement me")
 }
+
+func (v *MixSegmentView) ForceTriggerAll() ([]CompactionView, string) {
+	panic("implement me")
+}
+
+func (v *MixSegmentView) GetTriggerID() int64 {
+	return v.triggerID
+}

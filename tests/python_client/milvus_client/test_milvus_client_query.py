@@ -3824,6 +3824,63 @@ class TestQueryOperation(TestMilvusClientV2Base):
         assert res_one == res_two, "Query results should be identical when querying the same partition repeatedly"
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="the assert is not good")
+    def test_milvus_client_query_with_bloom_filter(self):
+        """
+        target: test query with bloom filter in PK
+        method: compare time with filter by bloom filter and without bloom filter
+        expected: query with bloom filter in PK should faster than without bloom filter
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=5)
+        self.create_collection(client, collection_name=collection_name, schema=schema)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+
+        # 2. insert data
+        schema_info = self.describe_collection(client, collection_name)[0]
+        insert_offset = 0
+        insert_nb = 1000
+        for i in range(10):
+            rows = cf.gen_row_data_by_schema(nb=insert_nb, schema=schema_info, start=insert_offset)
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            insert_offset += insert_nb
+
+        # 3. load
+        self.load_collection(client, collection_name)
+
+        # 4. query with bloom filter and without bloom filter
+        start_time = time.perf_counter()
+        res = self.query(client, collection_name=collection_name,
+            filter=f"{default_primary_key_field_name} != -1", output_fields=["count(*)"]
+        )[0]
+        end_time = time.perf_counter()
+        run_time1 = end_time - start_time
+
+        # with bloom filter
+        start_time = time.perf_counter()
+        res = self.query(client, collection_name=collection_name,
+            filter=f"{default_primary_key_field_name} == -1", output_fields=["count(*)"]
+        )[0]
+        end_time = time.perf_counter()
+        run_time2 = end_time - start_time
+
+        print(f"rt1: {run_time1}s rt2: {run_time2}s")
+        log.info(f"rt1: {run_time1}s rt2: {run_time2}s")
+
+        # 5. verify without bloom filter should slower than with bloom filter
+        assert run_time1 > run_time2
+
+        # 6. clean up
+        self.drop_collection(client, collection_name)
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -4047,8 +4104,8 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool"])
-    @pytest.fixture(scope="function", params=["DOUBLE"])
+    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool", "ARRAY_DOUBLE"])
+    @pytest.fixture(scope="function", params=["DOUBLE", "ARRAY_DOUBLE"])
     def supported_json_cast_type(self, request):
         yield request.param
 
@@ -4110,10 +4167,11 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         # 3. flush if specified
         if is_flush:
             self.flush(client, collection_name)
+        time.sleep(300)
         # 4. query when there is no json path index under all expressions
         # skip negative expression for issue 40685
         # "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
-        express_list = cf.gen_json_field_expressions_all_single_operator()
+        express_list = cf.gen_json_field_expressions_all_single_operator(supported_json_cast_type)
         compare_dict = {}
         for i in range(len(express_list)):
             json_list = []
@@ -4138,11 +4196,15 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         # 6. prepare index params with json path index
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
-        json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
-                          f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
-                          f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
-                          f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
-                          f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
+        if supported_json_cast_type == "ARRAY_DOUBLE":
+            # For ARRAY_DOUBLE type, use array paths
+            json_path_list = [f"{json_field_name}['a']"]
+        else:
+            json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
+                              f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
+                              f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
+                              f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
+                              f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         for i in range(len(json_path_list)):
             index_params.add_index(field_name=json_field_name, index_name=index_name + f'{i}',

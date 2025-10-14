@@ -24,6 +24,8 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "common/VectorTrait.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce/Reduce.h"
@@ -38,6 +40,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
+using namespace milvus::index;
 
 // Test utility function for AppendFieldInfoForTest
 inline CStatus
@@ -240,6 +243,155 @@ CSearch(CSegmentInterface c_segment,
     }
     *result = static_cast<CSearchResult>(searchResult);
     return status;
+}
+
+CStatus
+CRetrieve(CSegmentInterface c_segment,
+          CRetrievePlan c_plan,
+          uint64_t timestamp,
+          CRetrieveResult** result) {
+    auto future = AsyncRetrieve(
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0, 0);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CRetrieveResult*>(retrieveResult);
+    return status;
+}
+
+CStatus
+CRetrieveByOffsets(CSegmentInterface c_segment,
+                   CRetrievePlan c_plan,
+                   int64_t* offsets,
+                   int64_t len,
+                   CRetrieveResult** result) {
+    auto future = AsyncRetrieveByOffsets({}, c_segment, c_plan, offsets, len);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CRetrieveResult*>(retrieveResult);
+    return status;
+}
+
+template <class TraitType>
+std::string
+generate_collection_schema(std::string metric_type, int dim) {
+    namespace schema = milvus::proto::schema;
+    GET_SCHEMA_DATA_TYPE_FOR_VECTOR_TRAIT
+
+    schema::CollectionSchema collection_schema;
+    collection_schema.set_name("collection_test");
+
+    auto vec_field_schema = collection_schema.add_fields();
+    vec_field_schema->set_name("fakevec");
+    vec_field_schema->set_fieldid(100);
+    vec_field_schema->set_data_type(schema_data_type);
+    auto metric_type_param = vec_field_schema->add_index_params();
+    metric_type_param->set_key("metric_type");
+    metric_type_param->set_value(metric_type);
+    auto dim_param = vec_field_schema->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value(std::to_string(dim));
+
+    auto other_field_schema = collection_schema.add_fields();
+    other_field_schema->set_name("counter");
+    other_field_schema->set_fieldid(101);
+    other_field_schema->set_data_type(schema::DataType::Int64);
+    other_field_schema->set_is_primary_key(true);
+
+    auto other_field_schema2 = collection_schema.add_fields();
+    other_field_schema2->set_name("doubleField");
+    other_field_schema2->set_fieldid(102);
+    other_field_schema2->set_data_type(schema::DataType::Double);
+
+    auto other_field_schema3 = collection_schema.add_fields();
+    other_field_schema3->set_name("timestamptzField");
+    other_field_schema3->set_fieldid(103);
+    other_field_schema3->set_data_type(schema::DataType::Timestamptz);
+
+    std::string schema_string;
+    auto marshal = google::protobuf::TextFormat::PrintToString(
+        collection_schema, &schema_string);
+    assert(marshal);
+    return schema_string;
+}
+
+const char*
+get_default_index_meta() {
+    static std::string conf = R"(maxIndexRowCount: 1000
+                                index_metas: <
+                                  fieldID: 100
+                                  collectionID: 1001
+                                  index_name: "test-index"
+                                  type_params: <
+                                    key: "dim"
+                                    value: "4"
+                                  >
+                                  index_params: <
+                                    key: "index_type"
+                                    value: "IVF_FLAT"
+                                  >
+                                  index_params: <
+                                   key: "metric_type"
+                                   value: "L2"
+                                  >
+                                  index_params: <
+                                   key: "nlist"
+                                   value: "128"
+                                  >
+                                >)";
+    return conf.c_str();
+}
+
+IndexBasePtr
+generate_index(void* raw_data,
+               DataType field_type,
+               MetricType metric_type,
+               IndexType index_type,
+               int64_t dim,
+               int64_t N) {
+    auto engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    CreateIndexInfo create_index_info{
+        field_type, index_type, metric_type, engine_version};
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    auto database = knowhere::GenDataSet(N, dim, raw_data);
+    auto build_config = generate_build_conf(index_type, metric_type);
+    indexing->BuildWithDataset(database, build_config);
+
+    auto vec_indexing = dynamic_cast<VectorIndex*>(indexing.get());
+    EXPECT_EQ(vec_indexing->Count(), N);
+    EXPECT_EQ(vec_indexing->GetDim(), dim);
+
+    return indexing;
 }
 
 }  // namespace

@@ -255,7 +255,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	succeed, err := node.compactionExecutor.Execute(task)
+	succeed, err := node.compactionExecutor.Enqueue(task)
 	if succeed {
 		return merr.Success(), nil
 	} else {
@@ -263,8 +263,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 }
 
-// GetCompactionState called by DataCoord
-// return status of all compaction plans
+// GetCompactionState called by DataCoord return status of all compaction plans
+// Deprecated after v2.6.0
 func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Ctx(ctx).Warn("DataNode.GetCompactionState failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
@@ -522,6 +522,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	}, nil
 }
 
+// Not in used now
 func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil

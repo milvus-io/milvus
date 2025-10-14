@@ -101,10 +101,6 @@ func ContainsCipherProperties(properties []*commonpb.KeyValuePair, deletedKeys [
 
 func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID int64) *EZ {
 	if len(collProperties) == 0 {
-		log.Warn("GetEzByCollProperties empty properties",
-			zap.Any("insertCodec collID", collectionID),
-			zap.Any("properties", collProperties),
-		)
 		return nil
 	}
 	for _, property := range collProperties {

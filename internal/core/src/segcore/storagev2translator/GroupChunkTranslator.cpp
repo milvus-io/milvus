@@ -158,7 +158,10 @@ GroupChunkTranslator::estimated_byte_size_of_cell(
     auto cell_sz = static_cast<int64_t>(row_group_meta.memory_size());
 
     if (use_mmap_) {
-        return {{0, cell_sz}, {2 * cell_sz, cell_sz}};
+        // why double the disk size for loading?
+        // during file writing, the temporary size could be larger than the final size
+        // so we need to reserve more space for the disk size.
+        return {{0, cell_sz}, {2 * cell_sz, 2 * cell_sz}};
     } else {
         return {{cell_sz, 0}, {2 * cell_sz, 0}};
     }
@@ -234,6 +237,8 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
     auto load_future = pool.Submit([&]() {
         return LoadWithStrategy(insert_files_,
@@ -241,6 +246,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                 std::move(strategy),
                                 row_group_lists,
+                                fs,
                                 nullptr,
                                 load_priority_);
     });

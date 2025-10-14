@@ -54,6 +54,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -103,48 +104,50 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                         dataset.raw_);
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
-        auto bool_result =
-            segment->bulk_subscript(bool_field, ids_ds->GetIds(), num_inserted);
-        auto int8_result =
-            segment->bulk_subscript(int8_field, ids_ds->GetIds(), num_inserted);
+        auto bool_result = segment->bulk_subscript(
+            nullptr, bool_field, ids_ds->GetIds(), num_inserted);
+        auto int8_result = segment->bulk_subscript(
+            nullptr, int8_field, ids_ds->GetIds(), num_inserted);
         auto int16_result = segment->bulk_subscript(
-            int16_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int16_field, ids_ds->GetIds(), num_inserted);
         auto int32_result = segment->bulk_subscript(
-            int32_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int32_field, ids_ds->GetIds(), num_inserted);
         auto int64_result = segment->bulk_subscript(
-            int64_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int64_field, ids_ds->GetIds(), num_inserted);
         auto float_result = segment->bulk_subscript(
-            float_field, ids_ds->GetIds(), num_inserted);
+            nullptr, float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
-            double_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_field, ids_ds->GetIds(), num_inserted);
         auto timestamptz_result = segment->bulk_subscript(
-            timestamptz_field, ids_ds->GetIds(), num_inserted);
+            nullptr, timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
-            varchar_field, ids_ds->GetIds(), num_inserted);
-        auto json_result =
-            segment->bulk_subscript(json_field, ids_ds->GetIds(), num_inserted);
+            nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
+        auto json_result = segment->bulk_subscript(
+            nullptr, json_field, ids_ds->GetIds(), num_inserted);
+        auto geometry_result = segment->bulk_subscript(
+            nullptr, geometry_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
-            int_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
-            long_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, long_array_field, ids_ds->GetIds(), num_inserted);
         auto bool_array_result = segment->bulk_subscript(
-            bool_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, bool_array_field, ids_ds->GetIds(), num_inserted);
         auto string_array_result = segment->bulk_subscript(
-            string_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, string_array_field, ids_ds->GetIds(), num_inserted);
         auto double_array_result = segment->bulk_subscript(
-            double_array_field, ids_ds->GetIds(), num_inserted);
+            nullptr, double_array_field, ids_ds->GetIds(), num_inserted);
         auto float_array_result = segment->bulk_subscript(
-            float_array_field, ids_ds->GetIds(), num_inserted);
-        auto fp32_vec_result =
-            segment->bulk_subscript(fp32_vec, ids_ds->GetIds(), num_inserted);
-        auto fp16_vec_result =
-            segment->bulk_subscript(fp16_vec, ids_ds->GetIds(), num_inserted);
-        auto bf16_vec_result =
-            segment->bulk_subscript(bf16_vec, ids_ds->GetIds(), num_inserted);
-        auto sparse_vec_result =
-            segment->bulk_subscript(sparse_vec, ids_ds->GetIds(), num_inserted);
-        auto int8_vec_result =
-            segment->bulk_subscript(int8_vec, ids_ds->GetIds(), num_inserted);
+            nullptr, float_array_field, ids_ds->GetIds(), num_inserted);
+        auto fp32_vec_result = segment->bulk_subscript(
+            nullptr, fp32_vec, ids_ds->GetIds(), num_inserted);
+        auto fp16_vec_result = segment->bulk_subscript(
+            nullptr, fp16_vec, ids_ds->GetIds(), num_inserted);
+        auto bf16_vec_result = segment->bulk_subscript(
+            nullptr, bf16_vec, ids_ds->GetIds(), num_inserted);
+        auto sparse_vec_result = segment->bulk_subscript(
+            nullptr, sparse_vec, ids_ds->GetIds(), num_inserted);
+        auto int8_vec_result = segment->bulk_subscript(
+            nullptr, int8_vec, ids_ds->GetIds(), num_inserted);
 
         EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
@@ -161,6 +164,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
+                  num_inserted);
         EXPECT_EQ(fp32_vec_result->vectors().float_vector().data_size(),
                   num_inserted * dim);
         EXPECT_EQ(fp16_vec_result->vectors().float16_vector().size(),

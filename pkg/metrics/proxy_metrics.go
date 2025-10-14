@@ -464,6 +464,22 @@ var (
 			Help:      "latency of function call",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName, functionTypeName, functionProvider, functionName})
+
+	ProxyScannedRemoteMB = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "scanned_remote_mb",
+			Help:      "the scanned remote megabytes",
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
+
+	ProxyScannedTotalMB = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "scanned_total_mb",
+			Help:      "the scanned total megabytes",
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -534,6 +550,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyFunctionlatency)
 
+	registry.MustRegister(ProxyScannedRemoteMB)
+	registry.MustRegister(ProxyScannedTotalMB)
 	RegisterStreamingServiceClient(registry)
 }
 
@@ -695,5 +713,53 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		queryTypeLabelName: SearchLabel,
 		databaseLabelName:  dbName,
 		collectionName:     collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  SearchLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  UpsertLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  DeleteLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  SearchLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  UpsertLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  DeleteLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
 	})
 }

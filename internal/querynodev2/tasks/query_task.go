@@ -9,6 +9,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -36,6 +38,7 @@ func NewQueryTask(ctx context.Context,
 		ctx:            ctx,
 		collection:     collection,
 		segmentManager: manager,
+		plan:           &planpb.PlanNode{},
 		req:            req,
 		notifier:       make(chan error, 1),
 		tr:             timerecord.NewTimeRecorderWithTrace(ctx, "queryTask"),
@@ -48,6 +51,7 @@ type QueryTask struct {
 	collection     *segments.Collection
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
+	plan           *planpb.PlanNode // use to do the bloom filter
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -87,6 +91,9 @@ func (t *QueryTask) PreExecute() error {
 		username).
 		Observe(inQueueDurationMS)
 
+	// Unmarshal the origin plan
+	proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan)
+
 	return nil
 }
 
@@ -113,7 +120,8 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
@@ -158,8 +166,10 @@ func (t *QueryTask) Execute() error {
 			ServiceTime:          tr.ElapseSpan().Milliseconds(),
 			TotalRelatedDataSize: relatedDataSize,
 		},
-		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
-		HasMoreResult:    reducedResult.HasMoreResult,
+		AllRetrieveCount:   reducedResult.GetAllRetrieveCount(),
+		HasMoreResult:      reducedResult.HasMoreResult,
+		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
+		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
 	}
 	return nil
 }

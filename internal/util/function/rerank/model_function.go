@@ -39,6 +39,7 @@ const (
 	siliconflowProviderName string = "siliconflow"
 	cohereProviderName      string = "cohere"
 	voyageaiProviderName    string = "voyageai"
+	aliProviderName         string = "ali"
 
 	queryKeyName string = "queries"
 )
@@ -84,6 +85,8 @@ func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
 				return newCohereProvider(params, conf, credentials)
 			case voyageaiProviderName:
 				return newVoyageaiProvider(params, conf, credentials)
+			case aliProviderName:
+				return newAliProvider(params, conf, credentials)
 			default:
 				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
 			}
@@ -139,7 +142,8 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 
 func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, query string, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	uniqueData := make(map[T]string)
-	for _, col := range cols {
+	idLocations := make(map[T]IDLoc)
+	for i, col := range cols {
 		if col.size == 0 {
 			continue
 		}
@@ -147,6 +151,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := uniqueData[id]; !ok {
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
 				uniqueData[id] = texts[idx]
 			}
 		}
@@ -178,22 +183,22 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 		rerankScores[id] = scores[idx]
 	}
 	if searchParams.isGrouping() {
-		return newGroupingIDScores(rerankScores, searchParams, idGroup)
+		return newGroupingIDScores(rerankScores, idLocations, searchParams, idGroup)
 	}
-	return newIDScores(rerankScores, searchParams), nil
+	return newIDScores(rerankScores, idLocations, searchParams, true), nil
 }
 
 func (model *ModelFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
 	if len(model.queries) != int(searchParams.nq) {
 		return nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", searchParams.nq, len(model.queries), model.queries)
 	}
-	outputs := newRerankOutputs(searchParams)
+	outputs := newRerankOutputs(inputs, searchParams)
 	for idx, cols := range inputs.data {
 		idScore, err := model.processOneSearchData(ctx, searchParams, model.queries[idx], cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
-		appendResult(outputs, idScore.ids, idScore.scores)
+		appendResult(inputs, outputs, idScore)
 	}
 	return outputs, nil
 }

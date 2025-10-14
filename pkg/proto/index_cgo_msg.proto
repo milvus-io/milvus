@@ -118,6 +118,7 @@ message LoadTextIndexInfo {
   int64 partitionID = 7;
   common.LoadPriority load_priority = 8;
   bool enable_mmap = 9;
+  int64 index_size = 10;
 }
 
 message LoadJsonKeyIndexInfo {
@@ -131,4 +132,5 @@ message LoadJsonKeyIndexInfo {
   common.LoadPriority load_priority = 8;
   bool enable_mmap = 9;
   string mmap_dir_path = 10;
+  int64 stats_size = 11;
 }

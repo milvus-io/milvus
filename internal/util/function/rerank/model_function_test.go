@@ -250,6 +250,24 @@ func (s *RerankModelSuite) TestNewProvider() {
 		_, err := newProvider(params)
 		s.NoError(err)
 	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "ali rerank model name is required")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.ModelNameParamKey, Value: "ali-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
 }
 
 func (s *RerankModelSuite) TestCallVllm() {
@@ -397,6 +415,28 @@ func (s *RerankModelSuite) TestCallVoyageAI() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
 		provder, err := newVoyageaiProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		s.NoError(err)
+		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
+		s.NoError(err)
+		s.Equal([]float32{0.0, 0.1, 0.2}, scores)
+	}
+}
+
+func (s *RerankModelSuite) TestCallAli() {
+	{
+		repStr := `{"output":{"results":[{"index":0,"relevance_score":0},{"index":1,"relevance_score":0.1},{"index":2,"relevance_score":0.2}]},"usage":{"total_tokens":1},"request_id":"x"}`
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(repStr))
+		}))
+		defer ts.Close()
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.ModelNameParamKey, Value: "ali-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		provder, err := newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)

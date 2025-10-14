@@ -188,6 +188,14 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
+func (s *baseSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
+	s.bloomFilterSet = bf
+}
+
+func (s *baseSegment) BloomFilterExist() bool {
+	return s.bloomFilterSet.BloomFilterExist()
+}
+
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
@@ -217,6 +225,20 @@ func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 		return true
 	}
 	return s.bloomFilterSet.MayPkExist(pk)
+}
+
+func (s *baseSegment) GetMinPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MinPK
+}
+
+func (s *baseSegment) GetMaxPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MaxPK
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
@@ -1174,6 +1196,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		PartitionID:  s.Partition(),
 		LoadPriority: s.LoadInfo().GetPriority(),
 		EnableMmap:   enableMmap,
+		IndexSize:    textLogs.GetMemorySize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1228,6 +1251,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		LoadPriority: s.loadInfo.Load().GetPriority(),
 		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
 		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		StatsSize:    jsonKeyStats.GetMemorySize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1328,8 +1352,9 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 }
 
 func (s *LocalSegment) FinishLoad() error {
-	usage := s.ResourceUsageEstimate()
-	s.manager.AddLogicalResource(usage)
+	// TODO: disable logical resource handling for now
+	// usage := s.ResourceUsageEstimate()
+	// s.manager.AddLogicalResource(usage)
 	return s.csegment.FinishLoad()
 }
 
@@ -1395,9 +1420,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return nil, nil
 	}).Await()
 
-	// release reserved resource after the segment resource is really released.
-	usage := s.ResourceUsageEstimate()
-	s.manager.SubLogicalResource(usage)
+	// TODO: disable logical resource handling for now
+	// usage := s.ResourceUsageEstimate()
+	// s.manager.SubLogicalResource(usage)
 
 	log.Info("delete segment from memory")
 }

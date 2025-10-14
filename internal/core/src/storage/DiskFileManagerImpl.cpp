@@ -166,13 +166,15 @@ DiskFileManagerImpl::AddFileInternal(
     return true;
 }  // namespace knowhere
 
+// Opens an input stream with fs_
+// note that `fs_` must not be nullptr.
 std::shared_ptr<InputStream>
 DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = fs_;
+    AssertInfo(fs, "fs is nullptr");
 
     auto remote_file = fs->OpenInputFile(remote_file_path);
     AssertInfo(remote_file.ok(), "failed to open remote file");
@@ -181,13 +183,15 @@ DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
             std::move(remote_file.ValueOrDie())));
 }
 
+// Opens an output stream with fs_
+// note that `fs_` must not be nullptr.
 std::shared_ptr<OutputStream>
 DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = fs_;
+    AssertInfo(fs, "fs is nullptr");
 
     auto remote_stream = fs->OpenOutputStream(remote_file_path);
     AssertInfo(remote_stream.ok(),
@@ -694,6 +698,8 @@ WriteOptFieldIvfData(
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
         case DataType::INT32:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
+        case DataType::TIMESTAMPTZ:
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::TIMESTAMPTZ);
         case DataType::INT64:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
         case DataType::FLOAT:
@@ -1020,6 +1026,8 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<int8_t>(const Config& config);
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {

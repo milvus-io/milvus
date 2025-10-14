@@ -14,6 +14,8 @@ if (TANTIVY_FEATURES)
 endif ()
 message("Cargo command: ${CARGO_CMD}")
 
+set(TOKENIZER_PROTO ${CMAKE_BINARY_DIR}/thirdparty/milvus-proto/proto/tokenizer.proto)
+
 set(TANTIVY_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(TANTIVY_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")
 set(TANTIVY_NAME "libtantivy_binding${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -36,7 +38,7 @@ add_custom_target(ls_cargo_target DEPENDS ls_cargo)
 
 add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
-        COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
+        COMMAND TOKENIZER_PROTO=${TOKENIZER_PROTO} CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding)
 add_custom_target(tantivy_binding_target DEPENDS compile_tantivy ls_cargo_target)
 

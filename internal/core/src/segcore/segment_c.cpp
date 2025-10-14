@@ -41,6 +41,8 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "exec/expression/ExprCache.h"
 #include "monitor/Monitor.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
+#include "common/GeometryCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -463,36 +465,7 @@ LoadTextIndex(CSegmentInterface c_segment,
             std::make_unique<milvus::proto::indexcgo::LoadTextIndexInfo>();
         info_proto->ParseFromArray(serialized_load_text_index_info, len);
 
-        milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
-                                                  info_proto->partitionid(),
-                                                  segment->get_segment_id(),
-                                                  info_proto->fieldid(),
-                                                  info_proto->schema()};
-        milvus::storage::IndexMeta index_meta{segment->get_segment_id(),
-                                              info_proto->fieldid(),
-                                              info_proto->buildid(),
-                                              info_proto->version()};
-        auto remote_chunk_manager =
-            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                .GetRemoteChunkManager();
-
-        milvus::Config config;
-        std::vector<std::string> files;
-        for (const auto& f : info_proto->files()) {
-            files.push_back(f);
-        }
-        config[milvus::index::INDEX_FILES] = files;
-        config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
-        config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
-        milvus::storage::FileManagerContext ctx(
-            field_meta, index_meta, remote_chunk_manager);
-
-        auto index = std::make_unique<milvus::index::TextMatchIndex>(ctx);
-        index->Load(config);
-
-        segment->LoadTextIndex(milvus::FieldId(info_proto->fieldid()),
-                               std::move(index));
-
+        segment->LoadTextIndex(std::move(info_proto));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -509,6 +482,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
     try {
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        auto span = milvus::tracer::StartSpan("SegCoreLoadJsonStats", &ctx);
+        milvus::tracer::SetRootSpan(span);
+
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment =
@@ -531,6 +507,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        AssertInfo(fs != nullptr, "arrow file system is null");
 
         milvus::Config config;
         std::vector<std::string> files;
@@ -544,28 +523,25 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
         }
 
+        milvus::segcore::storagev2translator::JsonStatsLoadInfo load_info{
+            info_proto->enable_mmap(),
+            info_proto->mmap_dir_path(),
+            segment->get_segment_id(),
+            info_proto->fieldid(),
+            info_proto->stats_size()};
         milvus::storage::FileManagerContext file_ctx(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, fs);
 
-        auto index =
-            std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
-        {
-            milvus::ScopedTimer timer(
-                "json_stats_load",
-                [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_load.Observe(
-                        ms);
-                },
-                milvus::ScopedTimer::LogLevel::Info);
-            index->Load(ctx, config);
-        }
+        std::unique_ptr<
+            milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
+            translator = std::make_unique<
+                milvus::segcore::storagev2translator::JsonStatsTranslator>(
+                load_info, ctx, file_ctx, config);
 
-        segment->LoadJsonStats(milvus::FieldId(info_proto->fieldid()),
-                               std::move(index));
-
-        LOG_INFO("load json stats success for field:{} of segment:{}",
-                 info_proto->fieldid(),
-                 segment->get_segment_id());
+        segment->LoadJsonStats(
+            milvus::FieldId(info_proto->fieldid()),
+            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+                std::move(translator)));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

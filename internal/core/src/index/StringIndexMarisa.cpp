@@ -209,6 +209,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
                                        const Config& config) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
+    // TODO: change the mmap path of marisa index
     auto file_name = std::string("/tmp/") + uuid_string;
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
@@ -227,11 +228,16 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     if (config.contains(MMAP_FILE_PATH)) {
         trie_.mmap(file_name.c_str());
+        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
     } else {
         auto file = File::Open(file_name, O_RDONLY);
         trie_.read(file.Descriptor());
+        mmap_file_raii_ = nullptr;
     }
-    mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
+
+    if (!config.contains(MMAP_FILE_PATH)) {
+        unlink(file_name.c_str());
+    }
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;

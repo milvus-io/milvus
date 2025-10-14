@@ -3,18 +3,17 @@ package wp
 import (
 	"context"
 	"fmt"
+	"net"
 
-	"github.com/minio/minio-go/v7"
 	"github.com/zilliztech/woodpecker/common/config"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
-	wpMinioHandler "github.com/zilliztech/woodpecker/common/minio"
+	wpStorageClient "github.com/zilliztech/woodpecker/common/objectstorage"
 	"github.com/zilliztech/woodpecker/woodpecker"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
@@ -43,13 +42,9 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
-	var minioHandler wpMinioHandler.MinioHandler
+	var storageClient wpStorageClient.ObjectStorage
 	if cfg.Woodpecker.Storage.IsStorageMinio() {
-		minioCli, err := b.getMinioClient(context.TODO())
-		if err != nil {
-			return nil, err
-		}
-		minioHandler, err = wpMinioHandler.NewMinioHandlerWithClient(context.Background(), minioCli)
+		storageClient, err = wpStorageClient.NewObjectStorage(context.Background(), cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +55,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("create etcd client finish while building wp opener")
-	wpClient, err := woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, minioHandler, true)
+	wpClient, err := woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +104,41 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	// storage
 	wpConfig.Woodpecker.Storage.Type = cfg.StorageType.GetValue()
-	wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+
+	// Set RootPath based on configuration
+	if cfg.RootPath.GetValue() == "default" {
+		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
+		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().LocalStorageCfg.Path.GetValue())
+	} else {
+		// Use custom directory as-is
+		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
+	}
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()
 	wpConfig.Minio.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().MinioCfg.RootPath.GetValue())
+	wpConfig.Minio.UseSSL = paramtable.Get().MinioCfg.UseSSL.GetAsBool()
+	wpConfig.Minio.UseIAM = paramtable.Get().MinioCfg.UseIAM.GetAsBool()
+	addr := paramtable.Get().MinioCfg.Address.GetValue()
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		wpConfig.Minio.Address = addr
+	} else {
+		wpConfig.Minio.Address = host
+	}
+	wpConfig.Minio.Port = paramtable.Get().MinioCfg.Port.GetAsInt()
+	wpConfig.Minio.Region = paramtable.Get().MinioCfg.Region.GetValue()
+	wpConfig.Minio.Ssl.TlsCACert = paramtable.Get().MinioCfg.SslCACert.GetValue()
+	wpConfig.Minio.SecretAccessKey = paramtable.Get().MinioCfg.SecretAccessKey.GetValue()
+	wpConfig.Minio.AccessKeyID = paramtable.Get().MinioCfg.AccessKeyID.GetValue()
+	wpConfig.Minio.GcpCredentialJSON = paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue()
+	wpConfig.Minio.CloudProvider = paramtable.Get().MinioCfg.CloudProvider.GetValue()
+	wpConfig.Minio.ListObjectsMaxKeys = paramtable.Get().MinioCfg.ListObjectsMaxKeys.GetAsInt()
+	wpConfig.Minio.CreateBucket = true
+	wpConfig.Minio.IamEndpoint = paramtable.Get().MinioCfg.IAMEndpoint.GetValue()
+	wpConfig.Minio.UseVirtualHost = paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool()
+	wpConfig.Minio.RequestTimeoutMs = paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt()
+	wpConfig.Minio.LogLevel = paramtable.Get().LogCfg.Level.GetValue()
 
 	// set log
 	wpConfig.Log.Level = paramtable.Get().LogCfg.Level.GetValue()
@@ -125,32 +150,6 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Log.File.MaxBackups = paramtable.Get().LogCfg.MaxBackups.GetAsInt()
 
 	return nil
-}
-
-func (b *builderImpl) getMinioClient(ctx context.Context) (*minio.Client, error) {
-	c := objectstorage.NewDefaultConfig()
-	params := paramtable.Get()
-	opts := []objectstorage.Option{
-		objectstorage.RootPath(params.MinioCfg.RootPath.GetValue()),
-		objectstorage.Address(params.MinioCfg.Address.GetValue()),
-		objectstorage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
-		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
-		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
-		objectstorage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
-		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
-		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
-		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
-		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
-		objectstorage.UseVirtualHost(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		objectstorage.Region(params.MinioCfg.Region.GetValue()),
-		objectstorage.RequestTimeout(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		objectstorage.CreateBucket(true),
-		objectstorage.GcpCredentialJSON(params.MinioCfg.GcpCredentialJSON.GetValue()),
-	}
-	for _, opt := range opts {
-		opt(c)
-	}
-	return objectstorage.NewMinioClient(ctx, c)
 }
 
 func (b *builderImpl) getEtcdClient(ctx context.Context) (*clientv3.Client, error) {

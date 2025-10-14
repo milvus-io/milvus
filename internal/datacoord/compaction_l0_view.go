@@ -14,6 +14,7 @@ type LevelZeroSegmentsView struct {
 	label                     *CompactionGroupLabel
 	segments                  []*SegmentView
 	earliestGrowingSegmentPos *msgpb.MsgPosition
+	triggerID                 int64
 }
 
 var _ CompactionView = (*LevelZeroSegmentsView)(nil)
@@ -86,10 +87,59 @@ func (v *LevelZeroSegmentsView) ForceTrigger() (CompactionView, string) {
 			label:                     v.label,
 			segments:                  targetViews,
 			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+			triggerID:                 v.triggerID,
 		}, reason
 	}
 
 	return nil, ""
+}
+
+func (v *LevelZeroSegmentsView) ForceTriggerAll() ([]CompactionView, string) {
+	// Only choose segments with position less than the earliest growing segment position
+	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
+		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+	})
+
+	if len(validSegments) == 0 {
+		return nil, ""
+	}
+
+	var resultViews []CompactionView
+	var lastReason string
+	remainingSegments := validSegments
+
+	// Multi-round force trigger loop
+	for len(remainingSegments) > 0 {
+		targetViews, reason := v.forceTrigger(remainingSegments)
+		if len(targetViews) == 0 {
+			// No more segments can be force triggered, break the loop
+			break
+		}
+
+		// Create a new LevelZeroSegmentsView for this round's target views
+		roundView := &LevelZeroSegmentsView{
+			label:                     v.label,
+			segments:                  targetViews,
+			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+			triggerID:                 v.triggerID,
+		}
+		resultViews = append(resultViews, roundView)
+		lastReason = reason
+
+		// Remove the target segments from remaining segments for next round
+		targetSegmentIDs := lo.Map(targetViews, func(view *SegmentView, _ int) int64 {
+			return view.ID
+		})
+		remainingSegments = lo.Filter(remainingSegments, func(view *SegmentView, _ int) bool {
+			return !lo.Contains(targetSegmentIDs, view.ID)
+		})
+	}
+
+	return resultViews, lastReason
+}
+
+func (v *LevelZeroSegmentsView) GetTriggerID() int64 {
+	return v.triggerID
 }
 
 // Trigger triggers all qualified LevelZeroSegments according to views
@@ -105,6 +155,7 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 			label:                     v.label,
 			segments:                  targetViews,
 			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+			triggerID:                 v.triggerID,
 		}, reason
 	}
 

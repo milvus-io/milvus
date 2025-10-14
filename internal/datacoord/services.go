@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -49,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -154,35 +154,6 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		}
 	}
 
-	if !streamingutil.IsStreamingServiceEnabled() {
-		var isUnimplemented bool
-		err = retry.Do(ctx, func() error {
-			nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(collectionID)
-
-			for nodeID, channelNames := range nodeChannels {
-				err = s.cluster.FlushChannels(ctx, nodeID, flushTs, channelNames)
-				if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
-					isUnimplemented = true
-					return nil
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		}, retry.Attempts(60)) // about 3min
-		if err != nil {
-			return nil, err
-		}
-
-		if isUnimplemented {
-			// For compatible with rolling upgrade from version 2.2.x,
-			// fall back to the flush logic of version 2.2.x;
-			log.Warn("DataNode FlushChannels unimplemented", zap.Error(err))
-			flushTs = 0
-		}
-	}
-
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
@@ -198,7 +169,47 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		FlushSegmentIDs: flushSegmentIDs,
 		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
+		DbName:          coll.DatabaseName,
+		CollectionName:  coll.Schema.GetName(),
 	}, nil
+}
+
+func resolveCollectionsToFlush(ctx context.Context, s *Server, req *datapb.FlushAllRequest) ([]int64, error) {
+	collectionsToFlush := make([]int64, 0)
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			collectionsToFlush = append(collectionsToFlush, target.GetCollectionIds()...)
+		}
+	} else if req.GetDbName() != "" {
+		// Backward compatibility: use deprecated db_name field
+		showColRsp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
+		if err != nil {
+			log.Warn("failed to ShowCollectionIDs", zap.String("db", req.GetDbName()), zap.Error(err))
+			return nil, err
+		}
+		for _, dbCollection := range showColRsp.GetDbCollections() {
+			collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
+		}
+	} else {
+		// Flush all databases
+		dbsResp, err := s.broker.ListDatabases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, dbName := range dbsResp.GetDbNames() {
+			showColRsp, err := s.broker.ShowCollectionIDs(ctx, dbName)
+			if err != nil {
+				log.Warn("failed to ShowCollectionIDs", zap.String("db", dbName), zap.Error(err))
+				return nil, err
+			}
+			for _, dbCollection := range showColRsp.GetDbCollections() {
+				collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
+			}
+		}
+	}
+
+	return collectionsToFlush, nil
 }
 
 func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
@@ -214,13 +225,6 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		}, nil
 	}
 
-	resp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
@@ -228,23 +232,33 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		return nil, err
 	}
 
-	dbCollections := resp.GetDbCollections()
+	// resolve collections to flush
+	collectionsToFlush, err := resolveCollectionsToFlush(ctx, s, req)
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	var mu sync.Mutex
+	flushInfos := make([]*datapb.FlushResult, 0)
 	wg := errgroup.Group{}
 	// limit goroutine number to 100
 	wg.SetLimit(100)
-	for _, dbCollection := range dbCollections {
-		for _, collectionID := range dbCollection.GetCollectionIDs() {
-			cid := collectionID
-			wg.Go(func() error {
-				_, err := s.flushCollection(ctx, cid, ts, nil)
-				if err != nil {
-					log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
-					return err
-				}
-				return nil
-			})
-		}
+	for _, cid := range collectionsToFlush {
+		wg.Go(func() error {
+			flushResult, err := s.flushCollection(ctx, cid, ts, nil)
+			if err != nil {
+				log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
+				return err
+			}
+			mu.Lock()
+			flushInfos = append(flushInfos, flushResult)
+			mu.Unlock()
+			return nil
+		})
 	}
+
 	err = wg.Wait()
 	if err != nil {
 		return &datapb.FlushAllResponse{
@@ -253,8 +267,9 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 
 	return &datapb.FlushAllResponse{
-		Status:  merr.Success(),
-		FlushTs: ts,
+		Status:       merr.Success(),
+		FlushTs:      ts,
+		FlushResults: flushInfos,
 	}, nil
 }
 
@@ -601,16 +616,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Moreover, the Match operation may be called if the flusher is ready to work, but the channel manager on coord don't see the assignment success.
 		// So the match operation may be rejected and wait for retry.
 		// TODO: We need to make an idempotent operation to avoid the double flush strictly.
-		if streamingutil.IsStreamingServiceEnabled() {
-			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
-			if err != nil || targetID != nodeID {
-				err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wal allocated", zap.Int64("nodeID", nodeID), zap.Int64("channel nodeID", targetID), zap.Error(err))
-				return merr.Status(err), nil
-			}
-		} else if !s.channelManager.Match(nodeID, channelName) {
+		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
+		if err != nil || targetID != nodeID {
 			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-			log.Warn("node is not matched with channel", zap.String("channel", channelName), zap.Error(err))
+			log.Warn("failed to get latest wal allocated", zap.Int64("nodeID", nodeID), zap.Int64("channel nodeID", targetID), zap.Error(err))
 			return merr.Status(err), nil
 		}
 	}
@@ -746,22 +755,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	log.Info("receive DropVirtualChannel request",
 		zap.String("channelName", channel))
 
-	// validate
-	nodeID := req.GetBase().GetSourceID()
-	if !s.channelManager.Match(nodeID, channel) {
-		if streamingutil.IsStreamingServiceEnabled() {
-			// If streaming service is enabled, the channel manager will always return true if channel exist.
-			// once the channel is not exist, the drop virtual channel has been done.
-			return &datapb.DropVirtualChannelResponse{
-				Status: merr.Success(),
-			}, nil
-		}
-		err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
-		resp.Status = merr.Status(err)
-		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
-		return resp, nil
-	}
-
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
@@ -784,16 +777,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
-	}
-
-	if !streamingutil.IsStreamingServiceEnabled() {
-		// if streaming service is enabled, the channel manager will never manage the channel.
-		// so we don't need to release the channel anymore.
-		log.Info("DropVChannel plan to remove", zap.String("channel", channel))
-		err = s.channelManager.Release(nodeID, channel)
-		if err != nil {
-			log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
-		}
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.removeTasksByChannel(channel)
@@ -1016,7 +999,12 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
-	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
+	if err != nil {
+		return &datapb.GetRecoveryInfoResponseV2{
+			Status: merr.Status(err),
+		}, nil
+	}
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, ch := range channels {
@@ -1099,8 +1087,10 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, nil, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
-	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
+	channelInfo := s.handler.GetDataVChanPositions(&channelMeta{
+		Name:         req.GetVchannel(),
+		CollectionID: collectionID,
+	}, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
 		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
@@ -1198,7 +1188,12 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		}, nil
 	}
 	var segmentIDs []UniqueID
-	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
+	if err != nil {
+		return &datapb.GetSegmentsByStatesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	for _, channel := range channels {
 		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
 		if channelSegmentsView == nil {
@@ -1301,8 +1296,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.MajorCompaction {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+	if req.GetMajorCompaction() || req.GetL0Compaction() {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction())
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1327,7 +1322,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Bool("isMajor", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
+	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
+		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1416,13 +1412,6 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp(), req.GetDbProperties())
-		err := s.channelManager.Watch(ctx, ch)
-		if err != nil {
-			log.Warn("fail to watch channelName", zap.Error(err))
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
 		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			log.Error("failed to mark channel added", zap.Error(err))
@@ -1441,7 +1430,6 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			log.Info("skip to init channel checkpoint for nil startPosition", zap.String("channel", channelName))
 		}
 	}
-
 	return resp, nil
 }
 
@@ -1479,7 +1467,12 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		}
 	}
 
-	channels := s.channelManager.GetChannelsByCollectionID(req.GetCollectionID())
+	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
+	if err != nil {
+		return &milvuspb.GetFlushStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 
@@ -1505,6 +1498,29 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	return resp, nil
 }
 
+// getChannelsByCollectionID gets the channels of the collection.
+func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]RWChannel, error) {
+	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
+		CollectionID: collectionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	channels := make([]RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
+	for _, channel := range describeRsp.GetVirtualChannelNames() {
+		startPos := toMsgPosition(channel, describeRsp.GetStartPositions())
+		channels = append(channels, &channelMeta{
+			Name:          channel,
+			CollectionID:  collectionID,
+			StartPosition: startPos,
+		})
+	}
+	return channels, nil
+}
+
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	log := log.Ctx(ctx)
@@ -1514,7 +1530,10 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		}, nil
 	}
 
-	resp := &milvuspb.GetFlushAllStateResponse{Status: merr.Success()}
+	resp := &milvuspb.GetFlushAllStateResponse{
+		Status:      merr.Success(),
+		FlushStates: make([]*milvuspb.FlushAllState, 0),
+	}
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
@@ -1522,43 +1541,96 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	dbNames := dbsRsp.DbNames
-	if req.GetDbName() != "" {
-		dbNames = lo.Filter(dbNames, func(dbName string, _ int) bool {
-			return dbName == req.GetDbName()
-		})
-		if len(dbNames) == 0 {
+
+	// Determine which databases to check
+	var targetDbs []string
+	if len(req.GetFlushTargets()) > 0 {
+		// Use flush_targets from request
+		for _, target := range req.GetFlushTargets() {
+			if target.GetDbName() != "" {
+				if !lo.Contains(dbsRsp.DbNames, target.GetDbName()) {
+					resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(target.GetDbName()))
+					return resp, nil
+				}
+				targetDbs = append(targetDbs, target.GetDbName())
+			}
+		}
+	} else if req.GetDbName() != "" {
+		if !lo.Contains(dbsRsp.DbNames, req.GetDbName()) {
 			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
 			return resp, nil
 		}
+		// Backward compatibility: use deprecated db_name field
+		targetDbs = []string{req.GetDbName()}
+	} else {
+		// Check all databases
+		targetDbs = dbsRsp.DbNames
 	}
 
-	for _, dbName := range dbsRsp.DbNames {
+	// Remove duplicates
+	targetDbs = lo.Uniq(targetDbs)
+	allFlushed := true
+
+	for _, dbName := range targetDbs {
+		flushState := &milvuspb.FlushAllState{
+			DbName:                dbName,
+			CollectionFlushStates: make(map[string]bool),
+		}
+
+		// Get collections to check for this database
+		var targetCollections []string
+		if len(req.GetFlushTargets()) > 0 {
+			// Check if specific collections are requested for this db
+			for _, target := range req.GetFlushTargets() {
+				if target.GetDbName() == dbName && len(target.GetCollectionNames()) > 0 {
+					targetCollections = target.GetCollectionNames()
+					break
+				}
+			}
+		}
+
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
 		if err != nil {
-			log.Warn("failed to ShowCollections", zap.Error(err))
+			log.Warn("failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
 
-		for _, collection := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collection)
+		for idx, collectionID := range showColRsp.GetCollectionIds() {
+			collectionName := ""
+			if idx < len(showColRsp.GetCollectionNames()) {
+				collectionName = showColRsp.GetCollectionNames()[idx]
+			}
+
+			// If specific collections are requested, skip others
+			if len(targetCollections) > 0 && !lo.Contains(targetCollections, collectionName) {
+				continue
+			}
+
+			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
-				log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+				log.Warn("failed to DescribeCollectionInternal",
+					zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
+
+			collectionFlushed := true
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
 				channelCP := s.meta.GetChannelCheckpoint(channel)
 				if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
-					resp.Flushed = false
-
-					return resp, nil
+					collectionFlushed = false
+					allFlushed = false
+					break
 				}
 			}
+			flushState.CollectionFlushStates[collectionName] = collectionFlushed
 		}
+
+		resp.FlushStates = append(resp.FlushStates, flushState)
 	}
-	resp.Flushed = true
+
+	resp.Flushed = allFlushed
 	return resp, nil
 }
 
@@ -1582,19 +1654,13 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	// For compatibility with old client
 	if req.GetVChannel() != "" && req.GetPosition() != nil {
 		channel := req.GetVChannel()
-		if streamingutil.IsStreamingServiceEnabled() {
-			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
-			if err != nil || targetID != nodeID {
-				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wal allocated", zap.Error(err))
-				return merr.Status(err), nil
-			}
-		} else if !s.channelManager.Match(nodeID, channel) {
-			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
-			return merr.Status(merr.WrapErrChannelNotFound(channel, fmt.Sprintf("from node %d", nodeID))), nil
+		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+		if err != nil || targetID != nodeID {
+			err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+			log.Warn("failed to get latest wal allocated", zap.Error(err))
+			return merr.Status(err), nil
 		}
-		err := s.meta.UpdateChannelCheckpoint(ctx, req.GetVChannel(), req.GetPosition())
-		if err != nil {
+		if err := s.meta.UpdateChannelCheckpoint(ctx, req.GetVChannel(), req.GetPosition()); err != nil {
 			log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
 			return merr.Status(err), nil
 		}
@@ -1603,16 +1669,10 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 	checkpoints := lo.Filter(req.GetChannelCheckpoints(), func(cp *msgpb.MsgPosition, _ int) bool {
 		channel := cp.GetChannelName()
-		if streamingutil.IsStreamingServiceEnabled() {
-			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
-			if err != nil || targetID != nodeID {
-				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wal allocated", zap.Error(err))
-				return false
-			}
-			return true
-		} else if !s.channelManager.Match(nodeID, channel) {
-			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+		if err != nil || targetID != nodeID {
+			err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+			log.Warn("failed to get latest wal allocated", zap.Error(err))
 			return false
 		}
 		return true
@@ -1636,90 +1696,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 // ReportDataNodeTtMsgs gets timetick messages from datanode.
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
-	if streamingutil.IsStreamingServiceEnabled() {
-		// milvus with streaming service will not handle timetick anymore.
-		return merr.Success(), nil
-	}
-
-	log := log.Ctx(ctx)
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	for _, ttMsg := range req.GetMsgs() {
-		sub := tsoutil.SubByNow(ttMsg.GetTimestamp())
-		metrics.DataCoordConsumeDataNodeTimeTickLag.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), ttMsg.GetChannelName()).
-			Set(float64(sub))
-		err := s.handleDataNodeTtMsg(ctx, ttMsg)
-		if err != nil {
-			log.Error("fail to handle Datanode Timetick Msg",
-				zap.Int64("sourceID", ttMsg.GetBase().GetSourceID()),
-				zap.String("channelName", ttMsg.GetChannelName()),
-				zap.Error(err))
-			return merr.Status(merr.WrapErrServiceInternal("fail to handle Datanode Timetick Msg")), nil
-		}
-	}
-
 	return merr.Success(), nil
-}
-
-func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
-	var (
-		channel  = ttMsg.GetChannelName()
-		ts       = ttMsg.GetTimestamp()
-		sourceID = ttMsg.GetBase().GetSourceID()
-	)
-
-	physical, _ := tsoutil.ParseTS(ts)
-	log := log.Ctx(ctx).WithRateGroup("dc.handleTimetick", 1, 60).With(
-		zap.String("channel", channel),
-		zap.Int64("sourceID", sourceID),
-		zap.Any("ts", ts),
-	)
-	if time.Since(physical).Minutes() > 1 {
-		// if lag behind, log every 1 mins about
-		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes")
-	}
-	// ignore report from a different node
-	if !s.channelManager.Match(sourceID, channel) {
-		log.Warn("node is not matched with channel")
-		return nil
-	}
-
-	sub := tsoutil.SubByNow(ts)
-	pChannelName := funcutil.ToPhysicalChannel(channel)
-	metrics.DataCoordConsumeDataNodeTimeTickLag.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
-		Set(float64(sub))
-
-	s.segmentManager.ExpireAllocations(ctx, channel, ts)
-
-	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
-	if err != nil {
-		log.Warn("failed to get flushable segments", zap.Error(err))
-		return err
-	}
-	flushableSegments := s.getFlushableSegmentsInfo(ctx, flushableIDs)
-	if len(flushableSegments) == 0 {
-		return nil
-	}
-
-	log.Info("start flushing segments", zap.Int64s("segmentIDs", flushableIDs), zap.Uint64("ts", ts))
-	// update segment last update triggered time
-	// it's ok to fail flushing, since next timetick after duration will re-trigger
-	s.setLastFlushTime(flushableSegments)
-
-	infos := lo.Map(flushableSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
-		return info.SegmentInfo
-	})
-	err = s.cluster.Flush(s.ctx, sourceID, channel, infos)
-	if err != nil {
-		log.Warn("failed to call Flush", zap.Error(err))
-		return err
-	}
-
-	return nil
 }
 
 // MarkSegmentsDropped marks the given segments as `Dropped`.
@@ -1782,16 +1759,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		}, nil
 	}
 
-	err := s.sessionManager.CheckHealth(ctx)
-	if err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
-	}
-
-	if err = CheckAllChannelsWatched(s.meta, s.channelManager); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
-	}
-
-	if err = CheckCheckPointsHealth(s.meta); err != nil {
+	if err := CheckCheckPointsHealth(s.meta); err != nil {
 		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 

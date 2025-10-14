@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -164,26 +164,17 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 
-	// Calculate embedding fields
-	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
-		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-call-function-udf")
-		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema)
-		if err != nil {
-			return err
-		}
-		sp.AddEvent("Create-function-udf")
-		if err := exec.ProcessInsert(ctx, it.insertMsg); err != nil {
-			return err
-		}
-		sp.AddEvent("Call-function-udf")
+	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
+		return err
 	}
+
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	tr := timerecord.NewTimeRecorder("applyPK")
-	rowIDBegin, rowIDEnd, _ = it.idAllocator.Alloc(rowNums)
+	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	rowIDBegin, rowIDEnd, _ = common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.insertMsg.RowIDs = make([]UniqueID, rowNums)
@@ -249,6 +240,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))
+		return err
+	}
+
+	// trans timestamptz data
+	_, colTimezone := getColTimezone(colInfo)
+	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone)
+	if err != nil {
 		return err
 	}
 

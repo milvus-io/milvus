@@ -185,7 +185,8 @@ TEST(Indexing, BinaryBruteForce) {
                                               index_info,
                                               nullptr,
                                               DataType::VECTOR_BINARY,
-                                              DataType::NONE);
+                                              DataType::NONE,
+                                              nullptr);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;
@@ -296,7 +297,7 @@ TEST(Indexing, Naive) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
     SearchResult result;
-    vec_index->Query(query_ds, searchInfo, view, result);
+    vec_index->Query(query_ds, searchInfo, view, nullptr, result);
 
     for (int i = 0; i < TOPK; ++i) {
         ASSERT_FALSE(result.seg_offsets_[i] < N / 2);
@@ -310,6 +311,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         storage_config_ = get_default_local_storage_config();
+        fs_ = milvus::storage::InitArrowFileSystem(storage_config_);
 
         auto param = GetParam();
         index_type = param.first;
@@ -392,6 +394,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     int64_t query_offset = 100;
     int64_t NB = 3000;  // will be updated to 27000 for mmap+hnsw
     StorageConfig storage_config_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -484,7 +487,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -519,7 +522,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -535,7 +538,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     if (!is_sparse) {
         // sparse doesn't support range search yet
         search_info.search_params_ = range_search_conf;
-        vec_index->Query(xq_dataset, search_info, nullptr, result);
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     }
 }
 
@@ -553,7 +556,7 @@ TEST_P(IndexTest, Mmap) {
     milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -590,7 +593,7 @@ TEST_P(IndexTest, Mmap) {
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, NQ);
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
@@ -599,7 +602,7 @@ TEST_P(IndexTest, Mmap) {
         EXPECT_EQ(result.seg_offsets_[0], query_offset);
     }
     search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
 }
 
 TEST_P(IndexTest, GetVector) {
@@ -616,7 +619,7 @@ TEST_P(IndexTest, GetVector) {
     milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -719,7 +722,7 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs_);
     index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -787,8 +790,9 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     milvus::storage::IndexMeta index_meta{
         segment_id, field_id, build_id, index_version};
     auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs);
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -842,8 +846,9 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
     };
     SearchResult result;
-    EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result),
-                 std::runtime_error);
+    EXPECT_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result),
+        std::runtime_error);
 }
 
 TEST(Indexing, SearchDiskAnnWithFloat16) {
@@ -872,8 +877,9 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     milvus::storage::IndexMeta index_meta{
         segment_id, field_id, build_id, index_version};
     auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs);
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -928,7 +934,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    EXPECT_NO_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result));
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 
 TEST(Indexing, SearchDiskAnnWithBFloat16) {
@@ -957,8 +964,9 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     milvus::storage::IndexMeta index_meta{
         segment_id, field_id, build_id, index_version};
     auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager);
+        field_data_meta, index_meta, chunk_manager, fs);
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
@@ -1013,7 +1021,8 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
         {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
     };
     SearchResult result;
-    EXPECT_NO_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result));
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 #endif
 

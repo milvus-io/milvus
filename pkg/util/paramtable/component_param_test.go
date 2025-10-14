@@ -146,6 +146,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
+
+		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
+		params.Save("common.clusterID", "32")
+		assert.Panics(t, func() {
+			params.CommonCfg.ClusterID.GetAsInt()
+		})
+		params.Save("common.clusterID", "0")
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -393,6 +400,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+
+		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -493,6 +502,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
+		assert.Equal(t, true, Params.EnableSparseFilterInQuery.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
@@ -628,6 +638,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
 
+		// compaction
+		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
@@ -655,6 +668,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
 		assert.Equal(t, 1.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
+		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse())
+		assert.Equal(t, 256, params.StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt())
+		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())

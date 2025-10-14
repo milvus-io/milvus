@@ -16,15 +16,17 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -58,8 +60,8 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-
-	s.l0_policy = newL0CompactionPolicy(meta)
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.l0_policy = newL0CompactionPolicy(meta, s.mockAlloc)
 }
 
 const MB = 1024 * 1024
@@ -68,13 +70,14 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key)
 
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.l0_policy.OnCollectionUpdate(1)
 	s.Require().EqualValues(1, s.l0_policy.activeCollections.GetActiveCollections()[0])
 
 	<-time.After(3 * time.Second)
 
 	for range 3 {
-		gotViews, err := s.l0_policy.Trigger()
+		gotViews, err := s.l0_policy.Trigger(context.Background())
 		s.NoError(err)
 		s.NotNil(gotViews)
 		s.NotEmpty(gotViews)
@@ -83,7 +86,7 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 	}
 
 	s.Empty(s.l0_policy.activeCollections.GetActiveCollections())
-	gotViews, err := s.l0_policy.Trigger()
+	gotViews, err := s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotNil(gotViews)
 	s.NotEmpty(gotViews)
@@ -93,8 +96,8 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 
 func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	s.Require().Empty(s.l0_policy.activeCollections.GetActiveCollections())
-
-	events, err := s.l0_policy.Trigger()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+	events, err := s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -118,18 +121,18 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	s.l0_policy.AddSkipCollection(1)
 	s.l0_policy.AddSkipCollection(1)
 	// Test for skip collection
-	events, err = s.l0_policy.Trigger()
+	events, err = s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.Empty(events)
 
 	// Test for skip collection with ref count
 	s.l0_policy.RemoveSkipCollection(1)
-	events, err = s.l0_policy.Trigger()
+	events, err = s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.Empty(events)
 
 	s.l0_policy.RemoveSkipCollection(1)
-	events, err = s.l0_policy.Trigger()
+	events, err = s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.Equal(1, len(events))
 	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
@@ -166,9 +169,10 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		meta.segments.SetSegment(id, segment)
 	}
 	s.l0_policy.meta = meta
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
 	s.l0_policy.OnCollectionUpdate(s.testLabel.CollectionID)
-	events, err := s.l0_policy.Trigger()
+	events, err := s.l0_policy.Trigger(context.Background())
 	s.NoError(err)
 	s.Equal(1, len(events))
 	gotViews, ok := events[TriggerTypeLevelZeroViewChange]
@@ -178,6 +182,11 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
 	s.False(ok)
 	s.Empty(gotViews)
+}
+
+func (s *L0CompactionPolicySuite) TestManualTrigger() {
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+	s.l0_policy.triggerOneCollection(context.Background(), s.testLabel.CollectionID)
 }
 
 func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {

@@ -11,9 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewCataLog creates a new catalog instance
@@ -36,7 +36,7 @@ import (
 // │   └── cluster-2-pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 
@@ -134,7 +134,8 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
@@ -195,7 +196,8 @@ func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *stream
 		}
 		kvs[key] = string(v)
 	}
-	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
@@ -216,8 +218,8 @@ func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.R
 	return config, nil
 }
 
-func (c *catalog) RemoveReplicatePChannel(ctx context.Context, targetClusterID, sourceChannelName string) error {
-	key := buildReplicatePChannelPath(targetClusterID, sourceChannelName)
+func (c *catalog) RemoveReplicatePChannel(ctx context.Context, task *streamingpb.ReplicatePChannelMeta) error {
+	key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
 	return c.metaKV.Remove(ctx, key)
 }
 
@@ -236,6 +238,12 @@ func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.Re
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) string {
+	targetClusterID := meta.GetTargetCluster().GetClusterId()
+	sourceChannelName := meta.GetSourceChannelName()
+	return buildReplicatePChannelPath(targetClusterID, sourceChannelName)
 }
 
 func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {

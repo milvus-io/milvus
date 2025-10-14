@@ -38,7 +38,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         expected: alter successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
         self.load_collection(client, collection_name)
@@ -69,7 +69,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
@@ -112,7 +112,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
         self.release_collection(client, collection_name)
@@ -141,11 +141,11 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         expected: alter successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.load_collection(client, collection_name)
         res1 = self.describe_collection(client, collection_name)[0]
-        assert res1.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
         error = {ct.err_code: 999,
@@ -170,24 +170,24 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         # self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
         #                                 check_task=CheckTasks.err_res, check_items=error)
         res3 = self.describe_collection(client, collection_name)[0]
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
         # 2. alter collection properties after release
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert res2.get('properties', None) == {'mmap.enabled': 'True'}
+        assert {'mmap.enabled': 'True'}.items() <= res2.get('properties', {}).items()
         self.alter_collection_properties(client, collection_name,
                                          properties={"collection.ttl.seconds": 100, "lazyload.enabled": True})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert res2.get('properties', None) == {'mmap.enabled': 'True',
-                                                'collection.ttl.seconds': '100', 'lazyload.enabled': 'True'}
+        assert {'mmap.enabled': 'True', 'collection.ttl.seconds': '100', 'lazyload.enabled': 'True'}.items()  \
+                <= res2.get('properties', {}).items()
         self.drop_collection_properties(client, collection_name,
                                         property_keys=["mmap.enabled", "lazyload.enabled",
                                                        "collection.ttl.seconds"])
         res3 = self.describe_collection(client, collection_name)[0]
-        assert res3.get('properties', None) == {}
+        assert len(res1.get('properties', {})) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_enable_dynamic_collection_field(self):
@@ -295,6 +295,114 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         res = self.describe_collection(client, collection_name)[0]
         assert res.get('enable_dynamic_field', None) is new_dynamic_flag
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("pk_field_type", [DataType.INT64, DataType.VARCHAR])
+    def test_milvus_client_alter_allow_insert_auto_id(self, pk_field_type):
+        """
+        target: test alter collection allow insert auto id
+        method: 
+            1. create collection with auto_id=True
+            2. try to insert data with primary key
+            3. verify insert failed
+            4. alter collection allow_insert_auto_id=True
+            5. insert data with customized primary key
+            6. verify insert successfully
+            7. verify the new inserted data's primary keys are customized
+            8. verify the collection info
+            9. drop the collection properties allow_insert_auto_id
+            10. alter collection allow_insert_auto_id=False
+            11. verify the collection info
+            12. alter collection allow_insert_auto_id=True with string value
+            13. verify the collection info
+            14. insert data with customized primary key
+            15. verify insert successfully
+        expected: insert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, pk_field_type, max_length=64, is_primary=True, auto_id=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. try to insert data with primary key
+        rows_with_pk = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
+        } for i in range(100)]
+        if pk_field_type == DataType.VARCHAR:
+            rows_with_pk = [{
+                default_primary_key_field_name: f"id_{i}",
+                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
+            } for i in range(100)]
+        error = {ct.err_code: 999, ct.err_msg: f"more fieldData has pass in"}
+        self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
+
+        rows_without_pk = cf.gen_row_data_by_schema(nb=100, schema=schema)
+        self.insert(client, collection_name, rows_without_pk)
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == 100
+
+        self.load_collection(client, collection_name)
+
+        filter = f"{default_primary_key_field_name} in [10, 20,90]"
+        if pk_field_type == DataType.VARCHAR:
+            filter = f"{default_primary_key_field_name} in ['id_10', 'id_20', 'id_90']"
+        res = self.query(client, collection_name, filter=filter,
+                         output_fields=[default_primary_key_field_name])[0]
+        assert (len(res)) == 0
+
+        # 3. alter collection allow_insert_auto_id=True
+        self.alter_collection_properties(client, collection_name, properties={"allow_insert_auto_id": True})
+        # 4. insert data with customized primary key
+        self.insert(client, collection_name, rows_with_pk)
+        # 5. verify insert successfully
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == 100 * 2
+        # 6. verify the new inserted data's primary keys are customized
+        res = self.query(client, collection_name, filter=filter,
+                         output_fields=[default_primary_key_field_name])[0]
+        assert (len(res)) == 3
+
+        # check the collection info
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('properties').get('allow_insert_auto_id', None) == 'True'
+
+        # drop the collection properties allow_insert_auto_id
+        self.drop_collection_properties(client, collection_name, property_keys=["allow_insert_auto_id"])
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('properties').get('allow_insert_auto_id', None) is None
+        self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
+
+        # alter collection allow_insert_auto_id=False
+        self.alter_collection_properties(client, collection_name, properties={"allow_insert_auto_id": False})
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('properties').get('allow_insert_auto_id', None) == 'False'
+        self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
+
+        # alter collection allow_insert_auto_id=True with string value
+        self.alter_collection_properties(client, collection_name, properties={"allow_insert_auto_id": "True"})
+        res = self.describe_collection(client, collection_name)[0]
+        assert res.get('properties').get('allow_insert_auto_id', None) == 'True'
+        rows_with_pk = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
+        } for i in range(100, 200)]
+        if pk_field_type == DataType.VARCHAR:
+            rows_with_pk = [{
+                default_primary_key_field_name: f"id_{i}",
+                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
+            } for i in range(100, 200)]
+        self.insert(client, collection_name, rows_with_pk)
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == 100 * 3
+     
 
 class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
@@ -306,7 +414,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         expected: alter successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
@@ -452,7 +560,7 @@ class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
         expected: alter successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.release_collection(client, collection_name)
         default_db = 'default'

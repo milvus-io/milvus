@@ -90,6 +90,10 @@ class ProtoParser {
     ParseJsonContainsExprs(const proto::plan::JSONContainsExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseGISFunctionFilterExprs(
+        const proto::plan::GISFunctionFilterExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseTermExprs(const proto::plan::TermExpr& expr_pb);
 
     expr::TypedExprPtr
@@ -97,6 +101,10 @@ class ProtoParser {
 
     expr::TypedExprPtr
     ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseTimestamptzArithCompareExprs(
+        const proto::plan::TimestamptzArithCompareExpr& expr_pb);
 
     expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);

@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -45,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -325,8 +325,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			return ms
 		})
 	}, nil)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
@@ -341,7 +341,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -560,12 +560,12 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		statsMap.Insert(1, map[int64]*storage.BM25Stats{101: stats})
 
 		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(statsMap, nil)
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -659,12 +659,12 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -717,8 +717,8 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 				bf := bloomfilter.NewBloomFilterWithType(
@@ -734,7 +734,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				bfs.AddHistoricalStats(pks)
 				return bfs
 			})
-		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -866,7 +866,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
 			Return(nil, errors.New("mocked error"))
 
 		workers := make(map[int64]*cluster.MockWorker)
@@ -905,12 +905,12 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -1203,8 +1203,8 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			return ms
 		})
 	}, nil)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.AnythingOfType("int64"), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -1220,7 +1220,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 

@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -50,6 +51,9 @@ type GrpcAccessInfo struct {
 	grpcInfo *grpc.UnaryServerInfo
 	start    time.Time
 	end      time.Time
+
+	// runtime set info
+	actualConsistencyLevel *commonpb.ConsistencyLevel
 }
 
 func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
@@ -299,6 +303,10 @@ func (i *GrpcAccessInfo) OutputFields() string {
 }
 
 func (i *GrpcAccessInfo) ConsistencyLevel() string {
+	// return actual consistency level if set
+	if i.actualConsistencyLevel != nil {
+		return i.actualConsistencyLevel.String()
+	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
 		return level.String()
@@ -356,4 +364,22 @@ func (i *GrpcAccessInfo) ClientRequestTime() string {
 	}
 
 	return time.UnixMilli(unixmsec).Format(timeFormat)
+}
+
+func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
+	i.actualConsistencyLevel = &acl
+}
+
+func (i *GrpcAccessInfo) TemplateValueLength() string {
+	templateValues, ok := requestutil.GetExprTemplateValues(i.req)
+	if !ok {
+		return NotAny
+	}
+
+	// get length only
+	m := lo.MapValues(templateValues, func(tv *schemapb.TemplateValue, _ string) int {
+		return getLengthFromTemplateValue(tv)
+	})
+
+	return fmt.Sprint(m)
 }

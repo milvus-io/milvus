@@ -74,7 +74,7 @@ var CDCReplicateEndToEndLatency = prometheus.NewHistogramVec(
 		Namespace: milvusNamespace,
 		Subsystem: typeutil.CDCRole,
 		Name:      CDCMetricReplicateEndToEndLatency,
-		Help:      "End-to-end latency from a single message being read from Source WAL to being written to Target WAL and receiving an ack",
+		Help:      "End-to-end latency in milliseconds from a single message being read from Source WAL to being written to Target WAL and receiving an ack",
 		Buckets:   buckets,
 	}, []string{
 		CDCLabelSourceChannelName,
@@ -82,13 +82,12 @@ var CDCReplicateEndToEndLatency = prometheus.NewHistogramVec(
 	},
 )
 
-// TODO: sheep
 var CDCReplicateLag = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: milvusNamespace,
 		Subsystem: typeutil.CDCRole,
 		Name:      CDCMetricReplicateLag,
-		Help:      "Lag between the latest message in Source and the latest message in Target",
+		Help:      "Lag in milliseconds between the latest synced Source message and the current time",
 	}, []string{
 		CDCLabelSourceChannelName,
 		CDCLabelTargetChannelName,

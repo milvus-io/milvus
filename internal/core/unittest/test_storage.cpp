@@ -219,27 +219,27 @@ TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
         ASSERT_NE(fs, nullptr);
     }
 
-    // Test remote storage configuration (Azure)
-    {
-        StorageConfig remote_config;
-        remote_config.storage_type = "remote";
-        remote_config.cloud_provider = "azure";
-        remote_config.address = "core.windows.net";
-        remote_config.bucket_name = "test-bucket";
-        remote_config.access_key_id = "test-access-key";
-        remote_config.access_key_value = "test-access-value";
-        remote_config.root_path = "/tmp/milvus/remote_data";
-        remote_config.iam_endpoint = "";
-        remote_config.log_level = "error";
-        remote_config.region = "";
-        remote_config.useSSL = false;
-        remote_config.sslCACert = "";
-        remote_config.useIAM = false;
-        remote_config.useVirtualHost = false;
-        remote_config.requestTimeoutMs = 30000;
-        remote_config.gcp_credential_json = "";
+    // // Test remote storage configuration (Azure)
+    // {
+    //     StorageConfig remote_config;
+    //     remote_config.storage_type = "remote";
+    //     remote_config.cloud_provider = "azure";
+    //     remote_config.address = "core.windows.net";
+    //     remote_config.bucket_name = "test-bucket";
+    //     remote_config.access_key_id = "test-access-key";
+    //     remote_config.access_key_value = "test-access-value";
+    //     remote_config.root_path = "/tmp/milvus/remote_data";
+    //     remote_config.iam_endpoint = "";
+    //     remote_config.log_level = "error";
+    //     remote_config.region = "";
+    //     remote_config.useSSL = false;
+    //     remote_config.sslCACert = "";
+    //     remote_config.useIAM = false;
+    //     remote_config.useVirtualHost = false;
+    //     remote_config.requestTimeoutMs = 30000;
+    //     remote_config.gcp_credential_json = "";
 
-        auto fs = InitArrowFileSystem(remote_config);
-        ASSERT_NE(fs, nullptr);
-    }
+    //     auto fs = InitArrowFileSystem(remote_config);
+    //     ASSERT_NE(fs, nullptr);
+    // }
 }

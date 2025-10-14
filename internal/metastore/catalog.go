@@ -22,7 +22,7 @@ type RootCoordCatalog interface {
 
 	CreateCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error)
-	GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
+	GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
 	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
@@ -212,7 +212,7 @@ type QueryCoordCatalog interface {
 type ReplicationCatalog interface {
 	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
 	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
-	RemoveReplicatePChannel(ctx context.Context, sourceChannelName, targetChannelName string) error
+	RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error
 
 	// ListReplicatePChannels lists all replicate pchannels from metastore.
 	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.

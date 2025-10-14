@@ -37,6 +37,8 @@ const (
 	defaultEtcdLogPath        = "stdout"
 	KafkaProducerConfigPrefix = "kafka.producer."
 	KafkaConsumerConfigPrefix = "kafka.consumer."
+
+	defaultLocalStoragePath = "/var/lib/milvus/data"
 )
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
@@ -462,7 +464,7 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 	p.Path = ParamItem{
 		Key:          "localStorage.path",
 		Version:      "2.0.0",
-		DefaultValue: "/var/lib/milvus/data",
+		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
@@ -477,6 +479,7 @@ type MetaStoreConfig struct {
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
 	ReadConcurrency            ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -522,6 +525,15 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Doc:          `read concurrency for fetching metadata from the metastore.`,
 	}
 	p.ReadConcurrency.Init(base.mgr)
+
+	p.MaxEtcdTxnNum = ParamItem{
+		Key:          "metastore.maxEtcdTxnNum",
+		Version:      "2.6.3",
+		DefaultValue: "64",
+		Doc:          `maximum number of operations in a single etcd transaction`,
+		Export:       true,
+	}
+	p.MaxEtcdTxnNum.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
@@ -896,8 +908,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
 		Version:      "2.6.0",
-		DefaultValue: "/var/lib/milvus/woodpecker",
-		Doc:          "The root path of the storage provider.",
+		DefaultValue: "default",
+		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
 		Export:       true,
 	}
 	p.RootPath.Init(base.mgr)
@@ -1511,7 +1523,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,
-		Doc:          "Whether use virtual host mode for bucket",
+		Doc:          "Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default",
 		Export:       true,
 	}
 	p.UseVirtualHost.Init(base.mgr)
@@ -1549,7 +1561,8 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				return path.Join(base.Get("localStorage.path"), "pprof")
+				localStoragePath := getLocalStoragePath(base)
+				return path.Join(localStoragePath, "pprof")
 			}
 			return v
 		},

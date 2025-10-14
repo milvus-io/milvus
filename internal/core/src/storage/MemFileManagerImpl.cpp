@@ -269,6 +269,8 @@ GetOptFieldIvfData(const DataType& dt,
             return GetOptFieldIvfDataImpl<DataType::INT16>(field_datas);
         case DataType::INT32:
             return GetOptFieldIvfDataImpl<DataType::INT32>(field_datas);
+        case DataType::TIMESTAMPTZ:
+            return GetOptFieldIvfDataImpl<DataType::TIMESTAMPTZ>(field_datas);
         case DataType::INT64:
             return GetOptFieldIvfDataImpl<DataType::INT64>(field_datas);
         case DataType::FLOAT:

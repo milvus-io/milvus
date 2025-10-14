@@ -95,6 +95,47 @@ type CachedProxyServiceProvider struct {
 	*Proxy
 }
 
+// cloneStructArrayFields creates a deep copy of struct array fields to avoid modifying cached data
+func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schemapb.StructArrayFieldSchema {
+	if fields == nil {
+		return nil
+	}
+
+	cloned := make([]*schemapb.StructArrayFieldSchema, len(fields))
+	for i, field := range fields {
+		cloned[i] = &schemapb.StructArrayFieldSchema{
+			FieldID:     field.FieldID,
+			Name:        field.Name,
+			Description: field.Description,
+			Fields:      make([]*schemapb.FieldSchema, len(field.Fields)),
+		}
+
+		// Deep copy sub-fields
+		for j, subField := range field.Fields {
+			cloned[i].Fields[j] = &schemapb.FieldSchema{
+				FieldID:          subField.FieldID,
+				Name:             subField.Name,
+				IsPrimaryKey:     subField.IsPrimaryKey,
+				Description:      subField.Description,
+				DataType:         subField.DataType,
+				TypeParams:       subField.TypeParams,
+				IndexParams:      subField.IndexParams,
+				AutoID:           subField.AutoID,
+				State:            subField.State,
+				ElementType:      subField.ElementType,
+				DefaultValue:     subField.DefaultValue,
+				IsDynamic:        subField.IsDynamic,
+				IsPartitionKey:   subField.IsPartitionKey,
+				IsClusteringKey:  subField.IsClusteringKey,
+				Nullable:         subField.Nullable,
+				IsFunctionOutput: subField.IsFunctionOutput,
+			}
+		}
+	}
+
+	return cloned
+}
+
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (resp *milvuspb.DescribeCollectionResponse, err error) {
@@ -153,12 +194,19 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic
 		}),
-		StructArrayFields:  c.schema.CollectionSchema.StructArrayFields,
+		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),
 		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
 		Properties:         c.schema.CollectionSchema.Properties,
 		Functions:          c.schema.CollectionSchema.Functions,
 		DbName:             c.schema.CollectionSchema.DbName,
 	}
+
+	// Restore struct field names from internal format (structName[fieldName]) to original format
+	if err := restoreStructFieldNames(resp.Schema); err != nil {
+		log.Error("failed to restore struct field names", zap.Error(err))
+		return nil, err
+	}
+
 	resp.CollectionID = c.collID
 	resp.UpdateTimestamp = c.updateTimestamp
 	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -338,7 +339,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
 
-	idBegin, idEnd, err := alloc.AllocN(preAllocIDNum)
+	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
+		ids, ide, e := alloc.AllocN(int64(n))
+		return int64(ids), int64(ide), e
+	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}

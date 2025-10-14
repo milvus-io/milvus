@@ -20,10 +20,12 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -345,11 +347,16 @@ func (m *ChannelDistManager) updateCollectionIndex() {
 func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica) *DmChannel {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
-
+	logger := log.With(zap.String("Scope", "ChannelDistManager"), zap.String("channelName", channelName),
+		zap.Int64("replicaID", replica.GetID()))
 	channels := m.collectionIndex[replica.GetCollectionID()]
 
 	var candidates *DmChannel
-	for _, channel := range channels {
+	for chIdx, channel := range channels {
+		logger := logger.With(zap.Int("channelIdx", chIdx))
+		logger.Debug("process", zap.Int64("channelID", channel.Node), zap.Int64("channelVersion", channel.Version),
+			zap.String("channel name", channel.GetChannelName()),
+			zap.Bool("replicaContains", replica.Contains(channel.Node)))
 		if channel.GetChannelName() == channelName && replica.Contains(channel.Node) {
 			if candidates == nil {
 				candidates = channel
@@ -360,13 +367,23 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 
 				candidateIsStreamingNode := m.checkIfStreamingNode(candidates.Node)
 				channelIsStreamingNode := m.checkIfStreamingNode(channel.Node)
+				logger.Debug("check whether stream node is serviceable",
+					zap.Bool("candidatesServiceable", candidatesServiceable),
+					zap.Bool("channelServiceable", channelServiceable),
+					zap.Bool("candidateIsStreamingNode", candidateIsStreamingNode),
+					zap.Bool("channelIsStreamingNode", channelIsStreamingNode))
+
 				if channelIsStreamingNode && !candidateIsStreamingNode {
 					// When upgrading from 2.5 to 2.6, the delegator leader may not locate at streaming node.
 					// We always use the streaming node as the delegator leader to avoid the delete data lost when loading segment.
+					logger.Debug("set delegator on stream node to candidate shard leader", zap.Int64("node", channel.Node),
+						zap.Int64("channel version", channel.Version))
 					candidates = channel
 				} else if !channelIsStreamingNode && candidateIsStreamingNode {
 					// When downgrading from 2.6 to 2.5, the delegator leader may locate at non-streaming node.
 					// We always use the non-streaming node as the delegator leader to avoid the delete data lost when loading segment.
+					logger.Debug("found delegator which is not on stream node", zap.Int64("node", channel.Node),
+						zap.Int64("channel version", channel.Version))
 					continue
 				} else {
 					updateNeeded := false
@@ -374,19 +391,28 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 					case !candidatesServiceable && channelServiceable:
 						// Current candidate is not serviceable but new channel is
 						updateNeeded = true
+						logger.Debug("set serviceable delegator to candidate shard leader", zap.Int64("node", channel.Node),
+							zap.Int64("channel version", channel.Version))
 					case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
 						// Same service status but higher version
 						updateNeeded = true
+						logger.Debug("set serviceable delegator with larger version to candidate shard leader", zap.Int64("node", channel.Node),
+							zap.Int64("channel version", channel.Version), zap.Int64("candidate version", candidates.Version))
 					}
-
 					if updateNeeded {
 						candidates = channel
+					} else {
+						logger.Debug("not set any channel to candidates in this round")
 					}
 				}
 			}
 		}
 	}
-
+	if candidates != nil {
+		logger.Debug("final", zap.Any("candidates", candidates),
+			zap.Int64("candidates version", candidates.Version),
+			zap.Int64("candidates node", candidates.Node))
+	}
 	return candidates
 }
 
@@ -398,7 +424,7 @@ func (m *ChannelDistManager) checkIfStreamingNode(nodeID int64) bool {
 	if node == nil {
 		return false
 	}
-	return node.IsEmbeddedQueryNodeInStreamingNode()
+	return node.IsEmbeddedQueryNodeInStreamingNode() || node.IsInStandalone()
 }
 
 func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.DmChannel {

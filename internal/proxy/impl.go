@@ -43,10 +43,12 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -2490,6 +2492,16 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	})
 	SetReportValue(dr.result.GetStatus(), v)
 
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()) / 1024 / 1024)
+	}
+
+	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
+		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
+		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
+	})
+
 	if merr.Ok(dr.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
 	}
@@ -2620,6 +2632,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.FailCntKey:         len(it.result.ErrIndex),
 	})
 	SetReportValue(it.result.GetStatus(), v)
+	SetStorageCost(it.result.GetStatus(), it.storageCost)
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes) / 1024 / 1024)
+	}
 	if merr.Ok(it.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
@@ -2880,6 +2897,22 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
+			nodeID,
+			metrics.SearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+
+		metrics.ProxyScannedTotalMB.WithLabelValues(
+			nodeID,
+			metrics.SearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+	}
+
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.result)
@@ -2892,6 +2925,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -3087,6 +3121,22 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
+			nodeID,
+			metrics.HybridSearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+
+		metrics.ProxyScannedTotalMB.WithLabelValues(
+			nodeID,
+			metrics.HybridSearchLabel,
+			dbName,
+			collectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+	}
+
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
 		username := GetCurUserFromContextOrDefault(ctx)
@@ -3099,6 +3149,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
+		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
@@ -3226,14 +3277,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 }
 
 // Query get the records by primary keys.
-func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, error) {
+func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.request
 	method := "Query"
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	log := log.Ctx(ctx).With(
@@ -3291,7 +3342,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
 
@@ -3304,7 +3355,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, segcore.StorageCost{}, nil
 	}
 
 	if !qt.reQuery {
@@ -3329,7 +3380,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
-	return qt.result, nil
+	return qt.result, qt.storageCost, nil
 }
 
 // Query get the records by primary keys.
@@ -3376,7 +3427,24 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	defer sp.End()
 	method := "Query"
 
-	res, err := node.query(ctx, qt, sp)
+	res, storageCost, err := node.query(ctx, qt, sp)
+
+	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		metrics.ProxyScannedRemoteMB.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+
+		metrics.ProxyScannedTotalMB.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.DbName,
+			request.CollectionName,
+		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+	}
+
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
@@ -3394,6 +3462,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.RelatedCntKey:      qt.allQueryCnt,
 	})
 	SetReportValue(res.Status, v)
+	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if log.Ctx(ctx).Core().Enabled(zap.DebugLevel) && matchCountRule(request.GetOutputFields()) {
@@ -3758,15 +3827,12 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	log.Debug(
 		rpcDone(method),
-		zap.Uint64("FlushAllTs", ft.result.GetFlushTs()),
+		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &milvuspb.FlushAllResponse{
-		Status:     merr.Success(),
-		FlushAllTs: ft.result.GetFlushTs(),
-	}, nil
+	return ft.result, nil
 }
 
 // GetDdChannel returns the used channel for dd operations.
@@ -4624,8 +4690,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 
 	username := request.Username
-	if globalMetaCache != nil {
-		globalMetaCache.RemoveCredential(username) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to invalidate credential cache")
 
@@ -4650,8 +4717,9 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		Username:       request.Username,
 		Sha256Password: request.Password,
 	}
-	if globalMetaCache != nil {
-		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to update credential cache")
 
@@ -4755,7 +4823,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}
 	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
+	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
 		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
 		return merr.Status(err), nil
 	}
@@ -5282,8 +5350,9 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 		return merr.Status(err), nil
 	}
 
-	if globalMetaCache != nil {
-		err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
 		})

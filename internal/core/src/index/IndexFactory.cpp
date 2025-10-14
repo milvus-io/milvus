@@ -38,6 +38,7 @@
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
+#include "index/RTreeIndex.h"
 #include "knowhere/comp/knowhere_check.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
@@ -306,11 +307,12 @@ IndexFactory::ScalarIndexLoadResource(
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = 0;
+            request.max_disk_cost = index_size_in_bytes;
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
-               index_type == milvus::index::NGRAM_INDEX_TYPE) {
+               index_type == milvus::index::NGRAM_INDEX_TYPE ||
+               index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
         request.max_memory_cost = index_size_in_bytes;
@@ -379,6 +381,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
             return CreatePrimitiveScalarIndex<int32_t>(create_index_info,
                                                        file_manager_context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return CreatePrimitiveScalarIndex<int64_t>(create_index_info,
                                                        file_manager_context);
         case DataType::FLOAT:
@@ -482,6 +485,15 @@ IndexFactory::CreateJsonIndex(
 }
 
 IndexBasePtr
+IndexFactory::CreateGeometryIndex(
+    IndexType index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    AssertInfo(index_type == RTREE_INDEX_TYPE,
+               "Invalid index type for geometry index");
+    return std::make_unique<RTreeIndex<std::string>>(file_manager_context);
+}
+
+IndexBasePtr
 IndexFactory::CreateScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
@@ -496,6 +508,7 @@ IndexFactory::CreateScalarIndex(
         case DataType::DOUBLE:
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TIMESTAMPTZ:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {
@@ -504,6 +517,10 @@ IndexFactory::CreateScalarIndex(
         }
         case DataType::JSON: {
             return CreateJsonIndex(create_index_info, file_manager_context);
+        }
+        case DataType::GEOMETRY: {
+            return CreateGeometryIndex(create_index_info.index_type,
+                                       file_manager_context);
         }
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
@@ -547,9 +564,8 @@ IndexFactory::CreateVectorIndex(
                           "VECTOR_ARRAY for DiskAnnIndex is not supported");
             }
             case DataType::VECTOR_INT8: {
-                // TODO caiyd, not support yet
-                ThrowInfo(Unsupported,
-                          "VECTOR_INT8 for DiskAnnIndex is not supported");
+                return std::make_unique<VectorDiskAnnIndex<int8>>(
+                    index_type, metric_type, version, file_manager_context);
             }
             default:
                 ThrowInfo(

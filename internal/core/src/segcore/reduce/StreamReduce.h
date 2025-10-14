@@ -152,6 +152,7 @@ class StreamReducerHelper {
                          slice_nqs_.end(),
                          slice_nqs_prefix_sum_.begin() + 1);
         total_nq_ = slice_nqs_prefix_sum_[num_slice_];
+        AssertInfo(total_nq_ > 0, "empty nq is not allowed");
     }
 
     void
@@ -196,8 +197,12 @@ class StreamReducerHelper {
     void
     AssembleMergedResult();
 
-    std::vector<char>
-    GetSearchResultDataSlice(int slice_index);
+    std::pair<std::vector<char>, StorageCost>
+    GetSearchResultDataSlice(const int slice_index,
+                             const StorageCost& total_cost);
+
+    void
+    GetTotalStorageCost();
 
     void
     CleanReduceStatus();
@@ -218,5 +223,6 @@ class StreamReducerHelper {
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     int64_t total_nq_{0};
+    StorageCost total_search_storage_cost_;
 };
 }  // namespace milvus::segcore

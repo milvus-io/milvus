@@ -34,6 +34,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const size_t* query_lims,
                     int64_t num_queries,
                     const BitsetView& bitset,
+                    milvus::OpContext* op_context,
                     SearchResult& search_result) {
     auto topK = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
@@ -66,7 +67,8 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
-    auto accessor = SemiInlineGet(field_indexing->indexing_->PinCells({0}));
+    auto accessor =
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
@@ -83,7 +85,8 @@ SearchOnSealedIndex(const Schema& schema,
                                                        search_result,
                                                        bitset,
                                                        *vec_index)) {
-        vec_index->Query(dataset, search_info, bitset, search_result);
+        vec_index->Query(
+            dataset, search_info, bitset, op_context, search_result);
         float* distances = search_result.distances_.data();
         auto total_num = num_queries * topK;
         if (round_decimal != -1) {
@@ -108,6 +111,7 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t num_queries,
                      int64_t row_count,
                      const BitsetView& bitview,
+                     milvus::OpContext* op_context,
                      SearchResult& result) {
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
@@ -148,7 +152,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     auto offset = 0;
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = column->DataOfChunk(i);
+        auto pw = column->DataOfChunk(op_context, i);
         auto vec_data = pw.get();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
@@ -159,7 +163,7 @@ SearchOnSealedColumn(const Schema& schema,
             AssertInfo(query_lims != nullptr,
                        "query_lims is nullptr, but data_type is vector array");
 
-            lims_pw = column->VectorArrayLims(i);
+            lims_pw = column->VectorArrayLims(op_context, i);
             raw_dataset.raw_data_lims = lims_pw.get();
         }
 
@@ -182,7 +186,8 @@ SearchOnSealedColumn(const Schema& schema,
                                            index_info,
                                            bitview,
                                            data_type,
-                                           element_type);
+                                           element_type,
+                                           op_context);
             final_qr.merge(sub_qr);
         }
         offset += chunk_size;

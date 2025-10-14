@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestCatalog(t *testing.T) {
@@ -128,18 +129,6 @@ func TestCatalog(t *testing.T) {
 	tasks, err = catalog.ListBroadcastTask(context.Background())
 	assert.Error(t, err)
 	assert.Nil(t, tasks)
-
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("save error"))
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
-	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("save error"))
-	err = catalog.SavePChannels(context.Background(), []*streamingpb.PChannelMeta{{
-		Channel: &streamingpb.PChannelInfo{Name: "test", Term: 1},
-		Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
-	}})
-	assert.Error(t, err)
-	err = catalog.SaveBroadcastTask(context.Background(), 1, &streamingpb.BroadcastTask{})
-	assert.Error(t, err)
 }
 
 func TestCatalog_ReplicationCatalog(t *testing.T) {
@@ -242,7 +231,11 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	assert.Equal(t, infos[1].GetTargetChannelName(), "target-channel-2")
 	assert.Equal(t, infos[1].GetTargetCluster().GetClusterId(), "target-cluster")
 
-	err = catalog.RemoveReplicatePChannel(context.Background(), "target-cluster", "source-channel-1")
+	err = catalog.RemoveReplicatePChannel(context.Background(), &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "source-channel-1",
+		TargetChannelName: "target-channel-1",
+		TargetCluster:     &commonpb.MilvusCluster{ClusterId: "target-cluster"},
+	})
 	assert.NoError(t, err)
 
 	infos, err = catalog.ListReplicatePChannels(context.Background())
@@ -251,4 +244,11 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	assert.Equal(t, infos[0].GetSourceChannelName(), "source-channel-2")
 	assert.Equal(t, infos[0].GetTargetChannelName(), "target-channel-2")
 	assert.Equal(t, infos[0].GetTargetCluster().GetClusterId(), "target-cluster")
+
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Unset()
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", merr.ErrIoKeyNotFound)
+
+	cfg, err = catalog.GetReplicateConfiguration(context.Background())
+	assert.NoError(t, err)
+	assert.Nil(t, cfg)
 }

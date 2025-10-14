@@ -154,7 +154,8 @@ class HybridIndexTestV1 : public testing::Test {
         chunk_manager_->Write(
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
-        storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager_);
+        storage::FileManagerContext ctx(
+            field_meta, index_meta, chunk_manager_, fs_);
         std::vector<std::string> index_files;
 
         Config config;
@@ -226,6 +227,7 @@ class HybridIndexTestV1 : public testing::Test {
         storage_config.storage_type = "local";
         storage_config.root_path = root_path;
         chunk_manager_ = storage::CreateChunkManager(storage_config);
+        fs_ = storage::InitArrowFileSystem(storage_config);
 
         Init(collection_id,
              partition_id,
@@ -507,6 +509,7 @@ class HybridIndexTestV1 : public testing::Test {
     size_t cardinality_;
     boost::container::vector<T> data_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    milvus_storage::ArrowFileSystemPtr fs_;
     bool nullable_;
     FixedVector<bool> valid_data_;
     int index_build_id_;

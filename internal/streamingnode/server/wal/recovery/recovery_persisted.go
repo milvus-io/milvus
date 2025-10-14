@@ -158,7 +158,7 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	checkpoint := &streamingpb.WALCheckpoint{
 		MessageId:     untilMessage.LastConfirmedMessageID().IntoProto(),
 		TimeTick:      untilMessage.TimeTick(),
-		RecoveryMagic: RecoveryMagicStreamingInitialized,
+		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
 	}
 	if err := resource.Resource().StreamingNodeCatalog().SaveConsumeCheckpoint(ctx, channelInfo.Name, checkpoint); err != nil {
 		return nil, errors.Wrap(err, "failed to save checkpoint to catalog")

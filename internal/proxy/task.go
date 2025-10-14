@@ -73,6 +73,9 @@ const (
 	LimitKey             = "limit"
 	// offsets for embedding list search
 	LimsKey = "lims"
+	// key for timestamptz translation
+	TimezoneKey   = "timezone"
+	TimefieldsKey = "time_fields"
 
 	SearchIterV2Key        = "search_iter_v2"
 	SearchIterBatchSizeKey = "search_iter_batch_size"
@@ -385,11 +388,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate whether field names duplicates
-	if err := validateDuplicatedFieldName(t.schema); err != nil {
-		return err
-	}
-
 	// validate primary key definition
 	if err := validatePrimaryKey(t.schema); err != nil {
 		return err
@@ -437,6 +435,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// Transform struct field names to ensure global uniqueness
+	// This allows different structs to have fields with the same name
+	err = transformStructFieldNames(t.schema)
+	if err != nil {
+		return fmt.Errorf("failed to transform struct field names: %v", err)
+	}
+
+	// validate whether field names duplicates (after transformation)
+	if err := validateDuplicatedFieldName(t.schema); err != nil {
+		return err
+	}
+
 	if err := validateMultipleVectorFields(t.schema); err != nil {
 		return err
 	}
@@ -448,10 +458,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
-	}
-	// prevent user creating collection with timestamptz field for now (not implemented)
-	if hasTimestamptzField(t.schema) {
-		return merr.WrapErrParameterInvalidMsg("timestamptz field is still in development")
 	}
 	return nil
 }
@@ -891,6 +897,11 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	for _, function := range result.Schema.Functions {
 		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 	}
+
+	if err := restoreStructFieldNames(t.result.Schema); err != nil {
+		return fmt.Errorf("failed to restore struct field names: %v", err)
+	}
+
 	return nil
 }
 
@@ -1160,6 +1171,10 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
 
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
@@ -1176,6 +1191,22 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 			}
+		}
+
+		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
+		if enabled {
+			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
+			if err != nil {
+				return err
+			}
+			if !primaryFieldSchema.AutoID {
+				return merr.WrapErrParameterInvalidMsg("the value for %s must be false when autoID is false", common.AllowInsertAutoIDKey)
+			}
+		}
+		// Check the validation of timezone
+		err := checkTimezone(t.Properties...)
+		if err != nil {
+			return err
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)

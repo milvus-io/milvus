@@ -27,8 +27,19 @@ func RegisterMessageIDUnmsarshaler(walName WALName, unmarshaler MessageIDUnmarsh
 // MessageIDUnmarshaler is the unmarshaler for message id.
 type MessageIDUnmarshaler = func(b string) (MessageID, error)
 
+// MustMarshalMessageID marshal the message id, panic if failed.
+func MustMarshalMessageID(msgID MessageID) *commonpb.MessageID {
+	if msgID == nil {
+		return nil
+	}
+	return msgID.IntoProto()
+}
+
 // MustUnmarshalMessageID unmarshal the message id, panic if failed.
 func MustUnmarshalMessageID(msgID *commonpb.MessageID) MessageID {
+	if msgID == nil {
+		return nil
+	}
 	id, err := UnmarshalMessageID(msgID)
 	if err != nil {
 		panic(fmt.Sprintf("unmarshal message id failed: %s, wal: %s, bytes: %s", err.Error(), msgID.WALName.String(), msgID.Id))

@@ -64,20 +64,24 @@ func (c *controller) Start() {
 func (c *controller) Stop() {
 	c.stopOnce.Do(func() {
 		log.Ctx(c.ctx).Info("CDC controller stopping...")
-		// TODO: sheep, gracefully stop the replicators
 		close(c.stopChan)
 		c.wg.Wait()
+		resource.Resource().ReplicateManagerClient().Close()
 		log.Ctx(c.ctx).Info("CDC controller stopped")
 	})
 }
 
 func (c *controller) run() {
-	replicatePChannels, err := resource.Resource().ReplicationCatalog().ListReplicatePChannels(c.ctx)
+	targetReplicatePChannels, err := resource.Resource().ReplicationCatalog().ListReplicatePChannels(c.ctx)
 	if err != nil {
 		log.Ctx(c.ctx).Error("failed to get replicate pchannels", zap.Error(err))
 		return
 	}
-	for _, replicatePChannel := range replicatePChannels {
+	// create replicators for all replicate pchannels
+	for _, replicatePChannel := range targetReplicatePChannels {
 		resource.Resource().ReplicateManagerClient().CreateReplicator(replicatePChannel)
 	}
+
+	// remove out of target replicators
+	resource.Resource().ReplicateManagerClient().RemoveOutOfTargetReplicators(targetReplicatePChannels)
 }

@@ -6,10 +6,10 @@ class MilvusConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     requires = (
         "rocksdb/6.29.5@milvus/dev#b1842a53ddff60240c5282a3da498ba1",
-        "boost/1.82.0#744a17160ebb5838e9115eab4d6d0c06",
+        "boost/1.83.0@",
         "onetbb/2021.9.0#4a223ff1b4025d02f31b65aedf5e7f4a",
-        "nlohmann_json/3.11.2#ffb9e9236619f1c883e36662f944345d",
-        "zstd/1.5.4#308b8b048f9a3823ce248f9c150cc889",
+        "nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d",
+        "zstd/1.5.5#34e9debe03bf0964834a09dfbc31a5dd",
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
@@ -48,7 +48,8 @@ class MilvusConan(ConanFile):
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
-        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01"
+        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01",
+        "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -87,6 +88,8 @@ class MilvusConan(ConanFile):
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
+        "gdal:shared": True,
+        "gdal:fPIC": True,
     }
 
     def configure(self):

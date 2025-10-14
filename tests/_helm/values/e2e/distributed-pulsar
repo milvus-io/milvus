@@ -21,7 +21,7 @@ proxy:
 dataNode:
   resources:
     limits:
-      cpu: "2"
+      cpu: "4"
       memory: 8Gi
     requests:
       cpu: "0.5"
@@ -77,6 +77,9 @@ extraConfigFiles:
         interval: 1800
         missingTolerance: 1800
         dropTolerance: 1800
+    queryNode:
+      segcore:
+        exprEvalBatchSize: 512
 metrics:
   serviceMonitor:
     enabled: true

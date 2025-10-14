@@ -378,5 +378,8 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 			indexParams[k] = v
 		}
 	}
+
+	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, indexParams)
+
 	return nil
 }

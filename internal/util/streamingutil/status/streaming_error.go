@@ -56,8 +56,13 @@ func (e *StreamingError) IsSkippedOperation() bool {
 // Stop resuming retry and report to user.
 func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
-		e.Code == streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION ||
+		e.IsReplicateViolation() ||
 		e.IsTxnUnavilable()
+}
+
+// IsReplicateViolation returns true if the error is caused by replicate violation.
+func (e *StreamingError) IsReplicateViolation() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION
 }
 
 // IsTxnUnavilable returns true if the transaction is unavailable.

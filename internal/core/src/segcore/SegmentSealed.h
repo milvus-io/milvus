@@ -22,6 +22,7 @@
 #include "index/Index.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/JsonFlatIndex.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
@@ -50,17 +51,21 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     ClearData() = 0;
     virtual std::unique_ptr<DataArray>
-    get_vector(FieldId field_id, const int64_t* ids, int64_t count) const = 0;
+    get_vector(milvus::OpContext* op_ctx,
+               FieldId field_id,
+               const int64_t* ids,
+               int64_t count) const = 0;
 
     virtual void
-    LoadTextIndex(FieldId field_id,
-                  std::unique_ptr<index::TextMatchIndex> index) = 0;
+    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) = 0;
 
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinJsonIndex(FieldId field_id,
+    PinJsonIndex(milvus::OpContext* op_ctx,
+                 FieldId field_id,
                  const std::string& path,
                  DataType data_type,
                  bool any_type,
@@ -113,7 +118,7 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (best_match == nullptr) {
                     return nullptr;
                 }
-                auto ca = SemiInlineGet(best_match->PinCells({0}));
+                auto ca = SemiInlineGet(best_match->PinCells(op_ctx, {0}));
                 auto index = ca->get_cell_of(0);
                 return PinWrapper<const index::IndexBase*>(ca, index);
             });
@@ -124,17 +129,13 @@ class SegmentSealed : public SegmentInternalInterface {
     }
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(FieldId field_id) const override = 0;
+    GetNgramIndex(milvus::OpContext* op_ctx,
+                  FieldId field_id) const override = 0;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(FieldId field_id,
+    GetNgramIndexForJson(milvus::OpContext* op_ctx,
+                         FieldId field_id,
                          const std::string& nested_path) const override = 0;
-    virtual void
-    LoadJsonStats(FieldId field_id,
-                  std::shared_ptr<index::JsonKeyStats> stats) = 0;
-
-    virtual void
-    RemoveJsonStats(FieldId field_id) = 0;
 
     SegmentType
     type() const override {

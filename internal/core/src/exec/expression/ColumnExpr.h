@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 #include <boost/variant.hpp>
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
@@ -33,16 +34,17 @@ class PhyColumnExpr : public Expr {
     PhyColumnExpr(const std::vector<std::shared_ptr<Expr>>& input,
                   const std::shared_ptr<const milvus::expr::ColumnExpr>& expr,
                   const std::string& name,
+                  milvus::OpContext* op_ctx,
                   const segcore::SegmentInternalInterface* segment,
                   int64_t active_count,
                   int64_t batch_size)
-        : Expr(expr->type(), std::move(input), name),
-          segment_chunk_reader_(segment, active_count),
+        : Expr(expr->type(), std::move(input), name, op_ctx),
+          segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
         auto& schema = segment->get_schema();
         auto& field_meta = schema[expr_->GetColumn().field_id_];
-        pinned_index_ = PinIndex(segment, field_meta);
+        pinned_index_ = PinIndex(op_ctx_, segment, field_meta);
         is_indexed_ = pinned_index_.size() > 0;
         if (segment->is_chunked()) {
             num_chunk_ =

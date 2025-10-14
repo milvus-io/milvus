@@ -1766,7 +1766,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[]):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[], desired_field_names=[]):
     """
     Generates row data based on the given schema.
     
@@ -1786,6 +1786,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         - For primary key fields, generates sequential values starting from 'start'.
         - For non-primary fields, generates random data based on field type.
     """
+    # if both skip_field_names and desired_field_names are specified, raise an exception
+    if skip_field_names and desired_field_names:
+        raise Exception(f"Cannot specify both skip_field_names and desired_field_names")
+
     if schema is None:
         schema = gen_default_collection_schema()
 
@@ -1793,7 +1797,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
     func_output_fields = []
     if isinstance(schema, dict):
         # a dict of collection schema info is usually from client.describe_collection()
-        fields = schema.get('fields', [])
+        all_fields = schema.get('fields', [])
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.get('name', None) in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         functions = schema.get('functions', [])
         for func in functions:
             output_field_names = func.get('output_field_names', [])
@@ -1822,7 +1835,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
             data.append(tmp)
     else:
         # a schema object is usually form orm schema object
-        fields = schema.fields
+        all_fields = schema.fields
+        fields = []
+        for field in all_fields:
+            # if desired_field_names is specified, only generate the fields in desired_field_names
+            if field.name in desired_field_names:
+                fields.append(field)
+            # elif desired_field_names is not specified, generate all fields
+            elif not desired_field_names:
+                fields.append(field)
+
         if hasattr(schema, "functions"):
             functions = schema.functions
             for func in functions:
@@ -2588,40 +2610,52 @@ def gen_json_field_expressions_and_templates():
     return expressions
 
 
-def gen_json_field_expressions_all_single_operator():
+def gen_json_field_expressions_all_single_operator(json_cast_type=None):
     """
     Gen a list of filter in expression-format(as a string)
+    :param json_cast_type: Optional parameter to specify the JSON cast type (e.g., "ARRAY_DOUBLE")
     """
-    expressions = ["json_field['a'] <= 1", "json_field['a'] <= 1.0", "json_field['a'] >= 1", "json_field['a'] >= 1.0",
-                   "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
-                   "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
-                   "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
-                   "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992",
-                   "json_field['a'] == '1'",
-                   "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
-                   "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
-                   "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
-                   "EXISTS json_field['a']['b']", "exists json_field['a']['b']", "json_field['a'] + 1 >= 2",
-                   "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
-                   "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
-                   "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
-                   "json_field['a'][0] == 1 && json_field['a'][1] == 2",
-                   "json_field['a'][0] == 1 and json_field['a'][1] == 2",
-                   "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
-                   "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
-                   "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
-                   "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
-                   "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
-                   "json_field['a'] in [1]", "json_contains(json_field['a'], 1)", "JSON_CONTAINS(json_field['a'], 1)",
-                   "json_contains_all(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ALL(json_field['a'], [2.0, '4'])",
-                   "json_contains_any(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ANY(json_field['a'], [2.0, '4'])",
-                   "array_contains(json_field['a'], 2)", "ARRAY_CONTAINS(json_field['a'], 2)",
-                   "array_contains_all(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1.0, 2])",
-                   "array_contains_any(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1.0, 2])",
-                   "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10",
-                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
-                   "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
-                   ]
+    if json_cast_type == "ARRAY_DOUBLE":
+        # For ARRAY_DOUBLE type, use array-specific expressions
+        expressions = [
+            "json_contains(json_field['a'], 1)", "JSON_CONTAINS(json_field['a'], 1)",
+            "json_contains(json_field['a'], 1.0)", "json_contains(json_field['a'], 2)",
+            "json_contains_all(json_field['a'], [1, 2])", "JSON_CONTAINS_ALL(json_field['a'], [1, 2])",
+            "json_contains_all(json_field['a'], [1.0, 2.0])", "json_contains_all(json_field['a'], [2, 4])",
+            "json_contains_any(json_field['a'], [1, 2])", "JSON_CONTAINS_ANY(json_field['a'], [1, 2])",
+            "json_contains_any(json_field['a'], [1.0, 2.0])", "json_contains_any(json_field['a'], [2, 4])",
+            "array_contains(json_field['a'], 1)", "ARRAY_CONTAINS(json_field['a'], 1)",
+            "array_contains(json_field['a'], 1.0)", "array_contains(json_field['a'], 2)",
+            "array_contains_all(json_field['a'], [1, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1, 2])",
+            "array_contains_all(json_field['a'], [1.0, 2.0])", "array_contains_all(json_field['a'], [2, 4])",
+            "array_contains_any(json_field['a'], [1, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1, 2])",
+            "array_contains_any(json_field['a'], [1.0, 2.0])", "array_contains_any(json_field['a'], [2, 4])",
+            "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10"
+        ]
+    else:
+        expressions = ["json_field['a'] <= 1", "json_field['a'] <= 1.0", "json_field['a'] >= 1", "json_field['a'] >= 1.0",
+                       "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
+                       "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
+                       "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
+                       "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992",
+                       "json_field['a'] == '1'",
+                       "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
+                       "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
+                       "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
+                       "EXISTS json_field['a']['b']", "exists json_field['a']['b']", "json_field['a'] + 1 >= 2",
+                       "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
+                       "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
+                       "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
+                       "json_field['a'][0] == 1 && json_field['a'][1] == 2",
+                       "json_field['a'][0] == 1 and json_field['a'][1] == 2",
+                       "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
+                       "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
+                       "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
+                       "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
+                       "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
+                       "json_field['a'] in [1]",  "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
+                       "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
+                       ]
 
     return expressions
 

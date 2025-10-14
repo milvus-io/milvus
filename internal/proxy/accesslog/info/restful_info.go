@@ -25,7 +25,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 )
 
@@ -41,6 +43,9 @@ type RestfulInfo struct {
 	params *gin.LogFormatterParams
 	start  time.Time
 	req    interface{}
+
+	// runtime set info
+	actualConsistencyLevel *commonpb.ConsistencyLevel
 }
 
 func NewRestfulInfo() *RestfulInfo {
@@ -209,6 +214,10 @@ func (i *RestfulInfo) OutputFields() string {
 }
 
 func (i *RestfulInfo) ConsistencyLevel() string {
+	// return actual consistency level if set
+	if i.actualConsistencyLevel != nil {
+		return i.actualConsistencyLevel.String()
+	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
 		return level.String()
@@ -258,4 +267,22 @@ func (i *RestfulInfo) QueryParams() string {
 
 func (i *RestfulInfo) ClientRequestTime() string {
 	return Unknown
+}
+
+func (i *RestfulInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
+	i.actualConsistencyLevel = &acl
+}
+
+func (i *RestfulInfo) TemplateValueLength() string {
+	templateValues, ok := requestutil.GetExprTemplateValues(i.req)
+	if !ok {
+		return NotAny
+	}
+
+	// get length only
+	m := lo.MapValues(templateValues, func(tv *schemapb.TemplateValue, _ string) int {
+		return getLengthFromTemplateValue(tv)
+	})
+
+	return fmt.Sprint(m)
 }

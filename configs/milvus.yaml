@@ -67,6 +67,7 @@ metastore:
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds
+  maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
@@ -152,7 +153,7 @@ minio:
   iamEndpoint: 
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
   region:  # Specify minio storage system location region
-  useVirtualHost: false # Whether use virtual host mode for bucket
+  useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
@@ -212,7 +213,7 @@ woodpecker:
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
-    rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
+    rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -487,20 +488,6 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
-      # This ratio estimates how much evictable memory can be cached.
-      # The higher the ratio, the more physical memory is reserved for evictable memory,
-      # resulting in fewer evictions but fewer segments can be loaded.
-      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
-      # This parameter is only valid when eviction is enabled.
-      # It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].
-      evictableMemoryCacheRatio: 0.3
-      # This ratio estimates how much evictable disk space can be cached.
-      # The higher the ratio, the more physical disk space is reserved for evictable disk usage,
-      # resulting in fewer evictions but fewer segments can be loaded.
-      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
-      # This parameter is only valid when eviction is enabled.
-      # It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].
-      evictableDiskCacheRatio: 0.3
       # Enable background eviction for Tiered Storage. Defaults to false.
       # Background eviction is used to do periodic eviction in a separate thread.
       # And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.
@@ -509,6 +496,7 @@ queryNode:
       # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
+      storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -1034,11 +1022,12 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledJSONKeyStats: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
   UsingJSONStatsForQuery: true # Indicates whether to use json stats when query
+  clusterID: 0 # cluster id
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

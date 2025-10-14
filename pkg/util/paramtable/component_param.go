@@ -57,6 +57,7 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+	MaxClusterIDBits                = 3
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -328,6 +329,9 @@ type commonConfig struct {
 	EnablePosixMode ParamItem `refreshable:"false"`
 
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
+	ClusterID              ParamItem `refreshable:"false"`
+
+	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1216,7 +1220,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
 		Export:       true,
 	}
@@ -1248,6 +1252,35 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnablePosixMode.Init(base.mgr)
+
+	p.ClusterID = ParamItem{
+		Key:          "common.clusterID",
+		Version:      "2.6.3",
+		DefaultValue: "0",
+		Doc:          "cluster id",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 0 {
+				return ""
+			}
+			maxClusterID := (int64(1) << MaxClusterIDBits) - 1
+			if getAsInt64(v) > maxClusterID {
+				return ""
+			}
+			return v
+		},
+	}
+	p.ClusterID.Init(base.mgr)
+
+	p.HybridSearchRequeryPolicy = ParamItem{
+		Key:          "common.requery.hybridSearchPolicy",
+		Version:      "2.6.3",
+		DefaultValue: "OutputVector",
+		Doc:          `the policy to decide when to do requery in hybrid search, support "always", "outputvector" and "outputfields"`,
+		Export:       false,
+	}
+	p.HybridSearchRequeryPolicy.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1748,6 +1781,8 @@ type proxyConfig struct {
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+
+	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2347,6 +2382,8 @@ type queryCoordConfig struct {
 
 	// query node task parallelism factor
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
+
+	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2979,6 +3016,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.QueryNodeTaskParallelismFactor.Init(base.mgr)
+
+	p.BalanceCheckCollectionMaxCount = ParamItem{
+		Key:          "queryCoord.balanceCheckCollectionMaxCount",
+		Version:      "2.6.2",
+		DefaultValue: "100",
+		Doc:          "the max collection count for each balance check",
+		Export:       false,
+	}
+	p.BalanceCheckCollectionMaxCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3024,6 +3070,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3125,6 +3172,7 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
+	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -3257,7 +3305,7 @@ resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
 It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].`,
-		Export: true,
+		Export: false, // TODO: disabled for now, no need to export
 	}
 	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
 
@@ -3278,7 +3326,7 @@ resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
 It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].`,
-		Export: true,
+		Export: false, // TODO: disabled for now, no need to export
 	}
 	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
 
@@ -3407,6 +3455,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.StorageUsageTrackingEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
+		Version:      "2.6.3",
+		DefaultValue: "false",
+		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
+		Export:       true,
+	}
+	p.StorageUsageTrackingEnabled.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
@@ -3667,7 +3724,8 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				return path.Join(base.Get("localStorage.path"), "mmap")
+				localStoragePath := getLocalStoragePath(base)
+				return path.Join(localStoragePath, "mmap")
 			}
 			return v
 		},
@@ -3940,7 +3998,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
-				localStoragePath := base.Get("localStorage.path")
+				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
@@ -4233,6 +4291,14 @@ user-task-polling:
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.EnableSparseFilterInQuery = ParamItem{
+		Key:          "queryNode.enableSparseFilterInQuery",
+		Version:      "2.6.2",
+		DefaultValue: "true",
+		Doc:          "Enable use sparse filter in query.",
+	}
+	p.EnableSparseFilterInQuery.Init(base.mgr)
 
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",
@@ -5598,6 +5664,7 @@ type dataNodeConfig struct {
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
+	MaxCompactionConcurrency ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5980,6 +6047,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxSegmentMergeSort.Init(base.mgr)
 
+	p.MaxCompactionConcurrency = ParamItem{
+		Key:          "dataNode.compaction.maxConcurrency",
+		Version:      "2.6.0",
+		Doc:          "The maximum number of compaction tasks that can run concurrently on a datanode",
+		DefaultValue: "10",
+		Export:       false,
+	}
+	p.MaxCompactionConcurrency.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -6082,7 +6158,10 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
 
 	// broadcaster
-	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
+	WALBroadcasterTombstoneCheckInternal ParamItem `refreshable:"true"`
+	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
+	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
@@ -6261,6 +6340,39 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneCheckInternal = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.checkInternal",
+		Version: "2.6.0",
+		Doc: `The interval of garbage collection of tombstone, 5m by default.
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "5m",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneCheckInternal.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneMaxCount = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.maxCount",
+		Version: "2.6.0",
+		Doc: `The max count of tombstone, 256 by default. 
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneMaxCount.Init(base.mgr)
+
+	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
+		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
+		Version: "2.6.0",
+		Doc: `The max lifetime of tombstone, 30m by default.
+Tombstone is used to reject duplicate submissions of DDL messages,
+too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		DefaultValue: "30m",
+		Export:       false,
+	}
+	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
@@ -6474,4 +6586,13 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
+}
+
+func getLocalStoragePath(base *BaseTable) string {
+	localStoragePath := base.Get("localStorage.path")
+	if len(localStoragePath) == 0 {
+		localStoragePath = defaultLocalStoragePath
+		log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
+	}
+	return localStoragePath
 }

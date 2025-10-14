@@ -1228,7 +1228,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		task.Req.ShardsNum = common.DefaultShardsNum
 		err = task.Prepare(context.Background())
 		assert.Len(t, task.dbProperties, 1)
-		assert.Len(t, task.Req.Properties, 0)
+		assert.Len(t, task.Req.Properties, 1)
 		assert.NoError(t, err)
 	})
 }

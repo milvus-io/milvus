@@ -11,6 +11,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	replicateutil "github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 
 	syncutil "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -312,6 +314,51 @@ func (_c *MockBalancer_RegisterStreamingEnabledNotifier_Call) Return() *MockBala
 
 func (_c *MockBalancer_RegisterStreamingEnabledNotifier_Call) RunAndReturn(run func(*syncutil.AsyncTaskNotifier[struct{}])) *MockBalancer_RegisterStreamingEnabledNotifier_Call {
 	_c.Run(run)
+	return _c
+}
+
+// ReplicateRole provides a mock function with no fields
+func (_m *MockBalancer) ReplicateRole() replicateutil.Role {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicateRole")
+	}
+
+	var r0 replicateutil.Role
+	if rf, ok := ret.Get(0).(func() replicateutil.Role); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(replicateutil.Role)
+	}
+
+	return r0
+}
+
+// MockBalancer_ReplicateRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplicateRole'
+type MockBalancer_ReplicateRole_Call struct {
+	*mock.Call
+}
+
+// ReplicateRole is a helper method to define mock.On call
+func (_e *MockBalancer_Expecter) ReplicateRole() *MockBalancer_ReplicateRole_Call {
+	return &MockBalancer_ReplicateRole_Call{Call: _e.mock.On("ReplicateRole")}
+}
+
+func (_c *MockBalancer_ReplicateRole_Call) Run(run func()) *MockBalancer_ReplicateRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBalancer_ReplicateRole_Call) Return(_a0 replicateutil.Role) *MockBalancer_ReplicateRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_ReplicateRole_Call) RunAndReturn(run func() replicateutil.Role) *MockBalancer_ReplicateRole_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

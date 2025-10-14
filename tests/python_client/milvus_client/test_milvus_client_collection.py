@@ -559,8 +559,9 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with duplicate field names
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("int64_field", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("int64_field", DataType.INT64)
+        schema.add_field("int64_field", DataType.INT64, is_primary=True, auto_id=False, max_length=1000)
+        schema.add_field("float_field", DataType.FLOAT, max_length=1000)
+        schema.add_field("float_field", DataType.INT64, max_length=1000)
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
 
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name"}
@@ -3055,7 +3056,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             'functions': [], 
             'aliases': [], 
             'consistency_level': 0, 
-            'properties': {},
+            'properties': {'collection.timezone': 'UTC'},
             'num_partitions': 1, 
             'enable_dynamic_field': True
         }
@@ -3345,8 +3346,8 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database default"
-                                                 f"with other collection name or alias"}
+        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database "
+                                                 f"default with other collection name or alias"}
         self.rename_collection(client, collection_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
 

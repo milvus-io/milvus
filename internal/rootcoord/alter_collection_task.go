@@ -186,10 +186,10 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
-	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldColl.Properties)
-	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldColl.Properties)
-	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newColl.Properties)
-	newResourceGroups, _ := common.DatabaseLevelResourceGroups(newColl.Properties)
+	oldReplicaNumber, _ := common.CollectionLevelReplicaNumber(oldColl.Properties)
+	oldResourceGroups, _ := common.CollectionLevelResourceGroups(oldColl.Properties)
+	newReplicaNumber, _ := common.CollectionLevelReplicaNumber(newColl.Properties)
+	newResourceGroups, _ := common.CollectionLevelResourceGroups(newColl.Properties)
 	left, right := lo.Difference(oldResourceGroups, newResourceGroups)
 	rgChanged := len(left) > 0 || len(right) > 0
 	replicaChanged := oldReplicaNumber != newReplicaNumber

@@ -595,8 +595,8 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// duplicate field
-	pkField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)
-	pkField2 := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar)
+	pkField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true).WithMaxLength(1000)
+	pkField2 := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1000)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 
 	// two vector fields have same name
@@ -1136,7 +1136,7 @@ func TestCollectionPropertyTtl(t *testing.T) {
 	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.CollectionTTLSeconds, 2))
 	common.CheckErr(t, err, true)
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{common.CollectionTTLSeconds: "2"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{common.CollectionTTLSeconds: "2"})
 
 	time.Sleep(5 * time.Second)
 
@@ -1147,7 +1147,7 @@ func TestCollectionPropertyTtl(t *testing.T) {
 	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.CollectionTTLSeconds))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{}, coll.Properties)
+	require.Equal(t, 1, len(coll.Properties))
 }
 
 // create collection with property -> alter property -> writing and reading
@@ -1161,14 +1161,14 @@ func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 		hp.TNewFieldsOption(), hp.TNewSchemaOption(), hp.TWithProperties(map[string]any{common.MmapEnabled: false}))
 
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{common.MmapEnabled: "false"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{common.MmapEnabled: "false"})
 	log.Info("TestCollectionPropertyMmap.DescribeCollection", zap.Any("properties", coll.Properties))
 
 	// alter properties
 	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.MmapEnabled, true))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{common.MmapEnabled: "true"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{common.MmapEnabled: "true"})
 
 	// writing and reading
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -1193,7 +1193,7 @@ func TestCollectionPropertyMmap(t *testing.T) {
 	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.MmapEnabled, true))
 	common.CheckErr(t, err, true)
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{common.MmapEnabled: "true"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{common.MmapEnabled: "true"})
 
 	// writing and reading
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -1212,7 +1212,7 @@ func TestCollectionPropertyMmap(t *testing.T) {
 	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.MmapEnabled))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, map[string]string{}, coll.Properties)
+	require.Equal(t, 1, len(coll.Properties))
 }
 
 func TestCollectionFakeProperties(t *testing.T) {
@@ -1225,16 +1225,16 @@ func TestCollectionFakeProperties(t *testing.T) {
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithProperty("1", "bbb"))
 	common.CheckErr(t, err, true)
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
-	require.Equal(t, map[string]string{"1": "bbb"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{"1": "bbb"})
 
-	// alter collection with fake property
+	// alter collection with fake kjproperty
 	err = mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(collName).WithProperty("2", 1))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
-	require.Equal(t, map[string]string{"1": "bbb", "2": "1"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{"1": "bbb", "2": "1"})
 
 	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(collName, "ccc"))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
-	require.Equal(t, map[string]string{"1": "bbb", "2": "1"}, coll.Properties)
+	require.Subset(t, coll.Properties, map[string]string{"1": "bbb", "2": "1"})
 }
