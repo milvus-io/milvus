@@ -468,11 +468,6 @@ func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
 // The method tracks execution time and logs warnings for slow operations
 // to help identify performance bottlenecks in large clusters.
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
-	// Skip balance operations if the checker is not active
-	if !b.IsActive() {
-		return nil
-	}
-
 	// Performance monitoring: track execution time
 	start := time.Now()
 	defer func() {
@@ -501,6 +496,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 
 			return nil
 		}
+	}
+
+	// Only Skip normal balance operations if the checker is not active
+	if !b.IsActive() {
+		return nil
 	}
 
 	// Phase 2: Process normal balance if no stopping balance was needed
