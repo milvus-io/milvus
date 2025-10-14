@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -398,6 +400,13 @@ func (s *Server) initMessageCallback() {
 		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 		if err != nil {
 			return err
+		}
+		repConfig, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+		if err != nil {
+			return err
+		}
+		if repConfig != nil && repConfig.GetCurrentCluster() != nil {
+			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
 	})
