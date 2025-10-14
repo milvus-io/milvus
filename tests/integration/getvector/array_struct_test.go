@@ -244,7 +244,7 @@ func (s *TestArrayStructSuite) run() {
 func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_FloatVector() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = integration.IndexEmbListHNSW
+	s.indexType = integration.IndexHNSW
 	s.metricType = metric.MaxSim
 	s.vecType = schemapb.DataType_FloatVector
 	s.run()

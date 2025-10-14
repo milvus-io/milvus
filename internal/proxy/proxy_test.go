@@ -554,7 +554,7 @@ func constructTestCreateIndexRequest(dbName, collectionName string, dataType sch
 				},
 				{
 					Key:   common.IndexTypeKey,
-					Value: "EMB_LIST_HNSW",
+					Value: "HNSW",
 				},
 				{
 					Key:   "nlist",
