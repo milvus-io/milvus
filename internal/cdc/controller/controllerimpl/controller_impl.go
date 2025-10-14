@@ -54,22 +54,13 @@ func NewController() *controller {
 }
 
 func (c *controller) Start() error {
-	replicatePChannels, err := ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
-	if err != nil {
-		return err
-	}
-	if err := c.recoverReplicatePChannelMeta(replicatePChannels.Channels); err != nil {
-		return err
-	}
-	initRevision := replicatePChannels.Revision
-	eventCh := c.watchEvents(initRevision)
-	c.startWatchLoop(eventCh)
+	c.startWatchLoop()
 	return nil
 }
 
-func (c *controller) recoverReplicatePChannelMeta(replicateChannels []*streamingpb.ReplicatePChannelMeta) error {
+func (c *controller) recoverReplicatePChannelMeta(replicatePChannels []*streamingpb.ReplicatePChannelMeta) {
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	for _, replicate := range replicateChannels {
+	for _, replicate := range replicatePChannels {
 		if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
 			// current cluster is not source cluster, skip create replicator
 			continue
@@ -78,9 +69,9 @@ func (c *controller) recoverReplicatePChannelMeta(replicateChannels []*streaming
 			zap.String("sourceChannel", replicate.GetSourceChannelName()),
 			zap.String("targetChannel", replicate.GetTargetChannelName()),
 		)
+		// Replicate manager ensures the idempotency of the creation.
 		resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
 	}
-	return nil
 }
 
 func (c *controller) watchEvents(revision int64) clientv3.WatchChan {
@@ -95,48 +86,60 @@ func (c *controller) watchEvents(revision int64) clientv3.WatchChan {
 	return eventCh
 }
 
-func (c *controller) startWatchLoop(eventCh clientv3.WatchChan) {
+func (c *controller) startWatchLoop() {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case event, ok := <-eventCh:
-				if !ok {
-					panic("etcd event channel closed")
-				}
-				if err := event.Err(); err != nil {
-					// restart watch loop if error occurred
-					log.Warn("etcd event error, will restart watch loop", zap.Error(err))
-					newRevision := MustGetRevision(c.ctx, resource.Resource().ETCD(), c.prefix)
-					eventCh := c.watchEvents(newRevision)
-					c.startWatchLoop(eventCh)
-					return
-				}
-				for _, e := range event.Events {
-					replicate := MustParseReplicateChannelFromEvent(e)
-					log.Info("handle replicate pchannel event",
-						zap.String("sourceChannel", replicate.GetSourceChannelName()),
-						zap.String("targetChannel", replicate.GetTargetChannelName()),
-						zap.String("eventType", e.Type.String()),
-					)
-					switch e.Type {
-					case mvccpb.PUT:
-						currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-						if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
-							// current cluster is not source cluster, skip create replicator
-							continue
-						}
-						resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
-					case mvccpb.DELETE:
-						resource.Resource().ReplicateManagerClient().RemoveReplicator(replicate)
-					}
-				}
+			channels, revision, err := ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
+			if err != nil {
+				log.Ctx(c.ctx).Warn("failed to list replicate pchannels", zap.Error(err))
+				continue
+			}
+			c.recoverReplicatePChannelMeta(channels)
+			eventCh := c.watchEvents(revision)
+			err = c.watchLoop(eventCh)
+			if err == nil {
+				break
 			}
 		}
 	}()
+}
+
+func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return nil
+		case event, ok := <-eventCh:
+			if !ok {
+				panic("etcd event channel closed")
+			}
+			if err := event.Err(); err != nil {
+				log.Warn("etcd event error", zap.Error(err))
+				return err
+			}
+			for _, e := range event.Events {
+				replicate := MustParseReplicateChannelFromEvent(e)
+				log.Info("handle replicate pchannel event",
+					zap.String("sourceChannel", replicate.GetSourceChannelName()),
+					zap.String("targetChannel", replicate.GetTargetChannelName()),
+					zap.String("eventType", e.Type.String()),
+				)
+				switch e.Type {
+				case mvccpb.PUT:
+					currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+					if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
+						// current cluster is not source cluster, skip create replicator
+						continue
+					}
+					resource.Resource().ReplicateManagerClient().CreateReplicator(replicate)
+				case mvccpb.DELETE:
+					resource.Resource().ReplicateManagerClient().RemoveReplicator(replicate)
+				}
+			}
+		}
+	}
 }
 
 func (c *controller) Stop() {

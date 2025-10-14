@@ -12,15 +12,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
-type ReplicatePChannels struct {
-	Channels []*streamingpb.ReplicatePChannelMeta
-	Revision int64
-}
-
-func ListReplicatePChannels(ctx context.Context, etcdCli *clientv3.Client, prefix string) (*ReplicatePChannels, error) {
+func ListReplicatePChannels(ctx context.Context, etcdCli *clientv3.Client, prefix string) ([]*streamingpb.ReplicatePChannelMeta, int64, error) {
 	resp, err := get(ctx, etcdCli, prefix)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	keys := make([]string, 0, resp.Count)
 	values := make([]string, 0, resp.Count)
@@ -33,22 +28,11 @@ func ListReplicatePChannels(ctx context.Context, etcdCli *clientv3.Client, prefi
 		info := &streamingpb.ReplicatePChannelMeta{}
 		err = proto.Unmarshal([]byte(value), info)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
+			return nil, 0, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
 		}
 		channels = append(channels, info)
 	}
-	return &ReplicatePChannels{
-		Channels: channels,
-		Revision: resp.Header.Revision,
-	}, nil
-}
-
-func MustGetRevision(ctx context.Context, etcdCli *clientv3.Client, prefix string) int64 {
-	resp, err := get(ctx, etcdCli, prefix)
-	if err != nil {
-		panic(fmt.Sprintf("failed to get revision for prefix %s", prefix))
-	}
-	return resp.Header.GetRevision()
+	return channels, resp.Header.Revision, nil
 }
 
 func MustParseReplicateChannelFromEvent(e *clientv3.Event) *streamingpb.ReplicatePChannelMeta {

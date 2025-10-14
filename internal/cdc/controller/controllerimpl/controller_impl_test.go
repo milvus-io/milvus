@@ -79,7 +79,7 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	)
 
 	ctrl := NewController()
-	ctrl.startWatchLoop(eventCh)
+	go ctrl.watchLoop(eventCh)
 
 	// Wait for events to be processed
 	<-notifyCh
