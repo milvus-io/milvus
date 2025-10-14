@@ -282,7 +282,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
     }
 
-    virtual PinWrapper<const size_t*>
+    PinWrapper<const size_t*>
     VectorArrayOffsets(milvus::OpContext* op_ctx,
                        int64_t chunk_id) const override {
         ThrowInfo(

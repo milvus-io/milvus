@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand"
@@ -734,30 +735,113 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				columns = append(columns, builder.NewListArray())
 			}
 		case schemapb.DataType_ArrayOfVector:
-			data := insertData.Data[fieldID].(*storage.VectorArrayFieldData).Data
-			rows := len(data)
+			vectorArrayData := insertData.Data[fieldID].(*storage.VectorArrayFieldData)
+			dim, err := typeutil.GetDim(field)
+			if err != nil {
+				return nil, err
+			}
+			elemType, err := storage.VectorArrayToArrowType(elementType, int(dim))
+			if err != nil {
+				return nil, err
+			}
 
-			switch elementType {
-			case schemapb.DataType_FloatVector:
-				// ArrayOfVector is flattened in Arrow - just a list of floats
-				// where total floats = dim * num_vectors
-				builder := array.NewListBuilder(mem, &arrow.Float32Type{})
-				valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+			// Create ListBuilder with "item" field name to match convertToArrowDataType
+			// Always represented as a list of fixed-size binary values
+			listBuilder := array.NewListBuilderWithField(mem, arrow.Field{
+				Name:     "item",
+				Type:     elemType,
+				Nullable: true,
+				Metadata: arrow.Metadata{},
+			})
+			fixedSizeBuilder, ok := listBuilder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+			if !ok {
+				return nil, fmt.Errorf("unexpected list value builder for VectorArray field %s: %T", field.GetName(), listBuilder.ValueBuilder())
+			}
 
-				for i := 0; i < rows; i++ {
-					vectorArray := data[i].GetFloatVector()
-					if vectorArray == nil || len(vectorArray.GetData()) == 0 {
-						builder.AppendNull()
+			vectorArrayData.Dim = dim
+
+			bytesPerVector := int(fixedSizeBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
+
+			appendBinarySlice := func(data []byte, stride int) error {
+				if stride == 0 {
+					return fmt.Errorf("zero stride for VectorArray field %s", field.GetName())
+				}
+				if len(data)%stride != 0 {
+					return fmt.Errorf("vector array data length %d is not divisible by stride %d for field %s", len(data), stride, field.GetName())
+				}
+				for offset := 0; offset < len(data); offset += stride {
+					fixedSizeBuilder.Append(data[offset : offset+stride])
+				}
+				return nil
+			}
+
+			for _, vectorField := range vectorArrayData.Data {
+				if vectorField == nil {
+					listBuilder.Append(false)
+					continue
+				}
+
+				listBuilder.Append(true)
+
+				switch elementType {
+				case schemapb.DataType_FloatVector:
+					floatArray := vectorField.GetFloatVector()
+					if floatArray == nil {
+						return nil, fmt.Errorf("expected FloatVector data for field %s", field.GetName())
+					}
+					data := floatArray.GetData()
+					if len(data) == 0 {
 						continue
 					}
-					builder.Append(true)
-					// Append all flattened vector data
-					valueBuilder.AppendValues(vectorArray.GetData(), nil)
+					if len(data)%int(dim) != 0 {
+						return nil, fmt.Errorf("float vector data length %d is not divisible by dim %d for field %s", len(data), dim, field.GetName())
+					}
+					for offset := 0; offset < len(data); offset += int(dim) {
+						vectorBytes := make([]byte, bytesPerVector)
+						for j := 0; j < int(dim); j++ {
+							binary.LittleEndian.PutUint32(vectorBytes[j*4:], math.Float32bits(data[offset+j]))
+						}
+						fixedSizeBuilder.Append(vectorBytes)
+					}
+				case schemapb.DataType_BinaryVector:
+					binaryData := vectorField.GetBinaryVector()
+					if len(binaryData) == 0 {
+						continue
+					}
+					bytesPer := int((dim + 7) / 8)
+					if err := appendBinarySlice(binaryData, bytesPer); err != nil {
+						return nil, err
+					}
+				case schemapb.DataType_Float16Vector:
+					float16Data := vectorField.GetFloat16Vector()
+					if len(float16Data) == 0 {
+						continue
+					}
+					if err := appendBinarySlice(float16Data, int(dim)*2); err != nil {
+						return nil, err
+					}
+				case schemapb.DataType_BFloat16Vector:
+					bfloat16Data := vectorField.GetBfloat16Vector()
+					if len(bfloat16Data) == 0 {
+						continue
+					}
+					if err := appendBinarySlice(bfloat16Data, int(dim)*2); err != nil {
+						return nil, err
+					}
+				case schemapb.DataType_Int8Vector:
+					int8Data := vectorField.GetInt8Vector()
+					if len(int8Data) == 0 {
+						continue
+					}
+					if err := appendBinarySlice(int8Data, int(dim)); err != nil {
+						return nil, err
+					}
+				default:
+					return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
 				}
-				columns = append(columns, builder.NewListArray())
-			default:
-				return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
 			}
+
+			columns = append(columns, listBuilder.NewListArray())
 		}
 	}
 	return columns, nil

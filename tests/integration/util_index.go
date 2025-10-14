@@ -70,8 +70,6 @@ func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName
 			return true
 		}
 		for _, desc := range resp.GetIndexDescriptions() {
-			fmt.Println("debug=== Index description", desc.String())
-
 			if desc.GetFieldName() == field {
 				switch desc.GetState() {
 				case commonpb.IndexState_Finished:

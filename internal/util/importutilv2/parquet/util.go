@@ -195,6 +195,8 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 			return valid
 		}
 		return false
+	case arrow.FIXED_SIZE_BINARY:
+		return dstType == arrow.FIXED_SIZE_BINARY
 	default:
 		return false
 	}
