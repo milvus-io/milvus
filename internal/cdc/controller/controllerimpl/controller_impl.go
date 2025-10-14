@@ -92,7 +92,7 @@ func (c *controller) startWatchLoop() {
 		defer c.wg.Done()
 		for {
 			channels, revision, err := ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
-			if err != nil {
+			if err != nil && c.ctx.Err() == nil {
 				log.Ctx(c.ctx).Warn("failed to list replicate pchannels", zap.Error(err))
 				continue
 			}
