@@ -6,6 +6,8 @@ package resource
 import (
 	"testing"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/controller"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
@@ -19,8 +21,11 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.watchKV == nil {
-		r.watchKV = mock_kv.NewMockWatchKV(t)
+	if r.metaKV == nil {
+		r.metaKV = mock_kv.NewMockMetaKv(t)
+	}
+	if r.etcdClient == nil {
+		r.etcdClient = &clientv3.Client{}
 	}
 	if r.catalog == nil {
 		r.catalog = mock_metastore.NewMockReplicationCatalog(t)

@@ -144,7 +144,8 @@ func (s *Server) init() (err error) {
 	// Create CDC service.
 	s.cdcServer = cdc.NewCDCServer(s.ctx)
 	resource.Init(
-		resource.OptWatchKV(s.watchKV),
+		resource.OptMetaKV(s.watchKV),
+		resource.OptETCD(s.etcdCli),
 		resource.OptReplicateManagerClient(replicatemanager.NewReplicateManager()),
 		resource.OptController(controllerimpl.NewController()),
 	)

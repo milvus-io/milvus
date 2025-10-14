@@ -19,6 +19,8 @@ package resource
 import (
 	"reflect"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/controller"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
@@ -32,10 +34,17 @@ var r *resourceImpl // singleton resource instance
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
 
-// OptWatchKV provides the meta kv to the resource.
-func OptWatchKV(watchKV kv.WatchKV) optResourceInit {
+// OptMetaKV provides the meta kv to the resource.
+func OptMetaKV(metaKV kv.MetaKv) optResourceInit {
 	return func(r *resourceImpl) {
-		r.watchKV = watchKV
+		r.metaKV = metaKV
+	}
+}
+
+// OptETCD provides the etcd client to the resource.
+func OptETCD(etcd *clientv3.Client) optResourceInit {
+	return func(r *resourceImpl) {
+		r.etcdClient = etcd
 	}
 }
 
@@ -74,10 +83,11 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 
-	newR.catalog = streamingcoord.NewReplicationCatalog(newR.WatchKV())
+	newR.catalog = streamingcoord.NewReplicationCatalog(newR.MetaKV())
 	newR.clusterClient = cluster.NewClusterClient()
 
-	assertNotNil(newR.WatchKV())
+	assertNotNil(newR.MetaKV())
+	assertNotNil(newR.ETCD())
 	assertNotNil(newR.ReplicationCatalog())
 	assertNotNil(newR.ClusterClient())
 	assertNotNil(newR.ReplicateManagerClient())
@@ -96,16 +106,22 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	watchKV                kv.WatchKV
+	metaKV                 kv.MetaKv
+	etcdClient             *clientv3.Client
 	catalog                metastore.ReplicationCatalog
 	clusterClient          cluster.ClusterClient
 	replicateManagerClient replication.ReplicateManagerClient
 	controller             controller.Controller
 }
 
-// WatchKV returns the meta kv.
-func (r *resourceImpl) WatchKV() kv.WatchKV {
-	return r.watchKV
+// MetaKV returns the meta kv.
+func (r *resourceImpl) MetaKV() kv.MetaKv {
+	return r.metaKV
+}
+
+// ETCD returns the etcd client.
+func (r *resourceImpl) ETCD() *clientv3.Client {
+	return r.etcdClient
 }
 
 // ReplicationCatalog returns the replication catalog.
