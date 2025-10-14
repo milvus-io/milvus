@@ -477,7 +477,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	segments := m.segments.GetSegments()
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
-	binlogFileSize := make(map[string]int64)              // map[collectionID]size
+	binlogFileCount := make(map[string]int64)             // map[collectionID]count
 	coll2DbName := make(map[string]string)
 
 	for _, segment := range segments {
@@ -502,7 +502,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 				}
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
-				binlogFileSize[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
+				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
 			} else {
 				log.Ctx(context.TODO()).Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
@@ -527,7 +527,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	}
 	// Reset to remove dropped collection
 	metrics.DataCoordSegmentBinLogFileCount.Reset()
-	for collectionID, size := range binlogFileSize {
+	for collectionID, size := range binlogFileCount {
 		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
 	}
 
