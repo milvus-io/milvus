@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 type ReplicatePChannels struct {
