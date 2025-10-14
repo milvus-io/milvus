@@ -15,10 +15,11 @@
 // limitations under the License.
 
 #include "RandomSampleNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include "exec/expression/Utils.h"
 #include "monitor/Monitor.h"
-
 namespace milvus {
 namespace exec {
 PhyRandomSampleNode::PhyRandomSampleNode(
@@ -93,6 +94,9 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span(
+        "PhyRandomSampleNode::Execute", tracer::GetRootSpan(), true);
+
     if (!is_source_node_ && input_ == nullptr) {
         return nullptr;
     }
@@ -101,6 +105,9 @@ PhyRandomSampleNode::GetOutput() {
         is_finished_ = true;
         return nullptr;
     }
+
+    tracer::AddEvent(fmt::format(
+        "sample_factor: {}, active_count: {}", factor_, active_count_));
 
     std::chrono::high_resolution_clock::time_point start =
         std::chrono::high_resolution_clock::now();
@@ -166,6 +173,17 @@ PhyRandomSampleNode::GetOutput() {
         std::chrono::duration<double, std::micro>(end - start).count();
     milvus::monitor::internal_core_search_latency_random_sample.Observe(
         duration / 1000);
+
+    if (result) {
+        auto result_col = GetColumnVector(result);
+        TargetBitmapView result_data(result_col->GetRawData(),
+                                     result_col->size());
+        auto sampled_count = result_col->size() - result_data.count();
+        tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
+                                     sampled_count,
+                                     active_count_));
+    }
+
     is_finished_ = true;
     return result;
 }
