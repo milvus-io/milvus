@@ -189,6 +189,14 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
+func (s *baseSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
+	s.bloomFilterSet = bf
+}
+
+func (s *baseSegment) BloomFilterExist() bool {
+	return s.bloomFilterSet.BloomFilterExist()
+}
+
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
@@ -218,6 +226,20 @@ func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 		return true
 	}
 	return s.bloomFilterSet.MayPkExist(pk)
+}
+
+func (s *baseSegment) GetMinPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MinPK
+}
+
+func (s *baseSegment) GetMaxPk() *storage.PrimaryKey {
+	if s.bloomFilterSet.Stats() == nil {
+		return nil
+	}
+	return &s.bloomFilterSet.Stats().MaxPK
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {

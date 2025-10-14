@@ -17,7 +17,13 @@
 package segments
 
 import (
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -145,5 +151,176 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 func WithoutLevel(level datapb.SegmentLevel) SegmentFilter {
 	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.Level() != level
+	})
+}
+
+// Bloom filter
+
+type filterFunc func(pk storage.PrimaryKey, op planpb.OpType) bool
+
+func binaryExprWalker(expr *planpb.BinaryExpr, filter filterFunc) bool {
+	switch expr.Op {
+	case planpb.BinaryExpr_LogicalAnd:
+		// one of expression return false
+		return exprWalker(expr.Left, filter) &&
+			exprWalker(expr.Right, filter)
+
+	case planpb.BinaryExpr_LogicalOr:
+		// both left and right return false
+		return exprWalker(expr.Left, filter) ||
+			exprWalker(expr.Right, filter)
+	}
+
+	// unknown operator return no filter
+	return true
+}
+
+func unaryRangeExprWalker(expr *planpb.UnaryRangeExpr, filter filterFunc) bool {
+	if expr.GetColumnInfo() == nil ||
+		!expr.GetColumnInfo().GetIsPrimaryKey() ||
+		expr.GetValue() == nil {
+		// not the primary key
+		return true
+	}
+
+	var pk storage.PrimaryKey
+	dt := expr.GetColumnInfo().GetDataType()
+
+	switch dt {
+	case schemapb.DataType_Int64:
+		pk = storage.NewInt64PrimaryKey(expr.GetValue().GetInt64Val())
+	case schemapb.DataType_VarChar:
+		pk = storage.NewVarCharPrimaryKey(expr.GetValue().GetStringVal())
+	default:
+		log.Warn("unknown pk type",
+			zap.Int("type", int(dt)),
+			zap.String("expr", expr.String()))
+		return true
+	}
+
+	return filter(pk, expr.Op)
+}
+
+func termExprWalker(expr *planpb.TermExpr, filter filterFunc) bool {
+	noFilter := true
+	if expr.GetColumnInfo() == nil ||
+		!expr.GetColumnInfo().GetIsPrimaryKey() {
+		return noFilter
+	}
+
+	// In empty array, direct return
+	if expr.GetValues() == nil {
+		return false
+	}
+
+	var pk storage.PrimaryKey
+	dt := expr.GetColumnInfo().GetDataType()
+	invals := expr.GetValues()
+
+	for _, pkval := range invals {
+		switch dt {
+		case schemapb.DataType_Int64:
+			pk = storage.NewInt64PrimaryKey(pkval.GetInt64Val())
+		case schemapb.DataType_VarChar:
+			pk = storage.NewVarCharPrimaryKey(pkval.GetStringVal())
+		default:
+			log.Warn("unknown pk type",
+				zap.Int("type", int(dt)),
+				zap.String("expr", expr.String()))
+			return noFilter
+		}
+
+		noFilter = filter(pk, planpb.OpType_Equal)
+		if noFilter {
+			break
+		}
+	}
+
+	return noFilter
+}
+
+// return true if current segment can be filtered
+func exprWalker(expr *planpb.Expr, filter filterFunc) bool {
+	switch expr := expr.GetExpr().(type) {
+	case *planpb.Expr_BinaryExpr:
+		return binaryExprWalker(expr.BinaryExpr, filter)
+	case *planpb.Expr_UnaryRangeExpr:
+		return unaryRangeExprWalker(expr.UnaryRangeExpr, filter)
+	case *planpb.Expr_TermExpr:
+		return termExprWalker(expr.TermExpr, filter)
+	}
+
+	return true
+}
+
+func doSparseFilter(seg Segment, plan *planpb.PlanNode) bool {
+	queryPlan := plan.GetQuery()
+	if queryPlan == nil {
+		// do nothing if current plan not the query plan
+		return true
+	}
+
+	pexpr := queryPlan.GetPredicates()
+	if pexpr == nil {
+		return true
+	}
+
+	return exprWalker(pexpr, func(pk storage.PrimaryKey, op planpb.OpType) bool {
+		noFilter := true
+		existMinMax := seg.GetMinPk() != nil && seg.GetMaxPk() != nil
+		var minPk, maxPk storage.PrimaryKey
+		if existMinMax {
+			minPk = *seg.GetMinPk()
+			maxPk = *seg.GetMaxPk()
+		}
+
+		switch op {
+		case planpb.OpType_Equal:
+
+			// bloom filter
+			existBF := seg.BloomFilterExist()
+			if existBF {
+				lc := storage.NewLocationsCache(pk)
+				// BloomFilter contains this key, no filter here
+				noFilter = seg.MayPkExist(lc)
+			}
+
+			// no need check min/max again
+			if !noFilter {
+				break
+			}
+
+			// min/max filter
+			noFilter = !(existMinMax && (minPk.GT(pk) || maxPk.LT(pk)))
+		case planpb.OpType_GreaterThan:
+			noFilter = !(existMinMax && maxPk.LE(pk))
+		case planpb.OpType_GreaterEqual:
+			noFilter = !(existMinMax && maxPk.LT(pk))
+		case planpb.OpType_LessThan:
+			noFilter = !(existMinMax && minPk.GE(pk))
+		case planpb.OpType_LessEqual:
+			noFilter = !(existMinMax && minPk.GT(pk))
+		}
+
+		return noFilter
+	})
+}
+
+type SegmentSparseFilter SegmentType
+
+func WithSparseFilter(plan *planpb.PlanNode) SegmentFilter {
+	return SegmentFilterFunc(func(segment Segment) bool {
+		if plan == nil {
+			log.Debug("SparseFilter with nil plan")
+			return true
+		}
+
+		rc := doSparseFilter(segment, plan)
+
+		log.Debug("SparseFilter",
+			zap.Int64("Segment ID", segment.ID()),
+			zap.Bool("No Filter", rc),
+			zap.Bool("Exist BF", segment.BloomFilterExist()))
+		return rc
 	})
 }
