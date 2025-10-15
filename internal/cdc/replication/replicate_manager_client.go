@@ -23,8 +23,11 @@ type ReplicateManagerClient interface {
 	// CreateReplicator creates a new replicator for the replicate pchannel.
 	CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
 
-	// RemoveOutOfTargetReplicators removes replicators that are not in the target replicate pchannels.
-	RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta)
+	// RemoveReplicator removes a replicator for the replicate pchannel.
+	RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta)
+
+	// RemoveOutdatedReplicators removes the outdated replicators.
+	RemoveOutdatedReplicators(aliveReplicates []*streamingpb.ReplicatePChannelMeta)
 
 	// Close closes the replicate manager client.
 	Close()

@@ -19,6 +19,8 @@ package cdc
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
@@ -42,7 +44,11 @@ func (svr *CDCServer) Init() error {
 
 // Start starts CDCServer.
 func (svr *CDCServer) Start() error {
-	resource.Resource().Controller().Start()
+	err := resource.Resource().Controller().Start()
+	if err != nil {
+		log.Ctx(svr.ctx).Error("start CDC controller failed", zap.Error(err))
+		return err
+	}
 	log.Ctx(svr.ctx).Info("CDCServer start successfully")
 	return nil
 }

@@ -19,6 +19,6 @@ package controller
 // Controller controls and schedules the CDC process.
 // It will periodically update the replications by the replicate configuration.
 type Controller interface {
-	Start()
+	Start() error
 	Stop()
 }

@@ -19,69 +19,71 @@ package controllerimpl
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
-func TestController_StartAndStop(t *testing.T) {
-	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
-	mockReplicateManagerClient.EXPECT().Close().Return()
-	resource.InitForTest(t,
-		resource.OptReplicateManagerClient(mockReplicateManagerClient),
-	)
-
-	ctrl := NewController()
-	assert.NotPanics(t, func() {
-		ctrl.Start()
-	})
-	assert.NotPanics(t, func() {
-		ctrl.Stop()
-	})
-}
-
-func TestController_Run(t *testing.T) {
+func TestController_StartAndStop_WithEvents(t *testing.T) {
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
 	mockReplicateManagerClient.EXPECT().Close().Return()
 
-	replicatePChannels := []*streamingpb.ReplicatePChannelMeta{
-		{
-			SourceChannelName: "test-source-channel-1",
-			TargetChannelName: "test-target-channel-1",
+	// Create test data
+	replicateMeta := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "by-dev-test-source-channel",
+		TargetChannelName: "by-dev-test-target-channel",
+	}
+	metaBytes, _ := proto.Marshal(replicateMeta)
+
+	// Create mock events
+	putEvent := &clientv3.Event{
+		Type: mvccpb.PUT,
+		Kv: &mvccpb.KeyValue{
+			Value: metaBytes,
 		},
 	}
-	mockReplicationCatalog := mock_metastore.NewMockReplicationCatalog(t)
-	mockReplicationCatalog.EXPECT().ListReplicatePChannels(mock.Anything).Return(replicatePChannels, nil)
-	mockReplicateManagerClient.EXPECT().CreateReplicator(replicatePChannels[0]).Return()
-	mockReplicateManagerClient.EXPECT().RemoveOutOfTargetReplicators(replicatePChannels).Return()
+
+	deleteEvent := &clientv3.Event{
+		Type: mvccpb.DELETE,
+		Kv: &mvccpb.KeyValue{
+			Value: metaBytes,
+		},
+	}
+
+	eventCh := make(chan clientv3.WatchResponse, 2)
+	// Send events
+	go func() {
+		eventCh <- clientv3.WatchResponse{
+			Events: []*clientv3.Event{putEvent},
+		}
+		eventCh <- clientv3.WatchResponse{
+			Events: []*clientv3.Event{deleteEvent},
+		}
+	}()
+
+	notifyCh := make(chan struct{}, 2)
+	mockReplicateManagerClient.EXPECT().CreateReplicator(mock.Anything).RunAndReturn(func(replicate *streamingpb.ReplicatePChannelMeta) {
+		notifyCh <- struct{}{}
+	})
+	mockReplicateManagerClient.EXPECT().RemoveReplicator(mock.Anything).RunAndReturn(func(replicate *streamingpb.ReplicatePChannelMeta) {
+		notifyCh <- struct{}{}
+	})
+
 	resource.InitForTest(t,
 		resource.OptReplicateManagerClient(mockReplicateManagerClient),
-		resource.OptReplicationCatalog(mockReplicationCatalog),
 	)
 
 	ctrl := NewController()
-	ctrl.Start()
-	defer ctrl.Stop()
-	ctrl.run()
-}
+	go ctrl.watchLoop(eventCh)
 
-func TestController_RunError(t *testing.T) {
-	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
-	mockReplicateManagerClient.EXPECT().Close().Return()
+	// Wait for events to be processed
+	<-notifyCh
+	<-notifyCh
 
-	mockReplicationCatalog := mock_metastore.NewMockReplicationCatalog(t)
-	mockReplicationCatalog.EXPECT().ListReplicatePChannels(mock.Anything).Return(nil, assert.AnError)
-	resource.InitForTest(t,
-		resource.OptReplicateManagerClient(mockReplicateManagerClient),
-		resource.OptReplicationCatalog(mockReplicationCatalog),
-	)
-
-	ctrl := NewController()
-	ctrl.Start()
-	defer ctrl.Stop()
-	ctrl.run()
+	ctrl.Stop()
 }
