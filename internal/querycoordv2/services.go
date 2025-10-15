@@ -1015,7 +1015,8 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 	return merr.Success(), nil
 }
 
-// go:deprecated TransferNode transfer nodes between resource groups.
+// Deprecated: TransferNode transfer nodes between resource groups.
+// Use UpdateResourceGroups instead.
 func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("source", req.GetSourceResourceGroup()),
@@ -1029,12 +1030,10 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		return merr.Status(err), nil
 	}
 
-	// Move node from source resource group to target resource group.
-	if err := s.meta.ResourceManager.TransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode())); err != nil {
+	if err := s.broadcastTransferNode(ctx, req); err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
-
 	return merr.Success(), nil
 }
 
