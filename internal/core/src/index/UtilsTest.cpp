@@ -133,3 +133,63 @@ TEST(UtilIndex, TestGetValueFromConfigWithoutTypeCheck) {
     auto f_value = GetValueFromConfig<bool>(cfg, "f");
     ASSERT_FALSE(f_value.has_value());
 }
+
+TEST(BloomFilter, BloomFilterBasicFunctionality) {
+    // Test with integers
+    ankerl::unordered_dense::set<int64_t> int_items = {1, 2, 3, 5, 8, 13, 21};
+    auto int_bf = BloomFilter::Build<int64_t>(int_items);
+    ASSERT_NE(int_bf, nullptr);
+
+    for (const auto& item : int_items) {
+        ASSERT_TRUE(int_bf->MightContain<int64_t>(item));
+    }
+    ASSERT_FALSE(int_bf->MightContain<int64_t>(0));
+    ASSERT_FALSE(int_bf->MightContain<int64_t>(4));
+    ASSERT_FALSE(int_bf->MightContain<int64_t>(100));
+
+    // Test with strings
+    ankerl::unordered_dense::set<std::string> string_items = {
+        "apple", "banana", "cherry"};
+    auto string_bf = BloomFilter::Build<std::string>(string_items);
+    ASSERT_NE(string_bf, nullptr);
+
+    for (const auto& item : string_items) {
+        ASSERT_TRUE(string_bf->MightContain<std::string>(item));
+    }
+    ASSERT_FALSE(string_bf->MightContain<std::string>("grape"));
+    ASSERT_FALSE(string_bf->MightContain<std::string>("milvus"));
+
+    // Empty items vector
+    ankerl::unordered_dense::set<int> empty_items = {};
+    auto empty_bf = BloomFilter::Build<int>(empty_items);
+    ASSERT_EQ(empty_bf, nullptr);
+
+    // Single item
+    ankerl::unordered_dense::set<std::string> single_item = {"one"};
+    auto single_item_bf = BloomFilter::Build<std::string>(single_item);
+    ASSERT_NE(single_item_bf, nullptr);
+    ASSERT_TRUE(single_item_bf->MightContain<std::string>("one"));
+    ASSERT_FALSE(single_item_bf->MightContain<std::string>("two"));
+}
+
+TEST(BloomFilter, BloomFilterSerialization) {
+    ankerl::unordered_dense::set<int64_t> items = {10, 20, 30, 40, 50};
+    auto bf1 = BloomFilter::Build<int64_t>(items);
+    ASSERT_NE(bf1, nullptr);
+
+    std::string serialized_data = bf1->Serialize();
+    ASSERT_FALSE(serialized_data.empty());
+
+    auto bf2 = BloomFilter::Deserialize(std::string_view(serialized_data));
+    ASSERT_NE(bf2, nullptr);
+
+    // Check properties
+    ASSERT_EQ(bf1->GetHashCount(), bf2->GetHashCount());
+    ASSERT_EQ(bf1->GetBitSize(), bf2->GetBitSize());
+    ASSERT_EQ(bf1->GetBitArray(), bf2->GetBitArray());
+
+    // Check behavior
+    for (int64_t i = 0; i < 100; ++i) {
+        ASSERT_EQ(bf1->MightContain<int64_t>(i), bf2->MightContain<int64_t>(i));
+    }
+}

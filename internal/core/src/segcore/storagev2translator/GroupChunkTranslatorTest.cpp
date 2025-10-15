@@ -20,9 +20,11 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include "arrow/type_fwd.h"
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
+#include "index/Utils.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -305,6 +307,228 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     // Clean up test files
+    for (const auto& file_path : multi_file_paths) {
+        if (std::filesystem::exists(file_path)) {
+            std::filesystem::remove(file_path);
+        }
+    }
+}
+
+TEST_P(GroupChunkTranslatorTest, TestGetSkipIndex) {
+    auto use_mmap = GetParam();
+    std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
+
+    // Create multiple files WITH SkipIndex
+    std::vector<std::string> multi_file_paths;
+    std::vector<int64_t> expected_row_groups_per_file;
+    int64_t total_rows = 0;
+
+    for (int file_idx = 0; file_idx < 3; ++file_idx) {
+        std::string file_path =
+            path_ + "/skipindex_" + std::to_string(file_idx) + ".parquet";
+        multi_file_paths.push_back(file_path);
+
+        int64_t per_batch = 1000;
+        int64_t n_batch = 2 + file_idx;  // 2, 3, 4 batches per file
+        int64_t dim = 128;
+
+        auto column_groups = std::vector<std::vector<int>>{
+            {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
+        auto writer_memory = 16 * 1024 * 1024;
+        auto storage_config = milvus_storage::StorageConfig();
+        std::vector<std::string> single_file_paths{file_path};
+
+        milvus_storage::PackedRecordBatchWriter writer(fs_,
+                                                       single_file_paths,
+                                                       arrow_schema_,
+                                                       storage_config,
+                                                       column_groups,
+                                                       writer_memory);
+
+        auto status = writer.AddMetadataBuilder(
+            milvus::ChunkSkipIndex::KEY,
+            []() { return std::make_unique<milvus::ChunkSkipIndexBuilder>(); });
+        AssertInfo(status.ok(), "failed to add metadata builder");
+
+        for (int64_t i = 0; i < n_batch; i++) {
+            auto dataset = DataGen(schema_, per_batch);
+            auto record_batch =
+                ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
+            total_rows += record_batch->num_rows();
+            EXPECT_TRUE(writer.Write(record_batch).ok());
+        }
+        EXPECT_TRUE(writer.Close().ok());
+
+        // Get expected row group count
+        auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs_, file_path);
+        expected_row_groups_per_file.push_back(
+            fr->file_metadata()->GetRowGroupMetadataVector().size());
+        auto s = fr->Close();
+        AssertInfo(s.ok(), "failed to close file reader");
+    }
+
+    auto column_group_info = FieldDataInfo(0, total_rows, "");
+
+    auto translator = std::make_unique<GroupChunkTranslator>(
+        segment_id_,
+        field_metas,
+        column_group_info,
+        multi_file_paths,
+        use_mmap,
+        schema_->get_field_ids().size(),
+        milvus::proto::common::LoadPriority::LOW);
+
+    auto skip_indexes = translator->GetSkipIndex(arrow_schema_);
+
+    int64_t expected_total_skip_indexes = 0;
+    for (auto count : expected_row_groups_per_file) {
+        expected_total_skip_indexes += count;
+    }
+    EXPECT_EQ(skip_indexes.size(), expected_total_skip_indexes);
+    for (size_t i = 0; i < skip_indexes.size(); ++i) {
+        EXPECT_NE(skip_indexes[i], nullptr)
+            << "SkipIndex at position " << i << " should not be null";
+    }
+
+    // Verify each SkipIndex is valid and contains field metrics
+    for (size_t i = 0; i < skip_indexes.size(); ++i) {
+        EXPECT_NE(skip_indexes[i], nullptr)
+            << "SkipIndex at chunk " << i << " should not be null";
+
+        EXPECT_FALSE(skip_indexes[i]->IsEmpty())
+            << "SkipIndex at chunk " << i << " should not be empty";
+
+        // Verify SkipIndex contains metrics for scalar fields
+        const auto& metrics = skip_indexes[i]->GetMetrics();
+        EXPECT_GT(metrics.size(), 0)
+            << "SkipIndex at chunk " << i << " should have field metrics";
+
+        for (const auto& [field_id, field_meta] : field_metas) {
+            auto data_type = field_meta.get_data_type();
+
+            if (index::SupportsSkipIndex(data_type)) {
+                bool found = false;
+                for (const auto& [metric_field_id, _] : metrics) {
+                    if (metric_field_id == field_id) {
+                        found = true;
+                        break;
+                    }
+                }
+                EXPECT_TRUE(found) << "Field " << field_id.get()
+                                   << " should have SkipIndex metrics";
+            }
+        }
+    }
+
+    // Test LoadSkipIndex integration
+    auto skip_index = std::make_shared<milvus::SkipIndex>();
+    size_t num_chunks = skip_indexes.size();
+    skip_index->LoadSkipIndex(std::move(skip_indexes));
+
+    std::vector<FieldId> fields_with_skip_index;
+    for (const auto& [field_id, field_meta] : field_metas) {
+        if (index::SupportsSkipIndex(field_meta.get_data_type())) {
+            fields_with_skip_index.push_back(field_id);
+        }
+    }
+    EXPECT_GT(fields_with_skip_index.size(), 0)
+        << "Schema should have at least one field supporting SkipIndex";
+
+    for (const auto& field_id : fields_with_skip_index) {
+        auto field_meta = schema_->operator[](field_id);
+        auto data_type = field_meta.get_data_type();
+
+        for (size_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            // Get FieldChunkMetrics for this field and chunk
+            auto field_chunk_metrics =
+                skip_index->GetFieldChunkMetrics(field_id, chunk_id);
+
+            EXPECT_NE(field_chunk_metrics, nullptr)
+                << "Field " << field_id.get()
+                << " should have FieldChunkMetrics in chunk " << chunk_id;
+
+            if (field_chunk_metrics != nullptr) {
+                // Verify the metrics has correct data type
+                auto arrow_type = field_chunk_metrics->GetDataType();
+                EXPECT_NE(arrow_type, arrow::Type::NA)
+                    << "FieldChunkMetrics for field " << field_id.get()
+                    << " in chunk " << chunk_id
+                    << " should have valid data type";
+
+                // Verify the metrics has at least one metric (MINMAX, SET, BLOOM_FILTER, or NGRAM_FILTER)
+                EXPECT_GT(field_chunk_metrics->Size(), 0)
+                    << "FieldChunkMetrics for field " << field_id.get()
+                    << " in chunk " << chunk_id
+                    << " should have at least one metric";
+
+                // Verify specific metrics based on data type
+                bool should_have_minmax = data_type == DataType::INT8 ||
+                                          data_type == DataType::INT16 ||
+                                          data_type == DataType::INT32 ||
+                                          data_type == DataType::INT64 ||
+                                          data_type == DataType::FLOAT ||
+                                          data_type == DataType::DOUBLE ||
+                                          data_type == DataType::VARCHAR ||
+                                          data_type == DataType::TIMESTAMPTZ;
+
+                if (should_have_minmax) {
+                    EXPECT_TRUE(field_chunk_metrics->HasMetric(
+                        FieldChunkMetricType::MINMAX))
+                        << "Field " << field_id.get()
+                        << " (type: " << static_cast<int>(data_type)
+                        << ") should have MINMAX metric in chunk " << chunk_id;
+                }
+
+                // INT types should have either SET or BLOOM_FILTER
+                bool is_int_type = data_type == DataType::INT8 ||
+                                   data_type == DataType::INT16 ||
+                                   data_type == DataType::INT32 ||
+                                   data_type == DataType::INT64 ||
+                                   data_type == DataType::TIMESTAMPTZ;
+
+                if (is_int_type) {
+                    bool has_set_or_bloom =
+                        field_chunk_metrics->HasMetric(
+                            FieldChunkMetricType::SET) ||
+                        field_chunk_metrics->HasMetric(
+                            FieldChunkMetricType::BLOOM_FILTER);
+
+                    EXPECT_TRUE(has_set_or_bloom)
+                        << "Field " << field_id.get()
+                        << " (type: " << static_cast<int>(data_type)
+                        << ") should have either SET or BLOOM_FILTER metric in "
+                           "chunk "
+                        << chunk_id;
+                }
+
+                // VARCHAR should have SET or BLOOM_FILTER, and potentially NGRAM_FILTER
+                if (data_type == DataType::VARCHAR) {
+                    bool has_set_or_bloom =
+                        field_chunk_metrics->HasMetric(
+                            FieldChunkMetricType::SET) ||
+                        field_chunk_metrics->HasMetric(
+                            FieldChunkMetricType::BLOOM_FILTER);
+
+                    EXPECT_TRUE(has_set_or_bloom)
+                        << "VARCHAR field " << field_id.get()
+                        << " should have either SET or BLOOM_FILTER metric in "
+                           "chunk "
+                        << chunk_id;
+                }
+
+                // BOOL should have SET metric
+                if (data_type == DataType::BOOL) {
+                    EXPECT_TRUE(field_chunk_metrics->HasMetric(
+                        FieldChunkMetricType::SET))
+                        << "BOOL field " << field_id.get()
+                        << " should have SET metric in chunk " << chunk_id;
+                }
+            }
+        }
+    }
+
+    // Clean up
     for (const auto& file_path : multi_file_paths) {
         if (std::filesystem::exists(file_path)) {
             std::filesystem::remove(file_path);

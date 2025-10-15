@@ -91,6 +91,9 @@ class GroupChunkTranslator
         return total_size;
     }
 
+    std::vector<std::unique_ptr<ChunkSkipIndex>>
+    GetSkipIndex(const std::shared_ptr<arrow::Schema>& arrow_schema);
+
  private:
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::shared_ptr<arrow::Table>& table,

@@ -311,7 +311,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 info.enable_mmap,
                 milvus_field_ids.size(),
                 load_info.load_priority);
-
+        LoadSkipIndex(translator->GetSkipIndex(arrow_schema));
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -355,9 +355,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                            num_rows);
             }
         }
-
-        LoadSkipIndex(
-            chunked_column_group->GetSkipIndex(insert_files, arrow_schema, fs));
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += chunked_column_group->memory_size();

@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
@@ -27,7 +28,6 @@
 #include "arrow/type.h"
 #include "arrow/type_fwd.h"
 #include "common/FieldDataInterface.h"
-#include "xxhash.h"
 #include "ankerl/unordered_dense.h"
 #include "arrow/record_batch.h"
 #include "common/Chunk.h"
@@ -36,6 +36,7 @@
 #include "mmap/ChunkedColumnInterface.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/common/constants.h"
+#include "Utils.h"
 
 namespace milvus {
 
@@ -62,8 +63,8 @@ using HighPrecisionType =
 static constexpr double FPR = 0.01;
 static constexpr size_t NGRAM_SIZE = 3;
 // static constexpr int64_t MIN_ROWS_TO_BUILD_METRICS = 10;
-static constexpr double CARDINALITY_RATIO_FOR_SET = 0.1;
-static constexpr double METADATA_BUDGET_RATIO = 0.01;
+// static constexpr double CARDINALITY_RATIO_FOR_SET = 0.1;
+// static constexpr double METADATA_BUDGET_RATIO = 0.01;
 
 template <typename T>
 struct MetricsInfo {
@@ -117,23 +118,44 @@ class MinMaxFieldChunkMetric : public FieldChunkMetric {
         hasValue_ = true;
     }
 
-    explicit MinMaxFieldChunkMetric(const std::string& data) {
+    explicit MinMaxFieldChunkMetric(const std::string_view data) {
         if (data.empty()) {
             return;
         }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
-        if constexpr (std::is_same_v<T, std::string>) {
-            uint32_t min_len, max_len;
-            ss.read(reinterpret_cast<char*>(&min_len), sizeof(min_len));
-            min_.resize(min_len);
-            ss.read(min_.data(), min_len);
 
-            ss.read(reinterpret_cast<char*>(&max_len), sizeof(max_len));
-            max_.resize(max_len);
-            ss.read(max_.data(), max_len);
+        const char* ptr = data.data();
+
+        if constexpr (std::is_same_v<T, std::string>) {
+            const char* end = ptr + data.size();
+
+            if (ptr + sizeof(uint32_t) > end)
+                return;
+            uint32_t min_len;
+            std::memcpy(&min_len, ptr, sizeof(min_len));
+            ptr += sizeof(uint32_t);
+
+            if (ptr + min_len > end)
+                return;
+            min_.assign(ptr, min_len);
+            ptr += min_len;
+
+            if (ptr + sizeof(uint32_t) > end)
+                return;
+            uint32_t max_len;
+            std::memcpy(&max_len, ptr, sizeof(max_len));
+            ptr += sizeof(uint32_t);
+
+            if (ptr + max_len > end)
+                return;
+            max_.assign(ptr, max_len);
         } else {
-            ss.read(reinterpret_cast<char*>(&min_), sizeof(min_));
-            ss.read(reinterpret_cast<char*>(&max_), sizeof(max_));
+            if (data.size() < sizeof(T) * 2)
+                return;
+
+            std::memcpy(&min_, ptr, sizeof(min_));
+            ptr += sizeof(T);
+
+            std::memcpy(&max_, ptr, sizeof(max_));
         }
         hasValue_ = true;
     }
@@ -272,18 +294,29 @@ class SetFieldChunkMetric : public FieldChunkMetric {
         hasValue_ = true;
     }
 
-    explicit SetFieldChunkMetric(const std::string& data) {
+    explicit SetFieldChunkMetric(std::string_view data) {
         if (data.empty()) {
             return;
         }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
+
+        const char* ptr = data.data();
+        const char* end = ptr + data.size();
+
+        if (data.size() < sizeof(uint32_t))
+            return;
         uint32_t count;
-        ss.read(reinterpret_cast<char*>(&count), sizeof(count));
+        std::memcpy(&count, ptr, sizeof(count));
+        ptr += sizeof(uint32_t);
+
+        unique_values_.reserve(count);
 
         for (uint32_t i = 0; i < count; ++i) {
+            if (ptr + sizeof(T) > end)
+                return;
             T value;
-            ss.read(reinterpret_cast<char*>(&value), sizeof(value));
-            unique_values_.insert(std::move(value));
+            std::memcpy(&value, ptr, sizeof(T));
+            ptr += sizeof(T);
+            unique_values_.insert(value);
         }
         hasValue_ = true;
     }
@@ -347,20 +380,35 @@ class SetFieldChunkMetric<std::string> : public FieldChunkMetric {
         hasValue_ = true;
     }
 
-    explicit SetFieldChunkMetric(const std::string& data) {
+    explicit SetFieldChunkMetric(std::string_view data) {
         if (data.empty()) {
             return;
         }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
+
+        const char* ptr = data.data();
+        const char* end = ptr + data.size();
+
+        if (data.size() < sizeof(uint32_t))
+            return;
         uint32_t count;
-        ss.read(reinterpret_cast<char*>(&count), sizeof(count));
+        std::memcpy(&count, ptr, sizeof(count));
+        ptr += sizeof(uint32_t);
+
         unique_values_.reserve(count);
 
         for (uint32_t i = 0; i < count; ++i) {
+            if (ptr + sizeof(uint32_t) > end)
+                return;
+
             uint32_t len;
-            ss.read(reinterpret_cast<char*>(&len), sizeof(len));
-            std::string value(len, '\0');
-            ss.read(value.data(), len);
+            std::memcpy(&len, ptr, sizeof(len));
+            ptr += sizeof(uint32_t);
+
+            if (ptr + len > end)
+                return;
+
+            std::string value(ptr, len);
+            ptr += len;
             unique_values_.insert(std::move(value));
         }
         hasValue_ = true;
@@ -426,15 +474,18 @@ class SetFieldChunkMetric<bool> : public FieldChunkMetric {
         hasValue_ = true;
     }
 
-    explicit SetFieldChunkMetric(const std::string& data) {
+    explicit SetFieldChunkMetric(std::string_view data) {
         if (data.empty()) {
             return;
         }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
-        ss.read(reinterpret_cast<char*>(&contains_true_),
-                sizeof(contains_true_));
-        ss.read(reinterpret_cast<char*>(&contains_false_),
-                sizeof(contains_false_));
+        if (data.size() < sizeof(bool) * 2)
+            return;
+
+        const char* ptr = data.data();
+        std::memcpy(&contains_true_, ptr, sizeof(contains_true_));
+        ptr += sizeof(bool);
+        std::memcpy(&contains_false_, ptr, sizeof(contains_false_));
+
         hasValue_ = true;
     }
 
@@ -482,180 +533,29 @@ class SetFieldChunkMetric<bool> : public FieldChunkMetric {
     bool contains_false_ = false;
 };
 
-class BloomFilter {
- public:
-    explicit BloomFilter(uint64_t hash_count,
-                         uint64_t bit_size,
-                         std::vector<uint64_t> bit_array)
-        : hash_count_(hash_count),
-          bit_size_(bit_size),
-          bit_array_(std::move(bit_array)) {
-    }
-
-    template <typename T>
-    static std::unique_ptr<BloomFilter>
-    Build(const ankerl::unordered_dense::set<T>& items) {
-        auto n = items.size();
-        if (n == 0) {
-            return nullptr;
-        }
-        auto bit_size = EstimateBitSize(n);
-        auto hash_count = EstimateHashCount(n, bit_size);
-        auto bit_array = std::vector<uint64_t>{};
-        bit_array.assign(bit_size / 64, 0);
-        for (const auto& item : items) {
-            uint64_t hash1 = Hash(item, 0x9e3779b9);
-            uint64_t hash2 = Hash(item, hash1);
-            for (size_t i = 0; i < hash_count; ++i) {
-                size_t bit_pos = (hash1 + i * hash2) % bit_size;
-                bit_array[bit_pos / 64] |= (1ULL << (bit_pos % 64));
-            }
-        }
-        return std::make_unique<BloomFilter>(hash_count, bit_size, bit_array);
-    }
-
-    static uint64_t
-    EstimateCost(size_t n) {
-        return EstimateBitSize(n) / 8 + sizeof(uint64_t) * 2;
-    }
-
-    template <typename T>
-    bool
-    MightContain(const T& item) const {
-        if (bit_size_ == 0) {
-            return true;
-        }
-        uint64_t hash1 = Hash(item, 0x9e3779b9);
-        uint64_t hash2 = Hash(item, hash1);
-        for (size_t i = 0; i < hash_count_; ++i) {
-            size_t bit_pos = (hash1 + i * hash2) % bit_size_;
-            if (!(bit_array_[bit_pos / 64] & (1ULL << (bit_pos % 64)))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // 暴露内部状态用于序列化
-    const std::vector<uint64_t>&
-    GetBitArray() const {
-        return bit_array_;
-    }
-    size_t
-    GetHashCount() const {
-        return hash_count_;
-    }
-    size_t
-    GetBitSize() const {
-        return bit_size_;
-    }
-    bool
-    IsValid() const {
-        return bit_size_ > 0 && !bit_array_.empty();
-    }
-
-    std::string
-    Serialize() const {
-        std::stringstream ss(std::ios::binary | std::ios::out);
-        uint64_t array_size = bit_array_.size();
-        ss.write(reinterpret_cast<const char*>(&hash_count_),
-                 sizeof(hash_count_));
-        ss.write(reinterpret_cast<const char*>(&bit_size_), sizeof(bit_size_));
-        ss.write(reinterpret_cast<const char*>(&array_size),
-                 sizeof(array_size));
-        for (const auto& block : bit_array_) {
-            ss.write(reinterpret_cast<const char*>(&block), sizeof(block));
-        }
-        return ss.str();
-    }
-
-    static std::unique_ptr<BloomFilter>
-    Deserialize(const std::string& data) {
-        if (data.empty()) {
-            return std::make_unique<BloomFilter>(0, 0, std::vector<uint64_t>{});
-        }
-
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
-        uint64_t hash_count, bit_size, array_size;
-        ss.read(reinterpret_cast<char*>(&hash_count), sizeof(hash_count));
-        ss.read(reinterpret_cast<char*>(&bit_size), sizeof(bit_size));
-        ss.read(reinterpret_cast<char*>(&array_size), sizeof(array_size));
-
-        std::vector<uint64_t> bit_array(array_size);
-        ss.read(reinterpret_cast<char*>(bit_array.data()),
-                array_size * sizeof(uint64_t));
-
-        return std::make_unique<BloomFilter>(
-            hash_count, bit_size, std::move(bit_array));
-    }
-
- private:
-    static uint64_t
-    EstimateBitSize(size_t n) {
-        if (n == 0) {
-            return 0;
-        }
-        double bit_size_double =
-            -1.0 * n * std::log(FPR) / (std::log(2) * std::log(2));
-        auto bit_size = static_cast<uint64_t>(bit_size_double);
-        // Align to 64 bits (8 bytes)
-        return ((bit_size + 63) / 64) * 64;
-    }
-
-    static uint64_t
-    EstimateHashCount(size_t n, uint64_t bit_size) {
-        if (n == 0 || bit_size == 0) {
-            return 0;
-        }
-        auto hash_count = static_cast<uint64_t>(
-            (static_cast<double>(bit_size) / n) * std::log(2));
-        if (hash_count < 1) {
-            hash_count = 1;
-        }
-        if (hash_count > 10) {
-            hash_count = 10;
-        }
-        return hash_count;
-    }
-
-    template <typename T>
-    static uint64_t
-    Hash(const T& item, uint64_t seed) {
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            return XXH64(item.data(), item.size(), seed);
-        } else if constexpr (std::is_arithmetic_v<T>) {
-            return XXH64(&item, sizeof(T), seed);
-        }
-    }
-
-    std::vector<uint64_t> bit_array_;
-    uint64_t hash_count_;
-    uint64_t bit_size_;
-};
-
 template <typename T>
 class BloomFilterFieldChunkMetric : public FieldChunkMetric {
  private:
-    std::unique_ptr<BloomFilter> filter_;
+    std::unique_ptr<index::BloomFilter> filter_;
 
  public:
     explicit BloomFilterFieldChunkMetric(const MetricsInfo<T>& info) {
-        filter_ = BloomFilter::Build<MetricsDataType<T>>(info.unique_values_);
+        filter_ = index::BloomFilter::Build<MetricsDataType<T>>(
+            info.unique_values_, FPR);
         hasValue_ = filter_ && filter_->IsValid();
     }
 
-    explicit BloomFilterFieldChunkMetric(const std::string& data) {
+    explicit BloomFilterFieldChunkMetric(const std::string_view data) {
         if (data.empty()) {
             return;
         }
-        filter_ = BloomFilter::Deserialize(data);
+        filter_ = index::BloomFilter::Deserialize(data);
         hasValue_ = filter_ && filter_->IsValid();
     }
 
     static uint64_t
     EstimateCost(const MetricsInfo<T>& info) {
-        return BloomFilter::EstimateCost(info.unique_values_.size());
+        return index::BloomFilter::EstimateCost(info.unique_values_.size());
     }
 
     bool
@@ -700,28 +600,29 @@ class BloomFilterFieldChunkMetric : public FieldChunkMetric {
 
 class NgramFilterFieldChunkMetric : public FieldChunkMetric {
  private:
-    std::unique_ptr<BloomFilter> filter_;
+    std::unique_ptr<index::BloomFilter> filter_;
 
  public:
     explicit NgramFilterFieldChunkMetric(const MetricsInfo<std::string>& info) {
         if (info.ngram_values_.empty()) {
             return;
         }
-        filter_ = BloomFilter::Build<std::string_view>(info.ngram_values_);
+        filter_ = index::BloomFilter::Build<std::string_view>(
+            info.ngram_values_, FPR);
         hasValue_ = filter_->IsValid();
     }
 
-    explicit NgramFilterFieldChunkMetric(const std::string& data) {
+    explicit NgramFilterFieldChunkMetric(const std::string_view data) {
         if (data.empty()) {
             return;
         }
-        filter_ = BloomFilter::Deserialize(data);
+        filter_ = index::BloomFilter::Deserialize(data);
         hasValue_ = filter_ && filter_->IsValid();
     }
 
     static uint64_t
     EstimateCost(const MetricsInfo<std::string>& info) {
-        return BloomFilter::EstimateCost(info.ngram_values_.size());
+        return index::BloomFilter::EstimateCost(info.ngram_values_.size());
     }
 
     bool
@@ -792,7 +693,7 @@ class FieldChunkMetrics {
     std::unique_ptr<FieldChunkMetric>
     LoadMetric(arrow::Type::type data_type,
                FieldChunkMetricType metric_type,
-               const std::string& data);
+               const std::string_view data);
 
     template <typename MetricType>
     MetricType*
@@ -829,7 +730,7 @@ class FieldChunkMetrics {
     Serialize() const;
 
     void
-    Deserialize(const std::string& data);
+    Deserialize(const std::string_view data);
 
     cachinglayer::ResourceUsage
     CellByteSize() const {
@@ -907,7 +808,7 @@ class FieldChunkMetrics {
 
     template <typename T>
     MetricsInfo<T>
-    ProcessIntFieldMetrics(
+    ProcessFieldMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
         int col_idx) {
         using ArrayType = typename arrow::TypeTraits<
@@ -916,6 +817,8 @@ class FieldChunkMetrics {
         T min, max;
         int64_t total_rows = 0;
         int64_t null_count = 0;
+        bool contains_true = false;
+        bool contains_false = false;
         ankerl::unordered_dense::set<T> unique_values;
 
         bool has_first_valid = false;
@@ -928,7 +831,14 @@ class FieldChunkMetrics {
                     continue;
                 }
                 T value = array->Value(i);
-
+                if constexpr (std::is_same_v<T, bool>) {
+                    if (value) {
+                        contains_true = true;
+                    } else {
+                        contains_false = true;
+                    }
+                    continue;
+                }
                 if (!has_first_valid) {
                     min = value;
                     max = value;
@@ -941,128 +851,69 @@ class FieldChunkMetrics {
                         max = value;
                     }
                 }
+                if constexpr (std::is_integral_v<T>) {
+                    unique_values.insert(value);
+                }
+            }
+            total_rows += array->length();
+        }
+        return {total_rows,
+                null_count,
+                min,
+                max,
+                contains_true,
+                contains_false,
+                std::move(unique_values)};
+    }
+
+    template <typename T>
+    MetricsInfo<T>
+    ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
+        bool has_first_valid = false;
+        T min, max;
+        int64_t total_rows = count;
+        int64_t null_count = 0;
+        bool contains_true = false;
+        bool contains_false = false;
+        ankerl::unordered_dense::set<T> unique_values;
+
+        for (int64_t i = 0; i < count; i++) {
+            T value = data[i];
+            if (valid_data != nullptr && !valid_data[i]) {
+                null_count++;
+                continue;
+            }
+            if constexpr (std::is_same_v<T, bool>) {
+                if (value) {
+                    contains_true = true;
+                } else {
+                    contains_false = true;
+                }
+                continue;
+            }
+            if (!has_first_valid) {
+                min = value;
+                max = value;
+                has_first_valid = true;
+            } else {
+                if (value < min) {
+                    min = value;
+                }
+                if (value > max) {
+                    max = value;
+                }
+            }
+            if constexpr (std::is_integral_v<T>) {
                 unique_values.insert(value);
             }
-            total_rows += array->length();
         }
         return {total_rows,
                 null_count,
                 min,
                 max,
-                false,
-                false,
+                contains_true,
+                contains_false,
                 std::move(unique_values)};
-    }
-
-    template <typename T>
-    MetricsInfo<T>
-    ProcessIntFieldMetrics(const T* data,
-                           const bool* valid_data,
-                           int64_t count) {
-        bool has_first_valid = false;
-        T min, max;
-        int64_t total_rows = count;
-        int64_t null_count = 0;
-        ankerl::unordered_dense::set<T> unique_values;
-
-        for (int64_t i = 0; i < count; i++) {
-            T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
-                null_count++;
-                continue;
-            }                
-            if (!has_first_valid) {
-                min = value;
-                max = value;
-                has_first_valid = true;
-            } else {
-                if (value < min) {
-                    min = value;
-                }
-                if (value > max) {
-                    max = value;
-                }
-            }
-            unique_values.insert(value);
-        }
-        return {total_rows,
-                null_count,
-                min,
-                max,
-                false,
-                false,
-                std::move(unique_values)};
-    }
-
-    template <typename T>
-    MetricsInfo<T>
-    ProcessFloatFieldMetrics(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        int col_idx) {
-        using ArrayType = typename arrow::TypeTraits<
-            typename arrow::CTypeTraits<T>::ArrowType>::ArrayType;
-        bool has_first_valid = false;
-        T min, max;
-        int64_t total_rows = 0;
-        int64_t null_count = 0;
-
-        for (const auto& batch : batches) {
-            auto arr = batch->column(col_idx);
-            auto array = std::static_pointer_cast<ArrayType>(arr);
-            for (int64_t i = 0; i < array->length(); ++i) {
-                if (array->IsNull(i)) {
-                    null_count++;
-                    continue;
-                }
-                T value = array->Value(i);
-
-                if (!has_first_valid) {
-                    min = value;
-                    max = value;
-                    has_first_valid = true;
-                } else {
-                    if (value < min) {
-                        min = value;
-                    }
-                    if (value > max) {
-                        max = value;
-                    }
-                }
-            }
-            total_rows += array->length();
-        }
-        return {total_rows, null_count, min, max};
-    }
-
-    template <typename T>
-    MetricsInfo<T>
-    ProcessFloatFieldMetrics(const T* data,
-                             const bool* valid_data,
-                             int64_t count) {
-        bool has_first_valid = false;
-        T min, max;
-        int64_t total_rows = count;
-        int64_t null_count = 0;
-        for (int64_t i = 0; i < count; i++) {
-            T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
-                null_count++;
-                continue;
-            }                
-            if (!has_first_valid) {
-                min = value;
-                max = value;
-                has_first_valid = true;
-            } else {
-                if (value < min) {
-                    min = value;
-                }
-                if (value > max) {
-                    max = value;
-                }
-            }
-        }
-        return {total_rows, null_count, min, max};
     }
 
     MetricsInfo<std::string>
@@ -1188,58 +1039,6 @@ class FieldChunkMetrics {
                 total_string_length};
     }
 
-    MetricsInfo<bool>
-    ProcessBooleanFieldMetrics(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
-        int col_idx) {
-        int64_t total_rows = 0;
-        int64_t null_count = 0;
-        bool contains_true = false;
-        bool contains_false = false;
-        for (const auto& batch : batches) {
-            auto array = batch->column(col_idx);
-            auto bool_array =
-                std::static_pointer_cast<arrow::BooleanArray>(array);
-            for (int64_t i = 0; i < bool_array->length(); ++i) {
-                if (bool_array->IsNull(i)) {
-                    null_count++;
-                    continue;
-                }
-                bool value = bool_array->Value(i);
-                if (value) {
-                    contains_true = true;
-                } else {
-                    contains_false = true;
-                }
-            }
-            total_rows += bool_array->length();
-        }
-        return {total_rows, null_count, {}, {}, contains_true, contains_false};
-    }
-
-    MetricsInfo<bool>
-    ProcessBooleanFieldMetrics(const bool* data,
-                               const bool* valid_data,
-                               int64_t count) {
-        int64_t total_rows = count;
-        int64_t null_count = 0;
-        bool contains_true = false;
-        bool contains_false = false;
-        for (int64_t i = 0; i < count; i++) {
-            bool value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
-                null_count++;
-                continue;
-            }                
-            if (value) {
-                contains_true = true;
-            } else {
-                contains_false = true;
-            }
-        }
-        return {total_rows, null_count, {}, {}, contains_true, contains_false};
-    }
-
  private:
     std::vector<std::unique_ptr<FieldChunkMetric>> metrics_;
     arrow::Type::type data_type_;
@@ -1265,13 +1064,13 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
                                ->data());
             auto fid = FieldId(field_id);
             auto data_type = field_schema->field(col_idx)->type()->id();
-            if (fid == RowFieldID || !SupportsSkipIndex(data_type)) {
+            if (fid == RowFieldID || !index::SupportsSkipIndex(data_type)) {
                 continue;
             }
             auto field_metrics = std::make_unique<FieldChunkMetrics>(
                 batches, col_idx, data_type);
             if (field_metrics->Size() > 0) {
-                field_chunk_metrics_.emplace_back(field_id,
+                field_chunk_metrics_.emplace_back(fid,
                                                   std::move(field_metrics));
             }
         }
@@ -1312,56 +1111,52 @@ class ChunkSkipIndex : public milvus_storage::Metadata {
     };
 
     void
-    Deserialize(const std::string& data) override {
+    Deserialize(std::string_view data) override {
         if (data.empty()) {
             return;
         }
-        std::stringstream ss(data, std::ios::binary | std::ios::in);
 
+        const char* ptr = data.data();
+        const char* end = ptr + data.size();
+        if (data.size() < sizeof(uint32_t)) {
+            return;
+        }
         uint32_t count;
-        ss.read(reinterpret_cast<char*>(&count), sizeof(count));
+        std::memcpy(&count, ptr, sizeof(count));
+        ptr += sizeof(uint32_t);
+
         field_chunk_metrics_.reserve(count);
 
         for (uint32_t i = 0; i < count; ++i) {
+            if (ptr + sizeof(int64_t) > end) {
+                return;
+            }
             int64_t field_id_val;
-            ss.read(reinterpret_cast<char*>(&field_id_val),
-                    sizeof(field_id_val));
+            std::memcpy(&field_id_val, ptr, sizeof(field_id_val));
+            ptr += sizeof(int64_t);
 
-            arrow::Type::type data_type;
-            ss.read(reinterpret_cast<char*>(&data_type), sizeof(data_type));
-
+            if (ptr + sizeof(uint64_t) > end) {
+                return;
+            }
             uint64_t len;
-            ss.read(reinterpret_cast<char*>(&len), sizeof(len));
-            std::string field_data(len, '\0');
-            ss.read(&field_data[0], len);
+            std::memcpy(&len, ptr, sizeof(len));
+            ptr += sizeof(uint64_t);
 
-            auto field_chunk_skipindex =
-                std::make_unique<FieldChunkMetrics>(data_type);
+            if (ptr + len > end) {
+                return;
+            }
+
+            std::string_view field_data(ptr, len);
+            ptr += len;
+            auto field_chunk_skipindex = std::make_unique<FieldChunkMetrics>();
             field_chunk_skipindex->Deserialize(field_data);
 
             field_chunk_metrics_.emplace_back(FieldId(field_id_val),
                                               std::move(field_chunk_skipindex));
         }
-    };
-
- private:
-    bool
-    SupportsSkipIndex(arrow::Type::type type) {
-        switch (type) {
-            case arrow::Type::BOOL:
-            case arrow::Type::INT8:
-            case arrow::Type::INT16:
-            case arrow::Type::INT32:
-            case arrow::Type::INT64:
-            case arrow::Type::FLOAT:
-            case arrow::Type::DOUBLE:
-            case arrow::Type::STRING:
-                return true;
-            default:
-                return false;
-        }
     }
 
+ private:
     std::vector<std::pair<FieldId, std::unique_ptr<FieldChunkMetrics>>>
         field_chunk_metrics_;
 };
@@ -1817,10 +1612,10 @@ class SkipIndex {
     }
 
     void
-    LoadSkip(int64_t segment_id,
-             milvus::FieldId field_id,
-             milvus::DataType data_type,
-             std::shared_ptr<ChunkedColumnInterface> column) {
+    LoadSkipIndex(int64_t segment_id,
+                  milvus::FieldId field_id,
+                  milvus::DataType data_type,
+                  std::shared_ptr<ChunkedColumnInterface> column) {
         auto translator = std::make_unique<FieldChunkMetricsTranslator>(
             segment_id, field_id, data_type, column);
         auto cache_slot =
@@ -1842,6 +1637,14 @@ class SkipIndex {
         return field_chunk_skipindex->HasMetric(type);
     }
 
+    FieldChunkMetrics const*
+    GetFieldChunkMetrics(milvus::FieldId field_id, int64_t chunk_id) const {
+        if (auto metrics = GetFieldChunkMetricsV2(field_id, chunk_id)) {
+            return metrics;
+        }
+        return GetFieldChunkMetricsV1(field_id, chunk_id).get();
+    }
+
  private:
     OpType
     FlipComparisonOperator(OpType op) const {
@@ -1858,14 +1661,6 @@ class SkipIndex {
             default:
                 return op;
         }
-    }
-
-    FieldChunkMetrics const*
-    GetFieldChunkMetrics(milvus::FieldId field_id, int64_t chunk_id) const {
-        if (auto metrics = GetFieldChunkMetricsV2(field_id, chunk_id)) {
-            return metrics;
-        }
-        return GetFieldChunkMetricsV1(field_id, chunk_id).get();
     }
 
     FieldChunkMetrics const*

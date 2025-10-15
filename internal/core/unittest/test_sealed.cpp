@@ -2022,7 +2022,8 @@ TEST(Sealed, SkipIndexSkipStringMatchNullable) {
     auto dim = 4;
     auto metrics_type = "L2";
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto string_nullable_fid = schema->AddDebugField("string_field", DataType::VARCHAR, true);
+    auto string_nullable_fid =
+        schema->AddDebugField("string_field", DataType::VARCHAR, true);
     auto fake_vec_fid = schema->AddDebugField(
         "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     size_t N = 5;
@@ -2034,8 +2035,8 @@ TEST(Sealed, SkipIndexSkipStringMatchNullable) {
     std::vector<std::string> strings = {
         "apple", "application", "banana", "band", "candy"};
     std::array<uint8_t, 1> valid_data = {0x13};
-    auto string_field_data = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, true, 1, N);
+    auto string_field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true, 1, N);
     string_field_data->FillFieldData(strings.data(), valid_data.data(), N, 0);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -2174,7 +2175,8 @@ TEST(Sealed, SkipIndexSkipIn) {
     segment->LoadFieldData(load_info_int8);
 
     // Test for float
-    std::vector<float> floats = {1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5};
+    std::vector<float> floats = {
+        1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5};
     auto float_field_data =
         storage::CreateFieldData(DataType::FLOAT, DataType::NONE, false, 1, N);
     float_field_data->FillFieldData(floats.data(), N);
@@ -2187,7 +2189,8 @@ TEST(Sealed, SkipIndexSkipIn) {
     segment->LoadFieldData(load_info_float);
 
     // Test for double
-    std::vector<double> doubles = {10.1, 20.2, 30.3, 40.4, 50.5, 60.6, 70.7, 80.8, 90.9, 100.0};
+    std::vector<double> doubles = {
+        10.1, 20.2, 30.3, 40.4, 50.5, 60.6, 70.7, 80.8, 90.9, 100.0};
     auto double_field_data =
         storage::CreateFieldData(DataType::DOUBLE, DataType::NONE, false, 1, N);
     double_field_data->FillFieldData(doubles.data(), N);
@@ -2200,18 +2203,25 @@ TEST(Sealed, SkipIndexSkipIn) {
     segment->LoadFieldData(load_info_double);
 
     // Test for string
-    std::vector<std::string> strings = {"apple", "banana", "cherry", "date", "elderberry",
-                                        "fig", "grape", "honeydew", "kiwi", "lemon"};
+    std::vector<std::string> strings = {"apple",
+                                        "banana",
+                                        "cherry",
+                                        "date",
+                                        "elderberry",
+                                        "fig",
+                                        "grape",
+                                        "honeydew",
+                                        "kiwi",
+                                        "lemon"};
     auto string_field_data = storage::CreateFieldData(
         DataType::VARCHAR, DataType::NONE, false, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
-    auto load_info_string =
-        PrepareSingleFieldInsertBinlog(kCollectionID,
-                                       kPartitionID,
-                                       kSegmentID,
-                                       string_fid.get(),
-                                       {string_field_data},
-                                       cm);
+    auto load_info_string = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                           kPartitionID,
+                                                           kSegmentID,
+                                                           string_fid.get(),
+                                                           {string_field_data},
+                                                           cm);
     segment->LoadFieldData(load_info_string);
 
     auto& skip_index = segment->GetSkipIndex();
@@ -2229,8 +2239,8 @@ TEST(Sealed, SkipIndexSkipIn) {
         pk_fid, 0, std::vector<int64_t>{110, 120, 130}));
     ASSERT_TRUE(skip_index.CanSkipInQuery<int64_t>(
         pk_fid, 0, std::vector<int64_t>{15, 25, 35}));
-    ASSERT_FALSE(skip_index.CanSkipInQuery<int64_t>(
-        pk_fid, 0, std::vector<int64_t>{}));
+    ASSERT_FALSE(
+        skip_index.CanSkipInQuery<int64_t>(pk_fid, 0, std::vector<int64_t>{}));
 
     // Int32 tests
     ASSERT_FALSE(skip_index.CanSkipInQuery<int32_t>(
@@ -2294,8 +2304,10 @@ TEST(Sealed, SkipIndexSkipIn) {
 TEST(Sealed, SkipIndexSkipInNullable) {
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
-    auto i64_nullable_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto string_nullable_fid = schema->AddDebugField("string_field", DataType::VARCHAR, true);
+    auto i64_nullable_fid =
+        schema->AddDebugField("int64_field", DataType::INT64, true);
+    auto string_nullable_fid =
+        schema->AddDebugField("string_field", DataType::VARCHAR, true);
     schema->set_primary_field_id(pk_fid);
     size_t N = 5;
     auto segment = CreateSealedSegment(schema);
@@ -2305,25 +2317,28 @@ TEST(Sealed, SkipIndexSkipInNullable) {
     // Test for nullable int64
     // Data: [10, 20, NULL, NULL, 50], valid_data: 0b00010011 = 0x13
     std::vector<int64_t> int64s = {10, 20, 30, 40, 50};
-    std::array<uint8_t, 1> int64_valid_data = {0x13}; // bits 0,1,4 are valid
+    std::array<uint8_t, 1> int64_valid_data = {0x13};  // bits 0,1,4 are valid
     auto int64_field_data =
         storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, N);
-    int64_field_data->FillFieldData(int64s.data(), int64_valid_data.data(), N, 0);
-    auto load_info_int64 = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                          kPartitionID,
-                                                          kSegmentID,
-                                                          i64_nullable_fid.get(),
-                                                          {int64_field_data},
-                                                          cm);
+    int64_field_data->FillFieldData(
+        int64s.data(), int64_valid_data.data(), N, 0);
+    auto load_info_int64 =
+        PrepareSingleFieldInsertBinlog(kCollectionID,
+                                       kPartitionID,
+                                       kSegmentID,
+                                       i64_nullable_fid.get(),
+                                       {int64_field_data},
+                                       cm);
     segment->LoadFieldData(load_info_int64);
 
     // Test for nullable string
     // Data: ["a", "b", NULL, NULL, "e"], valid_data: 0b00010011 = 0x13
     std::vector<std::string> strings = {"a", "b", "c", "d", "e"};
-    std::array<uint8_t, 1> string_valid_data = {0x13}; // bits 0,1,4 are valid
-    auto string_field_data = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, true, 1, N);
-    string_field_data->FillFieldData(strings.data(), string_valid_data.data(), N, 0);
+    std::array<uint8_t, 1> string_valid_data = {0x13};  // bits 0,1,4 are valid
+    auto string_field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true, 1, N);
+    string_field_data->FillFieldData(
+        strings.data(), string_valid_data.data(), N, 0);
     auto load_info_string =
         PrepareSingleFieldInsertBinlog(kCollectionID,
                                        kPartitionID,

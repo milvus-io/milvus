@@ -357,4 +357,43 @@ GroupChunkTranslator::load_group_chunk(
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
 
+std::vector<std::unique_ptr<ChunkSkipIndex>>
+GroupChunkTranslator::GetSkipIndex(
+    const std::shared_ptr<arrow::Schema>& arrow_schema) {
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    std::vector<std::unique_ptr<ChunkSkipIndex>> field_chunk_skipindex;
+    field_chunk_skipindex.reserve(meta_.num_rows_until_chunk_.size());
+
+    for (const auto& insert_file : insert_files_) {
+        auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs, insert_file, arrow_schema);
+        auto skip_index_metadata =
+            file_reader->file_metadata()->GetMetadataVector<ChunkSkipIndex>(
+                ChunkSkipIndex::KEY);
+        auto row_group_num =
+            file_reader->file_metadata()->GetRowGroupMetadataVector().size();
+        if (skip_index_metadata.size() != row_group_num) {
+            LOG_ERROR(
+                "[StorageV2] translator {} skip index size {} does not match "
+                "row group num {} in file {}, return empty skip index",
+                key_,
+                skip_index_metadata.size(),
+                row_group_num,
+                insert_file);
+            return {};
+        }
+        field_chunk_skipindex.insert(
+            field_chunk_skipindex.end(),
+            std::make_move_iterator(skip_index_metadata.begin()),
+            std::make_move_iterator(skip_index_metadata.end()));
+
+        auto status = file_reader->Close();
+        AssertInfo(status.ok(),
+                   "failed to close file reader when get skipindex from {}",
+                   insert_file);
+    }
+    return field_chunk_skipindex;
+}
+
 }  // namespace milvus::segcore::storagev2translator

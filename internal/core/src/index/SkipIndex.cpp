@@ -26,7 +26,7 @@ FieldChunkMetrics::FieldChunkMetrics() = default;
 std::unique_ptr<FieldChunkMetric>
 FieldChunkMetrics::LoadMetric(arrow::Type::type data_type,
                               FieldChunkMetricType metric_type,
-                              const std::string& data) {
+                              const std::string_view data) {
     switch (data_type) {
         case arrow::Type::BOOL:
             switch (metric_type) {
@@ -141,6 +141,8 @@ FieldChunkMetrics::Serialize() const {
     uint32_t count = metrics_.size();
     ss.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
+    ss.write(reinterpret_cast<const char*>(&data_type_), sizeof(data_type_));
+
     for (const auto& metric : metrics_) {
         auto type = metric->GetType();
         ss.write(reinterpret_cast<const char*>(&type), sizeof(type));
@@ -154,21 +156,52 @@ FieldChunkMetrics::Serialize() const {
 }
 
 void
-FieldChunkMetrics::Deserialize(const std::string& data) {
-    std::stringstream ss(data, std::ios::binary | std::ios::in);
+FieldChunkMetrics::Deserialize(std::string_view data) {
+    if (data.empty()) {
+        return;
+    }
+
+    const char* ptr = data.data();
+    const char* end = ptr + data.size();
+
+    if (data.size() < sizeof(uint32_t)) {
+        return;
+    }
     uint32_t metric_count;
-    ss.read(reinterpret_cast<char*>(&metric_count), sizeof(metric_count));
+    std::memcpy(&metric_count, ptr, sizeof(metric_count));
+    ptr += sizeof(uint32_t);
+
+    arrow::Type::type data_type;
+    if (ptr + sizeof(arrow::Type::type) > end) {
+        return;
+    }
+    std::memcpy(&data_type, ptr, sizeof(data_type));
+    ptr += sizeof(arrow::Type::type);
+    data_type_ = data_type;
+
     metrics_.reserve(metric_count);
 
     for (uint32_t i = 0; i < metric_count; ++i) {
+        if (ptr + sizeof(FieldChunkMetricType) > end) {
+            return;
+        }
         FieldChunkMetricType metric_type;
-        ss.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
+        std::memcpy(&metric_type, ptr, sizeof(metric_type));
+        ptr += sizeof(FieldChunkMetricType);
 
+        if (ptr + sizeof(uint32_t) > end) {
+            return;
+        }
         uint32_t metric_len;
-        ss.read(reinterpret_cast<char*>(&metric_len), sizeof(metric_len));
-        std::string metric_data(metric_len, '\0');
-        ss.read(&metric_data[0], metric_len);
+        std::memcpy(&metric_len, ptr, sizeof(metric_len));
+        ptr += sizeof(uint32_t);
 
+        if (ptr + metric_len > end) {
+            return;
+        }
+
+        std::string_view metric_data(ptr, metric_len);
+        ptr += metric_len;
         auto metric = LoadMetric(data_type_, metric_type, metric_data);
         if (metric && metric->hasValue_) {
             metrics_.emplace_back(std::move(metric));
@@ -251,53 +284,52 @@ FieldChunkMetrics::FieldChunkMetrics(DataType data_type, const Chunk* chunk)
     const bool* valid_data = span.valid_data();
     int64_t count = span.row_count();
     switch (data_type) {
+        case DataType::BOOL: {
+            const bool* typedData = static_cast<const bool*>(chunk_data);
+            auto info = ProcessFieldMetrics<bool>(typedData, valid_data, count);
+            LoadBooleanMetrics(info);
+            break;
+        }
         case DataType::INT8: {
             const int8_t* typedData = static_cast<const int8_t*>(chunk_data);
             auto info =
-                ProcessIntFieldMetrics<int8_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int8_t>(typedData, valid_data, count);
             LoadIntMetrics<int8_t>(info);
             break;
         }
         case DataType::INT16: {
             const int16_t* typedData = static_cast<const int16_t*>(chunk_data);
             auto info =
-                ProcessIntFieldMetrics<int16_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int16_t>(typedData, valid_data, count);
             LoadIntMetrics<int16_t>(info);
             break;
         }
         case DataType::INT32: {
             const int32_t* typedData = static_cast<const int32_t*>(chunk_data);
             auto info =
-                ProcessIntFieldMetrics<int32_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int32_t>(typedData, valid_data, count);
             LoadIntMetrics<int32_t>(info);
             break;
         }
         case DataType::INT64: {
             const int64_t* typedData = static_cast<const int64_t*>(chunk_data);
             auto info =
-                ProcessIntFieldMetrics<int64_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int64_t>(typedData, valid_data, count);
             LoadIntMetrics<int64_t>(info);
             break;
         }
         case DataType::FLOAT: {
             const float* typedData = static_cast<const float*>(chunk_data);
             auto info =
-                ProcessFloatFieldMetrics<float>(typedData, valid_data, count);
+                ProcessFieldMetrics<float>(typedData, valid_data, count);
             LoadFloatMetrics<float>(info);
             break;
         }
         case DataType::DOUBLE: {
             const double* typedData = static_cast<const double*>(chunk_data);
             auto info =
-                ProcessFloatFieldMetrics<double>(typedData, valid_data, count);
+                ProcessFieldMetrics<double>(typedData, valid_data, count);
             LoadFloatMetrics<double>(info);
-            break;
-        }
-        case DataType::BOOL: {
-            const bool* typedData = static_cast<const bool*>(chunk_data);
-            auto info =
-                ProcessBooleanFieldMetrics(typedData, valid_data, count);
-            LoadBooleanMetrics(info);
             break;
         }
     }
@@ -306,41 +338,42 @@ FieldChunkMetrics::FieldChunkMetrics(DataType data_type, const Chunk* chunk)
 FieldChunkMetrics::FieldChunkMetrics(
     const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
     int col_idx,
-    arrow::Type::type data_type) {
+    arrow::Type::type data_type)
+    : data_type_(data_type) {
     switch (data_type) {
         case arrow::Type::BOOL: {
             MetricsInfo<bool> info =
-                ProcessBooleanFieldMetrics(batches, col_idx);
+                ProcessFieldMetrics<bool>(batches, col_idx);
             LoadBooleanMetrics(info);
             break;
         }
         case arrow::Type::INT8: {
-            auto info = ProcessIntFieldMetrics<int8_t>(batches, col_idx);
+            auto info = ProcessFieldMetrics<int8_t>(batches, col_idx);
             LoadIntMetrics<int8_t>(info);
             break;
         }
         case arrow::Type::INT16: {
-            auto info = ProcessIntFieldMetrics<int16_t>(batches, col_idx);
+            auto info = ProcessFieldMetrics<int16_t>(batches, col_idx);
             LoadIntMetrics<int16_t>(info);
             break;
         }
         case arrow::Type::INT32: {
-            auto info = ProcessIntFieldMetrics<int32_t>(batches, col_idx);
+            auto info = ProcessFieldMetrics<int32_t>(batches, col_idx);
             LoadIntMetrics<int32_t>(info);
             break;
         }
         case arrow::Type::INT64: {
-            auto info = ProcessIntFieldMetrics<int64_t>(batches, col_idx);
+            auto info = ProcessFieldMetrics<int64_t>(batches, col_idx);
             LoadIntMetrics<int64_t>(info);
             break;
         }
         case arrow::Type::FLOAT: {
-            auto info = ProcessFloatFieldMetrics<float>(batches, col_idx);
+            auto info = ProcessFieldMetrics<float>(batches, col_idx);
             LoadFloatMetrics<float>(info);
             break;
         }
         case arrow::Type::DOUBLE: {
-            auto info = ProcessFloatFieldMetrics<double>(batches, col_idx);
+            auto info = ProcessFieldMetrics<double>(batches, col_idx);
             LoadFloatMetrics<double>(info);
             break;
         }

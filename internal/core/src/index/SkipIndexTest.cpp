@@ -143,7 +143,6 @@ class SkipIndexTest : public ::testing::Test {
     std::unique_ptr<SkipIndex>
     BuildSkipIndex(ArrowSchemaPtr schema,
                    std::vector<std::shared_ptr<arrow::Array>> arrays) {
-        std::cout << "BuildSkipIndex" << std::endl;
         if (arrays.size() == 0) {
             return nullptr;
         }
@@ -152,12 +151,10 @@ class SkipIndexTest : public ::testing::Test {
         auto batches =
             std::vector<std::shared_ptr<arrow::RecordBatch>>{record_batch};
 
-        std::cout << "batches.size(): " << batches.size() << std::endl;
         std::vector<std::unique_ptr<ChunkSkipIndex>> chunk_skipindex_vec;
         chunk_skipindex_vec.emplace_back(
             std::make_unique<ChunkSkipIndex>(batches));
         auto skip_index = std::make_unique<SkipIndex>();
-        std::cout << "before LoadSkipIndex" << std::endl;
         skip_index->LoadSkipIndex(std::move(chunk_skipindex_vec));
         return skip_index;
     }
@@ -822,79 +819,6 @@ TEST_F(SkipIndexTest, SkipBinaryArithRange) {
         -1));
 }
 
-TEST(BloomFilter, BloomFilterBasicFunctionality) {
-    // Test with integers
-    ankerl::unordered_dense::set<int64_t> int_items = {1, 2, 3, 5, 8, 13, 21};
-    auto int_bf = BloomFilter::Build(int_items);
-    ASSERT_NE(int_bf, nullptr);
-
-    for (const auto& item : int_items) {
-        ASSERT_TRUE(int_bf->MightContain<int64_t>(item));
-    }
-    ASSERT_FALSE(int_bf->MightContain<int64_t>(0));
-    ASSERT_FALSE(int_bf->MightContain<int64_t>(4));
-    ASSERT_FALSE(int_bf->MightContain<int64_t>(100));
-
-    // Test with strings
-    ankerl::unordered_dense::set<std::string> string_items = {
-        "apple", "banana", "cherry"};
-    auto string_bf = BloomFilter::Build(string_items);
-    ASSERT_NE(string_bf, nullptr);
-
-    for (const auto& item : string_items) {
-        ASSERT_TRUE(string_bf->MightContain<std::string>(item));
-    }
-    ASSERT_FALSE(string_bf->MightContain<std::string>("grape"));
-    ASSERT_FALSE(string_bf->MightContain<std::string>("milvus"));
-}
-
-TEST(BloomFilter, BloomFilterSerialization) {
-    ankerl::unordered_dense::set<int64_t> items = {10, 20, 30, 40, 50};
-    auto bf1 = BloomFilter::Build(items);
-    ASSERT_NE(bf1, nullptr);
-
-    std::string serialized_data = bf1->Serialize();
-    ASSERT_FALSE(serialized_data.empty());
-
-    auto bf2 = BloomFilter::Deserialize(serialized_data);
-    ASSERT_NE(bf2, nullptr);
-
-    // Check properties
-    ASSERT_EQ(bf1->GetHashCount(), bf2->GetHashCount());
-    ASSERT_EQ(bf1->GetBitSize(), bf2->GetBitSize());
-    ASSERT_EQ(bf1->GetBitArray(), bf2->GetBitArray());
-
-    // Check behavior
-    for (int64_t i = 0; i < 100; ++i) {
-        ASSERT_EQ(bf1->MightContain<int64_t>(i), bf2->MightContain<int64_t>(i));
-    }
-}
-
-TEST(BloomFilter, BloomFilterEdgeCases) {
-    // Empty items vector
-    ankerl::unordered_dense::set<int> empty_items = {};
-    auto empty_bf = BloomFilter::Build(empty_items);
-    ASSERT_EQ(empty_bf, nullptr);
-
-    // Single item
-    ankerl::unordered_dense::set<std::string> single_item = {"one"};
-    auto single_item_bf = BloomFilter::Build(single_item);
-    ASSERT_NE(single_item_bf, nullptr);
-    ASSERT_TRUE(single_item_bf->MightContain<std::string>("one"));
-    ASSERT_FALSE(single_item_bf->MightContain<std::string>("two"));
-}
-
-TEST(BloomFilter, BloomFilterBuildFromSet) {
-    ankerl::unordered_dense::set<int64_t> item_set = {100, 200, 300};
-    auto bf = BloomFilter::Build(item_set);
-    ASSERT_NE(bf, nullptr);
-
-    ASSERT_TRUE(bf->MightContain<int64_t>(100));
-    ASSERT_TRUE(bf->MightContain<int64_t>(200));
-    ASSERT_TRUE(bf->MightContain<int64_t>(300));
-    ASSERT_FALSE(bf->MightContain<int64_t>(400));
-}
-
 TEST(MinMaxMetric, IntegerFunctionality) {
     MetricsInfo<int64_t> info;
     info.min_ = 10;
@@ -936,6 +860,16 @@ TEST(MinMaxMetric, IntegerFunctionality) {
         5, 10, true, false));  // upper bound not inclusive
     ASSERT_FALSE(
         metric.CanSkipBinaryRange(5, 10, true, true));  // upper bound inclusive
+
+    info;
+    info.min_ = 5;
+    info.max_ = 5;
+    MinMaxFieldChunkMetric<int64_t> single_val_metric(info);
+    ASSERT_TRUE(single_val_metric.hasValue_);
+    ASSERT_FALSE(single_val_metric.CanSkipUnaryRange(OpType::Equal, 5));
+    ASSERT_TRUE(single_val_metric.CanSkipUnaryRange(OpType::Equal, 6));
+    ASSERT_TRUE(single_val_metric.CanSkipUnaryRange(OpType::LessThan, 5));
+    ASSERT_FALSE(single_val_metric.CanSkipUnaryRange(OpType::LessEqual, 5));
 }
 
 TEST(MinMaxMetric, StringFunctionality) {
@@ -986,26 +920,13 @@ TEST(MinMaxMetric, Serialization) {
     ASSERT_TRUE(str_metric2.hasValue_);
     ASSERT_FALSE(str_metric2.CanSkipUnaryRange(OpType::Equal, "vector"));
     ASSERT_TRUE(str_metric2.CanSkipUnaryRange(OpType::Equal, "apple"));
-}
 
-TEST(MinMaxMetric, EdgeCases) {
     // Empty data
     MinMaxFieldChunkMetric<int64_t> empty_metric("");
     ASSERT_FALSE(empty_metric.hasValue_);
     ASSERT_FALSE(empty_metric.CanSkipUnaryRange(OpType::Equal, 10));
     ASSERT_FALSE(empty_metric.CanSkipIn({10, 20}));
     ASSERT_FALSE(empty_metric.CanSkipBinaryRange(10, 20, true, true));
-
-    // Single value data
-    MetricsInfo<int64_t> info;
-    info.min_ = 5;
-    info.max_ = 5;
-    MinMaxFieldChunkMetric<int64_t> single_val_metric(info);
-    ASSERT_TRUE(single_val_metric.hasValue_);
-    ASSERT_FALSE(single_val_metric.CanSkipUnaryRange(OpType::Equal, 5));
-    ASSERT_TRUE(single_val_metric.CanSkipUnaryRange(OpType::Equal, 6));
-    ASSERT_TRUE(single_val_metric.CanSkipUnaryRange(OpType::LessThan, 5));
-    ASSERT_FALSE(single_val_metric.CanSkipUnaryRange(OpType::LessEqual, 5));
 }
 
 TEST(SetMetric, IntegerFunctionality) {
@@ -1022,6 +943,13 @@ TEST(SetMetric, IntegerFunctionality) {
     ASSERT_FALSE(metric.CanSkipIn({10, 15}));
     ASSERT_TRUE(metric.CanSkipIn({15, 25}));
     ASSERT_FALSE(metric.CanSkipIn({}));
+
+    // Empty MetricsInfo
+    MetricsInfo<int64_t> empty_info;
+    SetFieldChunkMetric<int64_t> metric_from_empty_info(empty_info);
+    ASSERT_TRUE(metric_from_empty_info.hasValue_);
+    ASSERT_TRUE(metric_from_empty_info.CanSkipEqual(10));
+    ASSERT_TRUE(metric_from_empty_info.CanSkipIn({10, 20}));
 }
 
 TEST(SetMetric, StringFunctionality) {
@@ -1101,9 +1029,7 @@ TEST(SetMetric, Serialization) {
     ASSERT_TRUE(deserialized_bool.hasValue_);
     ASSERT_FALSE(deserialized_bool.CanSkipEqual(true));
     ASSERT_TRUE(deserialized_bool.CanSkipEqual(false));
-}
 
-TEST(SetMetric, EdgeCases) {
     // Empty data for deserialization
     SetFieldChunkMetric<int64_t> empty_metric_int("");
     ASSERT_FALSE(empty_metric_int.hasValue_);
@@ -1111,13 +1037,6 @@ TEST(SetMetric, EdgeCases) {
     ASSERT_FALSE(empty_metric_str.hasValue_);
     SetFieldChunkMetric<bool> empty_metric_bool("");
     ASSERT_FALSE(empty_metric_bool.hasValue_);
-
-    // Empty MetricsInfo
-    MetricsInfo<int64_t> empty_info;
-    SetFieldChunkMetric<int64_t> metric_from_empty_info(empty_info);
-    ASSERT_TRUE(metric_from_empty_info.hasValue_);
-    ASSERT_TRUE(metric_from_empty_info.CanSkipEqual(10));
-    ASSERT_TRUE(metric_from_empty_info.CanSkipIn({10, 20}));
 }
 
 TEST(BloomFilterMetric, IntegerFunctionality) {
@@ -1169,6 +1088,13 @@ TEST(BloomFilterMetric, StringFunctionality) {
     // Test CanSkipIn
     ASSERT_TRUE(metric.CanSkipIn({"grape", "orange"}));
     ASSERT_FALSE(metric.CanSkipIn({"apple", "grape"}));
+
+    // Empty MetricsInfo
+    MetricsInfo<int64_t> empty_info;
+    BloomFilterFieldChunkMetric<int64_t> metric_from_empty_info(empty_info);
+    ASSERT_FALSE(metric_from_empty_info.hasValue_);
+    ASSERT_FALSE(metric_from_empty_info.CanSkipEqual(10));
+    ASSERT_FALSE(metric_from_empty_info.CanSkipIn({10, 20}));
 }
 
 TEST(BloomFilterMetric, Serialization) {
@@ -1195,21 +1121,12 @@ TEST(BloomFilterMetric, Serialization) {
     ASSERT_TRUE(deserialized_str.hasValue_);
     ASSERT_FALSE(deserialized_str.CanSkipEqual("a"));
     ASSERT_TRUE(deserialized_str.CanSkipEqual("d"));
-}
 
-TEST(BloomFilterMetric, EdgeCases) {
     // Empty data for deserialization
     BloomFilterFieldChunkMetric<int64_t> empty_metric_int("");
     ASSERT_FALSE(empty_metric_int.hasValue_);
     ASSERT_FALSE(empty_metric_int.CanSkipEqual(10));
     ASSERT_FALSE(empty_metric_int.CanSkipIn({10, 20}));
-
-    // Empty MetricsInfo
-    MetricsInfo<int64_t> empty_info;
-    BloomFilterFieldChunkMetric<int64_t> metric_from_empty_info(empty_info);
-    ASSERT_FALSE(metric_from_empty_info.hasValue_);
-    ASSERT_FALSE(metric_from_empty_info.CanSkipEqual(10));
-    ASSERT_FALSE(metric_from_empty_info.CanSkipIn({10, 20}));
 }
 
 TEST(NgramFilterMetric, Functionality) {
@@ -1222,21 +1139,21 @@ TEST(NgramFilterMetric, Functionality) {
 
     ASSERT_TRUE(metric.hasValue_);
 
-    // 1. Pattern contains an n-gram that is definitely not in the data. Should skip.
-    // "xyz" is not in the filter.
+    // Pattern contains an n-gram that is definitely not in the data. Should skip.
     ASSERT_TRUE(metric.CanSkipSubstringMatch(std::string("xyzabc")));
-    // "dat" is not in the filter.
     ASSERT_TRUE(metric.CanSkipSubstringMatch(std::string("database")));
-
-    // 2. Pattern is shorter than NGRAM_SIZE. Cannot skip.
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("ve")));
-
-    // 3. All of the pattern's n-grams might exist in the data. Cannot skip.
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("mil")));
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("vec")));
     ASSERT_FALSE(metric.CanSkipSubstringMatch(std::string("vector")));
-    // "vus" and "vec" are in the filter.
     ASSERT_TRUE(metric.CanSkipSubstringMatch(std::string("vusvec")));
+
+    // Empty MetricsInfo
+    MetricsInfo<std::string> empty_info;
+    NgramFilterFieldChunkMetric metric_from_empty_info(empty_info);
+    ASSERT_FALSE(metric_from_empty_info.hasValue_);
+    ASSERT_FALSE(
+        metric_from_empty_info.CanSkipSubstringMatch(std::string("abc")));
 }
 
 TEST(NgramFilterMetric, Serialization) {
@@ -1250,20 +1167,11 @@ TEST(NgramFilterMetric, Serialization) {
     ASSERT_FALSE(metric2.CanSkipSubstringMatch(std::string("abc")));
     ASSERT_FALSE(metric2.CanSkipSubstringMatch(std::string("bcd")));
     ASSERT_TRUE(metric2.CanSkipSubstringMatch(std::string("efg")));
-}
 
-TEST(NgramFilterMetric, EdgeCases) {
     // Empty data for deserialization
     NgramFilterFieldChunkMetric empty_metric("");
     ASSERT_FALSE(empty_metric.hasValue_);
     ASSERT_FALSE(empty_metric.CanSkipSubstringMatch(std::string("abc")));
-
-    // Empty MetricsInfo
-    MetricsInfo<std::string> empty_info;
-    NgramFilterFieldChunkMetric metric_from_empty_info(empty_info);
-    ASSERT_FALSE(metric_from_empty_info.hasValue_);
-    ASSERT_FALSE(
-        metric_from_empty_info.CanSkipSubstringMatch(std::string("abc")));
 }
 
 }  // namespace milvus

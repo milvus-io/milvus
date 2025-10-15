@@ -37,10 +37,6 @@
 #include "common/Span.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "milvus-storage/common/metadata.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "index/SkipIndex.h"
 
 namespace milvus {
 
@@ -170,46 +166,6 @@ class ChunkedColumnGroup {
             memory_size += size;
         }
         return memory_size;
-    }
-
-    std::vector<std::unique_ptr<ChunkSkipIndex>>
-    GetSkipIndex(const std::vector<std::string>& insert_files,
-                 const std::shared_ptr<arrow::Schema>& arrow_schema,
-                 milvus_storage::ArrowFileSystemPtr fs) {
-        auto meta =
-            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
-
-        std::vector<std::unique_ptr<ChunkSkipIndex>> field_chunk_skipindex;
-        field_chunk_skipindex.reserve(meta->num_rows_until_chunk_.size());
-
-        for (const auto& insert_file : insert_files) {
-            auto file_reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(
-                    fs, insert_file, arrow_schema);
-
-            auto skip_index_metadata =
-                file_reader->file_metadata()->GetMetadataVector<ChunkSkipIndex>(
-                    ChunkSkipIndex::KEY);
-
-            auto row_group_num = file_reader->file_metadata()
-                                     ->GetRowGroupMetadataVector()
-                                     .size();
-
-            if (skip_index_metadata.size() != row_group_num) {
-                return {};
-            }
-            field_chunk_skipindex.insert(
-                field_chunk_skipindex.end(),
-                std::make_move_iterator(skip_index_metadata.begin()),
-                std::make_move_iterator(skip_index_metadata.end()));
-
-            auto status = file_reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get skipindex from {}",
-                       insert_file);
-        }
-        return field_chunk_skipindex;
     }
 
  protected:

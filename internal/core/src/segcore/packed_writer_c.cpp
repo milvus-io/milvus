@@ -129,9 +129,12 @@ NewPackedWriter(struct ArrowSchema* schema,
             writer_properties);
         AssertInfo(writer, "[StorageV2] writer pointer is null");
         if (enableSkipindex) {
-            writer->AddMetadataBuilder(milvus::ChunkSkipIndex::KEY, []() {
-                return std::make_unique<milvus::ChunkSkipIndexBuilder>();
-            });
+            auto status =
+                writer->AddMetadataBuilder(milvus::ChunkSkipIndex::KEY, []() {
+                    return std::make_unique<milvus::ChunkSkipIndexBuilder>();
+                });
+            AssertInfo(status.ok(),
+                       "[StorageV2] failed to add metadata builder");
         }
         *c_packed_writer = writer.release();
         return milvus::SuccessCStatus();
