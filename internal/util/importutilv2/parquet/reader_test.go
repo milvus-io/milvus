@@ -31,6 +31,9 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -216,6 +219,17 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 					default:
 						s.Fail("unsupported array element type")
 					}
+				} else if fieldDataType == schemapb.DataType_Geometry && expect != nil {
+					expectData := expect.([]byte)
+					geomT, err := wkt.Unmarshal(string(expectData))
+					if err != nil {
+						s.Fail("unmarshal wkt failed")
+					}
+					wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+					if err != nil {
+						s.Fail("marshal wkb failed")
+					}
+					s.Equal(wkbValue, actual.([]byte))
 				} else {
 					s.Equal(expect, actual)
 				}
@@ -529,9 +543,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_String, schemapb.DataType_None, false, 0)
 	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, false, 0)
 	s.run(schemapb.DataType_JSON, schemapb.DataType_None, false, 0)
-	// skip, use insert data to generate parquet file
-	// geometry should insert wkt string
-	// s.run(schemapb.DataType_Geometry, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Geometry, schemapb.DataType_None, false, 0)
 
 	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, false, 0)
 	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, false, 0)
@@ -570,9 +582,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 100)
 	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 100)
 	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 100)
-	// skip, use insert data to generate parquet file
-	// geometry should insert wkt string
-	// s.run(schemapb.DataType_Geometry, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Geometry, schemapb.DataType_None, true, 100)
 
 	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 100)
 	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 100)
