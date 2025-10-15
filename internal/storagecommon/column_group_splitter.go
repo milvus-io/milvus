@@ -51,6 +51,25 @@ func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, p
 	return split.outputGroups
 }
 
+// DefaultPolicies returns the default column splitting policies for storage v2.
+// Policies are applied sequentially in a chain-of-responsibility pattern where each policy
+// processes only unprocessed fields from previous steps.
+//
+// Application order (each step processes remaining fields):
+//
+//  1. System Column Policy (conditional, enabled=true by default)
+//     - Groups: system fields (ID<100), PK, partition key, clustering key
+//     - Config: Stv2SplitSystemColumn.enabled
+//
+//  2. Average Size Policy (conditional, enabled=false by default)
+//     - Groups: columns with avg size ≥ threshold (1024 bytes default)
+//     - Config: Stv2SplitByAvgSize.enabled, threshold=Stv2SplitAvgSizeThreshold
+//
+//  3. Selected DataType Policy (always applied)
+//     - Groups: each vector and text field gets its own group
+//
+//  4. Remanent Short Policy (always applied)
+//     - Groups: all remaining scalar fields bundled together
 func DefaultPolicies() []ColumnGroupSplitPolicy {
 	paramtable.Init()
 	result := make([]ColumnGroupSplitPolicy, 0, 4)
