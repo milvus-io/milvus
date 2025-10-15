@@ -57,6 +57,7 @@ ReduceHelper::Initialize() {
 void
 ReduceHelper::Reduce() {
     FillPrimaryKey();
+    SortEqualScoresByPks();
     ReduceResultData();
     RefreshSearchResults();
     FillEntryData();
@@ -149,6 +150,67 @@ ReduceHelper::FillPrimaryKey() {
     }
     search_results_.resize(valid_index);
     num_segments_ = search_results_.size();
+}
+
+void
+ReduceHelper::SortEqualScoresByPks() {
+    tracer::AutoSpan span("ReduceHelper::SortEqualScoresByPks",
+                          tracer::GetRootSpan());
+    for (auto& search_result : search_results_) {
+        for (auto i = 0; i < search_result->total_nq_; i++) {
+            auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
+            auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
+            SortEqualScoresOneNQ(nq_begin, nq_end, search_result);
+        }
+    }
+}
+
+void
+ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
+                                   size_t nq_end,
+                                   SearchResult* search_result) {
+    if (nq_end - nq_begin <= 1)
+        return;
+
+    size_t start = nq_begin;
+    while (start < nq_end) {
+        // find scope with same scores
+        size_t end = start + 1;
+        while (end < nq_end &&
+               std::fabs(search_result->distances_[end] -
+                         search_result->distances_[start]) < 0.0000000119) {
+            ++end;
+        }
+
+        if (end - start > 1) {
+            std::vector<size_t> indices(end - start);
+            std::iota(indices.begin(), indices.end(), 0);
+
+            std::sort(indices.begin(),
+                      indices.end(),
+                      [&search_result, start](size_t i, size_t j) {
+                          return search_result->primary_keys_[start + i] <
+                                 search_result->primary_keys_[start + j];
+                      });
+
+            std::vector<PkType> temp_pks(end - start);
+            std::vector<int64_t> temp_offsets(end - start);
+
+            for (size_t i = 0; i < indices.size(); ++i) {
+                temp_pks[i] = search_result->primary_keys_[start + indices[i]];
+                temp_offsets[i] =
+                    search_result->seg_offsets_[start + indices[i]];
+            }
+
+            for (size_t i = 0; i < indices.size(); ++i) {
+                search_result->primary_keys_[start + i] =
+                    std::move(temp_pks[i]);
+                search_result->seg_offsets_[start + i] = temp_offsets[i];
+            }
+        }
+
+        start = end;
+    }
 }
 
 void
