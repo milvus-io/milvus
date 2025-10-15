@@ -566,7 +566,8 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				stoppingBalanceCalled = true
 				return 1, 0 // Return some tasks generated
 			}).Build()
@@ -610,7 +611,8 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				processQueueCalled = true
 				return 0, 0
 			}).Build()
@@ -660,7 +662,8 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				// Verify this is stopping balance by checking the function pointers
 				stoppingBalanceCalled = true
 				return 1, 0 // Generate stopping balance tasks
@@ -707,7 +710,8 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				callCount++
 				if callCount == 1 {
 					// First call: stopping balance generates no tasks
@@ -767,7 +771,8 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1 // Generate normal balance tasks
 			}).Build()
@@ -816,7 +821,8 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
 			}).Build()
@@ -863,7 +869,8 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 			func(ctx context.Context,
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig) (int, int) {
+				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
 			}).Build()
