@@ -67,7 +67,7 @@ image:
     tag: PR-35426-20240812-46dadb120
 kafka:
   nodeSelector:
-    jenkins-e2e-arm: "true"
+    jenkins-milvus-ci-e2e-service: "true"
   enabled: true
   metrics:
     jmx:
@@ -78,11 +78,12 @@ kafka:
       enabled: true
   exporter:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
   resources:
     requests:
       cpu: "0.2"
@@ -91,12 +92,13 @@ kafka:
       cpu: "0.5"
       memory: 4Gi
   tolerations:
-  - effect: NoSchedule
-    key: jenkins-e2e-arm
-    operator: Exists
+  - key: "jenkins-e2e-amd"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
   zookeeper:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     replicaCount: 1
     resources:
       requests:
@@ -106,9 +108,10 @@ kafka:
         cpu: "0.5"
         memory: 2Gi
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
 minio:
   nodeSelector:
     jenkins-e2e-arm: "true"

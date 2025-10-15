@@ -120,7 +120,7 @@ pulsarv3:
   enabled: true
   bookkeeper:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     resources:
       requests:
         cpu: "0.1"
@@ -134,12 +134,13 @@ pulsarv3:
         -Xmx512m
         -XX:MaxDirectMemorySize=1024m
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
   broker:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     replicaCount: 2
     resources:
       requests:
@@ -149,14 +150,15 @@ pulsarv3:
         cpu: "0.5"
         memory: 4Gi
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
   components:
     autorecovery: false
   proxy:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     resources:
       requests:
         cpu: "0.1"
@@ -165,9 +167,10 @@ pulsarv3:
         cpu: "0.5"
         memory: 2Gi
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
     wsResources:
       requests:
         cpu: "0.1"
@@ -177,7 +180,7 @@ pulsarv3:
         memory: 2Gi
   zookeeper:
     nodeSelector:
-      jenkins-e2e-arm: "true"
+      jenkins-milvus-ci-e2e-service: "true"
     replicaCount: 1
     resources:
       requests:
@@ -187,9 +190,10 @@ pulsarv3:
         cpu: "0.5"
         memory: 2Gi
     tolerations:
-    - effect: NoSchedule
-      key: jenkins-e2e-arm
-      operator: Exists
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
 tolerations:
 - effect: NoSchedule
   key: jenkins-e2e-arm
