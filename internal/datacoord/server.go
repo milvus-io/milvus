@@ -561,57 +561,24 @@ func (s *Server) initServiceDiscovery() error {
 		return err
 	}
 	log.Info("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
-
-	datanodes := make([]*session.NodeInfo, 0, len(sessions))
-	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
+	err = s.rewatchDataNodes(sessions)
 	if err != nil {
-		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
-	}
-
-	for _, s := range sessions {
-		info := &session.NodeInfo{
-			NodeID:  s.ServerID,
-			Address: s.Address,
-		}
-
-		if s.Version.LTE(legacyVersion) {
-			info.IsLegacy = true
-		}
-
-		datanodes = append(datanodes, info)
-	}
-
-	log.Info("DataCoord Cluster Manager start up")
-	if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
-		log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
+		log.Warn("DataCoord failed to rewatch datanode", zap.Error(err))
 		return err
 	}
-	log.Info("DataCoord Cluster Manager start up successfully")
-
-	// TODO implement rewatch logic
-	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
+	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
 
 	inSessions, inRevision, err := s.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryCoord session failed", zap.Error(err))
 		return err
 	}
-	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-		if err = s.indexNodeManager.AddNode(Params.DataCoordCfg.IndexNodeID.GetAsInt64(), Params.DataCoordCfg.IndexNodeAddress.GetValue()); err != nil {
-			log.Error("add indexNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
-				zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
-			return err
-		}
-		log.Info("add indexNode success", zap.String("IndexNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
-			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()))
-	} else {
-		for _, session := range inSessions {
-			if err := s.indexNodeManager.AddNode(session.ServerID, session.Address); err != nil {
-				return err
-			}
-		}
+	err = s.rewatchIndexNodes(inSessions)
+	if err != nil {
+		log.Warn("DataCoord failed to rewatch indexnode", zap.Error(err))
+		return err
 	}
-	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, nil)
+	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, s.rewatchIndexNodes)
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
@@ -619,9 +586,80 @@ func (s *Server) initServiceDiscovery() error {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
 		return err
 	}
-	s.indexEngineVersionManager.Startup(qnSessions)
-	s.qnEventCh = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, nil)
+	s.rewatchQueryNodes(qnSessions)
+	s.qnEventCh = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, s.rewatchQueryNodes)
 
+	return nil
+}
+
+// rewatchQueryNodes is used to rewatch query nodes when datacoord is started or reconnected to etcd
+// Note: may apply same node multiple times, so rewatchQueryNodes must be idempotent
+func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) error {
+	s.indexEngineVersionManager.Startup(sessions)
+	return nil
+}
+
+func (s *Server) rewatchIndexNodes(sessions map[string]*sessionutil.Session) error {
+	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+		nodes := make([]*session.NodeInfo, 0, 1)
+		nodes = append(nodes, &session.NodeInfo{
+			NodeID:  Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
+			Address: Params.DataCoordCfg.IndexNodeAddress.GetValue(),
+		})
+		if err := s.indexNodeManager.Startup(nodes); err != nil {
+			log.Error("add indexNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
+				zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
+			return err
+		}
+		log.Info("add indexNode success", zap.String("IndexNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
+			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()))
+	} else {
+		nodes := make([]*session.NodeInfo, 0, len(sessions))
+		for _, s := range sessions {
+			nodes = append(nodes, &session.NodeInfo{
+				NodeID:  s.ServerID,
+				Address: s.Address,
+			})
+		}
+		s.indexNodeManager.Startup(nodes)
+	}
+	return nil
+}
+
+// rewatchDataNodes is used to rewatch data nodes when datacoord is started or reconnected to etcd
+// Note: may apply same node multiple times, so rewatchDataNodes must be idempotent
+func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) error {
+	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
+	if err != nil {
+		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
+		return err
+	}
+
+	datanodes := make([]*session.NodeInfo, 0, len(sessions))
+	for _, ss := range sessions {
+		info := &session.NodeInfo{
+			NodeID:  ss.ServerID,
+			Address: ss.Address,
+		}
+
+		if ss.Version.LTE(legacyVersion) {
+			info.IsLegacy = true
+		}
+
+		datanodes = append(datanodes, info)
+	}
+
+	// if err := s.nodeManager.Startup(s.ctx, datanodes); err != nil {
+	// 	log.Warn("DataCoord failed to add datanode", zap.Error(err))
+	// 	return err
+	// }
+
+	log.Info("DataCoord Cluster Manager start up")
+	if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
+		log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
+		return err
+	}
+	log.Info("DataCoord Cluster Manager start up successfully")
 	return nil
 }
 
