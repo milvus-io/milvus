@@ -2376,7 +2376,6 @@ class SealedVectorArrayTest
 
 TEST_P(SealedVectorArrayTest, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
-
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", element_type, dim, metric_type);

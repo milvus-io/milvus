@@ -117,10 +117,17 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
                    "mmap directory path is empty");
         auto filepath = std::filesystem::path(index_load_info_.mmap_dir_path) /
                         "index_files" / index_load_info_.index_id /
-                        index_load_info_.segment_id / index_load_info_.field_id;
-
+                        index_load_info_.segment_id /
+                        index_load_info_.field_id / "index";
+        auto embedding_list_meta_path =
+            std::filesystem::path(index_load_info_.mmap_dir_path) /
+            "index_files" / index_load_info_.index_id /
+            index_load_info_.segment_id / index_load_info_.field_id /
+            index::EMB_LIST_META_FILE_NAME;
         config_[milvus::index::ENABLE_MMAP] = "true";
         config_[milvus::index::MMAP_FILE_PATH] = filepath.string();
+        config_[milvus::index::EMB_LIST_META_PATH] =
+            embedding_list_meta_path.string();
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }
