@@ -228,13 +228,10 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
 	var err error
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
-		if err != nil {
-			log.Warn("get local used size failed")
-			return err
-		}
 
+	// Ignore the error here, this param will only be used for diskann and aisaq
+	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
 		if err != nil {
 			log.Warn("failed to fill disk index params", zap.Error(err))
