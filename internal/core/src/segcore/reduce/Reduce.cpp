@@ -184,44 +184,45 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
 
         if (end - start > 1) {
             // Create lightweight index array for sorting
-              std::vector<size_t> indices(end - start);
-              std::iota(indices.begin(), indices.end(), 0);
+            std::vector<size_t> indices(end - start);
+            std::iota(indices.begin(), indices.end(), 0);
 
-              // Sort indices by comparing primary keys
-              std::sort(indices.begin(),
-                        indices.end(),
-                        [&search_result, start](size_t i, size_t j) {
-                            return search_result->primary_keys_[start + i] <
-                                   search_result->primary_keys_[start + j];
-                        });
+            // Sort indices by comparing primary keys
+            std::sort(indices.begin(),
+                      indices.end(),
+                      [&search_result, start](size_t i, size_t j) {
+                          return search_result->primary_keys_[start + i] <
+                                 search_result->primary_keys_[start + j];
+                      });
 
-              // Apply in-place cyclic permutation
-              for (size_t i = 0; i < indices.size();) {
-                  size_t target = indices[i];
-                  if (target == i) {
-                      ++i;
-                      continue;
-                  }
+            // Apply in-place cyclic permutation
+            for (size_t i = 0; i < indices.size();) {
+                size_t target = indices[i];
+                if (target == i) {
+                    ++i;
+                    continue;
+                }
 
-                  // Start of a new cycle
-                  PkType temp_pk = std::move(search_result->primary_keys_[start + i]);
-                  int64_t temp_offset = search_result->seg_offsets_[start + i];
+                // Start of a new cycle
+                PkType temp_pk =
+                    std::move(search_result->primary_keys_[start + i]);
+                int64_t temp_offset = search_result->seg_offsets_[start + i];
 
-                  size_t curr = i;
-                  while (indices[curr] != i) {
-                      size_t next = indices[curr];
-                      search_result->primary_keys_[start + curr] =
-                          std::move(search_result->primary_keys_[start + next]);
-                      search_result->seg_offsets_[start + curr] =
-                          search_result->seg_offsets_[start + next];
-                      indices[curr] = curr;  // Mark as processed
-                      curr = next;
-                  }
+                size_t curr = i;
+                while (indices[curr] != i) {
+                    size_t next = indices[curr];
+                    search_result->primary_keys_[start + curr] =
+                        std::move(search_result->primary_keys_[start + next]);
+                    search_result->seg_offsets_[start + curr] =
+                        search_result->seg_offsets_[start + next];
+                    indices[curr] = curr;  // Mark as processed
+                    curr = next;
+                }
 
-                  search_result->primary_keys_[start + curr] = std::move(temp_pk);
-                  search_result->seg_offsets_[start + curr] = temp_offset;
-                  indices[curr] = curr;
-              }
+                search_result->primary_keys_[start + curr] = std::move(temp_pk);
+                search_result->seg_offsets_[start + curr] = temp_offset;
+                indices[curr] = curr;
+            }
         }
 
         start = end;
