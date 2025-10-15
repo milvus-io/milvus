@@ -15,7 +15,7 @@ type DDLCallbacks struct {
 }
 
 func (c *DDLCallbacks) registerResourceGroupCallbacks() {
-	registry.RegisterAlterResourceGroupV2AckCallback(c.putResourceGroupV2AckCallback)
+	registry.RegisterAlterResourceGroupV2AckCallback(c.alterResourceGroupV2AckCallback)
 	registry.RegisterDropResourceGroupV2AckCallback(c.dropResourceGroupV2AckCallback)
 }
 
