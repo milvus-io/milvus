@@ -38,6 +38,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::segcore {
 
@@ -127,8 +128,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CreateTextIndex(FieldId field_id) override;
 
     void
-    LoadTextIndex(FieldId field_id,
-                  std::unique_ptr<index::TextMatchIndex> index) override;
+    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) override;
 
     void
     LoadJsonStats(FieldId field_id,

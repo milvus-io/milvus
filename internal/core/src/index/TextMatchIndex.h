@@ -14,6 +14,7 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
+#include "cachinglayer/Manager.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/IndexStats.h"
 
@@ -96,4 +97,40 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
 };
+
+class TextMatchIndexHolder {
+ public:
+    explicit TextMatchIndexHolder(
+        std::unique_ptr<milvus::index::TextMatchIndex> index, bool mmap_enabled)
+        : index_(std::move(index)), loaded_size_([&]() {
+              if (!index_) {
+                  return milvus::cachinglayer::ResourceUsage(0, 0);
+              }
+              if (mmap_enabled) {
+                  return milvus::cachinglayer::ResourceUsage(
+                      0, index_->ByteSize());
+              } else {
+                  return milvus::cachinglayer::ResourceUsage(index_->ByteSize(),
+                                                             0);
+              }
+          }()) {
+        milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            loaded_size_);
+    }
+
+    ~TextMatchIndexHolder() {
+        milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            loaded_size_);
+    }
+
+    milvus::index::TextMatchIndex*
+    get() const {
+        return index_.get();
+    }
+
+ private:
+    std::unique_ptr<milvus::index::TextMatchIndex> index_;
+    const milvus::cachinglayer::ResourceUsage loaded_size_;
+};
+
 }  // namespace milvus::index
