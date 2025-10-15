@@ -44,6 +44,14 @@ func (p *knowhereConfig) init(base *BaseTable) {
 				return "Size of the candidate list during building graph"
 			case "DISKANN.search.beam_width_ratio":
 				return "Ratio between the maximum number of IO requests per search iteration and CPU number"
+			case "AISAQ.build.max_degree":
+				return "Maximum degree of the Vamana graph"
+			case "AISAQ.build.pq_code_budget_gb_ratio":
+				return "Size limit on the PQ code (compared with raw data)"
+			case "AISAQ.build.search_list_size":
+				return "Size of the candidate list during building graph"
+			case "AISAQ.search.beam_width_ratio":
+				return "Ratio between the maximum number of IO requests per search iteration and CPU number"
 			default:
 				return ""
 			}

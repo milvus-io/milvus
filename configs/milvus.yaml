@@ -1379,6 +1379,13 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  AISAQ:
+    build:
+      max_degree: 56 # Maximum degree of the Vamana graph
+      pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
+      search_list_size: 100 # Size of the candidate list during building graph
+    search:
+      beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number
   DISKANN:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph
