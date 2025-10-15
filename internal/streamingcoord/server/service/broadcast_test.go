@@ -19,6 +19,8 @@ import (
 )
 
 func TestBroadcastService(t *testing.T) {
+	broadcast.ResetBroadcaster()
+
 	fb := syncutil.NewFuture[broadcaster.Broadcaster]()
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
 	mb := mock_broadcaster.NewMockBroadcaster(t)
