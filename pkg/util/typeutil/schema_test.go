@@ -4589,3 +4589,138 @@ func TestGetNeedProcessFunctions(t *testing.T) {
 		assert.Equal(t, f[0].Name, "test_func")
 	}
 }
+
+// Test UpdateFieldData for Geometry and Timestamptz types
+func TestUpdateFieldData_GeometryAndTimestamptz(t *testing.T) {
+	t.Run("update timestamptz field", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Timestamptz,
+				FieldName: "timestamp_field",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimestamptzData{
+							TimestamptzData: &schemapb.TimestamptzArray{
+								Data: []int64{1000, 2000, 3000},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Timestamptz,
+				FieldName: "timestamp_field",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimestamptzData{
+							TimestamptzData: &schemapb.TimestamptzArray{
+								Data: []int64{9999, 8888, 7777},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		assert.NoError(t, err)
+
+		timestampData := baseData[0].GetScalars().GetTimestamptzData().GetData()
+		assert.Equal(t, int64(1000), timestampData[0])
+		assert.Equal(t, int64(8888), timestampData[1])
+		assert.Equal(t, int64(3000), timestampData[2])
+	})
+
+	t.Run("update geometry WKT field", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "geometry_field",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryWktData{
+							GeometryWktData: &schemapb.GeometryWktArray{
+								Data: []string{"POINT (0 0)", "POINT (1 1)", "POINT (2 2)"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "geometry_field",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryWktData{
+							GeometryWktData: &schemapb.GeometryWktArray{
+								Data: []string{"POINT (10 10)", "POINT (11 11)", "POINT (12 12)"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		assert.NoError(t, err)
+
+		geoData := baseData[0].GetScalars().GetGeometryWktData().GetData()
+		assert.Equal(t, "POINT (0 0)", geoData[0])
+		assert.Equal(t, "POINT (11 11)", geoData[1])
+		assert.Equal(t, "POINT (2 2)", geoData[2])
+	})
+
+	t.Run("update geometry WKB field", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "geometry_field",
+				FieldId:   102,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
+								Data: [][]byte{{0x01, 0x02}, {0x03, 0x04}, {0x05, 0x06}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "geometry_field",
+				FieldId:   102,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
+								Data: [][]byte{{0xFF, 0xFE}, {0xFD, 0xFC}, {0xFB, 0xFA}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 2, 2)
+		assert.NoError(t, err)
+
+		geoData := baseData[0].GetScalars().GetGeometryData().GetData()
+		assert.Equal(t, []byte{0x01, 0x02}, geoData[0])
+		assert.Equal(t, []byte{0x03, 0x04}, geoData[1])
+		assert.Equal(t, []byte{0xFB, 0xFA}, geoData[2])
+	})
+}

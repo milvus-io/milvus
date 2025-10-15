@@ -1273,6 +1273,27 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 						baseScalar.GetJsonData().Data[baseIdx] = updateData.Data[updateIdx]
 					}
 				}
+			case *schemapb.ScalarField_TimestamptzData:
+				updateData := updateScalar.GetTimestamptzData()
+				baseData := baseScalar.GetTimestamptzData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_GeometryData:
+				updateData := updateScalar.GetGeometryData()
+				baseData := baseScalar.GetGeometryData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_GeometryWktData:
+				updateData := updateScalar.GetGeometryWktData()
+				baseData := baseScalar.GetGeometryWktData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
 			default:
 				log.Error("Not supported scalar field type", zap.String("field type", baseFieldData.Type.String()))
 				return fmt.Errorf("unsupported scalar field type: %s", baseFieldData.Type.String())

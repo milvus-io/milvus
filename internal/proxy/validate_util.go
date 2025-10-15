@@ -484,11 +484,15 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			}
 
 		case *schemapb.ScalarField_GeometryData:
-			if fieldSchema.GetNullable() {
-				sd.GeometryData.Data, err = fillWithNullValueImpl(sd.GeometryData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.GeometryData.Data, err = fillWithNullValueImpl(sd.GeometryData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_GeometryWktData:
+			sd.GeometryWktData.Data, err = fillWithNullValueImpl(sd.GeometryWktData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
