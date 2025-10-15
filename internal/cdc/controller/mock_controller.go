@@ -18,8 +18,21 @@ func (_m *MockController) EXPECT() *MockController_Expecter {
 }
 
 // Start provides a mock function with no fields
-func (_m *MockController) Start() {
-	_m.Called()
+func (_m *MockController) Start() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // MockController_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
@@ -39,13 +52,13 @@ func (_c *MockController_Start_Call) Run(run func()) *MockController_Start_Call 
 	return _c
 }
 
-func (_c *MockController_Start_Call) Return() *MockController_Start_Call {
-	_c.Call.Return()
+func (_c *MockController_Start_Call) Return(_a0 error) *MockController_Start_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockController_Start_Call) RunAndReturn(run func()) *MockController_Start_Call {
-	_c.Run(run)
+func (_c *MockController_Start_Call) RunAndReturn(run func() error) *MockController_Start_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
