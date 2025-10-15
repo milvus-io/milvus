@@ -76,6 +76,13 @@ kafka:
       enabled: true
     serviceMonitor:
       enabled: true
+  exporter:
+    nodeSelector:
+      jenkins-e2e-arm: "true"
+    tolerations:
+    - effect: NoSchedule
+      key: jenkins-e2e-arm
+      operator: Exists
   resources:
     requests:
       cpu: "0.2"
@@ -88,6 +95,8 @@ kafka:
     key: jenkins-e2e-arm
     operator: Exists
   zookeeper:
+    nodeSelector:
+      jenkins-e2e-arm: "true"
     replicaCount: 1
     resources:
       requests:
@@ -96,6 +105,10 @@ kafka:
       limits:
         cpu: "0.5"
         memory: 2Gi
+    tolerations:
+    - effect: NoSchedule
+      key: jenkins-e2e-arm
+      operator: Exists
 minio:
   nodeSelector:
     jenkins-e2e-arm: "true"
