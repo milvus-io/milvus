@@ -496,6 +496,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
+		assert.Equal(t, true, Params.EnableSparseFilterInQuery.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 

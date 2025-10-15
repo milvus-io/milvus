@@ -78,7 +78,7 @@ type Loader interface {
 	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
-	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
+	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadBM25Stats loads BM25 statslog for RemoteSegment
 	LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error)
@@ -357,6 +357,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
+		if !segment.BloomFilterExist() {
+			log.Debug("BloomFilterExist", zap.Int64("segid", segment.ID()))
+			bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+			if err != nil {
+				return errors.Wrap(err, "At LoadBloomFilter")
+			}
+			segment.SetBloomFilter(bfs)
+		}
+
 		loader.manager.Segment.Put(ctx, segmentType, segment)
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
@@ -602,7 +611,42 @@ func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int
 	return loadedStats, nil
 }
 
-func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+// load single bloom filter
+func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("segmentIDs", loadInfo.GetSegmentID()))
+
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		log.Warn("failed to get collection while loading segment", zap.Error(err))
+		return nil, err
+	}
+	pkField := GetPkField(collection.Schema())
+
+	log.Info("start loading remote...", zap.Int("segmentNum", 1))
+
+	partitionID := loadInfo.PartitionID
+	segmentID := loadInfo.SegmentID
+	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
+
+	log.Info("loading bloom filter for remote...")
+	pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
+	err := loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, logType)
+	if err != nil {
+		log.Warn("load remote segment bloom filter failed",
+			zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	return bfs, nil
+}
+
+func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("segmentIDs", lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
