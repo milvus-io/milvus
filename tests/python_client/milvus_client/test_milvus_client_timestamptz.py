@@ -1024,3 +1024,4 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
                                   nullable=False, check_task=CheckTasks.err_res, check_items=error)
         
         self.drop_collection(client, collection_name)
+        
