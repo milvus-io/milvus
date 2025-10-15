@@ -157,7 +157,7 @@ ReduceHelper::SortEqualScoresByPks() {
     tracer::AutoSpan span("ReduceHelper::SortEqualScoresByPks",
                           tracer::GetRootSpan());
     for (auto& search_result : search_results_) {
-        for (auto i = 0; i < search_result->total_nq_; i++) {
+        for (int64_t i = 0; i < search_result->total_nq_; i++) {
             auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
             auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
             SortEqualScoresOneNQ(nq_begin, nq_end, search_result);
@@ -178,7 +178,7 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
         size_t end = start + 1;
         while (end < nq_end &&
                std::fabs(search_result->distances_[end] -
-                         search_result->distances_[start]) < 0.0000000119) {
+                         search_result->distances_[start]) < EPSILON) {
             ++end;
         }
 

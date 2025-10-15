@@ -123,3 +123,6 @@ const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
 
 // VectorArray related, used for fetch metadata from Arrow schema
 const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
+
+// EPSILON value for comparing float numbers
+const float EPSILON = 0.0000000119;
