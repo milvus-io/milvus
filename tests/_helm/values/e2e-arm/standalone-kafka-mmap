@@ -72,9 +72,6 @@ kafka:
   metrics:
     jmx:
       enabled: true
-      image:
-        repository: bitnamilegacy/jmx-exporter
-        tag: 0.16.1
     kafka:
       enabled: true
     serviceMonitor:
