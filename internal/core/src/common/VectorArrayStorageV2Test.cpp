@@ -45,14 +45,13 @@
 #include "index/VectorIndex.h"
 #include "storage/Util.h"
 #include "storage/ChunkManager.h"
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "common/QueryResult.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::storage;
-
-const int64_t DIM = 4;
 
 SchemaPtr
 GenVectorArrayTestSchema() {
@@ -345,7 +344,138 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
         searchInfo.topk_ = 5;
-        searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
+        searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
+        searchInfo.search_params_ = search_conf;
+        SearchResult result;
+        milvus::OpContext op_context;
+        vec_index->Query(
+            query_dataset, searchInfo, nullptr, &op_context, result);
+        auto ref_result = SearchResultToJson(result);
+        std::cout << ref_result.dump(1) << std::endl;
+        EXPECT_EQ(result.total_nq_, 2);
+        EXPECT_EQ(result.distances_.size(), 2 * searchInfo.topk_);
+        EXPECT_EQ(op_context.storage_usage.scanned_cold_bytes, 0);
+        EXPECT_EQ(op_context.storage_usage.scanned_total_bytes, 0);
+    }
+}
+
+TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
+    ASSERT_NE(segment_, nullptr);
+    ASSERT_EQ(segment_->get_row_count(), test_data_count_ * chunk_num_);
+
+    auto vector_array_field_id = fields_["vector_array"];
+    ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
+
+    // Get the storage v2 parquet file paths that were already written in SetUp
+    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+
+    // Use the existing Arrow file system from SetUp
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    // Prepare for index building
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+
+    auto field_meta =
+        milvus::segcore::gen_field_meta(collection_id,
+                                        partition_id,
+                                        segment_id,
+                                        vector_array_field_id.get(),
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        false);
+
+    auto index_meta = gen_index_meta(
+        segment_id, vector_array_field_id.get(), index_build_id, index_version);
+
+    // Create storage config pointing to the test data location
+    auto storage_config =
+        gen_local_storage_config("/tmp/test_vector_array_for_storage_v2");
+    auto cm = CreateChunkManager(storage_config);
+
+    // Create index using storage v2 config
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM_IP;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    // Build index with storage v2 configuration
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = DIM;
+    config[INDEX_NUM_ROWS_KEY] =
+        test_data_count_ * chunk_num_;  // Important: set row count
+    config[STORAGE_VERSION_KEY] = 2;    // Use storage v2
+    config[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
+    config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
+
+    // For storage v2, we need to provide segment insert files instead of individual binlog files
+    milvus::SegmentInsertFiles segment_insert_files;
+    segment_insert_files.emplace_back(
+        paths);  // Column group with vector array field
+    config[SEGMENT_INSERT_FILES_KEY] = segment_insert_files;
+    emb_list_hnsw_index->Build(config);
+
+    auto create_index_result = emb_list_hnsw_index->Upload();
+    emb_list_hnsw_index.reset();
+    auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+
+    auto new_emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    milvus::index::VectorIndex* vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(
+            new_emb_list_hnsw_index.get());
+    // mmap load
+    {
+        auto load_conf = generate_load_conf(
+            knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::MAX_SIM_IP, 0);
+        load_conf["index_files"] = index_files;
+        load_conf["mmap_filepath"] = "mmap/test_emb_list_index";
+        load_conf["emb_list_meta_file_path"] = "mmap/test_index_meta";
+        load_conf[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    }
+    // search
+    {
+        // Each row has 3 vectors, so total count should be rows * 3
+        EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 3);
+        EXPECT_EQ(vec_index->GetDim(), DIM);
+        auto vec_num = 10;
+        std::vector<float> query_vec = generate_float_vector(vec_num, DIM);
+        auto query_dataset =
+            knowhere::GenDataSet(vec_num, DIM, query_vec.data());
+        std::vector<size_t> query_vec_lims;
+        query_vec_lims.push_back(0);
+        query_vec_lims.push_back(3);
+        query_vec_lims.push_back(10);
+        query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                           const_cast<const size_t*>(query_vec_lims.data()));
+
+        auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
+        milvus::SearchInfo searchInfo;
+        searchInfo.topk_ = 5;
+        searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         milvus::OpContext op_context;

@@ -591,6 +591,20 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    std::unique_ptr<storage::FileWriter> embedding_list_meta_writer_ptr =
+        nullptr;
+    auto embedding_list_meta_path =
+        GetValueFromConfig<std::string>(config, EMB_LIST_META_PATH);
+    if (is_embedding_list) {
+        AssertInfo(embedding_list_meta_path.has_value(),
+                   "mmap filepath is empty when load index");
+        std::filesystem::create_directories(
+            std::filesystem::path(embedding_list_meta_path.value())
+                .parent_path());
+        embedding_list_meta_writer_ptr = std::make_unique<storage::FileWriter>(
+            embedding_list_meta_path.value());
+    }
 
     auto file_writer = storage::FileWriter(
         local_filepath.value(),
@@ -654,7 +668,14 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    file_writer.Write(data->PayloadData(), data->PayloadSize());
+                    if (prefix == knowhere::meta::EMB_LIST_META &&
+                        embedding_list_meta_writer_ptr) {
+                        embedding_list_meta_writer_ptr->Write(
+                            data->PayloadData(), data->PayloadSize());
+                    } else {
+                        file_writer.Write(data->PayloadData(),
+                                          data->PayloadSize());
+                    }
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
                 }
@@ -686,9 +707,15 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             (std::chrono::system_clock::now() - start_load_files2_mem);
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
-        for (auto& [_, index_data] : result) {
-            file_writer.Write(index_data->PayloadData(),
-                              index_data->PayloadSize());
+        for (auto& [prefix, index_data] : result) {
+            if (prefix == knowhere::meta::EMB_LIST_META &&
+                embedding_list_meta_writer_ptr) {
+                embedding_list_meta_writer_ptr->Write(
+                    index_data->PayloadData(), index_data->PayloadSize());
+            } else {
+                file_writer.Write(index_data->PayloadData(),
+                                  index_data->PayloadSize());
+            }
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
@@ -701,11 +728,17 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             write_disk_duration_sum)
             .count());
     file_writer.Finish();
+    if (embedding_list_meta_writer_ptr) {
+        embedding_list_meta_writer_ptr->Finish();
+    }
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
+    if (is_embedding_list) {
+        conf["emb_list_meta_file_path"] = embedding_list_meta_path.value();
+    }
     auto start_deserialize = std::chrono::system_clock::now();
     auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
     auto deserialize_duration =
