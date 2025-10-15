@@ -1390,7 +1390,6 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 }
 
 func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	// check if the username is empty.
 	if funcutil.IsEmptyString(credInfo.GetUsername()) {
 		return errEmptyUsername
 	}
@@ -1527,7 +1526,6 @@ func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateR
 	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
 		return errEmptyRoleName
 	}
-
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1565,7 +1563,6 @@ func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleR
 	if util.IsBuiltinRole(in.GetRoleName()) {
 		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
 	}
-
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1608,7 +1605,6 @@ func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.O
 	if funcutil.IsEmptyString(req.GetRoleName()) {
 		return errors.New("role name in the role entity is empty")
 	}
-
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1830,7 +1826,7 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 
 func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
 	if funcutil.IsEmptyString(req.GetGroupName()) {
-		return errors.New("the privilege group name is empty")
+		return errEmptyPrivilegeGroupName
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1861,7 +1857,7 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 
 func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
 	if funcutil.IsEmptyString(req.GetGroupName()) {
-		return errors.New("the privilege group name is empty")
+		return errEmptyPrivilegeGroupName
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1915,6 +1911,9 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 
 // CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
 func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
+	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1925,9 +1924,15 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
 		return group.GroupName, group.Privileges
 	})
+	// check if the privilege group is defined by users
 	if _, ok := currenctGroups[req.GroupName]; !ok {
 		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] defined in system to operate", req.GroupName)
 	}
+
+	if len(req.Privileges) == 0 {
+		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
+	}
+	// check if the new incoming privileges are defined by users or built in
 	for _, p := range req.Privileges {
 		if util.IsPrivilegeNameDefined(p.Name) {
 			continue
@@ -1936,9 +1941,7 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 			return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 		}
 	}
-	if len(req.Privileges) == 0 {
-		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
-	}
+
 	if req.Type == milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup {
 		// Check if all privileges are the same privilege level
 		privilegeLevels := lo.SliceToMap(lo.Union(req.Privileges, currenctGroups[req.GroupName]), func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
@@ -1954,24 +1957,6 @@ func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *mi
 func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
-
-	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
-	if err != nil {
-		return err
-	}
-	for _, p := range privileges {
-		if util.IsPrivilegeNameDefined(p.Name) {
-			continue
-		}
-		for _, group := range groups {
-			// add privileges for custom privilege group
-			if group.GroupName == p.Name {
-				privileges = append(privileges, group.Privileges...)
-			} else {
-				break
-			}
-		}
-	}
 
 	// merge with current privileges
 	group, err := mt.catalog.GetPrivilegeGroup(ctx, groupName)

@@ -20,6 +20,8 @@ var (
 
 	errEmptyRBACMeta           = errors.New("rbac meta is empty")
 	errNotCustomPrivilegeGroup = errors.New("not a custom privilege group")
+
+	errEmptyPrivilegeGroupName = errors.New("privilege group name is empty")
 )
 
 type RBACChecker interface {
