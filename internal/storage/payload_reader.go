@@ -628,45 +628,16 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 			return nil, fmt.Errorf("expected ListArray, got %T", chunk)
 		}
 
-		valuesArray := listArray.ListValues()
-		switch elementType {
-		case schemapb.DataType_FloatVector:
-			floatArray, ok := valuesArray.(*array.Float32)
+		for i := 0; i < listArray.Len(); i++ {
+			value, ok := deserializeArrayOfVector(listArray, i, elementType, dim, true)
 			if !ok {
-				return nil, fmt.Errorf("expected Float32 array for FloatVector, got %T", valuesArray)
+				return nil, fmt.Errorf("failed to deserialize VectorArray at row %d", len(result))
 			}
-
-			// Process each row which contains multiple vectors
-			for i := 0; i < listArray.Len(); i++ {
-				if listArray.IsNull(i) {
-					return nil, fmt.Errorf("null value in VectorArray")
-				}
-
-				start, end := listArray.ValueOffsets(i)
-				vectorData := make([]float32, end-start)
-				copy(vectorData, floatArray.Float32Values()[start:end])
-
-				vectorField := &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: vectorData,
-						},
-					},
-				}
-				result = append(result, vectorField)
+			vectorField, _ := value.(*schemapb.VectorField)
+			if vectorField == nil {
+				return nil, fmt.Errorf("null value in VectorArray")
 			}
-
-		case schemapb.DataType_BinaryVector:
-			return nil, fmt.Errorf("BinaryVector in VectorArray not implemented yet")
-		case schemapb.DataType_Float16Vector:
-			return nil, fmt.Errorf("Float16Vector in VectorArray not implemented yet")
-		case schemapb.DataType_BFloat16Vector:
-			return nil, fmt.Errorf("BFloat16Vector in VectorArray not implemented yet")
-		case schemapb.DataType_Int8Vector:
-			return nil, fmt.Errorf("Int8Vector in VectorArray not implemented yet")
-		default:
-			return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
+			result = append(result, vectorField)
 		}
 	}
 

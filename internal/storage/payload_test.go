@@ -1719,6 +1719,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 
 		// Create VectorArrayFieldData with 3 rows
 		vectorArrayData := &VectorArrayFieldData{
+			Dim: int64(dim),
 			Data: []*schemapb.VectorField{
 				{
 					Dim: int64(dim),
