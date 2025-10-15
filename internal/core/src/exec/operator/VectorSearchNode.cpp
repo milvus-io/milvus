@@ -76,7 +76,7 @@ PhyVectorSearchNode::GetOutput() {
 
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob();
-    auto src_lims = ph.get_lims();
+    auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
     milvus::SearchResult search_result;
 
@@ -94,7 +94,7 @@ PhyVectorSearchNode::GetOutput() {
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,
-                            src_lims,
+                            src_offsets,
                             num_queries,
                             query_timestamp_,
                             final_view,

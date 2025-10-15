@@ -176,7 +176,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 		CollectionName: collectionName,
 		FieldName:      subFieldName,
 		IndexName:      "array_of_vector_index",
-		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexEmbListHNSW, metric.MaxSim),
+		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexHNSW, metric.MaxSim),
 	})
 	s.NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
@@ -318,7 +318,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	roundDecimal := -1
 
 	subFieldName := proxy.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
-	params := integration.GetSearchParams(integration.IndexEmbListHNSW, metric.MaxSim)
+	params := integration.GetSearchParams(integration.IndexHNSW, metric.MaxSim)
 	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, expr,
 		subFieldName, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)
 

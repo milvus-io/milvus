@@ -17,6 +17,7 @@
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
+#include "knowhere/comp/index_param.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "common/VectorArray.h"
@@ -2304,13 +2305,81 @@ TEST(Sealed, SearchSortedPk) {
     EXPECT_EQ(100, offsets2[0].get());
 }
 
-TEST(Sealed, QueryVectorArrayAllFields) {
+using VectorArrayTestParam =
+    std::tuple<DataType, std::string, int, std::string>;
+
+class SealedVectorArrayTest
+    : public ::testing::TestWithParam<VectorArrayTestParam> {
+ protected:
+    DataType element_type;
+    std::string metric_type;
+    int dim;
+    std::string test_name;
+
+    void
+    SetUp() override {
+        auto param = GetParam();
+        element_type = std::get<0>(param);
+        metric_type = std::get<1>(param);
+        dim = std::get<2>(param);
+        test_name = std::get<3>(param);
+
+        // Ensure dim is valid for binary vectors
+        if (element_type == DataType::VECTOR_BINARY) {
+            ASSERT_EQ(dim % 8, 0) << "Binary vector dim must be multiple of 8";
+        }
+    }
+
+    void
+    VerifyVectorResults(const VectorFieldProto& result_vec,
+                        const VectorFieldProto& expected_vec,
+                        DataType element_type) {
+        switch (element_type) {
+            case DataType::VECTOR_FLOAT: {
+                auto result_data = result_vec.float_vector().data();
+                auto expected_data = expected_vec.float_vector().data();
+                EXPECT_EQ(result_data.size(), expected_data.size());
+                for (int64_t i = 0; i < result_data.size(); ++i) {
+                    EXPECT_NEAR(result_data[i], expected_data[i], 1e-6f);
+                }
+                break;
+            }
+            case DataType::VECTOR_BINARY: {
+                auto result_data = result_vec.binary_vector();
+                auto expected_data = expected_vec.binary_vector();
+                EXPECT_EQ(result_data, expected_data);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                auto result_data = result_vec.float16_vector();
+                auto expected_data = expected_vec.float16_vector();
+                EXPECT_EQ(result_data, expected_data);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto result_data = result_vec.bfloat16_vector();
+                auto expected_data = expected_vec.bfloat16_vector();
+                EXPECT_EQ(result_data, expected_data);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto result_data = result_vec.int8_vector();
+                auto expected_data = expected_vec.int8_vector();
+                EXPECT_EQ(result_data, expected_data);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+};
+
+TEST_P(SealedVectorArrayTest, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
-    int64_t dim = 4;
+
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
+        "array_vec", element_type, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<FieldId, FieldIndexMeta> filedMap{};
@@ -2329,49 +2398,36 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     auto ids_ds = GenRandomIds(dataset_size);
     auto int64_result = segment->bulk_subscript(
         nullptr, int64_field, ids_ds->GetIds(), dataset_size);
-    auto array_float_vector_result = segment->bulk_subscript(
+    auto array_vector_result = segment->bulk_subscript(
         nullptr, array_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
-    EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),
+    EXPECT_EQ(array_vector_result->vectors().vector_array().data_size(),
               dataset_size);
 
-    auto verify_float_vectors = [](auto arr1, auto arr2) {
-        static constexpr float EPSILON = 1e-6;
-        EXPECT_EQ(arr1.size(), arr2.size());
-        for (int64_t i = 0; i < arr1.size(); ++i) {
-            EXPECT_NEAR(arr1[i], arr2[i], EPSILON);
-        }
-    };
     for (int64_t i = 0; i < dataset_size; ++i) {
-        auto arrow_array = array_float_vector_result->vectors()
-                               .vector_array()
-                               .data()[i]
-                               .float_vector()
-                               .data();
-        auto expected_array =
-            array_vec_values[ids_ds->GetIds()[i]].float_vector().data();
-        verify_float_vectors(arrow_array, expected_array);
+        auto result_vec =
+            array_vector_result->vectors().vector_array().data()[i];
+        auto expected_vec = array_vec_values[ids_ds->GetIds()[i]];
+        VerifyVectorResults(result_vec, expected_vec, element_type);
     }
 
     EXPECT_EQ(int64_result->valid_data_size(), 0);
-    EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
+    EXPECT_EQ(array_vector_result->valid_data_size(), 0);
 }
 
-TEST(Sealed, SearchVectorArray) {
+TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
     int64_t index_id = 5000;
-    int64_t dim = 4;
 
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
+        "array_vec", element_type, dim, metric_type);
     schema->set_primary_field_id(int64_field);
 
     auto field_meta = milvus::segcore::gen_field_meta(collection_id,
@@ -2379,7 +2435,7 @@ TEST(Sealed, SearchVectorArray) {
                                                       segment_id,
                                                       array_vec.get(),
                                                       DataType::VECTOR_ARRAY,
-                                                      DataType::VECTOR_FLOAT,
+                                                      element_type,
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, array_vec.get(), index_build_id, index_version);
@@ -2403,7 +2459,7 @@ TEST(Sealed, SearchVectorArray) {
         vector_arrays.push_back(milvus::VectorArray(v));
     }
     auto field_data = storage::CreateFieldData(
-        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim);
+        DataType::VECTOR_ARRAY, element_type, false, dim);
     field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
 
     // create sealed segment
@@ -2445,8 +2501,8 @@ TEST(Sealed, SearchVectorArray) {
     // create index
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    create_index_info.metric_type = metric_type;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -2457,8 +2513,7 @@ TEST(Sealed, SearchVectorArray) {
 
     // build index
     Config config;
-    config[milvus::index::INDEX_TYPE] =
-        knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
     config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
     config[knowhere::indexparam::M] = "16";
@@ -2473,18 +2528,37 @@ TEST(Sealed, SearchVectorArray) {
 
     // search
     auto vec_num = 10;
-    std::vector<float> query_vec = generate_float_vector(vec_num, dim);
-    auto query_dataset = knowhere::GenDataSet(vec_num, dim, query_vec.data());
-    std::vector<size_t> query_vec_lims;
-    query_vec_lims.push_back(0);
-    query_vec_lims.push_back(3);
-    query_vec_lims.push_back(10);
-    query_dataset->SetLims(query_vec_lims.data());
+
+    // Generate query vectors based on element type
+    std::vector<uint8_t> query_vec_bin;
+    std::vector<float> query_vec_f32;
+    knowhere::DataSetPtr query_dataset;
+    if (element_type == DataType::VECTOR_BINARY) {
+        auto byte_dim = (dim + 7) / 8;
+        auto total_bytes = vec_num * byte_dim;
+        query_vec_bin.resize(total_bytes);
+        for (size_t i = 0; i < total_bytes; ++i) {
+            query_vec_bin[i] = rand() % 256;
+        }
+        query_dataset =
+            knowhere::GenDataSet(vec_num, dim, query_vec_bin.data());
+    } else {
+        // For float-like types (FLOAT, FLOAT16, BFLOAT16, INT8)
+        query_vec_f32 = generate_float_vector(vec_num, dim);
+        query_dataset =
+            knowhere::GenDataSet(vec_num, dim, query_vec_f32.data());
+    }
+    std::vector<size_t> query_vec_offsets;
+    query_vec_offsets.push_back(0);
+    query_vec_offsets.push_back(3);
+    query_vec_offsets.push_back(10);
+    query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                       const_cast<const size_t*>(query_vec_offsets.data()));
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = 5;
-    searchInfo.metric_type_ = knowhere::metric::MAX_SIM;
+    searchInfo.metric_type_ = metric_type;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
     vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
@@ -2498,21 +2572,62 @@ TEST(Sealed, SearchVectorArray) {
 
     // brute force search
     {
-        const char* raw_plan = R"(vector_anns: <
+        std::string raw_plan = fmt::format(R"(vector_anns: <
                                     field_id: 101
                                     query_info: <
                                       topk: 5
                                       round_decimal: 3
-                                      metric_type: "MAX_SIM"
-                                      search_params: "{\"nprobe\": 10}"
+                                      metric_type: "{}"
+                                      search_params: "{{\"nprobe\": 10}}"
                                     >
                                     placeholder_tag: "$0"
-        >)";
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        >)",
+                                           metric_type);
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-        auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-            vec_num, dim, query_vec.data(), query_vec_lims);
+
+        // Create placeholder based on element type
+        milvus::proto::common::PlaceholderGroup ph_group_raw;
+        if (element_type == DataType::VECTOR_BINARY) {
+            auto byte_dim = (dim + 7) / 8;
+            auto total_bytes = vec_num * byte_dim;
+            std::vector<uint8_t> query_vec(total_bytes);
+            for (size_t i = 0; i < total_bytes; ++i) {
+                query_vec[i] = rand() % 256;
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListBinaryVector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_FLOAT16) {
+            std::vector<float> float_vec = generate_float_vector(vec_num, dim);
+            std::vector<float16> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = float16(float_vec[i]);
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloat16Vector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_BFLOAT16) {
+            std::vector<float> float_vec = generate_float_vector(vec_num, dim);
+            std::vector<bfloat16> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = bfloat16(float_vec[i]);
+            }
+            ph_group_raw =
+                CreatePlaceholderGroupFromBlob<EmbListBFloat16Vector>(
+                    vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_INT8) {
+            std::vector<int8_t> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = static_cast<int8_t>(rand() % 256 - 128);
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListInt8Vector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else {
+            std::vector<float> query_vec = generate_float_vector(vec_num, dim);
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        }
+
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         Timestamp timestamp = 1000000;
@@ -2528,30 +2643,71 @@ TEST(Sealed, SearchVectorArray) {
         LoadIndexInfo load_info;
         load_info.field_id = array_vec.get();
         load_info.field_type = DataType::VECTOR_ARRAY;
-        load_info.element_type = DataType::VECTOR_FLOAT;
+        load_info.element_type = element_type;
         load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
         load_info.cache_index =
             CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
-        load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
+        load_info.index_params["metric_type"] = metric_type;
 
         sealed_segment->DropFieldData(array_vec);
         sealed_segment->LoadIndex(load_info);
 
-        const char* raw_plan = R"(vector_anns: <
+        std::string raw_plan = fmt::format(R"(vector_anns: <
                                     field_id: 101
                                     query_info: <
                                       topk: 5
                                       round_decimal: 3
-                                      metric_type: "MAX_SIM"
-                                      search_params: "{\"nprobe\": 10}"
+                                      metric_type: "{}"
+                                      search_params: "{{\"nprobe\": 10}}"
                                     >
                                     placeholder_tag: "$0"
-        >)";
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        >)",
+                                           metric_type);
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-        auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-            vec_num, dim, query_vec.data(), query_vec_lims);
+
+        // Create placeholder based on element type
+        milvus::proto::common::PlaceholderGroup ph_group_raw;
+        if (element_type == DataType::VECTOR_BINARY) {
+            auto byte_dim = (dim + 7) / 8;
+            auto total_bytes = vec_num * byte_dim;
+            std::vector<uint8_t> query_vec(total_bytes);
+            for (size_t i = 0; i < total_bytes; ++i) {
+                query_vec[i] = rand() % 256;
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListBinaryVector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_FLOAT16) {
+            std::vector<float> float_vec = generate_float_vector(vec_num, dim);
+            std::vector<float16> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = float16(float_vec[i]);
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloat16Vector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_BFLOAT16) {
+            std::vector<float> float_vec = generate_float_vector(vec_num, dim);
+            std::vector<bfloat16> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = bfloat16(float_vec[i]);
+            }
+            ph_group_raw =
+                CreatePlaceholderGroupFromBlob<EmbListBFloat16Vector>(
+                    vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else if (element_type == DataType::VECTOR_INT8) {
+            std::vector<int8_t> query_vec(vec_num * dim);
+            for (size_t i = 0; i < vec_num * dim; ++i) {
+                query_vec[i] = static_cast<int8_t>(rand() % 256 - 128);
+            }
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListInt8Vector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        } else {
+            std::vector<float> query_vec = generate_float_vector(vec_num, dim);
+            ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+                vec_num, dim, query_vec.data(), query_vec_offsets);
+        }
+
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         Timestamp timestamp = 1000000;
@@ -2562,3 +2718,27 @@ TEST(Sealed, SearchVectorArray) {
         std::cout << sr_parsed.dump(1) << std::endl;
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    VectorArrayTypes,
+    SealedVectorArrayTest,
+    ::testing::Values(
+        std::make_tuple(DataType::VECTOR_FLOAT, "MAX_SIM", 4, "float_max_sim"),
+        std::make_tuple(DataType::VECTOR_FLOAT, "MAX_SIM_L2", 4, "float_l2"),
+        std::make_tuple(
+            DataType::VECTOR_FLOAT16, "MAX_SIM", 4, "float16_max_sim"),
+        std::make_tuple(
+            DataType::VECTOR_FLOAT16, "MAX_SIM_L2", 4, "float16_l2"),
+        std::make_tuple(
+            DataType::VECTOR_BFLOAT16, "MAX_SIM", 4, "bfloat16_max_sim"),
+        std::make_tuple(
+            DataType::VECTOR_BFLOAT16, "MAX_SIM_L2", 4, "bfloat16_l2"),
+        std::make_tuple(DataType::VECTOR_INT8, "MAX_SIM", 4, "int8_max_sim"),
+        std::make_tuple(DataType::VECTOR_INT8, "MAX_SIM_L2", 4, "int8_l2"),
+        std::make_tuple(
+            DataType::VECTOR_BINARY, "MAX_SIM_HAMMING", 32, "binary_hamming"),
+        std::make_tuple(
+            DataType::VECTOR_BINARY, "MAX_SIM_JACCARD", 32, "binary_jaccard")),
+    [](const ::testing::TestParamInfo<VectorArrayTestParam>& info) {
+        return std::get<3>(info.param);
+    });

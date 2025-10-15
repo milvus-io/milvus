@@ -159,8 +159,12 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
                     // Create appropriate value builder based on element type
                     std::shared_ptr<arrow::ArrayBuilder> value_builder;
+                    int byte_width = 0;
                     if (element_type == DataType::VECTOR_FLOAT) {
-                        value_builder = std::make_shared<arrow::FloatBuilder>();
+                        byte_width = DIM * sizeof(float);
+                        value_builder =
+                            std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                                arrow::fixed_size_binary(byte_width));
                     } else {
                         FAIL() << "Unsupported element type for VECTOR_ARRAY "
                                   "in test";
@@ -176,11 +180,13 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
                         // Generate 3 vectors for this row
                         auto data = generate_float_vector(3, DIM);
-                        auto float_builder =
-                            std::static_pointer_cast<arrow::FloatBuilder>(
-                                value_builder);
-                        for (const auto& value : data) {
-                            status = float_builder->Append(value);
+                        auto binary_builder = std::static_pointer_cast<
+                            arrow::FixedSizeBinaryBuilder>(value_builder);
+                        // Append each vector as a fixed-size binary value
+                        for (int vec_idx = 0; vec_idx < 3; vec_idx++) {
+                            status = binary_builder->Append(
+                                reinterpret_cast<const uint8_t*>(
+                                    data.data() + vec_idx * DIM));
                             EXPECT_TRUE(status.ok());
                         }
                     }
@@ -288,7 +294,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_ARRAY;
     create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -299,8 +305,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
 
     // Build index with storage v2 configuration
     Config config;
-    config[milvus::index::INDEX_TYPE] =
-        knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
@@ -330,11 +335,12 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         std::vector<float> query_vec = generate_float_vector(vec_num, DIM);
         auto query_dataset =
             knowhere::GenDataSet(vec_num, DIM, query_vec.data());
-        std::vector<size_t> query_vec_lims;
-        query_vec_lims.push_back(0);
-        query_vec_lims.push_back(3);
-        query_vec_lims.push_back(10);
-        query_dataset->SetLims(query_vec_lims.data());
+        std::vector<size_t> query_vec_offsets;
+        query_vec_offsets.push_back(0);
+        query_vec_offsets.push_back(3);
+        query_vec_offsets.push_back(10);
+        query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                           const_cast<const size_t*>(query_vec_offsets.data()));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
