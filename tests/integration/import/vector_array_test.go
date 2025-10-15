@@ -303,7 +303,7 @@ func (s *BulkInsertSuite) TestImportWithVectorArray() {
 	for _, fileType := range fileTypeArr {
 		s.fileType = fileType
 		s.vecType = schemapb.DataType_FloatVector
-		s.indexType = integration.IndexEmbListHNSW
+		s.indexType = integration.IndexHNSW
 		s.metricType = metric.MaxSim
 		s.runForStructArray()
 	}

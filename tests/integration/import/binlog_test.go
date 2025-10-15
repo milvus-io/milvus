@@ -102,7 +102,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		CollectionName: collectionName,
 		FieldName:      name,
 		IndexName:      "array_of_vector_index",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexEmbListHNSW, metric.MaxSim),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.MaxSim),
 	})
 	s.NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)

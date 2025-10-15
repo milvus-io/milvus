@@ -567,6 +567,33 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				}
 				sd.ArrayData.Data = ret
 			}
+		case *schemapb.ScalarField_TimestamptzData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.TimestamptzData.Data = make([]int64, 0)
+			} else {
+				ret := make([]int64, 0, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.TimestamptzData.Data[i])
+					}
+				}
+				sd.TimestamptzData.Data = ret
+			}
+
+		case *schemapb.ScalarField_GeometryWktData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.GeometryWktData.Data = make([]string, 0)
+			} else {
+				ret := make([]string, 0, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.GeometryWktData.Data[i])
+					}
+				}
+				sd.GeometryWktData.Data = ret
+			}
 
 		case *schemapb.ScalarField_GeometryData:
 			validRowNum := getValidNumber(field.GetValidData())
@@ -740,6 +767,42 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}, nil
 
+	case schemapb.DataType_Timestamptz:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: make([]int64, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
+
+	// the intput data of geometry field is in wkt format
+	case schemapb.DataType_Geometry:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			IsDynamic: field.IsDynamic,
+			ValidData: make([]bool, upsertIDSize),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: make([]string, upsertIDSize),
+						},
+					},
+				},
+			},
+		}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined scalar data type:%s", field.DataType.String()))
 	}

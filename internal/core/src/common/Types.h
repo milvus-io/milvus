@@ -205,10 +205,23 @@ GetArrowDataType(DataType data_type, int dim = 1) {
 }
 
 inline std::shared_ptr<arrow::DataType>
-GetArrowDataTypeForVectorArray(DataType elem_type) {
+GetArrowDataTypeForVectorArray(DataType elem_type, int dim) {
+    if (dim <= 0) {
+        ThrowInfo(DataTypeInvalid, "dim must be provided for VectorArray");
+    }
+    // VectorArray stores vectors as FixedSizeBinaryArray
+    // We must have dim to create the correct fixed_size_binary type
     switch (elem_type) {
         case DataType::VECTOR_FLOAT:
-            return arrow::list(arrow::float32());
+            return arrow::list(arrow::fixed_size_binary(dim * sizeof(float)));
+        case DataType::VECTOR_BINARY:
+            return arrow::list(arrow::fixed_size_binary((dim + 7) / 8));
+        case DataType::VECTOR_FLOAT16:
+            return arrow::list(arrow::fixed_size_binary(dim * 2));
+        case DataType::VECTOR_BFLOAT16:
+            return arrow::list(arrow::fixed_size_binary(dim * 2));
+        case DataType::VECTOR_INT8:
+            return arrow::list(arrow::fixed_size_binary(dim));
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("failed to get arrow type for vector array, "
@@ -534,7 +547,10 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::IP ||
            metric_type == knowhere::metric::COSINE ||
            metric_type == knowhere::metric::BM25 ||
-           metric_type == knowhere::metric::MAX_SIM;
+           metric_type == knowhere::metric::MAX_SIM ||
+           metric_type == knowhere::metric::MAX_SIM_COSINE ||
+           metric_type == knowhere::metric::MAX_SIM_IP ||
+           metric_type == knowhere::metric::MAX_SIM_L2;
 }
 
 inline bool
@@ -543,14 +559,20 @@ IsBinaryVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::JACCARD ||
            metric_type == knowhere::metric::SUPERSTRUCTURE ||
            metric_type == knowhere::metric::SUBSTRUCTURE ||
-           metric_type == knowhere::metric::MHJACCARD;
+           metric_type == knowhere::metric::MHJACCARD ||
+           metric_type == knowhere::metric::MAX_SIM_HAMMING ||
+           metric_type == knowhere::metric::MAX_SIM_JACCARD;
 }
 
 inline bool
 IsIntVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||
            metric_type == knowhere::metric::IP ||
-           metric_type == knowhere::metric::COSINE;
+           metric_type == knowhere::metric::COSINE ||
+           metric_type == knowhere::metric::MAX_SIM ||
+           metric_type == knowhere::metric::MAX_SIM_COSINE ||
+           metric_type == knowhere::metric::MAX_SIM_IP ||
+           metric_type == knowhere::metric::MAX_SIM_L2;
 }
 
 // Plus 1 because we can't use greater(>) symbol
@@ -746,6 +768,30 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
             return DataType::NONE;
     }
 }
+
+// Calculate bytes per vector element for different vector types
+// Used by VectorArray and storage utilities
+inline size_t
+vector_bytes_per_element(const DataType data_type, int64_t dim) {
+    switch (data_type) {
+        case DataType::VECTOR_BINARY:
+            // Binary vector stores bits, so dim represents bit count
+            // Need (dim + 7) / 8 bytes to store dim bits
+            return (dim + 7) / 8;
+        case DataType::VECTOR_FLOAT:
+            return dim * sizeof(float);
+        case DataType::VECTOR_FLOAT16:
+            return dim * sizeof(float16);
+        case DataType::VECTOR_BFLOAT16:
+            return dim * sizeof(bfloat16);
+        case DataType::VECTOR_INT8:
+            return dim * sizeof(int8);
+        default:
+            ThrowInfo(UnexpectedError,
+                      fmt::format("invalid data type: {}", data_type));
+    }
+}
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
@@ -883,6 +929,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::PhraseMatch:
                 name = "PhraseMatch";
+                break;
+            case milvus::OpType::InnerMatch:
+                name = "InnerMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

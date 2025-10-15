@@ -34,8 +34,23 @@ bool
 check_data_type(const FieldMeta& field_meta,
                 const milvus::proto::common::PlaceholderType type) {
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        return type ==
-               milvus::proto::common::PlaceholderType::EmbListFloatVector;
+        if (field_meta.get_element_type() == DataType::VECTOR_FLOAT) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListFloatVector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_FLOAT16) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListFloat16Vector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_BFLOAT16) {
+            return type == milvus::proto::common::PlaceholderType::
+                               EmbListBFloat16Vector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_BINARY) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListBinaryVector;
+        } else if (field_meta.get_element_type() == DataType::VECTOR_INT8) {
+            return type ==
+                   milvus::proto::common::PlaceholderType::EmbListInt8Vector;
+        }
+        return false;
     }
     return static_cast<int>(field_meta.get_data_type()) ==
            static_cast<int>(type);
@@ -96,25 +111,25 @@ ParsePlaceholderGroup(const Plan* plan,
                 // If the vector is embedding list, line contains multiple vectors.
                 // And we should record the offsets so that we can identify each
                 // embedding list in a flattened vectors.
-                auto& lims = element.lims_;
-                lims.reserve(element.num_of_queries_ + 1);
+                auto& offsets = element.offsets_;
+                offsets.reserve(element.num_of_queries_ + 1);
                 size_t offset = 0;
-                lims.push_back(offset);
+                offsets.push_back(offset);
 
-                auto elem_size = milvus::index::vector_element_size(
-                    field_meta.get_element_type());
+                auto bytes_per_vec = milvus::vector_bytes_per_element(
+                    field_meta.get_element_type(), dim);
                 for (auto& line : info.values()) {
                     target.insert(target.end(), line.begin(), line.end());
                     AssertInfo(
-                        line.size() % (dim * elem_size) == 0,
-                        "line.size() % (dim * elem_size) == 0 assert failed, "
-                        "line.size() = {}, dim = {}, elem_size = {}",
+                        line.size() % bytes_per_vec == 0,
+                        "line.size() % bytes_per_vec == 0 assert failed, "
+                        "line.size() = {}, dim = {}, bytes_per_vec = {}",
                         line.size(),
                         dim,
-                        elem_size);
+                        bytes_per_vec);
 
-                    offset += line.size() / (dim * elem_size);
-                    lims.push_back(offset);
+                    offset += line.size() / bytes_per_vec;
+                    offsets.push_back(offset);
                 }
             }
         }

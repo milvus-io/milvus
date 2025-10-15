@@ -376,7 +376,12 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	case schemapb.DataType_ArrayOfVector:
+		dim, err := GetDimFromParams(typeParams)
+		if err != nil {
+			return nil, err
+		}
 		data := &VectorArrayFieldData{
+			Dim:         int64(dim),
 			Data:        make([]*schemapb.VectorField, 0, cap),
 			ElementType: fieldSchema.GetElementType(),
 		}

@@ -234,9 +234,42 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
-                    has_raw_data =
-                        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
-                            index_type, index_version, config);
+                    break;
+                case milvus::DataType::VECTOR_FLOAT16:
+                    resource = knowhere::IndexStaticFaced<knowhere::fp16>::
+                        EstimateLoadResource(index_type,
+                                             index_version,
+                                             index_size_in_bytes,
+                                             num_rows,
+                                             dim,
+                                             config);
+                    break;
+                case milvus::DataType::VECTOR_BFLOAT16:
+                    resource = knowhere::IndexStaticFaced<knowhere::bf16>::
+                        EstimateLoadResource(index_type,
+                                             index_version,
+                                             index_size_in_bytes,
+                                             num_rows,
+                                             dim,
+                                             config);
+                    break;
+                case milvus::DataType::VECTOR_BINARY:
+                    resource = knowhere::IndexStaticFaced<knowhere::bin1>::
+                        EstimateLoadResource(index_type,
+                                             index_version,
+                                             index_size_in_bytes,
+                                             num_rows,
+                                             dim,
+                                             config);
+                    break;
+                case milvus::DataType::VECTOR_INT8:
+                    resource = knowhere::IndexStaticFaced<knowhere::int8>::
+                        EstimateLoadResource(index_type,
+                                             index_version,
+                                             index_size_in_bytes,
+                                             num_rows,
+                                             dim,
+                                             config);
                     break;
 
                 default:
@@ -247,6 +280,9 @@ IndexFactory::VecIndexLoadResource(
                         element_type);
                     return LoadResourceRequest{0, 0, 0, 0, true};
             }
+            // For VectorArray, has_raw_data is always false as get_vector of index does not provide offsets which
+            // is required for reconstructing the raw data
+            has_raw_data = false;
             break;
         }
         default:
@@ -641,6 +677,42 @@ IndexFactory::CreateVectorIndex(
                             version,
                             use_knowhere_build_pool,
                             file_manager_context);
+                    case DataType::VECTOR_FLOAT16: {
+                        return std::make_unique<VectorMemIndex<float16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_BFLOAT16: {
+                        return std::make_unique<VectorMemIndex<bfloat16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_BINARY: {
+                        return std::make_unique<VectorMemIndex<bin1>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
+                    case DataType::VECTOR_INT8: {
+                        return std::make_unique<VectorMemIndex<int8>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    }
                     default:
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented data type to "

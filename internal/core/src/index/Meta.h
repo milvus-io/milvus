@@ -79,6 +79,8 @@ constexpr const char* ENABLE_OFFSET_CACHE = "indexoffsetcache.enabled";
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
+constexpr const char* EMB_LIST_META_PATH = "emb_list_meta_file_path";
+constexpr const char* EMB_LIST_META_FILE_NAME = "emb_list_meta";
 
 // VecIndex node filtering
 constexpr const char* VEC_OPT_FIELDS_PATH = "opt_fields_path";

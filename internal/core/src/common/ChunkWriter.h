@@ -273,9 +273,6 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
     finish() override;
 
  private:
-    void
-    writeFloatVectorArray(const arrow::ArrayVector& array_vec);
-
     size_t
     calculateTotalSize(const arrow::ArrayVector& array_vec);
 
