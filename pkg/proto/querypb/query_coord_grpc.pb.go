@@ -1476,6 +1476,7 @@ const (
 	QueryNode_UpdateSchema_FullMethodName         = "/milvus.proto.query.QueryNode/UpdateSchema"
 	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
 	QueryNode_DropIndex_FullMethodName            = "/milvus.proto.query.QueryNode/DropIndex"
+	QueryNode_SyncFileResource_FullMethodName     = "/milvus.proto.query.QueryNode/SyncFileResource"
 )
 
 // QueryNodeClient is the client API for QueryNode service.
@@ -1513,6 +1514,8 @@ type QueryNodeClient interface {
 	UpdateSchema(ctx context.Context, in *UpdateSchemaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type queryNodeClient struct {
@@ -1821,6 +1824,15 @@ func (c *queryNodeClient) DropIndex(ctx context.Context, in *DropIndexRequest, o
 	return out, nil
 }
 
+func (c *queryNodeClient) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryNode_SyncFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryNodeServer is the server API for QueryNode service.
 // All implementations should embed UnimplementedQueryNodeServer
 // for forward compatibility
@@ -1856,6 +1868,8 @@ type QueryNodeServer interface {
 	UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -1945,6 +1959,9 @@ func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerReq
 }
 func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
+}
+func (UnimplementedQueryNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
 }
 
 // UnsafeQueryNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2468,6 +2485,24 @@ func _QueryNode_DropIndex_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.SyncFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).SyncFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_SyncFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).SyncFileResource(ctx, req.(*internalpb.SyncFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryNode_ServiceDesc is the grpc.ServiceDesc for QueryNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2578,6 +2613,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropIndex",
 			Handler:    _QueryNode_DropIndex_Handler,
+		},
+		{
+			MethodName: "SyncFileResource",
+			Handler:    _QueryNode_SyncFileResource_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
