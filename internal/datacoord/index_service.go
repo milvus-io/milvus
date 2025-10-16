@@ -26,7 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -140,6 +143,18 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
+	// Create a new broadcaster for the collection.
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+	if err != nil {
+		log.Warn("start broadcast failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
 	schema, err := s.getSchema(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
@@ -199,32 +214,78 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	allocateIndexID, err := s.allocator.AllocID(ctx)
+	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
 	if err != nil {
-		log.Warn("failed to alloc indexID", zap.Error(err))
+		log.Error("Check CanCreateIndex fail", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+	if indexID == 0 {
+		if indexID, err = s.allocator.AllocID(ctx); err != nil {
+			log.Warn("failed to alloc indexID", zap.Error(err))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
+	}
 
-	// Get flushed segments and create index
-	indexID, err := s.meta.indexMeta.CreateIndex(ctx, req, allocateIndexID, isJson)
-	if err != nil {
-		log.Error("CreateIndex fail",
-			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
+	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
+	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
+	index := &model.Index{
+		CollectionID:    req.GetCollectionID(),
+		FieldID:         req.GetFieldID(),
+		IndexID:         indexID,
+		IndexName:       req.GetIndexName(),
+		TypeParams:      typeParams,
+		IndexParams:     req.GetIndexParams(),
+		CreateTime:      req.GetTimestamp(),
+		IsAutoIndex:     req.GetIsAutoIndex(),
+		UserIndexParams: req.GetUserIndexParams(),
+	}
+	// Validate the index params.
+	if err := ValidateIndexParams(index); err != nil {
+		return nil, err
+	}
+
+	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
+		WithHeader(&message.CreateIndexMessageHeader{
+			DbId:         coll.GetDbId(),
+			CollectionId: req.GetCollectionID(),
+			FieldId:      req.GetFieldID(),
+			IndexId:      indexID,
+			IndexName:    req.GetIndexName(),
+		}).
+		WithBody(&message.CreateIndexMessageBody{
+			FieldIndex: model.MarshalIndexModel(index),
+		}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("CreateIndex fail", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
+	}
+	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	return merr.Success(), nil
+}
+
+func (s *Server) createIndexV2AckCallback(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+	msg := result.Message
+	index := msg.MustBody().FieldIndex
+
+	// Get flushed segments and create index
+	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index)); err != nil {
+		log.Error("CreateIndex fail", zap.Int64("fieldID", index.IndexInfo.FieldID), zap.String("indexName", index.IndexInfo.IndexName), zap.Error(err))
+		return err
 	}
 
 	select {
-	case s.notifyIndexChan <- req.GetCollectionID():
+	case s.notifyIndexChan <- index.IndexInfo.CollectionID:
 	default:
 	}
-
 	log.Info("CreateIndex successfully",
-		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
-		zap.Int64("IndexID", indexID))
-	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	return merr.Success(), nil
+		zap.String("IndexName", index.IndexInfo.IndexName), zap.Int64("fieldID", index.IndexInfo.FieldID),
+		zap.Int64("IndexID", index.IndexInfo.IndexID))
+	return nil
 }
 
 func ValidateIndexParams(index *model.Index) error {
@@ -322,6 +383,17 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
+	collectionID, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(collectionID.GetDbName(), collectionID.GetCollectionName()))
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
@@ -397,13 +469,36 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		}
 	}
 
-	err = s.meta.indexMeta.AlterIndex(ctx, indexes...)
-	if err != nil {
-		log.Warn("failed to alter index", zap.Error(err))
+	indexIDs := lo.Map(indexes, func(index *model.Index, _ int) int64 {
+		return index.IndexID
+	})
+	msg := message.NewAlterIndexMessageBuilderV2().
+		WithHeader(&message.AlterIndexMessageHeader{
+			CollectionId: req.GetCollectionID(),
+			IndexIds:     indexIDs,
+		}).
+		WithBody(&message.AlterIndexMessageBody{
+			FieldIndexes: lo.Map(indexes, func(index *model.Index, _ int) *indexpb.FieldIndex {
+				return model.MarshalIndexModel(index)
+			}),
+		}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		log.Warn("failed to broadcast alter index message", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
+	log.Info("broadcast alter index message successfully", zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("indexIDs", indexIDs))
 	return merr.Success(), nil
+}
+
+func (s *Server) alterIndexV2AckCallback(ctx context.Context, result message.BroadcastResultAlterIndexMessageV2) error {
+	indexes := result.Message.MustBody().FieldIndexes
+	indexModels := lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) *model.Index {
+		return model.UnmarshalIndexModel(index)
+	})
+	return s.meta.indexMeta.AlterIndex(ctx, indexModels...)
 }
 
 // GetIndexState gets the index state of the index name in the request from Proxy.
@@ -879,6 +974,25 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return merr.Status(err), nil
 	}
 
+	// Compatibility logic. To prevent the index on the corresponding segments
+	// from being dropped at the same time when dropping_partition in version 2.1
+	if len(req.PartitionIDs) > 0 {
+		log.Warn("drop index on partition is deprecated, please use drop index on collection instead",
+			zap.Int64s("partitionIDs", req.GetPartitionIDs()))
+	}
+
+	// Create a new broadcaster for the collection.
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+	if err != nil {
+		log.Warn("start broadcast failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		log.Info(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
@@ -918,20 +1032,29 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	for _, index := range indexes {
 		indexIDs = append(indexIDs, index.IndexID)
 	}
-	// Compatibility logic. To prevent the index on the corresponding segments
-	// from being dropped at the same time when dropping_partition in version 2.1
-	if len(req.GetPartitionIDs()) == 0 {
-		// drop collection index
-		err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, req.GetCollectionID(), indexIDs)
-		if err != nil {
-			log.Warn("DropIndex fail", zap.String("indexName", req.IndexName), zap.Error(err))
-			return merr.Status(err), nil
-		}
-	}
 
-	log.Debug("DropIndex success", zap.Int64s("partitionIDs", req.GetPartitionIDs()),
+	msg := message.NewDropIndexMessageBuilderV2().
+		WithHeader(&message.DropIndexMessageHeader{
+			CollectionId: req.GetCollectionID(),
+			IndexIds:     indexIDs,
+		}).
+		WithBody(&message.DropIndexMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		log.Warn("failed to broadcast drop index message", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	log.Info("DropIndex success", zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.String("indexName", req.GetIndexName()), zap.Int64s("indexIDs", indexIDs))
+
 	return merr.Success(), nil
+}
+
+func (s *Server) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+	header := result.Message.Header()
+	return s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
 }
 
 // GetIndexInfos gets the index file paths for segment from DataCoord.

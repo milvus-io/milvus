@@ -138,6 +138,11 @@ func (b *balancerImpl) UpdateReplicateConfiguration(ctx context.Context, result 
 	return nil
 }
 
+// AllocVirtualChannels allocates virtual channels for a collection.
+func (b *balancerImpl) AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error) {
+	return b.channelMetaManager.AllocVirtualChannels(ctx, param)
+}
+
 // UpdateBalancePolicy update the balance policy.
 func (b *balancerImpl) UpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {

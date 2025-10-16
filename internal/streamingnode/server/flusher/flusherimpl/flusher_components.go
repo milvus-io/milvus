@@ -65,9 +65,13 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 	}
 	msgChan := make(chan *msgstream.MsgPack, 10)
 
-	schema := &schemapb.CollectionSchema{}
-	if err := proto.Unmarshal(createCollectionRequest.GetSchema(), schema); err != nil {
-		panic("failed to unmarshal collection schema")
+	schema := createCollectionRequest.GetCollectionSchema()
+	if schema == nil {
+		// compatible before 2.6.1
+		schema = &schemapb.CollectionSchema{}
+		if err := proto.Unmarshal(createCollectionRequest.GetSchema(), schema); err != nil {
+			panic("failed to unmarshal collection schema")
+		}
 	}
 	ds := pipeline.NewEmptyStreamingNodeDataSyncService(
 		context.Background(), // There's no any rpc in this function, so the context is not used here.
