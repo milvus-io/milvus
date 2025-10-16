@@ -1157,7 +1157,7 @@ func (suite *JobSuite) TestReleasePartition() {
 		// make collection able to get into loaded state
 		suite.updateChannelDist(ctx, collectionID, true)
 		suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
-		waitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
+		WaitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
 	}
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
@@ -1238,7 +1238,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 		// make collection able to get into loaded state
 		suite.updateChannelDist(ctx, collectionID, true)
 		suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
-		waitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
+		WaitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
 	}
 
 	job := newReleasePartJob(col0, p0)

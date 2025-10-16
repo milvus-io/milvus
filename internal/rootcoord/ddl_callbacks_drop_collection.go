@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -77,31 +76,20 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			// when the control channel is acknowledged, we should do the following steps:
 
 			// 1. release the collection from querycoord first.
-			resp, err := c.mixCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				CollectionID: collectionID,
-			})
-			if err := merr.CheckRPCCall(resp, err); err != nil {
+			dropLoadConfigMsg := message.NewDropLoadConfigMessageBuilderV2().
+				WithHeader(&message.DropLoadConfigMessageHeader{
+					DbId:         msg.Header().DbId,
+					CollectionId: collectionID,
+				}).
+				WithBody(&message.DropLoadConfigMessageBody{}).
+				WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+				MustBuildBroadcast().
+				WithBroadcastID(msg.BroadcastHeader().BroadcastID)
+			if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
+				streaming.WAL().ControlChannel(): result,
+			}); err != nil {
 				return errors.Wrap(err, "failed to release collection")
 			}
-
-			// TODO: after DropLoadConfig is supported, we should uncomment the following code.
-			// dropLoadConfigMsg := message.NewDropLoadConfigMessageBuilderV2().
-			// 	WithHeader(&message.DropLoadConfigMessageHeader{
-			// 		DbId:         msg.Header().DbId,
-			// 		CollectionId: collectionID,
-			// 	}).
-			// 	WithBody(&message.DropLoadConfigMessageBody{}).
-			// 	WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-			// 	MustBuildBroadcast().
-			// 	WithBroadcastID(msg.BroadcastHeader().BroadcastID)
-			// if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
-			// 	streaming.WAL().ControlChannel(): result,
-			// }); err != nil {
-			//   return errors.Wrap(err, "failed to release collection")
-			// }
 
 			// 2. drop the collection index.
 			dropIndexMsg := message.NewDropIndexMessageBuilderV2().

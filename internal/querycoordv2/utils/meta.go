@@ -158,6 +158,19 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 	return replicaNumInRG, nil
 }
 
+// SpawnReplicasWithReplicaConfig spawns replicas with replica config.
+func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params meta.SpawnWithReplicaConfigParams) ([]*meta.Replica, error) {
+	replicas, err := m.ReplicaManager.SpawnWithReplicaConfig(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	RecoverReplicaOfCollection(ctx, m, params.CollectionID)
+	if streamingutil.IsStreamingServiceEnabled() {
+		m.RecoverSQNodesInCollection(ctx, params.CollectionID, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+	}
+	return replicas, nil
+}
+
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
 func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, resourceGroups []string,
 	replicaNumber int32, channels []string, loadPriority commonpb.LoadPriority,
