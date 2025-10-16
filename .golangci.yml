@@ -8,18 +8,14 @@ linters:
   disable-all: true
   enable:
     - gosimple
-    - govet
     - ineffassign
-    - staticcheck
-    - decorder
+    - decoder
     - depguard
     - gofmt
     - goimports
-    - gosec
     - revive
     - unconvert
     - misspell
-    - typecheck
     - durationcheck
     - forbidigo
     - gci

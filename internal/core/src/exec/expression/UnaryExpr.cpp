@@ -1758,14 +1758,16 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     }
 
     // Extract min_should_match from expression extra values
-    uint32_t min_should_match = 1; // default value
-    if (op_type == proto::plan::OpType::TextMatch && expr_->extra_values_.size() > 0) {
+    uint32_t min_should_match = 1;  // default value
+    if (op_type == proto::plan::OpType::TextMatch &&
+        expr_->extra_values_.size() > 0) {
         // min_should_match is stored in the first extra value
-        min_should_match = static_cast<uint32_t>(GetValueFromProto<int64_t>(expr_->extra_values_[0]));
+        min_should_match = static_cast<uint32_t>(
+            GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
-    auto func = [op_type, slop, min_should_match](Index* index,
-                                                  const std::string& query) -> TargetBitmap {
+    auto func = [op_type, slop, min_should_match](
+                    Index* index, const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
             auto result = index->MatchQuery(query, min_should_match);
             return result;
@@ -1792,7 +1794,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             std::make_shared<TargetBitmap>(std::move(valid_res));
         if (cached_match_res_->size() < active_count_) {
             // some entities are not visible in inverted index.
-            // only happend on growing segment.
+            // only happens on growing segment.
             TargetBitmap tail(active_count_ - cached_match_res_->size());
             cached_match_res_->append(tail);
             cached_index_chunk_valid_res_->append(tail);

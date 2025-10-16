@@ -45,7 +45,7 @@ build_index(const ScalarIndexCreatorPtr& creator,
 
     creator->Build(ds);
 
-    delete[](char*)(ds->GetTensor());
+    delete[] (char*)(ds->GetTensor());
 }
 
 template <>
@@ -58,7 +58,7 @@ build_index(const ScalarIndexCreatorPtr& creator,
 
     creator->Build(ds);
 
-    delete[](char*)(ds->GetTensor());
+    delete[] (char*)(ds->GetTensor());
 }
 
 }  // namespace

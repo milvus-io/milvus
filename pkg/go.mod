@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/pkg/v2
 
-go 1.24.6
+go 1.25
 
 require (
 	cloud.google.com/go/storage v1.50.0
@@ -139,7 +139,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
-	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4safe4910c // indirect
 	github.com/hamba/avro/v2 v2.26.0 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect

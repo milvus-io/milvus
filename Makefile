@@ -196,17 +196,10 @@ lint-fix: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml --concurrency 2
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/client/.golangci.yml --concurrency 2
 
-#TODO: Check code specifications by golangci-lint
 static-check: getdeps
 	@echo "Running $@ check"
-	@echo "Start check core packages"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=5m --config $(PWD)/.golangci.yml --concurrency 1
-	@echo "Start check pkg package"
-	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml --concurrency 1
-	@echo "Start check client package"
-	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml --concurrency 2
-	@echo "Start check go_client e2e package"
-	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml --concurrency 2
+	@echo "Running golangci-lint sequentially per-package"
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on GOFLAGS=-buildvcs=false GOTOOLCHAIN=go1.25.3 /bin/bash -c "set -e; pkgs=\$$(go list ./... | grep -v /thirdparty/); count=\$$(printf '%s\n' \"\$${pkgs}\" | wc -l); echo TOTAL_PACKAGES=\$${count}; for pkg in \$${pkgs}; do pkgdir=\$$(go list -f {{.Dir}} \$$pkg); echo LINTING \$$pkg at \$$pkgdir; if [ -d \"\$$pkgdir\" ]; then cd \"\$$pkgdir\"; if echo \$$pkg | grep -q '^github.com/milvus-io/milvus/client'; then $(INSTALL_PATH)/golangci-lint run . --timeout=30m --config $(PWD)/client/.golangci.yml --concurrency 1 || exit \$$?; elif echo \$$pkg | grep -q '^github.com/milvus-io/milvus/tests/go_client'; then $(INSTALL_PATH)/golangci-lint run . --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml --concurrency 1 || exit \$$?; else $(INSTALL_PATH)/golangci-lint run . --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml --concurrency 1 || exit \$$?; fi; cd - >/dev/null; else echo pkg_dir_\$$pkgdir_not_found; exit 1; fi; done"
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 

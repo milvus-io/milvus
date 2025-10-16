@@ -280,7 +280,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
-    AssembleIndexDatas(index_data_codecs, binary_set);
+    AssembleIndexData(index_data_codecs, binary_set);
     // clear index_data_codecs to free memory early
     index_data_codecs.clear();
 
@@ -321,7 +321,7 @@ is_embedding_list_index(const IndexType& index_type) {
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
-    auto field_datas = file_manager_->CacheRawDataToMemory(config);
+    auto field_data = file_manager_->CacheRawDataToMemory(config);
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
     auto is_partition_key_isolation =
@@ -340,7 +340,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         int64_t total_size = 0;
         int64_t total_num_rows = 0;
         int64_t dim = 0;
-        for (auto data : field_datas) {
+        for (auto data : field_data) {
             total_size += data->Size();
             total_num_rows += data->get_num_rows();
 
@@ -353,7 +353,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 dim = config[DIM_KEY].get<int64_t>();
             } else {
                 AssertInfo(dim == 0 || dim == data->get_dim(),
-                           "inconsistent dim value between field datas!");
+                           "inconsistent dim value between field data!");
 
                 dim = data->get_dim();
             }
@@ -369,14 +369,14 @@ VectorMemIndex<T>::Build(const Config& config) {
         int64_t offset = 0;
         if (!is_embedding_list_index(index_type_)) {
             // TODO: avoid copying
-            for (auto data : field_datas) {
+            for (auto data : field_data) {
                 std::memcpy(buf.get() + offset, data->Data(), data->Size());
                 offset += data->Size();
                 data.reset();
             }
         } else {
             auto elem_size = vector_element_size(elem_type_);
-            for (auto data : field_datas) {
+            for (auto data : field_data) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,
@@ -405,7 +405,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             total_num_rows = lim_offset;
         }
 
-        field_datas.clear();
+        field_data.clear();
 
         auto dataset = GenDataset(total_num_rows, dim, buf.get());
         if (!scalar_info.empty()) {
@@ -419,7 +419,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         // sparse
         int64_t total_rows = 0;
         int64_t dim = 0;
-        for (auto field_data : field_datas) {
+        for (auto field_data : field_data) {
             total_rows += field_data->Length();
             dim = std::max(
                 dim,
@@ -430,7 +430,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
             total_rows);
         int64_t offset = 0;
-        for (auto field_data : field_datas) {
+        for (auto field_data : field_data) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
@@ -591,7 +591,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),

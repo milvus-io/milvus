@@ -970,9 +970,9 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.match_query_with_minimum: {}",
                    res.result_->error);
-        AssertInfo(
-            res.result_->value.tag == Value::Tag::None,
-            "TantivyIndexWrapper.match_query_with_minimum: invalid result type");
+        AssertInfo(res.result_->value.tag == Value::Tag::None,
+                   "TantivyIndexWrapper.match_query_with_minimum: invalid "
+                   "result type");
     }
 
     void
