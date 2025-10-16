@@ -39,8 +39,10 @@ import (
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -48,8 +50,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+type MetaTableChecker interface {
+	RBACChecker
+}
+
 //go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
 type IMetaTable interface {
+	MetaTableChecker
+
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
 	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
@@ -91,10 +99,10 @@ type IMetaTable interface {
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
 
-	AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
-	DeleteCredential(ctx context.Context, username string) error
-	AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	InitCredential(ctx context.Context) error
+	DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error
+	AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error
 	ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
 
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
@@ -1353,47 +1361,103 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 	return mt.generalCnt
 }
 
-// AddCredential add credential
-func (mt *MetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
+
+	credInfo, err := mt.catalog.GetCredential(ctx, util.UserRoot)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	if credInfo != nil {
+		return nil
+	}
+	encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
+	}
+	log.Ctx(ctx).Info("RootCoord init user root")
+	err = mt.catalog.AlterCredential(ctx, &model.Credential{
+		Username:          util.UserRoot,
+		EncryptedPassword: encryptedRootPassword,
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
 	usernames, err := mt.catalog.ListCredentials(ctx)
 	if err != nil {
 		return err
 	}
-	if len(usernames) >= Params.ProxyCfg.MaxUserNum.GetAsInt() {
+	// check if the username already exists.
+	for _, username := range usernames {
+		if username == credInfo.GetUsername() {
+			return errUserAlreadyExists
+		}
+	}
+
+	// check if the number of users has reached the limit.
+	maxUserNum := Params.ProxyCfg.MaxUserNum.GetAsInt()
+	if len(usernames) >= maxUserNum {
 		errMsg := "unable to add user because the number of users has reached the limit"
-		log.Ctx(ctx).Error(errMsg, zap.Int("max_user_num", Params.ProxyCfg.MaxUserNum.GetAsInt()))
+		log.Ctx(ctx).Error(errMsg, zap.Int("maxUserNum", maxUserNum))
 		return errors.New(errMsg)
 	}
+	return nil
+}
 
-	if origin, _ := mt.catalog.GetCredential(ctx, credInfo.Username); origin != nil {
-		return fmt.Errorf("user already exists: %s", credInfo.Username)
+func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
 	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, credInfo.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
 	}
-	return mt.catalog.CreateCredential(ctx, credential)
+	return nil
 }
 
 // AlterCredential update credential
-func (mt *MetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error {
+	body := result.Message.MustBody()
 
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
+	existsCredential, err := mt.catalog.GetCredential(ctx, body.CredentialInfo.Username)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", body.CredentialInfo.Username),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
 	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+		Username:          body.CredentialInfo.Username,
+		EncryptedPassword: body.CredentialInfo.EncryptedPassword,
+		TimeTick:          result.GetControlChannelResult().TimeTick,
 	}
 	return mt.catalog.AlterCredential(ctx, credential)
 }
@@ -1407,12 +1471,42 @@ func (mt *MetaTable) GetCredential(ctx context.Context, username string) (*inter
 	return model.MarshalCredentialModel(credential), err
 }
 
+func (mt *MetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, req.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // DeleteCredential delete credential
-func (mt *MetaTable) DeleteCredential(ctx context.Context, username string) error {
+func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.DropCredential(ctx, username)
+	existsCredential, err := mt.catalog.GetCredential(ctx, result.Message.Header().UserName)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", result.Message.Header().UserName),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
+	return mt.catalog.DropCredential(ctx, result.Message.Header().UserName)
 }
 
 // ListCredentialUsernames list credential usernames
@@ -1427,23 +1521,23 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }
 
-// CreateRole create role
-func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	if funcutil.IsEmptyString(entity.Name) {
-		return errors.New("the role name in the role info is empty")
+// CheckIfCreateRole checks if the role can be created.
+func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
+		return errEmptyRoleName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	results, err := mt.catalog.ListRole(ctx, tenant, nil, false)
+	results, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
 		return err
 	}
 	for _, result := range results {
-		if result.GetRole().GetName() == entity.Name {
-			log.Ctx(ctx).Info("role already exists", zap.String("role", entity.Name))
-			return common.NewIgnorableError(errors.Newf("role [%s] already exists", entity))
+		if result.GetRole().GetName() == in.GetEntity().GetName() {
+			log.Ctx(ctx).Info("role already exists", zap.String("role", in.GetEntity().GetName()))
+			return errRoleAlreadyExists
 		}
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
@@ -1451,8 +1545,49 @@ func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milv
 		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
 		return errors.New(errMsg)
 	}
+	return nil
+}
+
+// CreateRole create role
+func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.CreateRole(ctx, tenant, entity)
+}
+
+func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetRoleName()) {
+		return errEmptyRoleName
+	}
+	if util.IsBuiltinRole(in.GetRoleName()) {
+		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	if in.GetForceDrop() {
+		return nil
+	}
+
+	grantEntities, err := mt.catalog.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   &milvuspb.RoleEntity{Name: in.GetRoleName()},
+		DbName: "*",
+	})
+	if err != nil {
+		return err
+	}
+	if len(grantEntities) != 0 {
+		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
+		return errors.New(errMsg)
+	}
+	return nil
 }
 
 // DropRole drop role info
@@ -1463,15 +1598,33 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 	return mt.catalog.DropRole(ctx, tenant, roleName)
 }
 
-// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
-func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	if funcutil.IsEmptyString(userEntity.Name) {
+func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
 		return errors.New("username in the user entity is empty")
 	}
-	if funcutil.IsEmptyString(roleEntity.Name) {
+	if funcutil.IsEmptyString(req.GetRoleName()) {
 		return errors.New("role name in the role entity is empty")
 	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: req.RoleName}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	if req.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		if _, err := mt.catalog.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: req.Username}, false); err != nil {
+			errMsg := "not found the user, maybe the user isn't existed or internal system error"
+			return errors.New(errMsg)
+		}
+	}
+	return nil
+}
+
+// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
+func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
@@ -1584,6 +1737,72 @@ func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.R
 	return mt.catalog.BackupRBAC(ctx, tenant)
 }
 
+func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
+	meta := req.GetRBACMeta()
+	if len(meta.GetRoles()) == 0 && len(meta.GetPrivilegeGroups()) == 0 && len(meta.GetGrants()) == 0 && len(meta.GetUsers()) == 0 {
+		return errEmptyRBACMeta
+	}
+
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if role already exists
+	existRoles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	existRoleAfterRestoreMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	for _, role := range meta.GetRoles() {
+		if _, ok := existRoleMap[role.GetName()]; ok {
+			return errors.Newf("role [%s] already exists", role.GetName())
+		}
+		existRoleAfterRestoreMap[role.GetName()] = struct{}{}
+	}
+
+	// check if privilege group already exists
+	existPrivGroups, err := mt.catalog.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	existPrivGroupAfterRestoreMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	for _, group := range meta.GetPrivilegeGroups() {
+		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
+			return errors.Newf("privilege group [%s] already exists", group.GetGroupName())
+		}
+		existPrivGroupAfterRestoreMap[group.GetGroupName()] = struct{}{}
+	}
+
+	// check if grant can be restored
+	for _, grant := range meta.GetGrants() {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
+			return errors.Newf("privilege [%s] does not exist", privName)
+		}
+	}
+
+	// check if user can be restored
+	existUser, err := mt.catalog.ListUser(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
+	for _, user := range meta.GetUsers() {
+		if _, ok := existUserMap[user.GetUser()]; ok {
+			return errors.Newf("user [%s] already exists", user.GetUser())
+		}
+
+		// check if user-role can be restored
+		for _, role := range user.GetRoles() {
+			if _, ok := existRoleAfterRestoreMap[role.GetName()]; !ok {
+				return errors.Newf("role [%s] does not exist", role.GetName())
+			}
+		}
+	}
+	return nil
+}
+
 func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1605,23 +1824,30 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 	return false, nil
 }
 
-func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", groupName)
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", req.GetGroupName())
 	}
-	if util.IsPrivilegeNameDefined(groupName) {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", groupName)
+	if util.IsPrivilegeNameDefined(req.GetGroupName()) {
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", req.GetGroupName())
 	}
+	return nil
+}
+
+func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	data := &milvuspb.PrivilegeGroupInfo{
 		GroupName:  groupName,
 		Privileges: make([]*milvuspb.PrivilegeEntity, 0),
@@ -1629,20 +1855,21 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 	return mt.catalog.SavePrivilegeGroup(ctx, data)
 }
 
-func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if !definedByUsers {
-		return nil
+		return errNotCustomPrivilegeGroup
 	}
+
 	// check if the group is used by any role
 	roles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
@@ -1660,11 +1887,18 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 			return err
 		}
 		for _, grant := range grants {
-			if grant.Grantor.Privilege.Name == groupName {
-				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", groupName, role.GetName())
+			if grant.Grantor.Privilege.Name == req.GetGroupName() {
+				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", req.GetGroupName(), role.GetName())
 			}
 		}
 	}
+	return nil
+}
+
+func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	return mt.catalog.DropPrivilegeGroup(ctx, groupName)
 }
 
@@ -1675,42 +1909,54 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 	return mt.catalog.ListPrivilegeGroups(ctx)
 }
 
-func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+// CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
+func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	if util.IsBuiltinPrivilegeGroup(groupName) {
-		return merr.WrapErrParameterInvalidMsg("the privilege group name [%s] is defined by built in privilege groups in system", groupName)
-	}
-
-	// validate input params
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
-	if err != nil {
-		return err
-	}
-	if !definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] to operate", groupName)
-	}
 	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
 	if err != nil {
 		return err
 	}
-	for _, p := range privileges {
+	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	// check if the privilege group is defined by users
+	if _, ok := currenctGroups[req.GroupName]; !ok {
+		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] defined in system to operate", req.GroupName)
+	}
+
+	if len(req.Privileges) == 0 {
+		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
+	}
+	// check if the new incoming privileges are defined by users or built in
+	for _, p := range req.Privileges {
 		if util.IsPrivilegeNameDefined(p.Name) {
 			continue
 		}
-		for _, group := range groups {
-			// add privileges for custom privilege group
-			if group.GroupName == p.Name {
-				privileges = append(privileges, group.Privileges...)
-			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
-			}
+		if _, ok := currenctGroups[p.Name]; !ok {
+			return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 		}
 	}
+
+	if req.Type == milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup {
+		// Check if all privileges are the same privilege level
+		privilegeLevels := lo.SliceToMap(lo.Union(req.Privileges, currenctGroups[req.GroupName]), func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+			return util.GetPrivilegeLevel(p.Name), struct{}{}
+		})
+		if len(privilegeLevels) > 1 {
+			return merr.WrapErrParameterInvalidMsg("privileges are not the same privilege level")
+		}
+	}
+	return nil
+}
+
+func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
 
 	// merge with current privileges
 	group, err := mt.catalog.GetPrivilegeGroup(ctx, groupName)

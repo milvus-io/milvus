@@ -30,15 +30,22 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -51,13 +58,37 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	rand.Seed(time.Now().UnixNano())
-	parameters := []string{"tikv", "etcd"}
-	var code int
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		code = m.Run()
-	}
+	code := m.Run()
 	os.Exit(code)
+}
+
+func initStreamingSystem() {
+	t := common.NewEmptyMockT()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0"))
+	streaming.SetWALForTest(wal)
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		results := make(map[string]*message.AppendResult)
+		for _, vchannel := range msg.BroadcastHeader().VChannels {
+			results[vchannel] = &message.AppendResult{
+				MessageID:              walimplstest.NewTestMessageID(1),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			}
+		}
+		registry.CallMessageAckCallback(context.Background(), msg, results)
+		return &types.BroadcastAppendResult{}, nil
+	})
+	bapi.EXPECT().Close().Return()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
+	mb.EXPECT().Close().Return()
+	broadcast.Release()
+	broadcast.ResetBroadcaster()
+	broadcast.Register(mb)
 }
 
 func TestRootCoord_CreateDatabase(t *testing.T) {
@@ -1733,345 +1764,6 @@ func TestRootCoord_DescribeDatabase(t *testing.T) {
 	})
 }
 
-func TestRootCoord_RBACError(t *testing.T) {
-	ctx := context.Background()
-	c := newTestCore(withHealthyCode(), withInvalidMeta())
-	t.Run("create credential failed", func(t *testing.T) {
-		resp, err := c.CreateCredential(ctx, &internalpb.CredentialInfo{Username: "foo", EncryptedPassword: "bar"})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-	t.Run("get credential failed", func(t *testing.T) {
-		resp, err := c.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{Username: "foo"})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-	t.Run("update credential failed", func(t *testing.T) {
-		resp, err := c.UpdateCredential(ctx, &internalpb.CredentialInfo{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-	t.Run("delete credential failed", func(t *testing.T) {
-		resp, err := c.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{Username: "foo"})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-	t.Run("list credential failed", func(t *testing.T) {
-		resp, err := c.ListCredUsers(ctx, &milvuspb.ListCredUsersRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-	t.Run("create role failed", func(t *testing.T) {
-		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "foo"}})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-	t.Run("drop role failed", func(t *testing.T) {
-		resp, err := c.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: "foo"})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-	t.Run("operate user role failed", func(t *testing.T) {
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, nil
-		}
-		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-			return nil, nil
-		}
-		resp, err := c.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{RoleName: "foo", Username: "bar", Type: milvuspb.OperateUserRoleType_AddUserToRole})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, errors.New("mock error")
-		}
-		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-			return nil, errors.New("mock error")
-		}
-	})
-	t.Run("select role failed", func(t *testing.T) {
-		{
-			resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "foo"}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		{
-			resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-	})
-	t.Run("select user failed", func(t *testing.T) {
-		{
-			resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: "foo"}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		{
-			resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-	})
-	t.Run("operate privilege failed", func(t *testing.T) {
-		{
-			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Type: milvuspb.OperatePrivilegeType(100)})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
-		{
-			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Type: milvuspb.OperatePrivilegeType_Grant})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
-		{
-			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{Object: &milvuspb.ObjectEntity{Name: "CollectionErr"}}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
-		{
-			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{Object: &milvuspb.ObjectEntity{Name: "Collection"}, Role: &milvuspb.RoleEntity{Name: "foo"}}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
-
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, nil
-		}
-		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-			return nil, nil
-		}
-		{
-			resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{
-				Role:       &milvuspb.RoleEntity{Name: "foo"},
-				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
-				ObjectName: "col1",
-				Grantor: &milvuspb.GrantorEntity{
-					User:      &milvuspb.UserEntity{Name: "root"},
-					Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
-				},
-			}, Type: milvuspb.OperatePrivilegeType_Grant})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
-		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
-			return false, nil
-		}
-		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-			return nil, nil
-		}
-		resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{
-			Role:       &milvuspb.RoleEntity{Name: "foo"},
-			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
-			ObjectName: "col1",
-			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: "root"},
-				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
-			},
-		}, Type: milvuspb.OperatePrivilegeType_Grant})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, errors.New("mock error")
-		}
-		mockMeta.SelectUserFunc = func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-			return nil, errors.New("mock error")
-		}
-	})
-
-	t.Run("operate privilege group failed", func(t *testing.T) {
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-			return nil, errors.New("mock error")
-		}
-		mockMeta.CreatePrivilegeGroupFunc = func(ctx context.Context, groupName string) error {
-			return errors.New("mock error")
-		}
-		mockMeta.GetPrivilegeGroupRolesFunc = func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
-			return nil, errors.New("mock error")
-		}
-		{
-			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-		}
-		{
-			resp, err := c.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		{
-			resp, err := c.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-		}
-		{
-			resp, err := c.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-		}
-	})
-
-	t.Run("select grant failed", func(t *testing.T) {
-		{
-			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		{
-			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, nil
-		}
-		{
-			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "CollectionFoo"}}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		{
-			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "Collection"}}})
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, errors.New("mock error")
-		}
-	})
-
-	t.Run("select grant success", func(t *testing.T) {
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return []*milvuspb.RoleResult{
-				{
-					Role: &milvuspb.RoleEntity{Name: "foo"},
-				},
-			}, nil
-		}
-		mockMeta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
-			return []*milvuspb.GrantEntity{
-				{
-					Role: &milvuspb.RoleEntity{Name: "foo"},
-				},
-			}, merr.ErrIoKeyNotFound
-		}
-
-		{
-			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "Collection"}, ObjectName: "fir"}})
-			assert.NoError(t, err)
-			assert.Equal(t, 1, len(resp.GetEntities()))
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		}
-
-		mockMeta.SelectRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-			return nil, errors.New("mock error")
-		}
-
-		mockMeta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
-			return nil, errors.New("mock error")
-		}
-	})
-
-	t.Run("list policy failed", func(t *testing.T) {
-		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
-			return []*milvuspb.GrantEntity{{
-				ObjectName: "*",
-				Object: &milvuspb.ObjectEntity{
-					Name: "Global",
-				},
-				Role:    &milvuspb.RoleEntity{Name: "role"},
-				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CustomGroup"}},
-			}}, nil
-		}
-		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-			return []*milvuspb.PrivilegeGroupInfo{
-				{
-					GroupName:  "CollectionAdmin",
-					Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
-				},
-			}, nil
-		}
-		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
-			return true, nil
-		}
-		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
-			return []*milvuspb.GrantEntity{}, errors.New("mock error")
-		}
-		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-			return []*milvuspb.PrivilegeGroupInfo{}, errors.New("mock error")
-		}
-		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
-			return false, errors.New("mock error")
-		}
-	})
-}
-
-func TestRootCoord_BuiltinRoles(t *testing.T) {
-	roleDbAdmin := "db_admin"
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().RoleCfg.Enabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"`+roleDbAdmin+`": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
-	t.Run("init builtin roles success", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(), withInvalidMeta())
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-			return nil
-		}
-		mockMeta.OperatePrivilegeFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-			return nil
-		}
-		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-			return nil, nil
-		}
-		err := c.initBuiltinRoles()
-		assert.Equal(t, nil, err)
-		assert.True(t, util.IsBuiltinRole(roleDbAdmin))
-		assert.False(t, util.IsBuiltinRole(util.RoleAdmin))
-		resp, err := c.DropRole(context.Background(), &milvuspb.DropRoleRequest{RoleName: roleDbAdmin})
-		assert.Equal(t, nil, err)
-		assert.Equal(t, int32(1401), resp.Code) // merr.ErrPrivilegeNotPermitted
-	})
-	t.Run("init builtin roles fail to create role", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(), withInvalidMeta())
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-			return merr.ErrPrivilegeNotPermitted
-		}
-		err := c.initBuiltinRoles()
-		assert.Error(t, err)
-	})
-	t.Run("init builtin roles fail to operate privileg", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(), withInvalidMeta())
-		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.CreateRoleFunc = func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-			return nil
-		}
-		mockMeta.OperatePrivilegeFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-			return merr.ErrPrivilegeNotPermitted
-		}
-		err := c.initBuiltinRoles()
-		assert.Error(t, err)
-	})
-}
-
 func TestCore_Stop(t *testing.T) {
 	t.Run("abnormal stop before component is ready", func(t *testing.T) {
 		c := &Core{}
@@ -2169,25 +1861,6 @@ func TestCore_BackupRBAC(t *testing.T) {
 	resp, err = c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
 	assert.NoError(t, err)
 	assert.False(t, merr.Ok(resp.GetStatus()))
-}
-
-func TestCore_RestoreRBAC(t *testing.T) {
-	meta := mockrootcoord.NewIMetaTable(t)
-	c := newTestCore(withHealthyCode(), withMeta(meta))
-	mockProxyClientManager := proxyutil.NewMockProxyClientManager(t)
-	mockProxyClientManager.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(nil).Maybe()
-	c.proxyClientManager = mockProxyClientManager
-
-	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	resp, err := c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(resp))
-
-	meta.ExpectedCalls = nil
-	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
-	resp, err = c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
-	assert.NoError(t, err)
-	assert.False(t, merr.Ok(resp))
 }
 
 func TestCore_getMetastorePrivilegeName(t *testing.T) {
