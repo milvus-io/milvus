@@ -198,6 +198,59 @@ class BsonView {
         : data_(data.data()), size_(data.size()) {
     }
 
+    // Core implementation: check if a BSON value is "empty" (null or recursively contains only nulls/empties)
+    // Following the same semantics as Json::isObjectEmpty/isDocEmpty in Json.h
+    static bool
+    IsBsonValueEmpty(const bsoncxx::types::bson_value::view& val) {
+        switch (val.type()) {
+            case bsoncxx::type::k_null:
+                return true;
+            case bsoncxx::type::k_document:
+                return IsBsonValueEmpty(val.get_document().value);
+            case bsoncxx::type::k_array:
+                return IsBsonValueEmpty(val.get_array().value);
+            default:
+                return false;
+        }
+    }
+
+    static bool
+    IsBsonValueEmpty(const bsoncxx::document::view& doc) {
+        for (auto&& elem : doc) {
+            if (!IsBsonValueEmpty(elem.get_value())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool
+    IsBsonValueEmpty(const bsoncxx::array::view& arr) {
+        for (auto&& elem : arr) {
+            if (!IsBsonValueEmpty(elem.get_value())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool
+    IsBsonValueEmpty(size_t offset) const {
+        AssertInfo(offset < size_, "bson offset out of range");
+        auto field = ParseBsonField(data_, offset);
+
+        switch (field.type) {
+            case bsoncxx::type::k_null:
+                return true;
+            case bsoncxx::type::k_document:
+                return IsBsonValueEmpty(ParseAsDocument(field.value_ptr));
+            case bsoncxx::type::k_array:
+                return IsBsonValueEmpty(ParseAsArray(field.value_ptr));
+            default:
+                return false;
+        }
+    }
+
     explicit BsonView(const uint8_t* data, size_t size)
         : data_(data), size_(size) {
     }
@@ -441,7 +494,7 @@ class BsonView {
     }
 
     inline BsonRawField
-    ParseBsonField(const uint8_t* bson_data, size_t offset) {
+    ParseBsonField(const uint8_t* bson_data, size_t offset) const {
         const uint8_t* ptr = bson_data + offset;
         auto type_tag = static_cast<bsoncxx::type>(*ptr++);
 
