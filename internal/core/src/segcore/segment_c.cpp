@@ -465,39 +465,7 @@ LoadTextIndex(CSegmentInterface c_segment,
             std::make_unique<milvus::proto::indexcgo::LoadTextIndexInfo>();
         info_proto->ParseFromArray(serialized_load_text_index_info, len);
 
-        milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
-                                                  info_proto->partitionid(),
-                                                  segment->get_segment_id(),
-                                                  info_proto->fieldid(),
-                                                  info_proto->schema()};
-        milvus::storage::IndexMeta index_meta{segment->get_segment_id(),
-                                              info_proto->fieldid(),
-                                              info_proto->buildid(),
-                                              info_proto->version()};
-        auto remote_chunk_manager =
-            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                .GetRemoteChunkManager();
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
-        AssertInfo(fs != nullptr, "arrow file system is null");
-
-        milvus::Config config;
-        std::vector<std::string> files;
-        for (const auto& f : info_proto->files()) {
-            files.push_back(f);
-        }
-        config[milvus::index::INDEX_FILES] = files;
-        config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
-        config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
-        milvus::storage::FileManagerContext ctx(
-            field_meta, index_meta, remote_chunk_manager, fs);
-
-        auto index = std::make_unique<milvus::index::TextMatchIndex>(ctx);
-        index->Load(config);
-
-        segment->LoadTextIndex(milvus::FieldId(info_proto->fieldid()),
-                               std::move(index));
-
+        segment->LoadTextIndex(std::move(info_proto));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

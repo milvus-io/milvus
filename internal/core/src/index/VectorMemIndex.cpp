@@ -313,11 +313,6 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(index_.Dim());
 }
 
-bool
-is_embedding_list_index(const IndexType& index_type) {
-    return index_type == knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
-}
-
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
@@ -344,30 +339,19 @@ VectorMemIndex<T>::Build(const Config& config) {
             total_size += data->Size();
             total_num_rows += data->get_num_rows();
 
-            // todo(SapdeA): now, vector arrays (embedding list) are serialized
-            // to parquet by using binary format which does not provide dim
-            // information so we use this temporary solution.
-            if (is_embedding_list_index(index_type_)) {
-                AssertInfo(elem_type_ != DataType::NONE,
-                           "embedding list index must have elem_type");
-                dim = config[DIM_KEY].get<int64_t>();
-            } else {
-                AssertInfo(dim == 0 || dim == data->get_dim(),
-                           "inconsistent dim value between field data!");
-
-                dim = data->get_dim();
-            }
+            AssertInfo(dim == 0 || dim == data->get_dim(),
+                       "inconsistent dim value between field datas!");
+            dim = data->get_dim();
         }
 
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
 
         size_t lim_offset = 0;
-        std::vector<size_t> lims;
-        lims.reserve(total_num_rows + 1);
-        lims.push_back(lim_offset);
+        std::vector<size_t> offsets;
 
         int64_t offset = 0;
-        if (!is_embedding_list_index(index_type_)) {
+        // For embedding list index, elem_type_ is not NONE
+        if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
             for (auto data : field_data) {
                 std::memcpy(buf.get() + offset, data->Data(), data->Size());
@@ -375,8 +359,10 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
         } else {
-            auto elem_size = vector_element_size(elem_type_);
-            for (auto data : field_data) {
+            offsets.reserve(total_num_rows + 1);
+            offsets.push_back(lim_offset);
+            auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
+            for (auto data : field_datas) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,
@@ -385,16 +371,16 @@ VectorMemIndex<T>::Build(const Config& config) {
                 auto rows = vec_array_data->get_num_rows();
                 for (auto i = 0; i < rows; ++i) {
                     auto size = vec_array_data->DataSize(i);
-                    assert(size % (dim * elem_size) == 0);
-                    assert(dim * elem_size != 0);
+                    assert(size % bytes_per_vec == 0);
+                    assert(bytes_per_vec != 0);
 
                     auto vec_array = vec_array_data->value_at(i);
 
                     std::memcpy(buf.get() + offset, vec_array->data(), size);
                     offset += size;
 
-                    lim_offset += size / (dim * elem_size);
-                    lims.push_back(lim_offset);
+                    lim_offset += size / bytes_per_vec;
+                    offsets.push_back(lim_offset);
                 }
 
                 assert(data->Size() == offset);
@@ -411,8 +397,9 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
-        if (!lims.empty()) {
-            dataset->SetLims(lims.data());
+        if (!offsets.empty()) {
+            dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                         const_cast<const size_t*>(offsets.data()));
         }
         BuildWithDataset(dataset, build_config);
     } else {
@@ -605,6 +592,20 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    std::unique_ptr<storage::FileWriter> embedding_list_meta_writer_ptr =
+        nullptr;
+    auto embedding_list_meta_path =
+        GetValueFromConfig<std::string>(config, EMB_LIST_META_PATH);
+    if (is_embedding_list) {
+        AssertInfo(embedding_list_meta_path.has_value(),
+                   "mmap filepath is empty when load index");
+        std::filesystem::create_directories(
+            std::filesystem::path(embedding_list_meta_path.value())
+                .parent_path());
+        embedding_list_meta_writer_ptr = std::make_unique<storage::FileWriter>(
+            embedding_list_meta_path.value());
+    }
 
     auto file_writer = storage::FileWriter(
         local_filepath.value(),
@@ -668,7 +669,14 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    file_writer.Write(data->PayloadData(), data->PayloadSize());
+                    if (prefix == knowhere::meta::EMB_LIST_META &&
+                        embedding_list_meta_writer_ptr) {
+                        embedding_list_meta_writer_ptr->Write(
+                            data->PayloadData(), data->PayloadSize());
+                    } else {
+                        file_writer.Write(data->PayloadData(),
+                                          data->PayloadSize());
+                    }
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
                 }
@@ -700,9 +708,15 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             (std::chrono::system_clock::now() - start_load_files2_mem);
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
-        for (auto& [_, index_data] : result) {
-            file_writer.Write(index_data->PayloadData(),
-                              index_data->PayloadSize());
+        for (auto& [prefix, index_data] : result) {
+            if (prefix == knowhere::meta::EMB_LIST_META &&
+                embedding_list_meta_writer_ptr) {
+                embedding_list_meta_writer_ptr->Write(
+                    index_data->PayloadData(), index_data->PayloadSize());
+            } else {
+                file_writer.Write(index_data->PayloadData(),
+                                  index_data->PayloadSize());
+            }
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
@@ -715,11 +729,17 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             write_disk_duration_sum)
             .count());
     file_writer.Finish();
+    if (embedding_list_meta_writer_ptr) {
+        embedding_list_meta_writer_ptr->Finish();
+    }
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
+    if (is_embedding_list) {
+        conf["emb_list_meta_file_path"] = embedding_list_meta_path.value();
+    }
     auto start_deserialize = std::chrono::system_clock::now();
     auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
     auto deserialize_duration =

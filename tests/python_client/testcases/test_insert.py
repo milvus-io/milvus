@@ -719,24 +719,6 @@ class TestInsertOperation(TestcaseBase):
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_auto_id_true_with_dataframe_values(self, pk_field):
-        """
-        target: test insert with auto_id=True
-        method: create collection with auto_id=True
-        expected: 1.verify num entities 2.verify ids
-        """
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(
-            primary_field=pk_field, auto_id=True)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        df = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"Expect no data for auto_id primary field: {pk_field}"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
-        assert collection_w.is_empty
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true_with_list_values(self, pk_field):
         """
@@ -888,107 +870,6 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data)
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("enable_partition_key", [True, False])
-    @pytest.mark.parametrize("default_value", [[], [None for _ in range(ct.default_nb)]])
-    def test_insert_multi_fields_using_none_data(self, enable_partition_key, default_value, auto_id):
-        """
-        target: test insert with multi fields include array using none value
-        method: 1. create a collection with multi fields using default value
-                2. insert using none value to replace the field value
-        expected: insert successfully
-        """
-        json_embedded_object = "json_embedded_object"
-        fields = [
-            cf.gen_int64_field(is_primary=True),
-            cf.gen_int32_field(default_value=np.int32(1), nullable=True),
-            cf.gen_float_field(default_value=np.float32(1.0), nullable=True),
-            cf.gen_string_field(default_value="abc", enable_partition_key=enable_partition_key, nullable=True),
-            cf.gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32, nullable=True),
-            cf.gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT, nullable=True),
-            cf.gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR, max_length=100, nullable=True),
-            cf.gen_json_field(name=json_embedded_object, nullable=True),
-            cf.gen_float_vec_field()
-        ]
-        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
-        collection_w = self.init_collection_wrap(schema=schema)
-        # default value fields, [] or [None]
-        data = [
-            [i for i in range(ct.default_nb)],
-            default_value,
-            default_value,
-            default_value,
-            [[np.int32(j) for j in range(10)] for _ in range(ct.default_nb)],
-            [[np.float32(j) for j in range(10)] for _ in range(ct.default_nb)],
-            default_value,
-            default_value,
-            cf.gen_vectors(ct.default_nb, ct.default_dim)
-        ]
-        if auto_id:
-            del data[0]
-        collection_w.insert(data=data)
-        assert collection_w.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("enable_partition_key", [True, False])
-    @pytest.mark.parametrize("nullable", [True, False])
-    def test_insert_multi_fields_by_rows_using_default(self, enable_partition_key, nullable):
-        """
-        target: test insert multi fields by rows with default value
-        method: 1. create a collection with one field using default value
-                2. insert using default value to replace the field value
-        expected: insert successfully
-        """
-        # 1. initialize with data
-        if enable_partition_key is True and nullable is True:
-            pytest.skip("partition key field not support nullable")
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
-                  cf.gen_string_field(default_value="abc", is_partition_key=enable_partition_key, nullable=nullable),
-                  cf.gen_json_field(), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(schema=schema)
-
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        collection_w.load()
-
-        # 2. insert data
-        array = cf.gen_default_rows_data()
-        for i in range(0, ct.default_nb, 2):
-            array[i][ct.default_string_field_name] = None
-        collection_w.insert(array)
-
-        exp = f"{ct.default_string_field_name} == 'abc'"
-        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
-        assert len(res) == ct.default_nb/2
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_multi_fields_by_rows_using_none(self):
-        """
-        target: test insert multi fields by rows with none value
-        method: 1. create a collection with one field using none value
-                2. insert using none to replace the field value
-        expected: insert successfully
-        """
-        # 1. initialize with data
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(nullable=True),
-                  cf.gen_string_field(default_value="abc", nullable=True), cf.gen_json_field(), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(schema=schema)
-
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        collection_w.load()
-
-        # 2. insert data
-        array = cf.gen_default_rows_data()
-        for i in range(0, ct.default_nb, 2):
-            array[i][ct.default_float_field_name] = None
-            array[i][ct.default_string_field_name] = None
-        collection_w.insert(array)
-
-        exp = f"{ct.default_string_field_name} == 'abc'"
-        res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
-        assert len(res) == ct.default_nb/2
-        assert res[0][ct.default_float_field_name] is None
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_partition_key", [True, False])

@@ -570,3 +570,18 @@ func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 	}
 	return false, false
 }
+
+func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
+	enabled, _, err := ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
+	}
+	namespaceIsSet := namespace != nil
+	if enabled != namespaceIsSet {
+		if namespaceIsSet {
+			return fmt.Errorf("namespace data is set but namespace disabled")
+		}
+		return fmt.Errorf("namespace data is not set but namespace enabled")
+	}
+	return nil
+}

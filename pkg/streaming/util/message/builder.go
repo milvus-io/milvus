@@ -374,7 +374,10 @@ func newImmutableTxnMesasgeFromWAL(
 	if err != nil {
 		return nil, err
 	}
-	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
+
+	// begin message will be used to replicate, so we also need to set it timetick and last confirmed message id into committed message.
+	var beginImmutable ImmutableMessage = begin
+	beginImmutable = beginImmutable.(*specializedImmutableMessageImpl[*BeginTxnMessageHeader, *BeginTxnMessageBody]).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	for idx, m := range body {
 		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	}
@@ -385,7 +388,7 @@ func newImmutableTxnMesasgeFromWAL(
 		IntoImmutableMessage(commit.MessageID())
 	return &immutableTxnMessageImpl{
 		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
-		begin:                begin,
+		begin:                MustAsImmutableBeginTxnMessageV2(beginImmutable),
 		messages:             body,
 		commit:               commit,
 	}, nil

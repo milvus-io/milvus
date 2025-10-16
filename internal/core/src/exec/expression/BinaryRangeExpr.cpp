@@ -24,6 +24,11 @@ namespace exec {
 
 void
 PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyBinaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("data_type",
+                                 static_cast<int>(expr_->column_.data_type_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
@@ -422,7 +427,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecRangeVisitorImplForJsonStats<ValueType>();
     }
     auto real_batch_size =

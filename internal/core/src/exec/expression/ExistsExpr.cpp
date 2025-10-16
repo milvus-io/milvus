@@ -26,6 +26,11 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyExistsFilterExpr::Eval", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("data_type",
+                                 static_cast<int>(expr_->column_.data_type_));
+
     context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -116,7 +121,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonStats(context, field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(context, field_id, expr_->column_.nested_path_) &&
+        !has_offset_input_) {
         return EvalJsonExistsForDataSegmentByStats();
     }
     auto real_batch_size =

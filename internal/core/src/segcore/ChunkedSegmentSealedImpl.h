@@ -34,10 +34,12 @@
 #include "common/IndexMeta.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/CacheSlot.h"
+#include "parquet/statistics.h"
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::segcore {
 
@@ -49,6 +51,7 @@ using namespace milvus::cachinglayer;
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
+    using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
@@ -127,8 +130,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CreateTextIndex(FieldId field_id) override;
 
     void
-    LoadTextIndex(FieldId field_id,
-                  std::unique_ptr<index::TextMatchIndex> index) override;
+    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) override;
 
     void
     LoadJsonStats(FieldId field_id,
@@ -458,7 +461,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
-                  const size_t* query_lims,
+                  const size_t* query_offsets,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
@@ -507,7 +510,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         size_t num_rows,
         DataType data_type,
         bool enable_mmap,
-        bool is_proxy_column);
+        bool is_proxy_column,
+        std::optional<ParquetStatistics> statistics = {});
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {

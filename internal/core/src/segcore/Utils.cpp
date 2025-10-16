@@ -611,22 +611,40 @@ CreateVectorDataArrayFrom(const void* data_raw,
         case DataType::VECTOR_ARRAY: {
             auto data = reinterpret_cast<const VectorFieldProto*>(data_raw);
             auto vector_type = field_meta.get_element_type();
+            auto obj = vector_array->mutable_vector_array();
+            obj->set_dim(dim);
+
+            // Set element type based on vector type
             switch (vector_type) {
-                case DataType::VECTOR_FLOAT: {
-                    auto obj = vector_array->mutable_vector_array();
+                case DataType::VECTOR_FLOAT:
                     obj->set_element_type(
                         milvus::proto::schema::DataType::FloatVector);
-                    obj->set_dim(dim);
-                    for (auto i = 0; i < count; i++) {
-                        *(obj->mutable_data()->Add()) = data[i];
-                    }
                     break;
-                }
-                default: {
+                case DataType::VECTOR_FLOAT16:
+                    obj->set_element_type(
+                        milvus::proto::schema::DataType::Float16Vector);
+                    break;
+                case DataType::VECTOR_BFLOAT16:
+                    obj->set_element_type(
+                        milvus::proto::schema::DataType::BFloat16Vector);
+                    break;
+                case DataType::VECTOR_BINARY:
+                    obj->set_element_type(
+                        milvus::proto::schema::DataType::BinaryVector);
+                    break;
+                case DataType::VECTOR_INT8:
+                    obj->set_element_type(
+                        milvus::proto::schema::DataType::Int8Vector);
+                    break;
+                default:
                     ThrowInfo(NotImplemented,
                               fmt::format("not implemented vector type {}",
                                           vector_type));
-                }
+            }
+
+            // Add all vector data
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = data[i];
             }
             break;
         }

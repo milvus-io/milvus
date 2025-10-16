@@ -1196,6 +1196,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		PartitionID:  s.Partition(),
 		LoadPriority: s.LoadInfo().GetPriority(),
 		EnableMmap:   enableMmap,
+		IndexSize:    textLogs.GetMemorySize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1351,8 +1352,9 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 }
 
 func (s *LocalSegment) FinishLoad() error {
-	usage := s.ResourceUsageEstimate()
-	s.manager.AddLogicalResource(usage)
+	// TODO: disable logical resource handling for now
+	// usage := s.ResourceUsageEstimate()
+	// s.manager.AddLogicalResource(usage)
 	return s.csegment.FinishLoad()
 }
 
@@ -1418,9 +1420,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return nil, nil
 	}).Await()
 
-	// release reserved resource after the segment resource is really released.
-	usage := s.ResourceUsageEstimate()
-	s.manager.SubLogicalResource(usage)
+	// TODO: disable logical resource handling for now
+	// usage := s.ResourceUsageEstimate()
+	// s.manager.SubLogicalResource(usage)
 
 	log.Info("delete segment from memory")
 }

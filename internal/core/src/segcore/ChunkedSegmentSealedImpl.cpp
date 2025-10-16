@@ -32,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
@@ -62,9 +63,11 @@
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "cachinglayer/CacheSlot.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -244,6 +247,40 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     }
 }
 
+std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
+parse_parquet_statistics(
+    const std::vector<std::shared_ptr<parquet::FileMetaData>>& file_metas,
+    const std::map<int64_t, milvus_storage::ColumnOffset>& field_id_mapping,
+    int64_t field_id) {
+    ChunkedSegmentSealedImpl::ParquetStatistics statistics;
+    if (file_metas.size() == 0) {
+        return std::nullopt;
+    }
+    auto it = field_id_mapping.find(field_id);
+    AssertInfo(it != field_id_mapping.end(),
+               "field id {} not found in field id mapping",
+               field_id);
+    auto offset = it->second;
+
+    for (auto& file_meta : file_metas) {
+        auto num_row_groups = file_meta->num_row_groups();
+        for (auto i = 0; i < num_row_groups; i++) {
+            auto row_group = file_meta->RowGroup(i);
+            auto column_chunk = row_group->ColumnChunk(offset.col_index);
+            if (!column_chunk->is_stats_set()) {
+                AssertInfo(statistics.size() == 0,
+                           "Statistics is not set for some column chunks "
+                           "for field {}",
+                           field_id);
+                continue;
+            }
+            auto stats = column_chunk->statistics();
+            statistics.push_back(stats);
+        }
+    }
+    return statistics;
+}
+
 void
 ChunkedSegmentSealedImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& load_info) {
@@ -312,6 +349,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
+        auto file_metas = translator->parquet_file_metas();
+        auto field_id_mapping = translator->field_id_mapping();
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -321,9 +360,21 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             auto column = std::make_shared<ProxyChunkColumn>(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
+            std::optional<ParquetStatistics> statistics_opt;
+            if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
+                statistics_opt = parse_parquet_statistics(
+                    file_metas, field_id_mapping, field_id.get());
+            }
 
-            load_field_data_common(
-                field_id, column, num_rows, data_type, info.enable_mmap, true);
+            load_field_data_common(field_id,
+                                   column,
+                                   num_rows,
+                                   data_type,
+                                   info.enable_mmap,
+                                   true,
+                                   ENABLE_PARQUET_STATS_SKIP_INDEX
+                                       ? statistics_opt
+                                       : std::nullopt);
             if (field_id == TimestampFieldID) {
                 auto timestamp_proxy_column = get_column(TimestampFieldID);
                 AssertInfo(timestamp_proxy_column != nullptr,
@@ -754,7 +805,7 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
-                                        const size_t* query_lims,
+                                        const size_t* query_offsets,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
@@ -781,7 +832,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    binlog_search_info,
                                    query_data,
-                                   query_lims,
+                                   query_offsets,
                                    query_count,
                                    bitset,
                                    op_context,
@@ -796,7 +847,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    search_info,
                                    query_data,
-                                   query_lims,
+                                   query_offsets,
                                    query_count,
                                    bitset,
                                    op_context,
@@ -824,7 +875,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     search_info,
                                     index_info,
                                     query_data,
-                                    query_lims,
+                                    query_offsets,
                                     query_count,
                                     row_count,
                                     bitset,
@@ -1688,17 +1739,60 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
 
-    text_indexes_[field_id] = std::move(index);
+    text_indexes_[field_id] =
+        std::make_shared<index::TextMatchIndexHolder>(std::move(index));
 }
 
 void
 ChunkedSegmentSealedImpl::LoadTextIndex(
-    FieldId field_id, std::unique_ptr<index::TextMatchIndex> index) {
+    std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto) {
     std::unique_lock lck(mutex_);
+
+    milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
+                                                   info_proto->partitionid(),
+                                                   this->get_segment_id(),
+                                                   info_proto->fieldid(),
+                                                   info_proto->schema()};
+    milvus::storage::IndexMeta index_meta{this->get_segment_id(),
+                                          info_proto->fieldid(),
+                                          info_proto->buildid(),
+                                          info_proto->version()};
+    auto remote_chunk_manager =
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    AssertInfo(fs != nullptr, "arrow file system is null");
+
+    milvus::Config config;
+    std::vector<std::string> files;
+    for (const auto& f : info_proto->files()) {
+        files.push_back(f);
+    }
+    config[milvus::index::INDEX_FILES] = files;
+    config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
+    config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+    milvus::storage::FileManagerContext file_ctx(
+        field_data_meta, index_meta, remote_chunk_manager, fs);
+
+    auto field_id = milvus::FieldId(info_proto->fieldid());
     const auto& field_meta = schema_->operator[](field_id);
-    index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    milvus::segcore::storagev1translator::TextMatchIndexLoadInfo load_info{
+        info_proto->enable_mmap(),
+        this->get_segment_id(),
+        info_proto->fieldid(),
+        field_meta.get_analyzer_params(),
+        info_proto->index_size()};
+
+    std::unique_ptr<
+        milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
+        translator = std::make_unique<
+            milvus::segcore::storagev1translator::TextMatchIndexTranslator>(
+            load_info, file_ctx, config);
+    auto cache_slot =
+        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+            std::move(translator));
+    text_indexes_[field_id] = std::move(cache_slot);
 }
 
 std::unique_ptr<DataArray>
@@ -2422,7 +2516,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     size_t num_rows,
     DataType data_type,
     bool enable_mmap,
-    bool is_proxy_column) {
+    bool is_proxy_column,
+    std::optional<ParquetStatistics> statistics) {
     {
         std::unique_lock lck(mutex_);
         AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
@@ -2451,13 +2546,18 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
-        if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
-            LoadSkipIndex(field_id, data_type, column);
-        }
         if (IsVariableDataType(data_type)) {
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, column->DataByteSize());
+        }
+    }
+    if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
+        if (statistics) {
+            LoadSkipIndexFromStatistics(
+                field_id, data_type, statistics.value());
+        } else {
+            LoadSkipIndex(field_id, data_type, column);
         }
     }
 

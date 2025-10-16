@@ -71,8 +71,6 @@ const (
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
-	// offsets for embedding list search
-	LimsKey = "lims"
 	// key for timestamptz translation
 	TimezoneKey   = "timezone"
 	TimefieldsKey = "time_fields"

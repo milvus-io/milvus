@@ -45,6 +45,7 @@ enum VectorType {
   EmbListFloat16Vector = 7;
   EmbListBFloat16Vector = 8;
   EmbListInt8Vector = 9;
+  EmbListBinaryVector = 10;
 };
 
 message GenericValue {
@@ -345,4 +346,5 @@ message PlanNode {
   repeated ScoreFunction scorers = 6;
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
+  optional string namespace = 9;
 }

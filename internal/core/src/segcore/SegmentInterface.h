@@ -142,7 +142,7 @@ class SegmentInterface {
     virtual void
     CreateTextIndex(FieldId field_id) = 0;
 
-    virtual index::TextMatchIndex*
+    virtual PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
@@ -241,7 +241,7 @@ class SegmentInternalInterface : public SegmentInterface {
             }
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), std::move(valid_data)});
+                pw, {std::move(res), std::move(valid_data)});
         }
     }
 
@@ -358,10 +358,19 @@ class SegmentInternalInterface : public SegmentInterface {
         skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
+    void
+    LoadSkipIndexFromStatistics(
+        FieldId field_id,
+        DataType data_type,
+        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+        skip_index_.LoadSkipFromStatistics(
+            get_segment_id(), field_id, data_type, statistics);
+    }
+
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
 
-    index::TextMatchIndex*
+    PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
@@ -373,14 +382,14 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
  public:
-    // `query_lims` is not null only for vector array (embedding list) search
+    // `query_offsets` is not null only for vector array (embedding list) search
     // where it denotes the number of vectors in each embedding list. The length
-    // of `query_lims` is the number of queries in the search plus one (the first
-    // element in query_lims is 0).
+    // of `query_offsets` is the number of queries in the search plus one (the first
+    // element in query_offsets is 0).
     virtual void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
-                  const size_t* query_lims,
+                  const size_t* query_offsets,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
@@ -595,7 +604,12 @@ class SegmentInternalInterface : public SegmentInterface {
     SkipIndex skip_index_;
 
     // text-indexes used to do match.
-    std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
+    std::unordered_map<
+        FieldId,
+        std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
+                     std::shared_ptr<milvus::index::TextMatchIndexHolder>,
+                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                         milvus::index::TextMatchIndex>>>>
         text_indexes_;
 
     // json stats cache (field_id -> CacheSlot of JsonKeyStats)

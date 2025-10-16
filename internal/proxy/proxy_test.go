@@ -555,7 +555,7 @@ func constructTestCreateIndexRequest(dbName, collectionName string, dataType sch
 				},
 				{
 					Key:   common.IndexTypeKey,
-					Value: "EMB_LIST_HNSW",
+					Value: "HNSW",
 				},
 				{
 					Key:   "nlist",
@@ -1744,7 +1744,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
-	fmt.Println("create index for binVec field")
 
 	fieldName := ConcatStructFieldName(structField, subFieldFVec)
 	wg.Add(1)
@@ -1756,8 +1755,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
-
-	fmt.Println("create index for embedding list field")
 
 	wg.Add(1)
 	t.Run("alter index for embedding list field", func(t *testing.T) {
@@ -1778,7 +1775,6 @@ func TestProxy(t *testing.T) {
 		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
 	})
-	fmt.Println("alter index for embedding list field")
 
 	wg.Add(1)
 	t.Run("describe index for embedding list field", func(t *testing.T) {
@@ -1796,7 +1792,6 @@ func TestProxy(t *testing.T) {
 		enableMmap, _ := common.IsMmapDataEnabled(resp.IndexDescriptions[0].GetParams()...)
 		assert.True(t, enableMmap, "params: %+v", resp.IndexDescriptions[0])
 	})
-	fmt.Println("describe index for embedding list field")
 
 	wg.Add(1)
 	t.Run("describe index with indexName for embedding list field", func(t *testing.T) {
@@ -1812,7 +1807,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
-	fmt.Println("describe index with indexName for embedding list field")
 
 	wg.Add(1)
 	t.Run("get index statistics for embedding list field", func(t *testing.T) {

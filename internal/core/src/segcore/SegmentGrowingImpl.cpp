@@ -385,7 +385,8 @@ SegmentGrowingImpl::load_field_data_common(
 
     // build text match index
     if (field_meta.enable_match()) {
-        auto index = GetTextIndex(nullptr, field_id);
+        auto pinned = GetTextIndex(nullptr, field_id);
+        auto index = pinned.get();
         index->BuildIndexFromFieldData(field_data, field_meta.is_nullable());
         index->Commit();
         // Reload reader so that the index can be read immediately
@@ -695,7 +696,7 @@ SegmentGrowingImpl::search_batch_pks(
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
-                                  const size_t* query_lims,
+                                  const size_t* query_offsets,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
@@ -704,7 +705,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
     query::SearchOnGrowing(*this,
                            search_info,
                            query_data,
-                           query_lims,
+                           query_offsets,
                            query_count,
                            timestamp,
                            bitset,
@@ -1265,7 +1266,16 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
+    // only unique_ptr is supported for growing segment
+    if (auto p = std::get_if<std::unique_ptr<milvus::index::TextMatchIndex>>(
+            &iter->second)) {
+        (*p)->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
+    } else {
+        throw SegcoreError(ErrorCode::UnexpectedError,
+                           fmt::format("text index of growing segment is not a "
+                                       "unique_ptr for field {}",
+                                       field_id.get()));
+    }
 }
 
 void

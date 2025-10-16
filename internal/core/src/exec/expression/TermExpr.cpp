@@ -24,6 +24,11 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("data_type",
+                                 static_cast<int>(expr_->column_.data_type_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (is_pk_field_ && !has_offset_input_) {
@@ -709,7 +714,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ && CanUseJsonStats(context, field_id)) {
+    if (!has_offset_input_ &&
+        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
         return ExecJsonInVariableByStats<ValueType>();
     }
 

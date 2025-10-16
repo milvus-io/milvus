@@ -488,20 +488,6 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
-      # This ratio estimates how much evictable memory can be cached.
-      # The higher the ratio, the more physical memory is reserved for evictable memory,
-      # resulting in fewer evictions but fewer segments can be loaded.
-      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
-      # This parameter is only valid when eviction is enabled.
-      # It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].
-      evictableMemoryCacheRatio: 0.3
-      # This ratio estimates how much evictable disk space can be cached.
-      # The higher the ratio, the more physical disk space is reserved for evictable disk usage,
-      # resulting in fewer evictions but fewer segments can be loaded.
-      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
-      # This parameter is only valid when eviction is enabled.
-      # It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].
-      evictableDiskCacheRatio: 0.3
       # Enable background eviction for Tiered Storage. Defaults to false.
       # Background eviction is used to do periodic eviction in a separate thread.
       # And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.
@@ -1036,7 +1022,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledJSONKeyStats: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
@@ -1393,6 +1379,13 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  AISAQ:
+    build:
+      max_degree: 56 # Maximum degree of the Vamana graph
+      pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
+      search_list_size: 100 # Size of the candidate list during building graph
+    search:
+      beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number
   DISKANN:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph

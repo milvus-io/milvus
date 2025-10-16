@@ -49,11 +49,9 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	mockMilvusClient := cluster.NewMockMilvusClient(t)
 	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
 		Return(&milvuspb.GetReplicateInfoResponse{
-			Checkpoints: []*commonpb.ReplicateCheckpoint{
-				{
-					Pchannel:  "test-source-channel",
-					MessageId: newMockPulsarMessageID(),
-				},
+			Checkpoint: &commonpb.ReplicateCheckpoint{
+				Pchannel:  "test-source-channel",
+				MessageId: newMockPulsarMessageID(),
 			},
 		}, nil)
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)

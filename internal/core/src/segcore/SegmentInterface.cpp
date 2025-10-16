@@ -117,7 +117,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int32_t consistency_level,
                                    Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
+    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(
         *this, timestamp, consistency_level, collection_ttl);
@@ -439,17 +439,46 @@ SegmentInternalInterface::GetSkipIndex() const {
     return skip_index_;
 }
 
-index::TextMatchIndex*
+PinWrapper<index::TextMatchIndex*>
 SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
                                        FieldId field_id) const {
     std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
         throw SegcoreError(
-            ErrorCode::TextIndexNotFound,
+            milvus::ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    return iter->second.get();
+
+    auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
+        using Alt = std::decay_t<decltype(alt)>;
+
+        if constexpr (std::is_same_v<
+                          Alt,
+                          std::unique_ptr<milvus::index::TextMatchIndex>>) {
+            return PinWrapper<index::TextMatchIndex*>(alt.get());
+        } else if constexpr (std::is_same_v<
+                                 Alt,
+                                 std::shared_ptr<
+                                     milvus::index::TextMatchIndexHolder>>) {
+            return PinWrapper<index::TextMatchIndex*>(alt, alt->get());
+        } else if constexpr (std::is_same_v<
+                                 Alt,
+                                 std::shared_ptr<
+                                     milvus::cachinglayer::CacheSlot<
+                                         milvus::index::TextMatchIndex>>>) {
+            auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
+            return PinWrapper<index::TextMatchIndex*>(ca, ca->get_cell_of(0));
+        } else {
+            throw SegcoreError(
+                milvus::ErrorCode::UnexpectedError,
+                fmt::format(
+                    "text index of segment is not supported for field {}",
+                    field_id.get()));
+        }
+    };
+
+    return std::visit(make_pin, iter->second);
 }
 
 std::unique_ptr<DataArray>
