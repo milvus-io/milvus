@@ -280,7 +280,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
-    AssembleIndexDatas(index_data_codecs, binary_set);
+    AssembleIndexData(index_data_codecs, binary_set);
     // clear index_data_codecs to free memory early
     index_data_codecs.clear();
 
@@ -340,7 +340,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             total_num_rows += data->get_num_rows();
 
             AssertInfo(dim == 0 || dim == data->get_dim(),
-                       "inconsistent dim value between field datas!");
+                       "inconsistent dim value between field data!");
             dim = data->get_dim();
         }
 
@@ -362,7 +362,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             offsets.reserve(total_num_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
-            for (auto data : field_datas) {
+            for (auto data : field_data) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,
