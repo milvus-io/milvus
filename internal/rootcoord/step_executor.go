@@ -58,9 +58,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 		todo := steps[l-1]
 		childSteps, err := todo.Execute(ctx)
 
-		// TODO: maybe a interface `step.LogOnError` is better.
-		_, isConfirmGCStep := todo.(*confirmGCStep)
-		skipLog := isConfirmGCStep
+		skipLog := false
 
 		if !retry.IsRecoverable(err) {
 			if !skipLog {

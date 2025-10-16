@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 type Collection struct {
@@ -128,6 +129,32 @@ func (c *Collection) Equal(other Collection) bool {
 		c.ConsistencyLevel == other.ConsistencyLevel &&
 		checkParamsEqual(c.Properties, other.Properties) &&
 		c.EnableDynamicField == other.EnableDynamicField
+}
+
+func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, body *message.AlterCollectionMessageBody) {
+	updateMask := header.UpdateMask
+	updates := body.Updates
+	for _, field := range updateMask.GetPaths() {
+		switch field {
+		case message.FieldMaskDB:
+			c.DBID = updates.DbId
+			c.DBName = updates.DbName
+		case message.FieldMaskCollectionName:
+			c.Name = updates.CollectionName
+		case message.FieldMaskCollectionDescription:
+			c.Description = updates.Description
+		case message.FieldMaskCollectionConsistencyLevel:
+			c.ConsistencyLevel = updates.ConsistencyLevel
+		case message.FieldMaskCollectionProperties:
+			c.Properties = updates.Properties
+		case message.FieldMaskCollectionSchema:
+			c.AutoID = updates.Schema.AutoID
+			c.Fields = UnmarshalFieldModels(updates.Schema.Fields)
+			c.EnableDynamicField = updates.Schema.EnableDynamicField
+			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
+			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
+		}
+	}
 }
 
 func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
