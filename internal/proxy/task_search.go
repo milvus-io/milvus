@@ -664,10 +664,18 @@ func (t *searchTask) reduceResults(ctx context.Context, toReduceResults []*inter
 
 	log := log.Ctx(ctx)
 	// Decode all search results
-	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
+	decodedSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
 		log.Warn("failed to decode search results", zap.Error(err))
 		return nil, err
+	}
+
+	validSearchResults := []*schemapb.SearchResultData{}
+	for _, result := range decodedSearchResults {
+		if result == nil || typeutil.GetSizeOfIDs(result.GetIds()) == 0 {
+			continue
+		}
+		validSearchResults = append(validSearchResults, result)
 	}
 
 	if len(validSearchResults) <= 0 {
@@ -783,6 +791,12 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+
+			// filter out empty results
+			if result == nil || result.GetResults() == nil || typeutil.GetSizeOfIDs(result.GetResults().GetIds()) == 0 {
+				continue
+			}
+
 			t.reScorers[index].setMetricType(subMetricType)
 			t.reScorers[index].reScore(result)
 			multipleMilvusResults[index] = result

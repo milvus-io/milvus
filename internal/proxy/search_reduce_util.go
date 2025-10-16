@@ -73,11 +73,20 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 	nq int64, topK int64, pkType schemapb.DataType, metricType string,
 ) (*milvuspb.SearchResults, error) {
 	log.Ctx(ctx).Debug("reduceAdvanceGroupBY", zap.Int("len(subSearchResultData)", len(subSearchResultData)), zap.Int64("nq", nq))
+
+	validSubSearchResultData := []*schemapb.SearchResultData{}
+	for _, result := range subSearchResultData {
+		if result == nil || typeutil.GetSizeOfIDs(result.GetIds()) == 0 {
+			continue
+		}
+		validSubSearchResultData = append(validSubSearchResultData, result)
+	}
+
 	// for advance group by, offset is not applied, so just return when there's only one channel
-	if len(subSearchResultData) == 1 {
+	if len(validSubSearchResultData) == 1 {
 		return &milvuspb.SearchResults{
 			Status:  merr.Success(),
-			Results: subSearchResultData[0],
+			Results: validSubSearchResultData[0],
 		}, nil
 	}
 
@@ -93,13 +102,13 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 	}
 
 	var limit int64
-	if allSearchCount, hitNum, err := checkResultDatas(ctx, subSearchResultData, nq, topK); err != nil {
+	if allSearchCount, hitNum, err := checkResultDatas(ctx, validSubSearchResultData, nq, topK); err != nil {
 		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
 		limit = int64(hitNum)
-		ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit)
+		ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(validSubSearchResultData[0].GetFieldsData(), limit)
 	}
 
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
@@ -107,26 +116,26 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 	}
 
 	var (
-		subSearchNum = len(subSearchResultData)
+		subSearchNum = len(validSubSearchResultData)
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset = make([][]int64, subSearchNum)
 	)
 	for i := 0; i < subSearchNum; i++ {
-		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
+		subSearchNqOffset[i] = make([]int64, validSubSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
-			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + validSubSearchResultData[i].Topks[j-1]
 		}
 	}
 	// reducing nq * topk results
 	for nqIdx := int64(0); nqIdx < nq; nqIdx++ {
 		dataCount := int64(0)
 		for subIdx := 0; subIdx < subSearchNum; subIdx += 1 {
-			subData := subSearchResultData[subIdx]
+			subData := validSubSearchResultData[subIdx]
 			subPks := subData.GetIds()
 			subScores := subData.GetScores()
 			subGroupByVals := subData.GetGroupByFieldValue()
 
-			nqTopK := subData.Topks[nqIdx]
+			nqTopK := validSubSearchResultData[subIdx].Topks[nqIdx]
 			for i := int64(0); i < nqTopK; i++ {
 				innerIdx := subSearchNqOffset[subIdx][nqIdx] + i
 				pk := typeutil.GetPK(subPks, innerIdx)
@@ -181,12 +190,20 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		zap.Int64("limit", limit),
 		zap.String("metricType", metricType))
 
+	validSubSearchResultData := []*schemapb.SearchResultData{}
+	for _, result := range subSearchResultData {
+		if result == nil || typeutil.GetSizeOfIDs(result.GetIds()) == 0 {
+			continue
+		}
+		validSubSearchResultData = append(validSubSearchResultData, result)
+	}
+
 	ret := &milvuspb.SearchResults{
 		Status: merr.Success(),
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: typeutil.PrepareResultFieldData(validSubSearchResultData[0].GetFieldsData(), limit),
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -197,7 +214,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		return ret, nil
 	}
 
-	if allSearchCount, _, err := checkResultDatas(ctx, subSearchResultData, nq, topk); err != nil {
+	if allSearchCount, _, err := checkResultDatas(ctx, validSubSearchResultData, nq, topk); err != nil {
 		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 		return ret, err
 	} else {
@@ -205,15 +222,15 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 	}
 
 	var (
-		subSearchNum = len(subSearchResultData)
+		subSearchNum = len(validSubSearchResultData)
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset       = make([][]int64, subSearchNum)
 		totalResCount     int64 = 0
 	)
 	for i := 0; i < subSearchNum; i++ {
-		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
+		subSearchNqOffset[i] = make([]int64, validSubSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
-			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + validSubSearchResultData[i].Topks[j-1]
 		}
 		totalResCount += subSearchNqOffset[i][nq-1]
 	}
@@ -237,11 +254,11 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		)
 
 		for j = 0; j < groupBound; {
-			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
+			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, validSubSearchResultData, subSearchNqOffset, cursors, i)
 			if subSearchIdx == -1 {
 				break
 			}
-			subSearchRes := subSearchResultData[subSearchIdx]
+			subSearchRes := validSubSearchResultData[subSearchIdx]
 
 			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
 			score := subSearchRes.GetScores()[resultDataIdx]
@@ -279,7 +296,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			if groupVal != nil {
 				groupEntities := groupByValMap[groupVal]
 				for _, groupEntity := range groupEntities {
-					subResData := subSearchResultData[groupEntity.subSearchIdx]
+					subResData := validSubSearchResultData[groupEntity.subSearchIdx]
 					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
 					typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 					ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
@@ -325,12 +342,20 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		zap.Int64("limit", limit),
 		zap.String("metricType", metricType))
 
+	validSubSearchResultData := []*schemapb.SearchResultData{}
+	for _, result := range subSearchResultData {
+		if result == nil || typeutil.GetSizeOfIDs(result.GetIds()) == 0 {
+			continue
+		}
+		validSubSearchResultData = append(validSubSearchResultData, result)
+	}
+
 	ret := &milvuspb.SearchResults{
 		Status: merr.Success(),
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: typeutil.PrepareResultFieldData(validSubSearchResultData[0].GetFieldsData(), limit),
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -341,20 +366,20 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		return ret, nil
 	}
 
-	if allSearchCount, _, err := checkResultDatas(ctx, subSearchResultData, nq, topk); err != nil {
+	if allSearchCount, _, err := checkResultDatas(ctx, validSubSearchResultData, nq, topk); err != nil {
 		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
 	}
 
-	subSearchNum := len(subSearchResultData)
+	subSearchNum := len(validSubSearchResultData)
 	if subSearchNum == 1 && offset == 0 {
 		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
 		//  we still need to adjust the scores later.
-		ret.Results = subSearchResultData[0]
+		ret.Results = validSubSearchResultData[0]
 		// realTopK is the topK of the nq-th query, it is used in proxy but not handled by delegator.
-		topks := subSearchResultData[0].Topks
+		topks := validSubSearchResultData[0].Topks
 		if len(topks) > 0 {
 			ret.Results.TopK = topks[len(topks)-1]
 		}
@@ -365,9 +390,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset := make([][]int64, subSearchNum)
 		for i := 0; i < subSearchNum; i++ {
-			subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
+			subSearchNqOffset[i] = make([]int64, validSubSearchResultData[i].GetNumQueries())
 			for j := int64(1); j < nq; j++ {
-				subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+				subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + validSubSearchResultData[i].Topks[j-1]
 			}
 		}
 		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
@@ -382,7 +407,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 
 			// skip offset results
 			for k := int64(0); k < offset; k++ {
-				subSearchIdx, _ := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
+				subSearchIdx, _ := selectHighestScoreIndex(ctx, validSubSearchResultData, subSearchNqOffset, cursors, i)
 				if subSearchIdx == -1 {
 					break
 				}
@@ -395,14 +420,14 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				// From all the sub-query result sets of the i-th query vector,
 				//   find the sub-query result set index of the score j-th data,
 				//   and the index of the data in schemapb.SearchResultData
-				subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
+				subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, validSubSearchResultData, subSearchNqOffset, cursors, i)
 				if subSearchIdx == -1 {
 					break
 				}
-				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
+				score := validSubSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
-				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
+				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, validSubSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				typeutil.CopyPk(ret.Results.Ids, validSubSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				cursors[subSearchIdx]++
 			}
@@ -510,13 +535,21 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		zap.Int64("offset", offset),
 		zap.Int64("limit", limit))
 
+	validSearchResults := []*milvuspb.SearchResults{}
+	for _, result := range searchResults {
+		if result == nil || result.GetResults() == nil || typeutil.GetSizeOfIDs(result.GetResults().GetIds()) == 0 {
+			continue
+		}
+		validSearchResults = append(validSearchResults, result)
+	}
+
 	var ret *milvuspb.SearchResults
-	if ret = initSearchResults(nq, limit); len(searchResults) == 0 {
+	if ret = initSearchResults(nq, limit); len(validSearchResults) == 0 {
 		return ret, nil
 	}
 
 	// init FieldsData
-	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+	ret.Results.FieldsData = typeutil.PrepareResultFieldData(validSearchResults[0].GetResults().GetFieldsData(), limit)
 
 	totalCount := limit * groupSize
 	if err := setupIdListForSearchResult(ret, pkType, totalCount); err != nil {
@@ -540,7 +573,7 @@ func rankSearchResultDataByGroup(ctx context.Context,
 	}
 
 	groupByDataType := searchResults[0].GetResults().GetGroupByFieldValue().GetType()
-	for ri, result := range searchResults {
+	for ri, result := range validSearchResults {
 		scores := result.GetResults().GetScores()
 		start := 0
 		// milvus has limits for the value range of nq and limit
@@ -643,7 +676,7 @@ func rankSearchResultDataByGroup(ctx context.Context,
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				loc := pk2DataOffset[i][group.idList[idx]]
-				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
+				typeutil.AppendFieldData(ret.Results.FieldsData, validSearchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
 				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
 			}
 			returnedRowNum += len(group.idList)
@@ -707,13 +740,21 @@ func rankSearchResultDataByPk(ctx context.Context,
 		zap.Int64("offset", offset),
 		zap.Int64("limit", limit))
 
+	validSearchResults := []*milvuspb.SearchResults{}
+	for _, result := range searchResults {
+		if result == nil || result.GetResults() == nil || typeutil.GetSizeOfIDs(result.GetResults().GetIds()) == 0 {
+			continue
+		}
+		validSearchResults = append(validSearchResults, result)
+	}
+
 	var ret *milvuspb.SearchResults
-	if ret = initSearchResults(nq, limit); len(searchResults) == 0 {
+	if ret = initSearchResults(nq, limit); len(validSearchResults) == 0 {
 		return ret, nil
 	}
 
 	// init FieldsData
-	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+	ret.Results.FieldsData = typeutil.PrepareResultFieldData(validSearchResults[0].GetResults().GetFieldsData(), limit)
 
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
 		return ret, nil
@@ -731,7 +772,7 @@ func rankSearchResultDataByPk(ctx context.Context,
 		pk2DataOffset[i] = make(map[any]dataLoc)
 	}
 
-	for ri, result := range searchResults {
+	for ri, result := range validSearchResults {
 		scores := result.GetResults().GetScores()
 		start := int64(0)
 		for i := int64(0); i < nq; i++ {
@@ -783,7 +824,7 @@ func rankSearchResultDataByPk(ctx context.Context,
 			}
 			ret.Results.Scores = append(ret.Results.Scores, score)
 			loc := pk2DataOffset[i][keys[index]]
-			typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), loc.offset)
+			typeutil.AppendFieldData(ret.Results.FieldsData, validSearchResults[loc.resultIdx].GetResults().GetFieldsData(), loc.offset)
 		}
 	}
 
