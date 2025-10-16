@@ -45,6 +45,10 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 	panic("unreachable code")
 }
 
+func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutablePutCollectionMessageV2) error {
+	panic("unreachable code")
+}
+
 func NewMsgHandlerImpl(broker broker.Broker) *msgHandlerImpl {
 	return &msgHandlerImpl{
 		broker: broker,

@@ -935,40 +935,22 @@ func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectio
 		zap.String("name", in.GetCollectionName()),
 		zap.String("role", typeutil.RootCoordRole))
 
-	t := &addCollectionFieldTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to add field",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := c.broadcastAlterCollectionV2ForAddField(ctx, in); err != nil {
 		log.Ctx(ctx).Info("failed to add field",
 			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+			zap.String("name", in.GetCollectionName()))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionField").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AddCollectionField").Observe(float64(t.queueDur.Milliseconds()))
+	// metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AddCollectionField").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to add field",
 		zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetCollectionName()),
-		zap.Uint64("ts", t.GetTs()))
+		zap.String("name", in.GetCollectionName()))
 	return merr.Success(), nil
 }
 
@@ -1302,48 +1284,21 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 		zap.Any("delete_keys", in.DeleteKeys),
 	)
 
-	var t task
-	if ok, value, err := common.IsEnableDynamicSchema(in.GetProperties()); ok {
-		if err != nil {
-			log.Warn("failed to check dynamic schema prop kv", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		log.Info("found update dynamic schema prop kv")
-		t = &alterDynamicFieldTask{
-			baseTask:    newBaseTask(ctx, c),
-			Req:         in,
-			targetValue: value,
-		}
-	} else {
-		t = &alterCollectionTask{
-			baseTask: newBaseTask(ctx, c),
-			Req:      in,
-		}
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Warn("failed to enqueue request to alter collection",
-			zap.Error(err))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := c.broadcastAlterCollectionV2ForAlterCollection(ctx, in); err != nil {
 		log.Warn("failed to alter collection",
 			zap.Error(err),
-			zap.Uint64("ts", t.GetTs()))
-
+			zap.String("name", in.GetCollectionName()))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.GetDurationInQueue().Milliseconds()))
+	// metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection",
-		zap.Uint64("ts", t.GetTs()))
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()))
 	return merr.Success(), nil
 }
 
@@ -1362,29 +1317,7 @@ func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterColle
 		zap.Any("props", in.Properties),
 	)
 
-	t := &alterCollectionFieldTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Warn("failed to enqueue request to alter collection field",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
-			zap.String("fieldName", in.GetFieldName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Warn("failed to alter collection",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastAlterCollectionV2ForAlterCollectionField(ctx, in); err != nil {
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -2676,19 +2609,9 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("RenameCollection")
-	t := &renameCollectionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      req,
-	}
 
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Warn("failed to enqueue request to rename collection", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Warn("failed to rename collection", zap.Uint64("ts", t.GetTs()), zap.Error(err))
+	if err := c.broadcastRenameCollection(ctx, req); err != nil {
+		log.Warn("failed to rename collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -2696,7 +2619,7 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("RenameCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to rename collection", zap.Uint64("ts", t.GetTs()))
+	log.Info("done to rename collection")
 	return merr.Success(), nil
 }
 
