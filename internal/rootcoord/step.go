@@ -24,17 +24,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
 
 type stepPriority int
@@ -62,89 +60,6 @@ func (s baseStep) Desc() string {
 
 func (s baseStep) Weight() stepPriority {
 	return stepPriorityLow
-}
-
-type addCollectionMetaStep struct {
-	baseStep
-	coll *model.Collection
-}
-
-func (s *addCollectionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.AddCollection(ctx, s.coll)
-	return nil, err
-}
-
-func (s *addCollectionMetaStep) Desc() string {
-	return fmt.Sprintf("add collection to meta table, name: %s, id: %d, ts: %d", s.coll.Name, s.coll.CollectionID, s.coll.CreateTime)
-}
-
-type deleteCollectionMetaStep struct {
-	baseStep
-	collectionID UniqueID
-	ts           Timestamp
-}
-
-func (s *deleteCollectionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.RemoveCollection(ctx, s.collectionID, s.ts)
-	return nil, err
-}
-
-func (s *deleteCollectionMetaStep) Desc() string {
-	return fmt.Sprintf("delete collection from meta table, id: %d, ts: %d", s.collectionID, s.ts)
-}
-
-func (s *deleteCollectionMetaStep) Weight() stepPriority {
-	return stepPriorityNormal
-}
-
-type deleteDatabaseMetaStep struct {
-	baseStep
-	databaseName string
-	ts           Timestamp
-}
-
-func (s *deleteDatabaseMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.DropDatabase(ctx, s.databaseName, s.ts)
-	return nil, err
-}
-
-func (s *deleteDatabaseMetaStep) Desc() string {
-	return fmt.Sprintf("delete database from meta table, name: %s, ts: %d", s.databaseName, s.ts)
-}
-
-type removeDmlChannelsStep struct {
-	baseStep
-	pChannels []string
-}
-
-func (s *removeDmlChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	s.core.chanTimeTick.removeDmlChannels(s.pChannels...)
-	return nil, nil
-}
-
-func (s *removeDmlChannelsStep) Desc() string {
-	// this shouldn't be called.
-	return fmt.Sprintf("remove dml channels: %v", s.pChannels)
-}
-
-func (s *removeDmlChannelsStep) Weight() stepPriority {
-	// avoid too frequent tt.
-	return stepPriorityUrgent
-}
-
-type watchChannelsStep struct {
-	baseStep
-	info *watchInfo
-}
-
-func (s *watchChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.WatchChannels(ctx, s.info)
-	return nil, err
-}
-
-func (s *watchChannelsStep) Desc() string {
-	return fmt.Sprintf("watch channels, ts: %d, collection: %d, partition: %d, vChannels: %v",
-		s.info.ts, s.info.collectionID, s.info.partitionID, s.info.vChannels)
 }
 
 type cleanupMetricsStep struct {
@@ -238,65 +153,6 @@ func (s *dropIndexStep) Desc() string {
 
 func (s *dropIndexStep) Weight() stepPriority {
 	return stepPriorityNormal
-}
-
-type addPartitionMetaStep struct {
-	baseStep
-	partition *model.Partition
-}
-
-func (s *addPartitionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.AddPartition(ctx, s.partition)
-	return nil, err
-}
-
-func (s *addPartitionMetaStep) Desc() string {
-	return fmt.Sprintf("add partition to meta table, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
-}
-
-type broadcastCreatePartitionMsgStep struct {
-	baseStep
-	vchannels []string
-	partition *model.Partition
-	ts        Timestamp
-}
-
-func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	req := &msgpb.CreatePartitionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
-			commonpbutil.WithTimeStamp(0), // ts is given by streamingnode.
-		),
-		PartitionName: s.partition.PartitionName,
-		CollectionID:  s.partition.CollectionID,
-		PartitionID:   s.partition.PartitionID,
-	}
-
-	msgs := make([]message.MutableMessage, 0, len(s.vchannels))
-	for _, vchannel := range s.vchannels {
-		msg, err := message.NewCreatePartitionMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&message.CreatePartitionMessageHeader{
-				CollectionId: s.partition.CollectionID,
-				PartitionId:  s.partition.PartitionID,
-			}).
-			WithBody(req).
-			BuildMutable()
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, msg)
-	}
-	if err := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
-		BarrierTimeTick: s.ts,
-	}, msgs...).UnwrapFirstError(); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (s *broadcastCreatePartitionMsgStep) Desc() string {
-	return fmt.Sprintf("broadcast create partition message to mq, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
 }
 
 type nullStep struct{}
@@ -441,7 +297,7 @@ func (s *renameCollectionStep) Desc() string {
 
 var (
 	confirmGCInterval          = time.Minute * 20
-	allPartition      UniqueID = -1
+	allPartition      UniqueID = common.AllPartitionsID
 )
 
 type confirmGCStep struct {

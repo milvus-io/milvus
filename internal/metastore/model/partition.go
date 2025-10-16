@@ -1,7 +1,6 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 )
 
@@ -9,7 +8,6 @@ type Partition struct {
 	PartitionID               int64
 	PartitionName             string
 	PartitionCreatedTimestamp uint64
-	Extra                     map[string]string // deprecated.
 	CollectionID              int64
 	State                     pb.PartitionState
 }
@@ -23,7 +21,6 @@ func (p *Partition) Clone() *Partition {
 		PartitionID:               p.PartitionID,
 		PartitionName:             p.PartitionName,
 		PartitionCreatedTimestamp: p.PartitionCreatedTimestamp,
-		Extra:                     common.CloneStr2Str(p.Extra),
 		CollectionID:              p.CollectionID,
 		State:                     p.State,
 	}

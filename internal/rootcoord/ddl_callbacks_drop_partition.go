@@ -1,33 +1,45 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rootcoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) error {
-	if err := CheckMsgType(in.GetBase().GetMsgType(), commonpb.MsgType_DropPartition); err != nil {
-		return err
-	}
 	if in.GetPartitionName() == Params.CommonCfg.DefaultPartitionName.GetValue() {
 		return errors.New("default partition cannot be deleted")
 	}
 
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(in.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(in.GetDbName(), in.GetCollectionName()))
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -57,6 +69,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 	for i := 0; i < int(collMeta.ShardsNum); i++ {
 		channels = append(channels, collMeta.VirtualChannelNames[i])
 	}
+
 	msg := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{
 			CollectionId: collMeta.CollectionID,
@@ -75,7 +88,6 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
@@ -96,6 +108,9 @@ func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result mes
 	if err := c.meta.DropPartition(ctx, header.CollectionId, header.PartitionId, result.GetControlChannelResult().TimeTick); err != nil {
 		return err
 	}
+	// add the partition tombstone to the sweeper.
+	c.tombstoneSweeper.AddTombstone(newPartitionTombstone(c.meta, c.broker, header.CollectionId, header.PartitionId))
+	// expire the partition meta cache on proxy.
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(body.DbName),
@@ -105,4 +120,33 @@ func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result mes
 			ce.OptLPCMMsgType(commonpb.MsgType_DropPartition),
 		),
 		result.GetControlChannelResult().TimeTick)
+}
+
+// newPartitionTombstone creates a new partition tombstone.
+func newPartitionTombstone(meta IMetaTable, broker Broker, collectionID int64, partitionID int64) *partitionTombstone {
+	return &partitionTombstone{
+		meta:         meta,
+		broker:       broker,
+		collectionID: collectionID,
+		partitionID:  partitionID,
+	}
+}
+
+type partitionTombstone struct {
+	meta         IMetaTable
+	broker       Broker
+	collectionID int64
+	partitionID  int64
+}
+
+func (t *partitionTombstone) ID() string {
+	return fmt.Sprintf("p:%d:%d", t.collectionID, t.partitionID)
+}
+
+func (t *partitionTombstone) ConfirmCanBeRemoved(ctx context.Context) (bool, error) {
+	return t.broker.GcConfirm(ctx, t.collectionID, t.partitionID), nil
+}
+
+func (t *partitionTombstone) Remove(ctx context.Context) error {
+	return t.meta.RemoveCollection(ctx, t.collectionID, 0)
 }

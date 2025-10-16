@@ -43,13 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var errCreateCollectionWithSameSchema = errors.New("create collection with same schema")
-
-type collectionChannels struct {
-	virtualChannels  []string
-	physicalChannels []string
-}
-
 type createCollectionTask struct {
 	*Core
 	Req    *milvuspb.CreateCollectionRequest
@@ -58,6 +51,9 @@ type createCollectionTask struct {
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
+	if t.Req == nil {
+		return errors.New("empty requests")
+	}
 	Params := paramtable.Get()
 
 	// 1. check shard number
@@ -384,21 +380,11 @@ func (t *createCollectionTask) assignCollectionID() error {
 func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 	Params := paramtable.Get()
 
-	// allocate partition ids
-	t.header.PartitionIds = make([]int64, t.Req.GetNumPartitions())
-	start, end, err := t.idAllocator.Alloc(uint32(len(t.header.PartitionIds)))
-	if err != nil {
-		return err
-	}
-	for i := start; i < end; i++ {
-		t.header.PartitionIds[i-start] = i
-	}
-
-	t.body.PartitionIDs = make([]int64, 0, t.Req.GetNumPartitions())
-	t.body.PartitionNames = make([]string, 0, t.Req.GetNumPartitions())
+	partitionNames := make([]string, 0, t.Req.GetNumPartitions())
 	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 
 	if _, err := typeutil.GetPartitionKeyFieldSchema(t.body.CollectionSchema); err == nil {
+		// only when enabling partition key mode, we allow to create multiple partitions.
 		partitionNums := t.Req.GetNumPartitions()
 		// double check, default num of physical partitions should be greater than 0
 		if partitionNums <= 0 {
@@ -412,18 +398,30 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 		}
 
 		for i := int64(0); i < partitionNums; i++ {
-			t.body.PartitionNames = append(t.body.PartitionNames, fmt.Sprintf("%s_%d", defaultPartitionName, i))
-			t.body.PartitionIDs = append(t.body.PartitionIDs, t.header.PartitionIds[i])
+			partitionNames = append(partitionNames, fmt.Sprintf("%s_%d", defaultPartitionName, i))
 		}
 	} else {
 		// compatible with old versions <= 2.2.8
-		t.body.PartitionNames = append(t.body.PartitionNames, defaultPartitionName)
-		t.body.PartitionIDs = append(t.body.PartitionIDs, t.header.PartitionIds[0])
+		partitionNames = append(partitionNames, defaultPartitionName)
 	}
+
+	// allocate partition ids
+	start, end, err := t.idAllocator.Alloc(uint32(len(partitionNames)))
+	if err != nil {
+		return err
+	}
+	t.header.PartitionIds = make([]int64, len(partitionNames))
+	t.body.PartitionIDs = make([]int64, len(partitionNames))
+	for i := start; i < end; i++ {
+		t.header.PartitionIds[i-start] = i
+		t.body.PartitionIDs[i-start] = i
+	}
+	t.body.PartitionNames = partitionNames
 
 	log.Ctx(ctx).Info("assign partitions when create collection",
 		zap.String("collectionName", t.Req.GetCollectionName()),
-		zap.Any("partitions", t.body.PartitionNames))
+		zap.Int64s("partitionIds", t.header.PartitionIds),
+		zap.Strings("partitionNames", t.body.PartitionNames))
 	return nil
 }
 
@@ -508,7 +506,7 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
-		return errCreateCollectionWithSameSchema
+		return errIgnoredCreateCollection
 	}
 	return nil
 }

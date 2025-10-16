@@ -153,3 +153,15 @@ func startBroadcastWithAlterAliasLock(ctx context.Context, dbName string, collec
 	}
 	return broadcaster, nil
 }
+
+// startBroadcastWithCollectionLock starts a broadcast with collection lock.
+func startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
+	}
+	return broadcaster, nil
+}

@@ -50,7 +50,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var errIgnoredAlterAlias = errors.New("ignored alter alias") // alias already created on current collection, so it can be ignored.
+var (
+	errIgnoredAlterAlias       = errors.New("ignored alter alias")       // alias already created on current collection, so it can be ignored.
+	errIgnoredCreateCollection = errors.New("ignored create collection") // create collection with same schema, so it can be ignored.
+	errIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
+	errIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
+)
 
 type MetaTableChecker interface {
 	RBACChecker

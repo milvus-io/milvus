@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -74,7 +73,7 @@ func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int
 
 func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err != nil {
+	if err := merr.CheckRPCCall(resp.Status, err); err != nil {
 		return nil, err
 	}
 	return resp.GetSchema(), nil
@@ -144,21 +143,17 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
 	// Create a new broadcaster for the collection.
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
-		return merr.Status(err), nil
-	}
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
-	if err != nil {
-		log.Warn("start broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
 
-	schema, err := s.getSchema(ctx, req.GetCollectionID())
-	if err != nil {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
 		return merr.Status(err), nil
 	}
+	schema := coll.GetSchema()
 
 	if !FieldExists(schema, req.GetFieldID()) {
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
@@ -264,28 +259,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+	log.Info("CreateIndex successfully",
+		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
+		zap.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
-}
-
-func (s *Server) createIndexV2AckCallback(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
-	msg := result.Message
-	index := msg.MustBody().FieldIndex
-
-	// Get flushed segments and create index
-	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index)); err != nil {
-		log.Error("CreateIndex fail", zap.Int64("fieldID", index.IndexInfo.FieldID), zap.String("indexName", index.IndexInfo.IndexName), zap.Error(err))
-		return err
-	}
-
-	select {
-	case s.notifyIndexChan <- index.IndexInfo.CollectionID:
-	default:
-	}
-	log.Info("CreateIndex successfully",
-		zap.String("IndexName", index.IndexInfo.IndexName), zap.Int64("fieldID", index.IndexInfo.FieldID),
-		zap.Int64("IndexID", index.IndexInfo.IndexID))
-	return nil
 }
 
 func ValidateIndexParams(index *model.Index) error {
@@ -383,12 +361,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
-	collectionID, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(collectionID.GetDbName(), collectionID.GetCollectionName()))
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -491,14 +464,6 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 	log.Info("broadcast alter index message successfully", zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("indexIDs", indexIDs))
 	return merr.Success(), nil
-}
-
-func (s *Server) alterIndexV2AckCallback(ctx context.Context, result message.BroadcastResultAlterIndexMessageV2) error {
-	indexes := result.Message.MustBody().FieldIndexes
-	indexModels := lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) *model.Index {
-		return model.UnmarshalIndexModel(index)
-	})
-	return s.meta.indexMeta.AlterIndex(ctx, indexModels...)
 }
 
 // GetIndexState gets the index state of the index name in the request from Proxy.
@@ -979,16 +944,12 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	if len(req.PartitionIDs) > 0 {
 		log.Warn("drop index on partition is deprecated, please use drop index on collection instead",
 			zap.Int64s("partitionIDs", req.GetPartitionIDs()))
+		return merr.Success(), nil
 	}
 
 	// Create a new broadcaster for the collection.
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
-		return merr.Status(err), nil
-	}
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
-	if err != nil {
-		log.Warn("start broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
@@ -1048,13 +1009,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}
 	log.Info("DropIndex success", zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.String("indexName", req.GetIndexName()), zap.Int64s("indexIDs", indexIDs))
-
 	return merr.Success(), nil
-}
-
-func (s *Server) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
-	header := result.Message.Header()
-	return s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
 }
 
 // GetIndexInfos gets the index file paths for segment from DataCoord.

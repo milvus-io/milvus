@@ -21,62 +21,48 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestDDLCallbacksAliasDDL(t *testing.T) {
-	initStreamingSystem()
+	core := initStreamingSystemAndCore(t)
 
-	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
-	catalogKV := etcdkv.NewEtcdKV(kv, path)
-
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
-
-	testDB := newNameDb()
-	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
-	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
-			names:       testDB,
-			aliases:     newNameDb(),
-			dbName2Meta: make(map[string]*model.Database),
-			collID2Meta: collID2Meta,
-		}),
-		withValidProxyManager(),
-		withValidIDAllocator(),
-	)
-	registry.ResetRegistration()
-	RegisterDDLCallbacks(core)
-
+	// create database and collection to test alias ddl.
 	status, err := core.CreateDatabase(context.Background(), &milvuspb.CreateDatabaseRequest{
 		DbName: "test",
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	// TODO: after refactor create collection, we can use CreateCollection to create a collection directly.
-	testDB.insert("test", "test_collection", 1)
-	testDB.insert("test", "test_collection2", 2)
-	collID2Meta[1] = &model.Collection{
-		CollectionID: 1,
-		Name:         "test_collection",
-		State:        pb.CollectionState_CollectionCreated,
+	testSchema := &schemapb.CollectionSchema{
+		Name:        "test_collection",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "field1",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
 	}
-	collID2Meta[2] = &model.Collection{
-		CollectionID: 2,
-		Name:         "test_collection2",
-		State:        pb.CollectionState_CollectionCreated,
-	}
+	schemaBytes, _ := proto.Marshal(testSchema)
+	status, err = core.CreateCollection(context.Background(), &milvuspb.CreateCollectionRequest{
+		DbName:         "test",
+		CollectionName: "test_collection",
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	testSchema.Name = "test_collection2"
+	schemaBytes, _ = proto.Marshal(testSchema)
+	status, err = core.CreateCollection(context.Background(), &milvuspb.CreateCollectionRequest{
+		DbName:         "test",
+		CollectionName: "test_collection2",
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
 
 	// create an alias with a not-exist database.
 	status, err = core.CreateAlias(context.Background(), &milvuspb.CreateAliasRequest{
@@ -104,7 +90,7 @@ func TestDDLCallbacksAliasDDL(t *testing.T) {
 
 	coll, err := core.meta.GetCollectionByName(context.Background(), "test", "test_alias", typeutil.MaxTimestamp)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), coll.CollectionID)
+	require.NotZero(t, coll.CollectionID)
 	require.Equal(t, "test_collection", coll.Name)
 
 	// create an alias already created on current collection should be ok.

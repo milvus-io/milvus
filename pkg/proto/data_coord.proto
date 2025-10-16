@@ -64,7 +64,9 @@ service DataCoord {
   rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
-  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
+  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {
+    option deprecated = true;
+  }
   rpc GetFlushState(GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 

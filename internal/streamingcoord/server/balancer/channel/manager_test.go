@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -354,6 +355,48 @@ func TestChannelManager(t *testing.T) {
 		assert.True(t, proto.Equal(param.ReplicateConfiguration, cfg))
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RoleSecondary)
 	})
+}
+
+func TestAllocVirtualChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	// Test recover failure.
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	newIncomingTopics := util.GetAllTopicsFromConfiguration()
+	m, err := RecoverChannelManager(ctx, newIncomingTopics.Collect()...)
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+
+	allocVChannels, err := m.AllocVirtualChannels(ctx, AllocVChannelParam{
+		CollectionID: 1,
+		Num:          256,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, allocVChannels, 0)
+
+	StaticPChannelStatsManager.Get().AddVChannel("by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_0_101v0", "by-dev-rootcoord-dml_1_100v1")
+
+	allocVChannels, err = m.AllocVirtualChannels(ctx, AllocVChannelParam{
+		CollectionID: 1,
+		Num:          4,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, allocVChannels, 4)
+	assert.Equal(t, allocVChannels[0], "by-dev-rootcoord-dml_10_1v0")
+	assert.Equal(t, allocVChannels[1], "by-dev-rootcoord-dml_11_1v1")
+	assert.Equal(t, allocVChannels[2], "by-dev-rootcoord-dml_12_1v2")
+	assert.Equal(t, allocVChannels[3], "by-dev-rootcoord-dml_13_1v3")
 }
 
 func TestStreamingEnableChecker(t *testing.T) {

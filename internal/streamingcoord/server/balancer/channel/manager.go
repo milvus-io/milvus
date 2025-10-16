@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -247,16 +248,43 @@ func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error) {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
+	if len(cm.channels) < param.Num {
+		return nil, errors.Errorf("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(cm.channels))
+	}
 
-	// TODO: implement this function.
 	vchannels := make([]string, 0, param.Num)
-	for _, c := range cm.channels {
-		if len(vchannels) == param.Num {
+	for _, channel := range cm.sortChannelsByVChannelCount() {
+		if len(vchannels) >= param.Num {
 			break
 		}
-		vchannels = append(vchannels, funcutil.GetVirtualChannel(c.Name(), param.CollectionID, len(vchannels)))
+		vchannels = append(vchannels, funcutil.GetVirtualChannel(channel.id.Name, param.CollectionID, len(vchannels)))
 	}
 	return vchannels, nil
+}
+
+// withVChannelCount is a helper struct to sort the channels by the vchannel count.
+type withVChannelCount struct {
+	id            ChannelID
+	vchannelCount int
+}
+
+// sortChannelsByVChannelCount sorts the channels by the vchannel count.
+func (cm *ChannelManager) sortChannelsByVChannelCount() []withVChannelCount {
+	vchannelCounts := make([]withVChannelCount, 0, len(cm.channels))
+	for id := range cm.channels {
+		vchannelCounts = append(vchannelCounts, withVChannelCount{
+			id:            id,
+			vchannelCount: StaticPChannelStatsManager.Get().GetPChannelStats(id).VChannelCount(),
+		})
+	}
+	sort.Slice(vchannelCounts, func(i, j int) bool {
+		if vchannelCounts[i].vchannelCount == vchannelCounts[j].vchannelCount {
+			// make a stable sort result, so get the order of sort result with same vchannel count by name.
+			return vchannelCounts[i].id.Name < vchannelCounts[j].id.Name
+		}
+		return vchannelCounts[i].vchannelCount < vchannelCounts[j].vchannelCount
+	})
+	return vchannelCounts
 }
 
 // AssignPChannels update the pchannels to servers and return the modified pchannels.

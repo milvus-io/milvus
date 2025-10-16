@@ -271,7 +271,16 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
-		indexID, err = m.CreateIndex(context.TODO(), req, indexID, false)
+		err = m.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			IndexName:    indexName,
+			IsDeleted:    false,
+			CreateTime:   10,
+			TypeParams:   typeParams,
+			IndexParams:  indexParams,
+		})
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req, false)
@@ -476,7 +485,15 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(nil)
 
 		m := newSegmentIndexMeta(sc)
-		_, err := m.CreateIndex(context.TODO(), req, allocatedID, false)
+		err := m.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: req.CollectionID,
+			FieldID:      req.FieldID,
+			IndexID:      allocatedID,
+			IndexName:    req.IndexName,
+			TypeParams:   req.TypeParams,
+			IndexParams:  req.IndexParams,
+			CreateTime:   req.Timestamp,
+		})
 		assert.NoError(t, err)
 	})
 
@@ -488,7 +505,15 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(errors.New("fail"))
 
 		m := newSegmentIndexMeta(ec)
-		_, err := m.CreateIndex(context.TODO(), req, 4, false)
+		err := m.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: req.CollectionID,
+			FieldID:      req.FieldID,
+			IndexID:      4,
+			IndexName:    req.IndexName,
+			TypeParams:   req.TypeParams,
+			IndexParams:  req.IndexParams,
+			CreateTime:   req.Timestamp,
+		})
 		assert.Error(t, err)
 	})
 }
