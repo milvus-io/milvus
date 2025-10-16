@@ -174,6 +174,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveTextLogFiles();
 
     void
+    RemoveJsonStatsSharedIndexFiles();
+
+    void
     RemoveJsonStatsFiles();
 
     void
