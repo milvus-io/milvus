@@ -117,6 +117,12 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
 			SegmentID:      int64(i),
 			FieldBinlogs:   storage.SortFieldBinlogs(inserts),
+			Deltalogs:      []*datapb.FieldBinlog{},
+			StorageVersion: storage.StorageV2,
+			IsSorted:       true,
+		})
+	}
+}
 
 func (s *NamespaceCompactorTestSuite) TestCompactSorted() {
 	plan := &datapb.CompactionPlan{
