@@ -27,7 +27,11 @@ pub extern "C" fn tantivy_match_query_with_minimum(
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let query = cstr_to_str!(query);
-    unsafe { (*real).match_query_with_minimum(query, min_should_match, bitset).into() }
+    unsafe {
+        (*real)
+            .match_query_with_minimum(query, min_should_match, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]

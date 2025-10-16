@@ -57,7 +57,6 @@ impl IndexReaderWrapper {
             let token = token_stream.token();
             terms.push(Term::from_field_text(self.field, &token.text));
         }
-        
         use tantivy::query::{Occur, TermQuery};
         use tantivy::schema::IndexRecordOption;
         let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
@@ -68,10 +67,7 @@ impl IndexReaderWrapper {
             ));
         }
         let effective_min = std::cmp::max(1, min_should_match);
-        let query = BooleanQuery::with_minimum_required_clauses(
-            subqueries,
-            effective_min,
-        );
+        let query = BooleanQuery::with_minimum_required_clauses(subqueries, effective_min);
         self.search(&query, bitset)
     }
 
