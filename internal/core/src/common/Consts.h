@@ -104,3 +104,6 @@ const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
 
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
+
+// EPSILON value for comparing float numbers
+const float EPSILON = 0.0000000119;
