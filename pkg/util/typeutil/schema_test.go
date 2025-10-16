@@ -3396,7 +3396,7 @@ func TestUpdateFieldData(t *testing.T) {
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
 								Data: [][]byte{
-									[]byte(`{"key1": "value1"}`),
+									[]byte(`{"key1": "value1", "key2": 123}`),
 								},
 							},
 						},
@@ -3417,7 +3417,7 @@ func TestUpdateFieldData(t *testing.T) {
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
 								Data: [][]byte{
-									[]byte(`{"key2": "value2"}`),
+									[]byte(`{"key2": 999, "key3": "value3"}`),
 								},
 							},
 						},
@@ -3430,9 +3430,375 @@ func TestUpdateFieldData(t *testing.T) {
 		err := UpdateFieldData(baseData, updateData, 0, 0)
 		require.NoError(t, err)
 
-		// For non-dynamic fields, the update should completely replace the old value
+		// With mergo, non-dynamic fields also use merge behavior now
 		result := baseData[0].GetScalars().GetJsonData().Data[0]
-		assert.Equal(t, []byte(`{"key2": "value2"}`), result)
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		// Check merged values
+		assert.Equal(t, "value1", resultMap["key1"])     // Original value kept
+		assert.Equal(t, float64(999), resultMap["key2"]) // Updated value
+		assert.Equal(t, "value3", resultMap["key3"])     // New value added
+	})
+
+	t.Run("deep nested json merge - two levels", func(t *testing.T) {
+		// Test deep merge with nested objects (the key feature of mergo)
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"user": {"id": 1, "name": "Alice", "email": "alice@example.com"}, "status": "active"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"user": {"email": "newemail@example.com", "age": 30}, "country": "USA"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		// Check top-level fields
+		assert.Equal(t, "active", resultMap["status"])
+		assert.Equal(t, "USA", resultMap["country"])
+
+		// Check nested user object - mergo should do deep merge
+		userObj := resultMap["user"].(map[string]interface{})
+		assert.Equal(t, float64(1), userObj["id"])                // Original value preserved
+		assert.Equal(t, "Alice", userObj["name"])                 // Original value preserved
+		assert.Equal(t, "newemail@example.com", userObj["email"]) // Updated value
+		assert.Equal(t, float64(30), userObj["age"])              // New value added
+	})
+
+	t.Run("deep nested json merge - three levels", func(t *testing.T) {
+		// Test deep merge with three levels of nesting
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"company": {"department": {"name": "Engineering", "head": "Bob", "budget": 100000}, "location": "NYC"}}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"company": {"department": {"budget": 150000, "size": 50}, "country": "USA"}}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		companyObj := resultMap["company"].(map[string]interface{})
+		assert.Equal(t, "NYC", companyObj["location"])
+		assert.Equal(t, "USA", companyObj["country"])
+
+		departmentObj := companyObj["department"].(map[string]interface{})
+		assert.Equal(t, "Engineering", departmentObj["name"])     // Original preserved
+		assert.Equal(t, "Bob", departmentObj["head"])             // Original preserved
+		assert.Equal(t, float64(150000), departmentObj["budget"]) // Updated
+		assert.Equal(t, float64(50), departmentObj["size"])       // New value added
+	})
+
+	t.Run("deep nested json merge - mixed types", func(t *testing.T) {
+		// Test deep merge with various data types in nested structures
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"config": {"enabled": true, "timeout": 30, "tags": ["prod", "api"]}, "version": "1.0"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"config": {"timeout": 60, "retry": 3}, "version": "2.0"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		assert.Equal(t, "2.0", resultMap["version"]) // Updated at top level
+
+		configObj := resultMap["config"].(map[string]interface{})
+		assert.Equal(t, true, configObj["enabled"])        // Original preserved
+		assert.Equal(t, float64(60), configObj["timeout"]) // Updated
+		assert.Equal(t, float64(3), configObj["retry"])    // New value added
+
+		// Arrays are replaced, not merged (default mergo behavior)
+		tags := configObj["tags"].([]interface{})
+		assert.Equal(t, 2, len(tags))
+		assert.Equal(t, "prod", tags[0])
+		assert.Equal(t, "api", tags[1])
+	})
+
+	t.Run("deep nested json merge - empty nested object", func(t *testing.T) {
+		// Test that updating with empty nested object doesn't clear existing data
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"metadata": {"created": "2023-01-01", "author": "Alice"}, "title": "Document"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"metadata": {}, "status": "published"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		assert.Equal(t, "Document", resultMap["title"])
+		assert.Equal(t, "published", resultMap["status"])
+
+		// Empty object in update should preserve existing nested values
+		metadataObj := resultMap["metadata"].(map[string]interface{})
+		assert.Equal(t, "2023-01-01", metadataObj["created"])
+		assert.Equal(t, "Alice", metadataObj["author"])
+	})
+
+	t.Run("json field clear nested object with null", func(t *testing.T) {
+		// Test that using null can clear a nested object
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"metadata": {"created": "2023-01-01", "author": "Alice"}, "title": "Document"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: false,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"metadata": null, "status": "published"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		// Check that metadata was set to null
+		assert.Nil(t, resultMap["metadata"])
+		assert.Equal(t, "Document", resultMap["title"])
+		assert.Equal(t, "published", resultMap["status"])
+	})
+
+	t.Run("json field clear top-level field with null", func(t *testing.T) {
+		// Test clearing a top-level field with null
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"name": "Alice", "age": 30, "city": "NYC"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "json_field",
+				FieldId:   1,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{
+									[]byte(`{"age": null, "country": "USA"}`),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 0, 0)
+		require.NoError(t, err)
+
+		result := baseData[0].GetScalars().GetJsonData().Data[0]
+		var resultMap map[string]interface{}
+		err = json.Unmarshal(result, &resultMap)
+		require.NoError(t, err)
+
+		// Check that age was set to null, other fields preserved/added
+		assert.Equal(t, "Alice", resultMap["name"])
+		assert.Nil(t, resultMap["age"])
+		assert.Equal(t, "NYC", resultMap["city"])
+		assert.Equal(t, "USA", resultMap["country"])
 	})
 
 	t.Run("invalid json data", func(t *testing.T) {
