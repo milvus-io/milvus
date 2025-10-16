@@ -3339,9 +3339,9 @@ func (_c *IMetaTable_RenameCollection_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// RestoreRBAC provides a mock function with given fields: ctx, tenant, _a2
-func (_m *IMetaTable) RestoreRBAC(ctx context.Context, tenant string, _a2 *milvuspb.RBACMeta) error {
-	ret := _m.Called(ctx, tenant, _a2)
+// RestoreRBAC provides a mock function with given fields: ctx, tenant, meta
+func (_m *IMetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	ret := _m.Called(ctx, tenant, meta)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RestoreRBAC")
@@ -3349,7 +3349,7 @@ func (_m *IMetaTable) RestoreRBAC(ctx context.Context, tenant string, _a2 *milvu
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RBACMeta) error); ok {
-		r0 = rf(ctx, tenant, _a2)
+		r0 = rf(ctx, tenant, meta)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -3365,12 +3365,12 @@ type IMetaTable_RestoreRBAC_Call struct {
 // RestoreRBAC is a helper method to define mock.On call
 //   - ctx context.Context
 //   - tenant string
-//   - _a2 *milvuspb.RBACMeta
-func (_e *IMetaTable_Expecter) RestoreRBAC(ctx interface{}, tenant interface{}, _a2 interface{}) *IMetaTable_RestoreRBAC_Call {
-	return &IMetaTable_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC", ctx, tenant, _a2)}
+//   - meta *milvuspb.RBACMeta
+func (_e *IMetaTable_Expecter) RestoreRBAC(ctx interface{}, tenant interface{}, meta interface{}) *IMetaTable_RestoreRBAC_Call {
+	return &IMetaTable_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC", ctx, tenant, meta)}
 }
 
-func (_c *IMetaTable_RestoreRBAC_Call) Run(run func(ctx context.Context, tenant string, _a2 *milvuspb.RBACMeta)) *IMetaTable_RestoreRBAC_Call {
+func (_c *IMetaTable_RestoreRBAC_Call) Run(run func(ctx context.Context, tenant string, meta *milvuspb.RBACMeta)) *IMetaTable_RestoreRBAC_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RBACMeta))
 	})

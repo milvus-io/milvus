@@ -1,8 +1,23 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -12,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -20,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -38,10 +53,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		req.NumPartitions = int64(1)
 	}
 
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetCollectionName()),
-	)
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -59,9 +71,6 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		},
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
-		if errors.Is(err, errCreateCollectionWithSameSchema) {
-			return nil
-		}
 		return err
 	}
 
@@ -79,7 +88,6 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 			message.NewExclusiveCollectionNameResourceKey(createCollectionTask.body.DbName, createCollectionTask.body.CollectionName),
 		).
 		MustBuildBroadcast()
-
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
 	}
@@ -94,15 +102,14 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		if !funcutil.IsControlChannel(vchannel) {
 			// create shard info when virtual channel is created.
 			if err := c.createCollectionShard(ctx, header, body, vchannel, result); err != nil {
-				return err
+				return errors.Wrap(err, "failed to create collection shard")
 			}
 		}
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
-		return err
+		return errors.Wrap(err, "failed to add collection to meta table")
 	}
-
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
@@ -113,6 +120,7 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 }
 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {
+	// TODO: redundant channel watch by now, remove it in future.
 	startPosition := adaptor.MustGetMQWrapperIDFromMessage(appendResult.LastConfirmedMessageID).Serialize()
 	resp, err := c.mixCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:    header.CollectionId,
@@ -121,48 +129,7 @@ func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message
 		Schema:          body.CollectionSchema,
 		CreateTimestamp: appendResult.TimeTick,
 	})
-	if err != nil {
-		return err
-	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("failed to watch channels, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
-	}
-	return nil
-}
-
-// mergeCollectionModel merges the given collection models into a single collection model.
-func mergeCollectionModel(models ...*model.Collection) *model.Collection {
-	if len(models) == 1 {
-		return models[0]
-	}
-	// createTimeTick from cchannel
-	createTimeTick := uint64(0)
-	// startPosition from vchannel
-	startPosition := make(map[string][]byte, len(models[0].PhysicalChannelNames))
-	state := etcdpb.CollectionState_CollectionCreating
-	for _, model := range models {
-		if model.CreateTime != 0 && createTimeTick == 0 {
-			createTimeTick = model.CreateTime
-		}
-		for key, value := range toMap(model.StartPositions) {
-			if _, ok := startPosition[key]; !ok {
-				startPosition[key] = value
-			}
-		}
-		if len(startPosition) == len(models[0].PhysicalChannelNames) && createTimeTick != 0 {
-			// if all vchannels and cchannel are created, the collection is created
-			state = etcdpb.CollectionState_CollectionCreated
-		}
-	}
-
-	mergedModel := models[0]
-	mergedModel.CreateTime = createTimeTick
-	for _, partition := range mergedModel.Partitions {
-		partition.PartitionCreatedTimestamp = createTimeTick
-	}
-	mergedModel.StartPositions = toKeyDataPairs(startPosition)
-	mergedModel.State = state
-	return mergedModel
+	return merr.CheckRPCCall(resp.GetStatus(), err)
 }
 
 // newCollectionModelWithMessage creates a collection model with the given message.

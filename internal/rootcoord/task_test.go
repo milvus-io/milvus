@@ -114,40 +114,6 @@ func TestGetLockerKey(t *testing.T) {
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
 	})
-	t.Run("create collection task locker key", func(t *testing.T) {
-		tt := &createCollectionTask{
-			Req: &milvuspb.CreateCollectionRequest{
-				DbName:         "foo",
-				CollectionName: "bar",
-			},
-			collID: 10,
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|10-2-true")
-	})
-	t.Run("create partition task locker key", func(t *testing.T) {
-		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
-				return &model.Collection{
-					Name:         "real" + s2,
-					CollectionID: 111,
-				}, nil
-			})
-		c := &Core{
-			meta: metaMock,
-		}
-		tt := &createPartitionTask{
-			baseTask: baseTask{core: c},
-			Req: &milvuspb.CreatePartitionRequest{
-				DbName:         "foo",
-				CollectionName: "bar",
-				PartitionName:  "baz",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
-	})
 	t.Run("describe collection task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
 		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -191,51 +157,6 @@ func TestGetLockerKey(t *testing.T) {
 		}
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false")
-	})
-	t.Run("drop collection task locker key", func(t *testing.T) {
-		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
-				return &model.Collection{
-					Name:         "bar",
-					CollectionID: 111,
-				}, nil
-			})
-		c := &Core{
-			meta: metaMock,
-		}
-		tt := &dropCollectionTask{
-			baseTask: baseTask{core: c},
-			Req: &milvuspb.DropCollectionRequest{
-				DbName:         "foo",
-				CollectionName: "bar",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
-	})
-	t.Run("drop partition task locker key", func(t *testing.T) {
-		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
-				return &model.Collection{
-					Name:         "real" + s2,
-					CollectionID: 111,
-				}, nil
-			})
-		c := &Core{
-			meta: metaMock,
-		}
-		tt := &dropPartitionTask{
-			baseTask: baseTask{core: c},
-			Req: &milvuspb.DropPartitionRequest{
-				DbName:         "foo",
-				CollectionName: "bar",
-				PartitionName:  "baz",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
 	})
 	t.Run("has collection task locker key", func(t *testing.T) {
 		tt := &hasCollectionTask{

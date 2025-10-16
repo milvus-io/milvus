@@ -24,38 +24,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestDDLCallbacksDatabaseDDL(t *testing.T) {
-	initStreamingSystem()
-
-	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
-	catalogKV := etcdkv.NewEtcdKV(kv, path)
-
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
-	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
-			names:       newNameDb(),
-			aliases:     newNameDb(),
-			dbName2Meta: make(map[string]*model.Database),
-		}),
-		withValidProxyManager(),
-		withValidIDAllocator(),
-	)
-	registry.ResetRegistration()
-	RegisterDDLCallbacks(core)
+	core := initStreamingSystemAndCore(t)
 
 	// Create a new database
 	status, err := core.CreateDatabase(context.Background(), &milvuspb.CreateDatabaseRequest{

@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -1194,12 +1193,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1413,12 +1411,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1573,12 +1570,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
+			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
-		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
