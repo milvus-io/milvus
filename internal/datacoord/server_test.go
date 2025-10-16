@@ -2752,6 +2752,11 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	mockChunkManager := mocks.NewChunkManager(t)
 	mockManager := NewMockManager(t)
 
+	mb := mock_balancer.NewMockBalancer(t)
+	mb.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{}, nil).Maybe()
+	balance.ResetBalancer()
+	balance.Register(mb)
+
 	server := &Server{
 		ctx: ctx,
 		meta: &meta{
