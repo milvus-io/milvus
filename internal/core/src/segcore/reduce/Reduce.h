@@ -90,6 +90,14 @@ class ReduceHelper {
                   std::unique_ptr<milvus::proto::schema::SearchResultData>&
                       search_res_data);
 
+    virtual void
+    SortEqualScoresByPks();
+
+    virtual void
+    SortEqualScoresOneNQ(size_t nq_begin,
+                         size_t nq_end,
+                         SearchResult* search_result);
+
  private:
     void
     Initialize();

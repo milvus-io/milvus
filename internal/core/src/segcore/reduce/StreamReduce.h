@@ -90,7 +90,7 @@ struct StreamSearchResultPair {
 
     bool
     operator>(const StreamSearchResultPair& other) const {
-        if (std::fabs(distance_ - other.distance_) < 0.0000000119) {
+        if (std::fabs(distance_ - other.distance_) < EPSILON) {
             return primary_key_ < other.primary_key_;
         }
         return distance_ > other.distance_;
