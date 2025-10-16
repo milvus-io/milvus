@@ -392,6 +392,17 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
+	if err != nil {
+		log.Warn("get collection schema failed", zap.Error(err))
+		return err
+	}
+	t.schema = schema
+	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
+	if err != nil {
+		return err
+	}
+
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
@@ -433,13 +444,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
-
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
-	}
-	t.schema = schema
 
 	if t.ids != nil {
 		pkField := ""
@@ -488,6 +492,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.plan.GetQuery().GetIsCount() && t.queryParams.limit != typeutil.Unlimited {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
 	}
+	t.plan.Namespace = t.request.Namespace
 
 	t.RetrieveRequest.IsCount = t.plan.GetQuery().GetIsCount()
 	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
