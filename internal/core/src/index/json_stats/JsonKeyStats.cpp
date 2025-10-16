@@ -1009,7 +1009,9 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LoadShreddingData(shredding_data_files);
 
     // load shared key index
-    bson_inverted_index_->LoadIndex(shared_key_index_files, load_priority_);
+    bson_inverted_index_->LoadIndex(shared_key_index_files,
+                                    load_priority_,
+                                    config.contains(MMAP_FILE_PATH));
 }
 
 IndexStatsPtr
