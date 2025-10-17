@@ -252,7 +252,7 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
     } else {
         ThrowInfo(Unsupported,
                   "unsupported generic value {}",
-                  value_proto.DebugString());
+                  value_proto.ShortDebugString());
     }
 }
 
