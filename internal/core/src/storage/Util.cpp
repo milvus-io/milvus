@@ -495,6 +495,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::TEXT:
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
+        case DataType::JSON:
+            return std::make_shared<arrow::BinaryScalar>(
+                default_value.bytes_data());
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported default value data type {}",
