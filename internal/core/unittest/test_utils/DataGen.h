@@ -1135,11 +1135,11 @@ inline auto
 CreatePlaceholderGroup(int64_t num_queries,
                        int dim,
                        const std::vector<float>& vecs) {
-    namespace set = milvus::proto::common;
-    set::PlaceholderGroup raw_group;
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(set::PlaceholderType::FloatVector);
+    value->set_type(ser::PlaceholderType::FloatVector);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
@@ -1156,10 +1156,10 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
-    namespace set = milvus::proto::common;
+    namespace ser = milvus::proto::common;
     GET_ELEM_TYPE_FOR_VECTOR_TRAIT
 
-    set::PlaceholderGroup raw_group;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(TraitType::placeholder_type);
@@ -1189,10 +1189,10 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries,
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
-    namespace set = milvus::proto::common;
+    namespace ser = milvus::proto::common;
     GET_ELEM_TYPE_FOR_VECTOR_TRAIT
 
-    set::PlaceholderGroup raw_group;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(TraitType::placeholder_type);
@@ -1225,12 +1225,12 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries,
 
 inline auto
 CreateSparseFloatPlaceholderGroup(int64_t num_queries, int64_t seed = 42) {
-    namespace set = milvus::proto::common;
-    set::PlaceholderGroup raw_group;
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
 
     value->set_tag("$0");
-    value->set_type(set::PlaceholderType::SparseFloatVector);
+    value->set_type(ser::PlaceholderType::SparseFloatVector);
     auto sparse_vecs = GenerateRandomSparseFloatVector(
         num_queries, kTestSparseDim, kTestSparseVectorDensity, seed);
     for (int i = 0; i < num_queries; ++i) {
@@ -1244,11 +1244,11 @@ inline auto
 CreateInt8PlaceholderGroup(int64_t num_queries,
                            int64_t dim,
                            int64_t seed = 42) {
-    namespace set = milvus::proto::common;
-    set::PlaceholderGroup raw_group;
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(set::PlaceholderType::Int8Vector);
+    value->set_type(ser::PlaceholderType::Int8Vector);
     std::default_random_engine e(seed);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<int8> vec;
@@ -1264,11 +1264,11 @@ inline auto
 CreateInt8PlaceholderGroupFromBlob(int64_t num_queries,
                                    int64_t dim,
                                    const int8* ptr) {
-    namespace set = milvus::proto::common;
-    set::PlaceholderGroup raw_group;
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(set::PlaceholderType::Int8Vector);
+    value->set_type(ser::PlaceholderType::Int8Vector);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<int8> vec;
         for (int d = 0; d < dim; ++d) {

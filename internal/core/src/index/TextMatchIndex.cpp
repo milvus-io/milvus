@@ -153,12 +153,12 @@ TextMatchIndex::Load(const Config& config) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_data =
+        auto index_datas =
             mem_file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
-        AssembleIndexDatas(index_data, binary_set);
-        // clear index_data to free memory early
-        index_data.clear();
+        AssembleIndexDatas(index_datas, binary_set);
+        // clear index_datas to free memory early
+        index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
         memcpy(null_offset_.data(),
@@ -226,18 +226,18 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_data, bool nullable) {
+    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
     if (nullable) {
         int64_t total = 0;
-        for (const auto& data : field_data) {
+        for (const auto& data : field_datas) {
             total += data->get_null_count();
         }
         {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
             null_offset_.reserve(total);
         }
-        for (const auto& data : field_data) {
+        for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
@@ -251,7 +251,7 @@ TextMatchIndex::BuildIndexFromFieldData(
             }
         }
     } else {
-        for (const auto& data : field_data) {
+        for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             wrapper_->add_data(
                 static_cast<const std::string*>(data->Data()), n, offset);

@@ -335,13 +335,13 @@ VectorMemIndex<T>::Build(const Config& config) {
         int64_t total_size = 0;
         int64_t total_num_rows = 0;
         int64_t dim = 0;
-        for (auto field_data : field_datas) {
-            total_size += field_data->Size();
-            total_num_rows += field_data->get_num_rows();
+        for (auto data : field_datas) {
+            total_size += data->Size();
+            total_num_rows += data->get_num_rows();
 
-            AssertInfo(dim == 0 || dim == field_data->get_dim(),
-                       "inconsistent dim value between field data!");
-            dim = field_data->get_dim();
+            AssertInfo(dim == 0 || dim == data->get_dim(),
+                       "inconsistent dim value between field datas!");
+            dim = data->get_dim();
         }
 
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
@@ -353,11 +353,10 @@ VectorMemIndex<T>::Build(const Config& config) {
         // For embedding list index, elem_type_ is not NONE
         if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
-            for (auto field_data : field_datas) {
-                std::memcpy(
-                    buf.get() + offset, field_data->Data(), field_data->Size());
-                offset += field_data->Size();
-                field_data.reset();
+            for (auto data : field_datas) {
+                std::memcpy(buf.get() + offset, data->Data(), data->Size());
+                offset += data->Size();
+                data.reset();
             }
         } else {
             offsets.reserve(total_num_rows + 1);
