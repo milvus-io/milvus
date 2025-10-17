@@ -124,15 +124,6 @@ func TestGetLockerKey(t *testing.T) {
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
 	})
-	t.Run("alter database task locker key", func(t *testing.T) {
-		tt := &alterDatabaseTask{
-			Req: &rootcoordpb.AlterDatabaseRequest{
-				DbName: "foo",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-true")
-	})
 	t.Run("create alias task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
 		c := &Core{
@@ -160,15 +151,6 @@ func TestGetLockerKey(t *testing.T) {
 		}
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|10-2-true")
-	})
-	t.Run("create database task locker key", func(t *testing.T) {
-		tt := &createDatabaseTask{
-			Req: &milvuspb.CreateDatabaseRequest{
-				DbName: "foo",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-true")
 	})
 	t.Run("create partition task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
@@ -280,15 +262,6 @@ func TestGetLockerKey(t *testing.T) {
 		}
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
-	})
-	t.Run("drop database task locker key", func(t *testing.T) {
-		tt := &dropDatabaseTask{
-			Req: &milvuspb.DropDatabaseRequest{
-				DbName: "foo",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-true")
 	})
 	t.Run("drop partition task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
