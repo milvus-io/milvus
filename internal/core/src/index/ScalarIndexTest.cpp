@@ -593,4 +593,3 @@ TEST(ScalarTest, test_function_range) {
     TestIndexSearchRange<float>();
     TestIndexSearchRange<double>();
 }
-
