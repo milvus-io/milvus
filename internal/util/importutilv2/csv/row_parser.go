@@ -23,6 +23,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -285,6 +288,16 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 			return nil, err
 		}
 		return []byte(obj), nil
+	case schemapb.DataType_Geometry:
+		geomT, err := wkt.Unmarshal(obj)
+		if err != nil {
+			return nil, r.wrapTypeError(obj, field)
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, r.wrapTypeError(obj, field)
+		}
+		return wkbValue, nil
 	case schemapb.DataType_FloatVector:
 		if nullable && obj == r.nullkey {
 			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")

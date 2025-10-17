@@ -744,14 +744,14 @@ func (data *GeometryFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, false)
 		return nil
 	}
-	v, ok := row.([]byte)
-	if !ok {
+	switch v := row.(type) {
+	case []byte:
+		data.Data = append(data.Data, v)
+	case string:
+		data.Data = append(data.Data, []byte(v))
+	default:
 		return merr.WrapErrParameterInvalid("[]byte", row, "Wrong row type")
 	}
-	if data.GetNullable() {
-		data.ValidData = append(data.ValidData, true)
-	}
-	data.Data = append(data.Data, v)
 	return nil
 }
 
@@ -1030,11 +1030,16 @@ func (data *JSONFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *GeometryFieldData) AppendDataRows(rows interface{}) error {
-	v, ok := rows.([][]byte)
-	if !ok {
+	switch v := rows.(type) {
+	case [][]byte:
+		data.Data = append(data.Data, v...)
+	case []string:
+		for _, row := range v {
+			data.Data = append(data.Data, []byte(row))
+		}
+	default:
 		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
 	}
-	data.Data = append(data.Data, v...)
 	return nil
 }
 
