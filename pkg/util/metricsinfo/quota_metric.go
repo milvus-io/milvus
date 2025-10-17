@@ -62,6 +62,7 @@ type QueryNodeQuotaMetrics struct {
 	Rms                 []RateMetric
 	Fgm                 FlowGraphMetric
 	GrowingSegmentsSize int64
+	LoadedBinlogSize    int64
 	Effect              NodeEffect
 	DeleteBufferInfo    DeleteBufferInfo
 	StreamingQuota      *StreamingQuotaMetrics
