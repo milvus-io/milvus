@@ -58,7 +58,7 @@ usage:
   esac
 done
 
-export ASAN_OPTIONS="detect_containter_overflow=0"
+export ASAN_OPTIONS="detect_container_overflow=0"
 
 function test_proxy()
 {
