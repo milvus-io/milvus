@@ -1734,6 +1734,45 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
         assert len(results[0]) > 0
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("retrieval_ann_ratio", [1.0, 3.0, 5.0, 10.0])
+    def test_search_with_retrieval_ann_ratio(self, retrieval_ann_ratio):
+        """
+        target: test search with retrieval_ann_ratio parameter for struct array
+        method: search with different retrieval_ann_ratio values to control recall
+        expected: search returns results, higher ratio should improve recall
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search")
+
+        client = self._client()
+
+        # Create collection with data and index
+        self.create_collection_with_index(client, collection_name)
+
+        # Create search vector
+        search_vector = [random.random() for _ in range(default_dim)]
+        search_tensor = EmbeddingList()
+        search_tensor.add(search_vector)
+
+        # Search with retrieval_ann_ratio parameter
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[clip_embedding1]",
+            search_params={
+                "metric_type": "MAX_SIM_COSINE",
+                "params": {"retrieval_ann_ratio": retrieval_ann_ratio}
+            },
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
+
+        # Verify results are returned
+        for hit in results[0]:
+            assert hit is not None
+
 
 class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
     """Test case of struct array with hybrid search functionality"""
