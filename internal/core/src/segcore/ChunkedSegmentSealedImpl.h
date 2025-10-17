@@ -247,6 +247,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
+    search_pks(BitsetType& bitset, const std::vector<PkType>& pks) const;
+
+    void
     search_batch_pks(
         const std::vector<PkType>& pks,
         const std::function<Timestamp(const size_t idx)>& get_timestamp,
@@ -481,8 +484,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const override;
+    void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     void
     LoadVecIndex(const LoadIndexInfo& info);

@@ -1015,6 +1015,84 @@ ChunkedSegmentSealedImpl::search_pk(milvus::OpContext* op_ctx,
 }
 
 void
+ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
+                                     const std::vector<PkType>& pks) const {
+    BitsetTypeView bitset_view(bitset);
+    if (!is_sorted_by_pk_) {
+        for (auto& pk : pks) {
+            insert_record_.search_pk_range(
+                pk, proto::plan::OpType::Equal, bitset_view);
+        }
+        return;
+    }
+
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = get_column(pk_field_id);
+    AssertInfo(pk_column != nullptr, "primary key column not loaded");
+
+    auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto pw = all_chunk_pins[i];
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                for (size_t j = 0; j < pks.size(); j++) {
+                    // get int64 pks
+                    auto target = std::get<int64_t>(pks[j]);
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        bitset[offset] = true;
+                    }
+                }
+            }
+
+            break;
+        }
+        case DataType::VARCHAR: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto pw = all_chunk_pins[i];
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    // get varchar pks
+                    auto& target = std::get<std::string>(pks[j]);
+                    auto offset = string_chunk->binary_search_string(target);
+                    for (; offset != -1 && offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        bitset[segment_offset] = true;
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
+    }
+}
+
+void
 ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
     const std::function<Timestamp(const size_t idx)>& get_timestamp,
@@ -2197,9 +2275,9 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
-std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
-                                     Timestamp timestamp) const {
+void
+ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
+                                     const IdArray& id_array) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -2208,16 +2286,7 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    std::vector<SegOffset> res_offsets;
-    res_offsets.reserve(pks.size());
-    this->search_batch_pks(
-        pks,
-        [=](const size_t idx) { return timestamp; },
-        true,
-        [&](const SegOffset offset, const Timestamp ts) {
-            res_offsets.push_back(offset);
-        });
-    return std::move(res_offsets);
+    this->search_pks(bitset, pks);
 }
 
 SegcoreError

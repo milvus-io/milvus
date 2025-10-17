@@ -432,12 +432,14 @@ class SegmentInternalInterface : public SegmentInterface {
     /**
      * search offset by possible pk values and mvcc timestamp
      *
+     * @param bitset The final bitset after id array filtering,
+     *  `false` means that the entity will be filtered out.
      * @param id_array possible pk values
-     * @param timestamp mvcc timestamp 
-     * @return all the hit entries in vector of offsets
+     * this interface is used for internal expression calculation,
+     * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
-    virtual std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+    virtual void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose
