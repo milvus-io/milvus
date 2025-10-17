@@ -316,7 +316,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
-    auto field_data = file_manager_->CacheRawDataToMemory(config);
+    auto field_datas = file_manager_->CacheRawDataToMemory(config);
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
     auto is_partition_key_isolation =
@@ -335,13 +335,13 @@ VectorMemIndex<T>::Build(const Config& config) {
         int64_t total_size = 0;
         int64_t total_num_rows = 0;
         int64_t dim = 0;
-        for (auto data : field_data) {
-            total_size += data->Size();
-            total_num_rows += data->get_num_rows();
+        for (auto field_data : field_datas) {
+            total_size += field_data->Size();
+            total_num_rows += field_data->get_num_rows();
 
-            AssertInfo(dim == 0 || dim == data->get_dim(),
+            AssertInfo(dim == 0 || dim == field_data->get_dim(),
                        "inconsistent dim value between field data!");
-            dim = data->get_dim();
+            dim = field_data->get_dim();
         }
 
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
@@ -353,16 +353,17 @@ VectorMemIndex<T>::Build(const Config& config) {
         // For embedding list index, elem_type_ is not NONE
         if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
-            for (auto data : field_data) {
-                std::memcpy(buf.get() + offset, data->Data(), data->Size());
-                offset += data->Size();
-                data.reset();
+            for (auto field_data : field_datas) {
+                std::memcpy(
+                    buf.get() + offset, field_data->Data(), field_data->Size());
+                offset += field_data->Size();
+                field_data.reset();
             }
         } else {
             offsets.reserve(total_num_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
-            for (auto data : field_data) {
+            for (auto data : field_datas) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,
@@ -391,7 +392,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             total_num_rows = lim_offset;
         }
 
-        field_data.clear();
+        field_datas.clear();
 
         auto dataset = GenDataset(total_num_rows, dim, buf.get());
         if (!scalar_info.empty()) {
@@ -406,29 +407,30 @@ VectorMemIndex<T>::Build(const Config& config) {
         // sparse
         int64_t total_rows = 0;
         int64_t dim = 0;
-        for (auto data : field_data) {
-            total_rows += data->Length();
+        for (auto field_data : field_datas) {
+            total_rows += field_data->Length();
             dim = std::max(
                 dim,
-                std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(data)
+                std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
+                    field_data)
                     ->Dim());
         }
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
             total_rows);
         int64_t offset = 0;
-        for (auto data : field_data) {
+        for (auto field_data : field_datas) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
-                data->Data());
+                field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
-            for (size_t i = 0; i < data->Length(); ++i) {
+            for (size_t i = 0; i < field_data->Length(); ++i) {
                 // this does a deep copy of field_data's data.
                 // TODO: avoid copying by enforcing field data to give up
                 // ownership.
                 AssertInfo(dim >= ptr[i].dim(), "bad dim");
                 vec[offset + i] = ptr[i];
             }
-            offset += data->Length();
+            offset += field_data->Length();
         }
         auto dataset = GenDataset(total_rows, dim, vec.data());
         dataset->SetIsSparse(true);
