@@ -36,8 +36,8 @@ func RegisterDDLCallbacks(core *Core) {
 	ddlCallback := &DDLCallback{
 		Core: core,
 	}
-	// RBAC
 	ddlCallback.registerRBACCallbacks()
+	ddlCallback.registerDatabaseCallbacks()
 }
 
 // registerRBACCallbacks registers the rbac callbacks.
@@ -53,6 +53,13 @@ func (c *DDLCallback) registerRBACCallbacks() {
 	registry.RegisterAlterPrivilegeGroupV2AckCallback(c.alterPrivilegeGroupV2AckCallback)
 	registry.RegisterDropPrivilegeGroupV2AckCallback(c.dropPrivilegeGroupV2AckCallback)
 	registry.RegisterRestoreRBACV2AckCallback(c.restoreRBACV2AckCallback)
+}
+
+// registerDatabaseCallbacks registers the database callbacks.
+func (c *DDLCallback) registerDatabaseCallbacks() {
+	registry.RegisterCreateDatabaseV2AckCallback(c.createDatabaseV1AckCallback)
+	registry.RegisterAlterDatabaseV2AckCallback(c.alterDatabaseV1AckCallback)
+	registry.RegisterDropDatabaseV2AckCallback(c.dropDatabaseV1AckCallback)
 }
 
 // DDLCallback is the callback of ddl.
@@ -101,4 +108,13 @@ func startBroadcastWithRBACLock(ctx context.Context) (broadcaster.BroadcastAPI, 
 		return nil, errors.Wrap(err, "failed to start broadcast with rbac lock")
 	}
 	return api, nil
+}
+
+// startBroadcastWithDatabaseLock starts a broadcast with database lock.
+func startBroadcastWithDatabaseLock(ctx context.Context, dbName string) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveDBNameResourceKey(dbName))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with database lock")
+	}
+	return broadcaster, nil
 }

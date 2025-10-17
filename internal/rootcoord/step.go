@@ -553,22 +553,6 @@ func (s *WriteSchemaChangeWALStep) Desc() string {
 	return fmt.Sprintf("write schema change WALcollectionID: %d, ts: %d", s.collection.CollectionID, s.ts)
 }
 
-type AlterDatabaseStep struct {
-	baseStep
-	oldDB *model.Database
-	newDB *model.Database
-	ts    Timestamp
-}
-
-func (a *AlterDatabaseStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := a.core.meta.AlterDatabase(ctx, a.oldDB, a.newDB, a.ts)
-	return nil, err
-}
-
-func (a *AlterDatabaseStep) Desc() string {
-	return fmt.Sprintf("alter database, databaseID: %d, databaseName: %s, ts: %d", a.oldDB.ID, a.oldDB.Name, a.ts)
-}
-
 type renameCollectionStep struct {
 	baseStep
 	dbName    string

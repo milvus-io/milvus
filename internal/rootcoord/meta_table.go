@@ -52,6 +52,9 @@ import (
 
 type MetaTableChecker interface {
 	RBACChecker
+
+	CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error
+	CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb.DropDatabaseRequest) error
 }
 
 //go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
@@ -63,7 +66,7 @@ type IMetaTable interface {
 	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
 	DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error
 	ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error)
-	AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts typeutil.Timestamp) error
+	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
 	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
@@ -325,6 +328,23 @@ func (mt *MetaTable) createDefaultDb() error {
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
 }
 
+func (mt *MetaTable) CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error {
+	dbName := req.GetDbName()
+
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if _, ok := mt.dbName2Meta[dbName]; ok || mt.aliases.exist(dbName) || mt.names.exist(dbName) {
+		return fmt.Errorf("database already exist: %s", dbName)
+	}
+
+	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
+	if len(mt.dbName2Meta) > cfgMaxDatabaseNum { // not include default database so use > instead of >= here.
+		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
+	}
+	return nil
+}
+
 func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -338,10 +358,6 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if mt.names.exist(dbName) || mt.aliases.exist(dbName) {
-		return fmt.Errorf("database already exist: %s", dbName)
-	}
-
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
 		return err
 	}
@@ -359,35 +375,31 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	return nil
 }
 
-func (mt *MetaTable) AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts typeutil.Timestamp) error {
+func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-
-	if oldDB.Name != newDB.Name || oldDB.ID != newDB.ID || oldDB.State != newDB.State {
-		return errors.New("alter database name/id is not supported!")
-	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
 		return err
 	}
-	mt.dbName2Meta[oldDB.Name] = newDB
-	log.Ctx(ctx).Info("alter database finished", zap.String("dbName", oldDB.Name), zap.Uint64("ts", ts))
+	mt.dbName2Meta[newDB.Name] = newDB
+	log.Ctx(ctx).Info("alter database finished", zap.String("dbName", newDB.Name), zap.Uint64("ts", ts))
 	return nil
 }
 
-func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb.DropDatabaseRequest) error {
+	dbName := req.GetDbName()
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 
 	if dbName == util.DefaultDBName {
 		return errors.New("can not drop default database")
 	}
 
-	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
-	if err != nil {
+	if _, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp); err != nil {
 		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
-		return nil
+		return err
 	}
 
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
@@ -397,7 +409,18 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	if len(colls) > 0 {
 		return fmt.Errorf("database:%s not empty, must drop all collections before drop database", dbName)
 	}
+	return nil
+}
 
+func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
+	if err != nil {
+		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
+		return nil
+	}
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
 		return err
 	}

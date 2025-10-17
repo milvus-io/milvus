@@ -99,35 +99,6 @@ func TestRootCoord_CreateDatabase(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
 }
 
 func TestRootCoord_DropDatabase(t *testing.T) {
@@ -137,35 +108,6 @@ func TestRootCoord_DropDatabase(t *testing.T) {
 		resp, err := c.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
-	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
@@ -215,35 +157,6 @@ func TestRootCoord_AlterDatabase(t *testing.T) {
 		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
-	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
