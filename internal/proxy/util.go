@@ -655,13 +655,9 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		return fmt.Errorf("Nested array is not supported %s", field.Name)
 	}
 
-	if field.ElementType == schemapb.DataType_JSON {
-		return fmt.Errorf("JSON is not supported for fields in struct, fieldName = %s", field.Name)
-	}
-
 	if field.DataType == schemapb.DataType_Array {
-		if typeutil.IsVectorType(field.GetElementType()) {
-			return fmt.Errorf("Inconsistent schema: element type of array field %s is a vector type", field.Name)
+		if err := validateElementType(field.GetElementType()); err != nil {
+			return err
 		}
 	} else {
 		if !typeutil.IsVectorType(field.GetElementType()) {
