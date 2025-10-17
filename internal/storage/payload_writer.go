@@ -997,13 +997,14 @@ func (w *NativePayloadWriter) addFloatVectorArrayToPayload(builder *array.ListBu
 
 		floatData := vectorField.GetFloatVector().GetData()
 
-		numVectors := len(floatData) / int(data.Dim)
+		dim := vectorField.GetDim()
+		numVectors := len(floatData) / int(dim)
 		for i := 0; i < numVectors; i++ {
-			start := i * int(data.Dim)
-			end := start + int(data.Dim)
+			start := i * int(dim)
+			end := start + int(dim)
 			vectorSlice := floatData[start:end]
 
-			bytes := make([]byte, data.Dim*4)
+			bytes := make([]byte, dim*4)
 			for j, f := range vectorSlice {
 				binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 			}
