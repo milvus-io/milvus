@@ -3585,3 +3585,266 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 func TestMaterializedView(t *testing.T) {
 	suite.Run(t, new(MaterializedViewTestSuite))
 }
+
+// TestSearchTask_ReduceResultsWithEmptyResults tests the reduceResults method
+// with empty search results to ensure it filters them out correctly
+func TestSearchTask_ReduceResultsWithEmptyResults(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a mock schema with primary key
+	schema := &schemapb.CollectionSchema{
+		Name:        "test_collection",
+		Description: "test collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			},
+		},
+	}
+
+	schemaInfo := newSchemaInfo(schema)
+
+	// Test case 1: Mix of valid and empty results
+	t.Run("MixedValidAndEmptyResults", func(t *testing.T) {
+		task := &searchTask{
+			ctx:    ctx,
+			schema: schemaInfo,
+			SearchRequest: &internalpb.SearchRequest{
+				Nq:   1,
+				Topk: 10,
+			},
+		}
+
+		// Create valid result
+		validResult := &internalpb.SearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       10,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 10),
+		}
+
+		// Create empty result (no ids)
+		emptyResult1 := &internalpb.SearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       0,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 0),
+		}
+
+		// Create result with nil fields
+		emptyResult2 := &internalpb.SearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       0,
+			SlicedBlob: createMarshaledEmptyFieldsData(t, 1),
+		}
+
+		toReduceResults := []*internalpb.SearchResults{validResult, emptyResult1, emptyResult2}
+
+		result, err := task.reduceResults(ctx, toReduceResults, 1, 10, 0, "L2", &planpb.QueryInfo{}, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotNil(t, result.Results)
+	})
+
+	// Test case 2: All empty results
+	t.Run("AllEmptyResults", func(t *testing.T) {
+		task := &searchTask{
+			ctx:    ctx,
+			schema: schemaInfo,
+			SearchRequest: &internalpb.SearchRequest{
+				Nq:   1,
+				Topk: 10,
+			},
+		}
+
+		emptyResult1 := &internalpb.SearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       0,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 0),
+		}
+
+		emptyResult2 := &internalpb.SearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       0,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 0),
+		}
+
+		toReduceResults := []*internalpb.SearchResults{emptyResult1, emptyResult2}
+
+		result, err := task.reduceResults(ctx, toReduceResults, 1, 10, 0, "L2", &planpb.QueryInfo{}, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		// Should return empty result without error
+		assert.Equal(t, int64(1), result.Results.NumQueries)
+	})
+}
+
+// TestSearchTask_PostExecuteWithEmptyResultsInAdvancedSearch tests the PostExecute method
+// with empty results in advanced search to prevent rerank panic
+func TestSearchTask_PostExecuteWithEmptyResultsInAdvancedSearch(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a mock schema
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			},
+		},
+	}
+
+	schemaInfo := newSchemaInfo(schema)
+
+	t.Run("AdvancedSearchWithEmptySubResults", func(t *testing.T) {
+		// Create reScorers using the factory function
+		reScorers, err := NewReScorers(ctx, 2, nil)
+		assert.NoError(t, err)
+
+		task := &searchTask{
+			ctx:            ctx,
+			schema:         schemaInfo,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				Nq:         1,
+				Topk:       10,
+				IsAdvanced: true,
+				SubReqs: []*internalpb.SubSearchRequest{
+					{Nq: 1, Topk: 10},
+					{Nq: 1, Topk: 10},
+				},
+			},
+			queryInfos: []*planpb.QueryInfo{
+				{Topk: 10},
+				{Topk: 10},
+			},
+			reScorers:  reScorers,
+			rankParams: &rankParams{},
+		}
+
+		// Create mix of valid and empty results for advanced search
+		validSubResult := &internalpb.SubSearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       5,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 10),
+			ReqIndex:   0,
+		}
+
+		emptySubResult := &internalpb.SubSearchResults{
+			MetricType: "L2",
+			NumQueries: 1,
+			TopK:       0,
+			SlicedBlob: createMarshaledSearchResultData(t, 1, 0),
+			ReqIndex:   1,
+		}
+
+		advancedResult := &internalpb.SearchResults{
+			MetricType: "L2",
+			IsAdvanced: true,
+			SubResults: []*internalpb.SubSearchResults{validSubResult, emptySubResult},
+		}
+
+		task.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+		task.resultBuf.Insert(advancedResult)
+
+		err = task.PostExecute(ctx)
+		// Should not panic and should handle empty results gracefully
+		assert.NoError(t, err)
+	})
+}
+
+// Helper function to create marshaled search result data
+func createMarshaledSearchResultData(t *testing.T, nq int64, numResults int) []byte {
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: make([]int64, numResults),
+			},
+		},
+	}
+
+	for i := 0; i < numResults; i++ {
+		ids.GetIntId().Data[i] = int64(i)
+	}
+
+	scores := make([]float32, numResults)
+	for i := 0; i < numResults; i++ {
+		scores[i] = float32(i) * 0.1
+	}
+
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       int64(numResults),
+		Ids:        ids,
+		Scores:     scores,
+		Topks:      []int64{int64(numResults)},
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldId:   100,
+				FieldName: "id",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: ids.GetIntId().Data,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	blob, err := proto.Marshal(resultData)
+	assert.NoError(t, err)
+	return blob
+}
+
+// Helper function to create marshaled search result with empty fields
+func createMarshaledEmptyFieldsData(t *testing.T, nq int64) []byte {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       0,
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{},
+				},
+			},
+		},
+		Scores:     []float32{},
+		Topks:      []int64{0},
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	blob, err := proto.Marshal(resultData)
+	assert.NoError(t, err)
+	return blob
+}
