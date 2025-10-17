@@ -331,6 +331,7 @@ func initCipher() error {
 
 	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
 	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
+	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
 	if err = cipherVal.Init(initConfigs); err != nil {
 		return fmt.Errorf("fail to init configs for the cipher plugin, error: %s", err.Error())
 	}
