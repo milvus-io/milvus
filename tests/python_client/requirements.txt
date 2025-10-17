@@ -81,3 +81,6 @@ typing_extensions==4.12.2
 
 # for env configuration
 python-dotenv<=2.0.0
+
+# for geometry
+shapely==2.1.1
