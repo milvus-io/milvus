@@ -280,7 +280,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
-    AssembleIndexData(index_data_codecs, binary_set);
+    AssembleIndexDatas(index_data_codecs, binary_set);
     // clear index_data_codecs to free memory early
     index_data_codecs.clear();
 
@@ -406,30 +406,29 @@ VectorMemIndex<T>::Build(const Config& config) {
         // sparse
         int64_t total_rows = 0;
         int64_t dim = 0;
-        for (auto field_data : field_data) {
-            total_rows += field_data->Length();
+        for (auto data : field_data) {
+            total_rows += data->Length();
             dim = std::max(
                 dim,
-                std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
-                    field_data)
+                std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(data)
                     ->Dim());
         }
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
             total_rows);
         int64_t offset = 0;
-        for (auto field_data : field_data) {
+        for (auto data : field_data) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
-                field_data->Data());
+                data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
-            for (size_t i = 0; i < field_data->Length(); ++i) {
+            for (size_t i = 0; i < data->Length(); ++i) {
                 // this does a deep copy of field_data's data.
                 // TODO: avoid copying by enforcing field data to give up
                 // ownership.
                 AssertInfo(dim >= ptr[i].dim(), "bad dim");
                 vec[offset + i] = ptr[i];
             }
-            offset += field_data->Length();
+            offset += data->Length();
         }
         auto dataset = GenDataset(total_rows, dim, vec.data());
         dataset->SetIsSparse(true);
