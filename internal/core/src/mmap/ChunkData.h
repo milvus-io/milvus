@@ -124,7 +124,7 @@ VariableLengthChunk<std::string>::set(
             data_[i + begin] = std::string_view("");
         } else {
             char* data_ptr = buf + offset;
-            std::strcpy(data_ptr, src[i].c_str());
+            std::memcpy(data_ptr, src[i].data(), src[i].size());
             data_[i + begin] = std::string_view(data_ptr, src[i].size());
         }
         offset += data_size;
