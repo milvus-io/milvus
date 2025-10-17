@@ -14,7 +14,7 @@ FROM amazonlinux:2023
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
-RUN yum install -y wget libgomp libaio libatomic openblas-devel gcc gcc-c++ && \
+RUN yum install -y wget libgomp libaio libatomic openblas-devel && \
     rm -rf /var/cache/yum/*
 
 # Add Tini
