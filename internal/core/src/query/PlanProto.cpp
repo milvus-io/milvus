@@ -358,7 +358,7 @@ ProtoParser::RetrievePlanNodeFromProto(
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create search plan from proto: {}",
-              plan_node_proto.DebugString());
+              plan_node_proto.ShortDebugString());
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);
@@ -382,7 +382,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create retrieve plan from proto: {}",
-              plan_node_proto.DebugString());
+              plan_node_proto.ShortDebugString());
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
