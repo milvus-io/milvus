@@ -1046,12 +1046,13 @@ class TestNewIndexBinary(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
-        error = {ct.err_code: 999, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
         if metric_type in ["JACCARD", "HAMMING"]:
-            error = {ct.err_code: 999, ct.err_msg: f"data type BinaryVector can't build with this index HNSW"}
-        collection_w.create_index(default_binary_vec_field_name, binary_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error)
+            collection_w.create_index(default_binary_vec_field_name, binary_index_params)
+        else:
+            error = {ct.err_code: 999, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
+            collection_w.create_index(default_binary_vec_field_name, binary_index_params,
+                                      check_task=CheckTasks.err_res,
+                                      check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ct.binary_metrics)
