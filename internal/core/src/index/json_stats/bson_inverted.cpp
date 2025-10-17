@@ -19,6 +19,7 @@
 #include <vector>
 #include <unordered_map>
 #include <tuple>
+#include <boost/filesystem.hpp>
 
 #include "common/ScopedTimer.h"
 #include "monitor/Monitor.h"
@@ -110,7 +111,9 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         for (auto& file : index_files) {
             auto remote_prefix =
                 disk_file_manager_->GetRemoteJsonStatsLogPrefix();
-            remote_files.emplace_back(remote_prefix + "/" + file);
+            boost::filesystem::path full_path =
+                boost::filesystem::path(remote_prefix) / file;
+            remote_files.emplace_back(full_path.string());
         }
         // cache shared_key_index/... to disk
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(remote_files,
