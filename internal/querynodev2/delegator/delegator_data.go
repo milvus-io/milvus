@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -1000,4 +1001,58 @@ func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexR
 		}
 	}
 	return nil
+}
+
+func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	result := []*querypb.HighlightResult{}
+	for _, task := range req.GetTasks() {
+		analyzer := sd.analyzerRunners[task.GetFieldId()]
+		topks := req.GetTopks()
+		var searchTokens [][]*milvuspb.AnalyzerToken
+		var textTokens [][]*milvuspb.AnalyzerToken
+		var err error
+
+		if len(analyzer.GetInputFields()) == 1 {
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts())
+			if err != nil {
+				return nil, err
+			}
+
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
+			if err != nil {
+				return nil, err
+			}
+		} else if len(analyzer.GetInputFields()) == 2 {
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts(), task.GetTargetAnalyzers())
+			if err != nil {
+				return nil, err
+			}
+
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzers())
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		textIdx := 0
+		for i, targetTokens := range searchTokens {
+			target_set := typeutil.NewSet[string]()
+			for _, token := range targetTokens {
+				target_set.Insert(token.GetToken())
+			}
+
+			for j := 0; j < int(topks[i]); j++ {
+				offsets := []int64{}
+				for _, token := range textTokens[textIdx] {
+					if target_set.Contain(token.GetToken()) {
+						offsets = append(offsets, token.GetStartOffset(), token.GetEndOffset())
+					}
+				}
+				result = append(result, &querypb.HighlightResult{Fragments: []*querypb.HighlightFragment{{StartOffset: 0, EndOffset: int64(len(task.Texts[textIdx])), Offsets: offsets}}})
+				textIdx++
+			}
+		}
+	}
+
+	return result, nil
 }

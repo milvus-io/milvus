@@ -171,6 +171,8 @@ service QueryNode {
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+    rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
+    
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
@@ -992,6 +994,38 @@ message RunAnalyzerRequest{
 
     bool with_detail = 6;
     bool with_hash = 7;
+}
+
+message HighlightTask{
+    string field_name = 1;
+    int64 field_id = 2;
+    repeated string target_texts = 3;
+    repeated string target_analyzers = 4;
+
+    repeated string texts = 5;
+    repeated string analyzers = 6;
+}
+
+message GetHighlightRequest{
+    common.MsgBase base = 1;
+    string channel = 2;
+    repeated int64 topks = 3;
+    repeated HighlightTask tasks=4;
+}
+
+message HighlightFragment{      
+    int64 start_offset = 1;
+    int64 end_offset = 2;
+    repeated int64 offsets = 3;
+}
+
+message HighlightResult{       
+    repeated HighlightFragment fragments = 2;
+}
+
+message GetHighlightResponse{
+    common.Status status = 1;
+    repeated HighlightResult results = 2;
 }
 
 message ListLoadedSegmentsRequest {
