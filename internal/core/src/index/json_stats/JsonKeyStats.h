@@ -362,6 +362,26 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return fields;
     }
 
+    // return all shredding fields whose pointers start with the given prefix
+    // for example, prefix "/a/b" will include fields for "/a/b" and "/a/b/..."
+    std::set<std::string>
+    GetShreddingFieldsWithPrefix(const std::string& prefix) {
+        std::set<std::string> fields;
+        for (const auto& [path, field_names] : key_field_map_) {
+            if (path.size() >= prefix.size() &&
+                path.compare(0, prefix.size(), prefix) == 0 &&
+                (path.size() == prefix.size() || path[prefix.size()] == '/')) {
+                for (const auto& field : field_names) {
+                    if (shred_field_data_type_map_.find(field) !=
+                        shred_field_data_type_map_.end()) {
+                        fields.insert(field);
+                    }
+                }
+            }
+        }
+        return fields;
+    }
+
     std::string
     GetShreddingField(const std::string& pointer, JSONType type) {
         if (key_field_map_.find(pointer) == key_field_map_.end()) {
