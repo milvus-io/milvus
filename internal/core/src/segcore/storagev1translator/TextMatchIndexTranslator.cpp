@@ -41,7 +41,7 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
                                              /* is_index */ true),
             milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ false) {
+            /* support_eviction */ true) {
 }
 
 size_t
@@ -59,7 +59,16 @@ std::pair<milvus::cachinglayer::ResourceUsage,
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     // ignore the cid checking, because there is only one cell
-    return {{load_info_.index_size, 0}, {2 * load_info_.index_size, 0}};
+    if (load_info_.enable_mmap) {
+        return {{0, load_info_.index_size},
+                {load_info_.index_size, load_info_.index_size}};
+    } else {
+        // The reason the maximum disk usage is not zero is that the text match index
+        // is first written to the disk, then loaded into memory. Only after that are
+        // the disk files deleted.
+        return {{load_info_.index_size, 0},
+                {load_info_.index_size, load_info_.index_size}};
+    }
 }
 
 int64_t
@@ -98,7 +107,11 @@ TextMatchIndexTranslator::get_cells(
              load_info_.field_id,
              load_info_.segment_id);
 
-    index->SetCellSize({index->ByteSize(), 0});
+    if (load_info_.enable_mmap) {
+        index->SetCellSize({0, index->ByteSize()});
+    } else {
+        index->SetCellSize({index->ByteSize(), 0});
+    }
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::index::TextMatchIndex>>>
