@@ -22,15 +22,13 @@
 #include "log/Log.h"
 namespace milvus::index {
 
+class JsonFlatIndex;
 // JsonFlatIndexQueryExecutor is used to execute queries on a specified json path, and can be constructed by JsonFlatIndex
 template <typename T>
 class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
  public:
     JsonFlatIndexQueryExecutor(std::string& json_path,
-                               std::shared_ptr<TantivyIndexWrapper> wrapper) {
-        json_path_ = json_path;
-        this->wrapper_ = wrapper;
-    }
+                               const JsonFlatIndex& json_flat_index);
 
     ~JsonFlatIndexQueryExecutor() {
         this->wrapper_ = nullptr;
@@ -47,19 +45,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
-    const TargetBitmap
-    IsNull() override {
-        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNull",
-                              tracer::GetRootSpan());
-        TargetBitmap bitset(this->Count());
-        this->wrapper_->json_exist_query(json_path_, &bitset);
-        bitset.flip();
-        return bitset;
-    }
-
     TargetBitmap
-    IsNotNull() override {
-        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNotNull",
+    Exists() {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Exists",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
         this->wrapper_->json_exist_query(json_path_, &bitset);
@@ -107,7 +95,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         bitset.flip();
 
         // TODO: optimize this
-        auto null_bitset = IsNotNull();
+        auto null_bitset = this->IsNotNull();
         bitset &= null_bitset;
 
         return bitset;
@@ -194,6 +182,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 // we need to reuse InvertedIndexTantivy's Build and Load implementation, so we specify the template parameter as std::string
 // JsonFlatIndex should not be used to execute queries, use JsonFlatIndexQueryExecutor instead
 class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
+    template <typename T>
+    friend class JsonFlatIndexQueryExecutor;
+
  public:
     JsonFlatIndex() : InvertedIndexTantivy<std::string>() {
     }
@@ -224,7 +215,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
                  json_path);
 
         return std::make_shared<JsonFlatIndexQueryExecutor<T>>(json_path,
-                                                               this->wrapper_);
+                                                               *this);
     }
 
     JsonCastType
@@ -250,4 +241,12 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
  private:
     std::string nested_path_;
 };
+
+template <typename T>
+JsonFlatIndexQueryExecutor<T>::JsonFlatIndexQueryExecutor(
+    std::string& json_path, const JsonFlatIndex& json_flat_index) {
+    json_path_ = json_path;
+    this->wrapper_ = json_flat_index.wrapper_;
+    this->null_offset_ = json_flat_index.null_offset_;
+}
 }  // namespace milvus::index
