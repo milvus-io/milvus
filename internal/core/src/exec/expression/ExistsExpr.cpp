@@ -98,7 +98,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(executor->IsNotNull()));
+                    std::move(executor->Exists()));
                 break;
             }
 
