@@ -32,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
@@ -246,6 +247,40 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     }
 }
 
+std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
+parse_parquet_statistics(
+    const std::vector<std::shared_ptr<parquet::FileMetaData>>& file_metas,
+    const std::map<int64_t, milvus_storage::ColumnOffset>& field_id_mapping,
+    int64_t field_id) {
+    ChunkedSegmentSealedImpl::ParquetStatistics statistics;
+    if (file_metas.size() == 0) {
+        return std::nullopt;
+    }
+    auto it = field_id_mapping.find(field_id);
+    AssertInfo(it != field_id_mapping.end(),
+               "field id {} not found in field id mapping",
+               field_id);
+    auto offset = it->second;
+
+    for (auto& file_meta : file_metas) {
+        auto num_row_groups = file_meta->num_row_groups();
+        for (auto i = 0; i < num_row_groups; i++) {
+            auto row_group = file_meta->RowGroup(i);
+            auto column_chunk = row_group->ColumnChunk(offset.col_index);
+            if (!column_chunk->is_stats_set()) {
+                AssertInfo(statistics.size() == 0,
+                           "Statistics is not set for some column chunks "
+                           "for field {}",
+                           field_id);
+                continue;
+            }
+            auto stats = column_chunk->statistics();
+            statistics.push_back(stats);
+        }
+    }
+    return statistics;
+}
+
 void
 ChunkedSegmentSealedImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& load_info) {
@@ -314,6 +349,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
+        auto file_metas = translator->parquet_file_metas();
+        auto field_id_mapping = translator->field_id_mapping();
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -323,9 +360,21 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             auto column = std::make_shared<ProxyChunkColumn>(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
+            std::optional<ParquetStatistics> statistics_opt;
+            if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
+                statistics_opt = parse_parquet_statistics(
+                    file_metas, field_id_mapping, field_id.get());
+            }
 
-            load_field_data_common(
-                field_id, column, num_rows, data_type, info.enable_mmap, true);
+            load_field_data_common(field_id,
+                                   column,
+                                   num_rows,
+                                   data_type,
+                                   info.enable_mmap,
+                                   true,
+                                   ENABLE_PARQUET_STATS_SKIP_INDEX
+                                       ? statistics_opt
+                                       : std::nullopt);
             if (field_id == TimestampFieldID) {
                 auto timestamp_proxy_column = get_column(TimestampFieldID);
                 AssertInfo(timestamp_proxy_column != nullptr,
@@ -756,7 +805,7 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
-                                        const size_t* query_lims,
+                                        const size_t* query_offsets,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
@@ -783,7 +832,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    binlog_search_info,
                                    query_data,
-                                   query_lims,
+                                   query_offsets,
                                    query_count,
                                    bitset,
                                    op_context,
@@ -798,7 +847,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    search_info,
                                    query_data,
-                                   query_lims,
+                                   query_offsets,
                                    query_count,
                                    bitset,
                                    op_context,
@@ -826,7 +875,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     search_info,
                                     index_info,
                                     query_data,
-                                    query_lims,
+                                    query_offsets,
                                     query_count,
                                     row_count,
                                     bitset,
@@ -987,6 +1036,84 @@ ChunkedSegmentSealedImpl::search_pk(milvus::OpContext* op_ctx,
     return search_sorted_pk(op_ctx, pk, [this, timestamp](int64_t offset) {
         return insert_record_.timestamps_[offset] <= timestamp;
     });
+}
+
+void
+ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
+                                     const std::vector<PkType>& pks) const {
+    BitsetTypeView bitset_view(bitset);
+    if (!is_sorted_by_pk_) {
+        for (auto& pk : pks) {
+            insert_record_.search_pk_range(
+                pk, proto::plan::OpType::Equal, bitset_view);
+        }
+        return;
+    }
+
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = get_column(pk_field_id);
+    AssertInfo(pk_column != nullptr, "primary key column not loaded");
+
+    auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto pw = all_chunk_pins[i];
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                for (size_t j = 0; j < pks.size(); j++) {
+                    // get int64 pks
+                    auto target = std::get<int64_t>(pks[j]);
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        bitset[offset] = true;
+                    }
+                }
+            }
+
+            break;
+        }
+        case DataType::VARCHAR: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto pw = all_chunk_pins[i];
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    // get varchar pks
+                    auto& target = std::get<std::string>(pks[j]);
+                    auto offset = string_chunk->binary_search_string(target);
+                    for (; offset != -1 && offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        bitset[segment_offset] = true;
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
+    }
 }
 
 void
@@ -1690,8 +1817,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
 
-    text_indexes_[field_id] =
-        std::make_shared<index::TextMatchIndexHolder>(std::move(index));
+    text_indexes_[field_id] = std::make_shared<index::TextMatchIndexHolder>(
+        std::move(index), cfg.GetScalarIndexEnableMmap());
 }
 
 void
@@ -2172,9 +2299,9 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
-std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
-                                     Timestamp timestamp) const {
+void
+ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
+                                     const IdArray& id_array) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -2183,16 +2310,7 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    std::vector<SegOffset> res_offsets;
-    res_offsets.reserve(pks.size());
-    this->search_batch_pks(
-        pks,
-        [=](const size_t idx) { return timestamp; },
-        true,
-        [&](const SegOffset offset, const Timestamp ts) {
-            res_offsets.push_back(offset);
-        });
-    return std::move(res_offsets);
+    this->search_pks(bitset, pks);
 }
 
 SegcoreError
@@ -2467,7 +2585,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     size_t num_rows,
     DataType data_type,
     bool enable_mmap,
-    bool is_proxy_column) {
+    bool is_proxy_column,
+    std::optional<ParquetStatistics> statistics) {
     {
         std::unique_lock lck(mutex_);
         AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
@@ -2496,13 +2615,18 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
-        if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
-            LoadSkipIndex(field_id, data_type, column);
-        }
         if (IsVariableDataType(data_type)) {
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, column->DataByteSize());
+        }
+    }
+    if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
+        if (statistics) {
+            LoadSkipIndexFromStatistics(
+                field_id, data_type, statistics.value());
+        } else {
+            LoadSkipIndex(field_id, data_type, column);
         }
     }
 

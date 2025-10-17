@@ -95,6 +95,10 @@ GroupChunkTranslator::GroupChunkTranslator(
             file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             storage::GetReaderProperties());
+        parquet_file_metadata_.push_back(
+            reader->file_metadata()->GetParquetMetadata());
+
+        field_id_mapping_ = reader->file_metadata()->GetFieldIDMapping();
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();

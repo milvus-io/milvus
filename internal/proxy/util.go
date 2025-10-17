@@ -660,9 +660,14 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 			return err
 		}
 	} else {
-		if !typeutil.IsVectorType(field.GetElementType()) {
-			return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
+		// TODO(SpadeA): only support float vector now
+		if field.GetElementType() != schemapb.DataType_FloatVector {
+			return fmt.Errorf("Unsupported element type of array field %s, now only float vector is supported", field.Name)
 		}
+
+		// if !typeutil.IsVectorType(field.GetElementType()) {
+		// 	return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
+		// }
 		err = validateDimension(field)
 		if err != nil {
 			return err
@@ -2406,17 +2411,13 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	err := common.CheckNamespace(schema, insertMsg.InsertRequest.Namespace)
 	if err != nil {
 		return err
 	}
-	namespaceIsSet := insertMsg.InsertRequest.Namespace != nil
-
-	if namespaceEnabeld != namespaceIsSet {
-		if namespaceIsSet {
-			return fmt.Errorf("namespace data is set but namespace disabled")
-		}
-		return fmt.Errorf("namespace data is not set but namespace enabled")
+	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
+	if err != nil {
+		return err
 	}
 	if !namespaceEnabeld {
 		return nil

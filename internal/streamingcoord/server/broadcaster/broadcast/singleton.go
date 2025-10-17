@@ -8,7 +8,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
-var singleton = syncutil.NewFuture[broadcaster.Broadcaster]()
+var (
+	singleton     = syncutil.NewFuture[broadcaster.Broadcaster]()
+	ErrNotPrimary = broadcaster.ErrNotPrimary
+)
 
 // Register registers the broadcaster.
 func Register(broadcaster broadcaster.Broadcaster) {
@@ -21,6 +24,7 @@ func GetWithContext(ctx context.Context) (broadcaster.Broadcaster, error) {
 }
 
 // StartBroadcastWithResourceKeys starts a broadcast with resource keys.
+// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 	broadcaster, err := singleton.GetWithContext(ctx)
 	if err != nil {

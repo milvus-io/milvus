@@ -15,9 +15,10 @@
 // limitations under the License.
 
 #include "VectorSearchNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include "monitor/Monitor.h"
-
 namespace milvus {
 namespace exec {
 
@@ -59,17 +60,23 @@ PhyVectorSearchNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span(
+        "PhyVectorSearchNode::Execute", tracer::GetRootSpan(), true);
+
     DeferLambda([&]() { is_finished_ = true; });
     if (input_ == nullptr) {
         return nullptr;
     }
+
+    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
+    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
 
     std::chrono::high_resolution_clock::time_point vector_start =
         std::chrono::high_resolution_clock::now();
 
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob();
-    auto src_lims = ph.get_lims();
+    auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
     milvus::SearchResult search_result;
 
@@ -87,7 +94,7 @@ PhyVectorSearchNode::GetOutput() {
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,
-                            src_lims,
+                            src_offsets,
                             num_queries,
                             query_timestamp_,
                             final_view,
@@ -95,6 +102,10 @@ PhyVectorSearchNode::GetOutput() {
                             search_result);
 
     search_result.total_data_cnt_ = final_view.size();
+
+    span.GetSpan()->SetAttribute(
+        "result_count", static_cast<int>(search_result.seg_offsets_.size()));
+
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
         std::chrono::high_resolution_clock::now();

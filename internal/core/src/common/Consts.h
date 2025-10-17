@@ -102,6 +102,7 @@ const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
+const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;
 
 // index config related
 const std::string SEGMENT_INSERT_FILES_KEY = "segment_insert_files";
@@ -123,3 +124,6 @@ const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
 
 // VectorArray related, used for fetch metadata from Arrow schema
 const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
+// EPSILON value for comparing float numbers
+const float EPSILON = 0.0000000119;
+const std::string NAMESPACE_FIELD_NAME = "$namespace_id";

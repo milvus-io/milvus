@@ -15,10 +15,11 @@
 // limitations under the License.
 
 #include "IterativeFilterNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include "exec/Driver.h"
 #include "monitor/Monitor.h"
-
 namespace milvus {
 namespace exec {
 PhyIterativeFilterNode::PhyIterativeFilterNode(
@@ -115,6 +116,9 @@ PhyIterativeFilterNode::GetOutput() {
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
+
+    tracer::AutoSpan span(
+        "PhyIterativeFilterNode::Execute", tracer::GetRootSpan(), true);
 
     DeferLambda([&]() { is_finished_ = true; });
 
@@ -266,6 +270,12 @@ PhyIterativeFilterNode::GetOutput() {
             .count();
     milvus::monitor::internal_core_search_latency_iterative_filter.Observe(
         scalar_cost / 1000);
+
+    if (!is_native_supported_) {
+        tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
+                                     need_process_rows_,
+                                     need_process_rows_ - bitset.count()));
+    }
 
     return input_;
 }

@@ -29,7 +29,7 @@ func Test_CheckVecIndexWithDataTypeExist(t *testing.T) {
 		want      bool
 	}{
 		{"HNSW", schemapb.DataType_FloatVector, true},
-		{"HNSW", schemapb.DataType_BinaryVector, false},
+		{"HNSW", schemapb.DataType_BinaryVector, true},
 		{"HNSW", schemapb.DataType_Float16Vector, true},
 
 		{"SPARSE_WAND", schemapb.DataType_SparseFloatVector, true},
