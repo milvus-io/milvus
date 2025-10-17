@@ -1944,10 +1944,15 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 	db := model.NewDatabase(1, "exist", pb.DatabaseState_DatabaseCreated, nil)
 	t.Run("database already exist", func(t *testing.T) {
 		meta := &MetaTable{
-			names: newNameDb(),
+			names:       newNameDb(),
+			aliases:     newNameDb(),
+			dbName2Meta: make(map[string]*model.Database),
 		}
 		meta.names.insert("exist", "collection", 100)
-		err := meta.CreateDatabase(context.TODO(), db, 10000)
+
+		err := meta.CheckIfDatabaseCreatable(context.TODO(), &milvuspb.CreateDatabaseRequest{
+			DbName: "exist",
+		})
 		assert.Error(t, err)
 	})
 
@@ -1975,14 +1980,16 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
-			dbName2Meta: map[string]*model.Database{
-				"exist": db,
-			},
-			names:   newNameDb(),
-			aliases: newNameDb(),
-			catalog: catalog,
+			dbName2Meta: make(map[string]*model.Database),
+			names:       newNameDb(),
+			aliases:     newNameDb(),
+			catalog:     catalog,
 		}
-		err := meta.CreateDatabase(context.TODO(), db, 10000)
+		err := meta.CheckIfDatabaseCreatable(context.TODO(), &milvuspb.CreateDatabaseRequest{
+			DbName: "exist",
+		})
+		assert.NoError(t, err)
+		err = meta.CreateDatabase(context.TODO(), db, 10000)
 		assert.NoError(t, err)
 		assert.True(t, meta.names.exist("exist"))
 		assert.True(t, meta.aliases.exist("exist"))
@@ -2017,7 +2024,7 @@ func TestAlterDatabase(t *testing.T) {
 				Value: "value1",
 			},
 		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		err := meta.AlterDatabase(context.TODO(), newDB, typeutil.ZeroTimestamp)
 		assert.NoError(t, err)
 	})
 
@@ -2047,32 +2054,8 @@ func TestAlterDatabase(t *testing.T) {
 				Value: "value1",
 			},
 		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		err := meta.AlterDatabase(context.TODO(), newDB, typeutil.ZeroTimestamp)
 		assert.ErrorIs(t, err, mockErr)
-	})
-
-	t.Run("alter database name", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated, nil)
-
-		meta := &MetaTable{
-			dbName2Meta: map[string]*model.Database{
-				"db1": db,
-			},
-			names:   newNameDb(),
-			aliases: newNameDb(),
-			catalog: catalog,
-		}
-		newDB := db.Clone()
-		newDB.Name = "db2"
-		db.Properties = []*commonpb.KeyValuePair{
-			{
-				Key:   "key1",
-				Value: "value1",
-			},
-		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
-		assert.Error(t, err)
 	})
 }
 
@@ -2171,7 +2154,9 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 func TestMetaTable_DropDatabase(t *testing.T) {
 	t.Run("can't drop default database", func(t *testing.T) {
 		mt := &MetaTable{}
-		err := mt.DropDatabase(context.TODO(), "default", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: util.DefaultDBName,
+		})
 		assert.Error(t, err)
 	})
 
@@ -2180,8 +2165,10 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		err := mt.DropDatabase(context.TODO(), "not_exist", 10000)
-		assert.NoError(t, err)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_exist",
+		})
+		assert.True(t, errors.Is(err, merr.ErrDatabaseNotFound))
 	})
 
 	t.Run("database not empty", func(t *testing.T) {
@@ -2200,7 +2187,9 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 			},
 		}
 		mt.names.insert("not_empty", "collection", 10000000)
-		err := mt.DropDatabase(context.TODO(), "not_empty", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_empty",
+		})
 		assert.Error(t, err)
 	})
 
@@ -2221,7 +2210,11 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		}
 		mt.names.createDbIfNotExist("not_commit")
 		mt.aliases.createDbIfNotExist("not_commit")
-		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_commit",
+		})
+		assert.NoError(t, err)
+		err = mt.DropDatabase(context.TODO(), "not_commit", 10000)
 		assert.Error(t, err)
 	})
 
@@ -2242,7 +2235,11 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		}
 		mt.names.createDbIfNotExist("not_commit")
 		mt.aliases.createDbIfNotExist("not_commit")
-		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_commit",
+		})
+		assert.NoError(t, err)
+		err = mt.DropDatabase(context.TODO(), "not_commit", 10000)
 		assert.NoError(t, err)
 		assert.False(t, mt.names.exist("not_commit"))
 		assert.False(t, mt.aliases.exist("not_commit"))
