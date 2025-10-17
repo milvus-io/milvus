@@ -830,10 +830,6 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 	}
 
 	for index, wktdata := range geometryArray {
-		if field.GetValidData() != nil && !field.GetValidData()[index] {
-			wkbArray[index] = nil
-			continue
-		}
 		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
 		// fmt.Println(strings.Trim(string(wktdata), "\""))
 		geomT, err := wkt.Unmarshal(wktdata)
