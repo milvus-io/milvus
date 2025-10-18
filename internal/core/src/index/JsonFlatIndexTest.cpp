@@ -193,30 +193,16 @@ TEST_F(JsonFlatIndexTest, TestInQuery) {
     ASSERT_FALSE(result[2]);  // Charlie
 }
 
-TEST_F(JsonFlatIndexTest, TestIsNullQuery) {
+TEST_F(JsonFlatIndexTest, TestExistsQuery) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
     ASSERT_NE(json_flat_index, nullptr);
 
     std::string json_path = "/profile/name/preferred_name";
     auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->IsNull();
+    auto result = executor->Exists();
     ASSERT_EQ(result.size(), json_data_.size());
-    ASSERT_FALSE(result[0]);  // Al
-    ASSERT_TRUE(result[1]);   // null
-    ASSERT_TRUE(result[2]);   // not exist
-}
-
-TEST_F(JsonFlatIndexTest, TestIsNotNullQuery) {
-    auto json_flat_index =
-        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
-    ASSERT_NE(json_flat_index, nullptr);
-
-    std::string json_path = "/profile/name/preferred_name";
-    auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->IsNotNull();
-    ASSERT_EQ(result.size(), json_data_.size());
-    ASSERT_TRUE(result[0]);   // Al
+    ASSERT_TRUE(result[0]);   // Alice
     ASSERT_FALSE(result[1]);  // null
     ASSERT_FALSE(result[2]);  // not exist
 }
