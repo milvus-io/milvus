@@ -643,6 +643,47 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 	}
 }
 
+func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
+	task := getHybridSearchTask("test_collection", [][]string{
+		{"1", "2"},
+		{"3", "4"},
+	},
+		[]string{"intField"},
+	)
+
+	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
+	f1.FieldId = 101
+	f2 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "int64", 20)
+	f2.FieldId = 100
+	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
+		FieldsData: []*schemapb.FieldData{f1, f2},
+	}, segcore.StorageCost{}, nil).Build()
+	defer mocker.UnPatch()
+
+	pipeline, err := newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, task)
+	s.NoError(err)
+
+	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
+	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
+	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{d1, d2}, segcore.StorageCost{})
+
+	s.NoError(err)
+	s.NotNil(results)
+	s.NotNil(results.Results)
+	s.Equal(int64(2), results.Results.NumQueries)
+	s.Equal(int64(10), results.Results.Topks[0])
+	s.Equal(int64(10), results.Results.Topks[1])
+	s.NotNil(results.Results.Ids)
+	s.NotNil(results.Results.Ids.GetIntId())
+	s.Len(results.Results.Ids.GetIntId().Data, 20) // 2 queries * 10 topk
+	s.NotNil(results.Results.Scores)
+	s.Len(results.Results.Scores, 20) // 2 queries * 10 topk
+	s.NotNil(results.Results.FieldsData)
+	s.Len(results.Results.FieldsData, 1) // One output field
+	s.Equal("intField", results.Results.FieldsData[0].FieldName)
+	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},

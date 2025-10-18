@@ -919,8 +919,8 @@ var hybridSearchPipe = &pipelineDef{
 	},
 }
 
-var hybridSearchWithRequeryPipe = &pipelineDef{
-	name: "hybridSearchWithRequery",
+var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
+	name: "hybridSearchWithRequeryAndRerankByDataPipe",
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
@@ -1026,6 +1026,80 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 	},
 }
 
+var hybridSearchWithRequeryPipe = &pipelineDef{
+	name: "hybridSearchWithRequeryPipe",
+	nodes: []*nodeDef{
+		{
+			name:    "reduce",
+			inputs:  []string{"input", "storage_cost"},
+			outputs: []string{"reduced", "metrics"},
+			opName:  hybridSearchReduceOp,
+		},
+		{
+			name:    "rerank",
+			inputs:  []string{"reduced", "metrics"},
+			outputs: []string{"rank_result"},
+			opName:  rerankOp,
+		},
+		{
+			name:    "pick_ids",
+			inputs:  []string{"rank_result"},
+			outputs: []string{"ids"},
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					return []any{
+						inputs[0].(*milvuspb.SearchResults).Results.Ids,
+					}, nil
+				},
+			},
+			opName: lambdaOp,
+		},
+		{
+			name:    "requery",
+			inputs:  []string{"ids", "storage_cost"},
+			outputs: []string{"fields", "storage_cost"},
+			opName:  requeryOp,
+		},
+		{
+			name:    "gen_ids",
+			inputs:  []string{"reduced"},
+			outputs: []string{"ids"},
+			opName:  lambdaOp,
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					return []any{[]*schemapb.IDs{inputs[0].([]*milvuspb.SearchResults)[0].Results.Ids}}, nil
+				},
+			},
+		},
+		{
+			name:    "organize",
+			inputs:  []string{"fields", "ids"},
+			outputs: []string{"organized_fields"},
+			opName:  organizeOp,
+		},
+		{
+			name:    "pick",
+			inputs:  []string{"rank_result", "organized_fields"},
+			outputs: []string{"result"},
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					result := inputs[0].(*milvuspb.SearchResults)
+					fields := inputs[1].([][]*schemapb.FieldData)
+					result.Results.FieldsData = fields[0]
+					return []any{result}, nil
+				},
+			},
+			opName: lambdaOp,
+		},
+		{
+			name:    "filter_field",
+			inputs:  []string{"result"},
+			outputs: []string{"output"},
+			opName:  filterFieldOp,
+		},
+	},
+}
+
 func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
 		return newPipeline(searchPipe, t)
@@ -1043,7 +1117,11 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 		return newPipeline(hybridSearchPipe, t)
 	}
 	if t.SearchRequest.GetIsAdvanced() && t.needRequery {
-		return newPipeline(hybridSearchWithRequeryPipe, t)
+		if len(t.functionScore.GetAllInputFieldIDs()) > 0 {
+			return newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, t)
+		} else {
+			return newPipeline(hybridSearchWithRequeryPipe, t)
+		}
 	}
 	return nil, fmt.Errorf("Unsupported pipeline")
 }
