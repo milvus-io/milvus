@@ -1,0 +1,86 @@
+nodeSelector:
+  jenkins-e2e-arm: "true"
+cluster:
+  enabled: false
+streaming:
+  enabled: true
+service:
+  type: ClusterIP
+woodpecker:
+  enabled: true
+standalone:
+  messageQueue: woodpecker
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "4"
+      memory: 16Gi
+    requests:
+      cpu: "1"
+      memory: 3.5Gi
+log:
+  level: debug
+extraConfigFiles:
+  user.yaml: |+
+    dataCoord:
+      gc:
+        interval: 1800
+        missingTolerance: 1800
+        dropTolerance: 1800
+    queryNode:
+      segcore:
+        exprEvalBatchSize: 512
+metrics:
+  serviceMonitor:
+    enabled: true
+etcd:
+  nodeSelector:
+    jenkins-e2e-arm: "true"
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  image:
+    registry: "harbor-us-vdc.zilliz.cc"
+    repository: "milvusdb/etcd"
+  tolerations:
+  - effect: NoSchedule
+    key: jenkins-e2e-arm
+    operator: Exists
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: PR-35402-20240812-402f716b5
+minio:
+  nodeSelector:
+    jenkins-e2e-arm: "true"
+  mode: standalone
+  image:
+    repository: "harbor-us-vdc.zilliz.cc/milvusdb/minio"
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: NoSchedule
+    key: jenkins-e2e-arm
+    operator: Exists
+pulsarv3:
+  enabled: false
+tolerations:
+- effect: NoSchedule
+  key: jenkins-e2e-arm
+  operator: Exists

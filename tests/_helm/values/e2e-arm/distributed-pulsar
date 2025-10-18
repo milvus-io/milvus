@@ -1,0 +1,200 @@
+nodeSelector:
+  jenkins-e2e-arm: "true"
+cluster:
+  enabled: true
+streaming:
+  enabled: true
+proxy:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.3"
+      memory: 256Mi
+dataNode:
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+indexNode:
+  enabled: false
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+queryNode:
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
+streamingNode:
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
+mixCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+service:
+  type: ClusterIP
+log:
+  level: debug
+extraConfigFiles:
+  user.yaml: |+
+    common:
+      storage:
+        enablev2: true
+    dataCoord:
+      gc:
+        interval: 1800
+        missingTolerance: 1800
+        dropTolerance: 1800
+    queryNode:
+      segcore:
+        exprEvalBatchSize: 512
+metrics:
+  serviceMonitor:
+    enabled: true
+etcd:
+  nodeSelector:
+    jenkins-e2e-arm: "true"
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: NoSchedule
+    key: jenkins-e2e-arm
+    operator: Exists
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: PR-35426-20240812-46dadb120
+minio:
+  nodeSelector:
+    jenkins-e2e-arm: "true"
+  mode: standalone
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: NoSchedule
+    key: jenkins-e2e-arm
+    operator: Exists
+pulsarv3:
+  enabled: true
+  bookkeeper:
+    nodeSelector:
+      jenkins-milvus-ci-e2e-service: "true"
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+    configData:
+      PULSAR_MEM: >
+        -Xms512m
+        -Xmx512m
+        -XX:MaxDirectMemorySize=1024m
+    tolerations:
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  broker:
+    nodeSelector:
+      jenkins-milvus-ci-e2e-service: "true"
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 4Gi
+    tolerations:
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  components:
+    autorecovery: false
+  proxy:
+    nodeSelector:
+      jenkins-milvus-ci-e2e-service: "true"
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+    tolerations:
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    wsResources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+  zookeeper:
+    nodeSelector:
+      jenkins-milvus-ci-e2e-service: "true"
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+    tolerations:
+    - key: "jenkins-e2e-amd"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+tolerations:
+- effect: NoSchedule
+  key: jenkins-e2e-arm
+  operator: Exists
