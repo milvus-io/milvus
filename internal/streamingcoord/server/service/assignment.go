@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -20,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
@@ -141,8 +143,16 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 		return nil, errReplicateConfigurationSame
 	}
 
+	controlChannel := streaming.WAL().ControlChannel()
 	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
 		return channel.Name()
+	})
+	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
+		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
+			// return control channel if the control channel is on the pchannel.
+			return controlChannel
+		}
+		return pchannel
 	})
 
 	// validate the configuration itself
@@ -164,7 +174,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 			ReplicateConfiguration: config,
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
-		WithBroadcast(pchannels).
+		WithBroadcast(broadcastPChannels).
 		MustBuildBroadcast()
 	return b, nil
 }

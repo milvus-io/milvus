@@ -114,7 +114,10 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
-	msg := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
+	msg, err := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
+	if err != nil {
+		return err
+	}
 	sourceTs := msg.ReplicateHeader().TimeTick
 	log.Debug("recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
@@ -123,7 +126,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	)
 
 	// Append message to wal.
-	_, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+	_, err = streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
 	if err == nil {
 		p.sendReplicateResult(sourceTs)
 		return nil
