@@ -26,6 +26,7 @@
 #include "popcount.h"
 
 #include "bitset/common.h"
+#include "bit_wise.h"
 #include "maybe_vector.h"
 
 namespace milvus {
@@ -317,6 +318,16 @@ struct ElementWiseBitsetPolicy {
     static inline void
     op_set(data_type* const data, const size_t start, const size_t size) {
         op_fill(data, start, size, true);
+    }
+
+    static inline void
+    op_set_indices(data_type* const data,
+                   const size_t start,
+                   const size_t size,
+                   const uint32_t* const __restrict indices,
+                   const size_t n_indices) {
+        BitWiseBitsetPolicy<ElementT>::op_set_indices(
+            data, start, size, indices, n_indices);
     }
 
     static inline void
