@@ -3,12 +3,14 @@ from common import common_type as ct
 
 success = "success"
 
+
 class HNSW:
     supported_vector_types = [
         DataType.FLOAT_VECTOR,
         DataType.FLOAT16_VECTOR,
         DataType.BFLOAT16_VECTOR,
-        DataType.INT8_VECTOR
+        DataType.INT8_VECTOR,
+        DataType.BINARY_VECTOR
     ]
 
     supported_metrics = ['L2', 'IP', 'COSINE']
