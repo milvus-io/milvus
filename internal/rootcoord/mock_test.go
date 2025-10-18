@@ -72,9 +72,8 @@ type mockMetaTable struct {
 	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
 	ChangePartitionStateFunc         func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
 	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	CreateAliasFunc                  func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
-	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
-	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
+	AlterAliasFunc                   func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
+	DropAliasFunc                    func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
 	IsAliasFunc                      func(ctx context.Context, dbName, name string) bool
 	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
 	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
@@ -152,16 +151,12 @@ func (m mockMetaTable) RemovePartition(ctx context.Context, dbID int64, collecti
 	return m.RemovePartitionFunc(ctx, collectionID, partitionID, ts)
 }
 
-func (m mockMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
-	return m.CreateAliasFunc(ctx, dbName, alias, collectionName, ts)
+func (m mockMetaTable) AlterAlias(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error {
+	return m.AlterAliasFunc(ctx, result)
 }
 
-func (m mockMetaTable) AlterAlias(ctx context.Context, dbName, alias string, collectionName string, ts Timestamp) error {
-	return m.AlterAliasFunc(ctx, dbName, alias, collectionName, ts)
-}
-
-func (m mockMetaTable) DropAlias(ctx context.Context, dbName, alias string, ts Timestamp) error {
-	return m.DropAliasFunc(ctx, dbName, alias, ts)
+func (m mockMetaTable) DropAlias(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error {
+	return m.DropAliasFunc(ctx, result)
 }
 
 func (m mockMetaTable) IsAlias(ctx context.Context, dbName, name string) bool {
@@ -511,13 +506,10 @@ func withInvalidMeta() Opt {
 	meta.ChangePartitionStateFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error {
 		return errors.New("error mock ChangePartitionState")
 	}
-	meta.CreateAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
-		return errors.New("error mock CreateAlias")
-	}
-	meta.AlterAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
+	meta.AlterAliasFunc = func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error {
 		return errors.New("error mock AlterAlias")
 	}
-	meta.DropAliasFunc = func(ctx context.Context, dbName string, alias string, ts Timestamp) error {
+	meta.DropAliasFunc = func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error {
 		return errors.New("error mock DropAlias")
 	}
 	meta.AddCredentialFunc = func(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
