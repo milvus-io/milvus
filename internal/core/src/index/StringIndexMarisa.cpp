@@ -54,7 +54,28 @@ StringIndexMarisa::StringIndexMarisa(
 
 int64_t
 StringIndexMarisa::Size() {
-    return trie_.size();
+    return total_size_;
+}
+
+int64_t
+StringIndexMarisa::CalculateTotalSize() const {
+    int64_t size = 0;
+
+    // Size of the trie structure
+    // marisa trie uses io_size() to get the serialized size
+    // which approximates the memory usage
+    size += trie_.io_size();
+
+    // Size of str_ids_ vector (main data structure)
+    size += str_ids_.size() * sizeof(int64_t);
+
+    // Size of str_ids_to_offsets_ map data
+    for (const auto& [key, vec] : str_ids_to_offsets_) {
+        size += sizeof(size_t);               // key
+        size += vec.size() * sizeof(size_t);  // vector data
+    }
+
+    return size;
 }
 
 bool
@@ -113,6 +134,7 @@ StringIndexMarisa::BuildWithFieldData(
     fill_offsets();
 
     built_ = true;
+    total_size_ = CalculateTotalSize();
 }
 
 void
@@ -138,6 +160,7 @@ StringIndexMarisa::Build(size_t n,
     fill_offsets();
 
     built_ = true;
+    total_size_ = CalculateTotalSize();
 }
 
 BinarySet
@@ -222,6 +245,8 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
 
     fill_offsets();
+    built_ = true;
+    total_size_ = CalculateTotalSize();
 }
 
 void
