@@ -107,6 +107,13 @@ class PhyConjunctFilterExpr : public Expr {
         return true;
     }
 
+    void
+    SetNamespaceSkipFunc(SkipNamespaceFunc skip_namespace_func) override {
+        for (auto& input : inputs_) {
+            input->SetNamespaceSkipFunc(skip_namespace_func);
+        }
+    }
+
     std::string
     ToString() const {
         if (!input_order_.empty()) {
