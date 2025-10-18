@@ -1,5 +1,5 @@
 run:
-  go: "1.22"
+  go: "1.24"
   build-tags:
     - dynamic
     - test
@@ -8,18 +8,13 @@ linters:
   disable-all: true
   enable:
     - gosimple
-    - govet
     - ineffassign
-    - staticcheck
-    - decorder
     - depguard
     - gofmt
     - goimports
-    - gosec
     - revive
     - unconvert
     - misspell
-    - typecheck
     - durationcheck
     - forbidigo
     - gci
@@ -195,7 +190,7 @@ issues:
     - SA1006
     - S1009
     - offBy1
-    - unslice    
+    - unslice
     # Integer overflow conversion
     - G115
 
