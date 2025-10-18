@@ -884,7 +884,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
 		quotaCenter.checkDiskQuota(nil)
 
-		checkLimiter := func(notEquals ...int64) {
+		checkCollectionLimiter := func(notEquals ...int64) {
 			for db, collections := range quotaCenter.writableCollections {
 				for collection := range collections {
 					limiters := quotaCenter.rateLimiter.GetCollectionLimiters(db, collection).GetLimiters()
@@ -907,11 +907,21 @@ func TestQuotaCenter(t *testing.T) {
 			}
 		}
 
+		checkClusterLimiter := func() {
+			root := quotaCenter.rateLimiter.GetRootLimiters().GetLimiters()
+			a, _ := root.Get(internalpb.RateType_DMLInsert)
+			assert.Equal(t, Limit(0), a.Limit())
+			b, _ := root.Get(internalpb.RateType_DMLUpsert)
+			assert.Equal(t, Limit(0), b.Limit())
+			c, _ := root.Get(internalpb.RateType_DMLDelete)
+			assert.NotEqual(t, Limit(0), c.Limit())
+		}
+
 		// total DiskQuota exceeded
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "90")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
-			TotalBinlogSize: 10 * 1024 * 1024,
+			TotalBinlogSize: 300 * 1024 * 1024,
 			CollectionBinlogSize: map[int64]int64{
 				1: 100 * 1024 * 1024,
 				2: 100 * 1024 * 1024,
@@ -925,7 +935,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota(nil)
-		checkLimiter()
+		checkClusterLimiter()
 		paramtable.Get().Reset(Params.QuotaConfig.DiskQuota.Key)
 		paramtable.Get().Reset(Params.QuotaConfig.DiskQuotaPerCollection.Key)
 
@@ -940,8 +950,24 @@ func TestQuotaCenter(t *testing.T) {
 		}
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota(nil)
-		checkLimiter(1)
+		checkCollectionLimiter(1)
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup)
+
+		// loaded DiskQuota exceeded
+		loadedQuotaBackup := Params.QuotaConfig.LoadedDiskQuota.GetValue()
+		paramtable.Get().Save(Params.QuotaConfig.LoadedDiskQuota.Key, "99")
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {
+				LoadedBinlogSize: 100 * 1024 * 1024, // 100MB
+			},
+		}
+		quotaCenter.writableCollections = map[int64]map[int64][]int64{
+			0: collectionIDToPartitionIDs,
+		}
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.checkDiskQuota(nil)
+		checkClusterLimiter()
+		paramtable.Get().Save(Params.QuotaConfig.LoadedDiskQuota.Key, loadedQuotaBackup)
 	})
 
 	t.Run("test setRates", func(t *testing.T) {

@@ -190,3 +190,30 @@ func (s *ManagerSuite) TestIncreaseVersion() {
 func TestManager(t *testing.T) {
 	suite.Run(t, new(ManagerSuite))
 }
+
+func TestLoadedBinlogSizeAccounting(t *testing.T) {
+	m := NewSegmentManager()
+	if got := m.GetLoadedBinlogSize(); got != 0 {
+		t.Fatalf("expected initial 0, got %d", got)
+	}
+
+	m.AddLoadedBinlogSize(100)
+	if got := m.GetLoadedBinlogSize(); got != 100 {
+		t.Fatalf("expected 100 after add, got %d", got)
+	}
+
+	m.AddLoadedBinlogSize(50)
+	if got := m.GetLoadedBinlogSize(); got != 150 {
+		t.Fatalf("expected 150 after add, got %d", got)
+	}
+
+	m.SubLoadedBinlogSize(20)
+	if got := m.GetLoadedBinlogSize(); got != 130 {
+		t.Fatalf("expected 130 after sub, got %d", got)
+	}
+
+	m.SubLoadedBinlogSize(1000)
+	if got := m.GetLoadedBinlogSize(); got != 0 {
+		t.Fatalf("expected clamp to 0, got %d", got)
+	}
+}
