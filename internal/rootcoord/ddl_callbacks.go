@@ -38,6 +38,7 @@ func RegisterDDLCallbacks(core *Core) {
 	}
 	ddlCallback.registerRBACCallbacks()
 	ddlCallback.registerDatabaseCallbacks()
+	ddlCallback.registerAliasCallbacks()
 }
 
 // registerRBACCallbacks registers the rbac callbacks.
@@ -60,6 +61,12 @@ func (c *DDLCallback) registerDatabaseCallbacks() {
 	registry.RegisterCreateDatabaseV2AckCallback(c.createDatabaseV1AckCallback)
 	registry.RegisterAlterDatabaseV2AckCallback(c.alterDatabaseV1AckCallback)
 	registry.RegisterDropDatabaseV2AckCallback(c.dropDatabaseV1AckCallback)
+}
+
+// registerAliasCallbacks registers the alias callbacks.
+func (c *DDLCallback) registerAliasCallbacks() {
+	registry.RegisterAlterAliasV2AckCallback(c.alterAliasV2AckCallback)
+	registry.RegisterDropAliasV2AckCallback(c.dropAliasV2AckCallback)
 }
 
 // DDLCallback is the callback of ddl.
@@ -115,6 +122,19 @@ func startBroadcastWithDatabaseLock(ctx context.Context, dbName string) (broadca
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveDBNameResourceKey(dbName))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to start broadcast with database lock")
+	}
+	return broadcaster, nil
+}
+
+// startBroadcastWithAlterAliasLock starts a broadcast with alter alias lock.
+func startBroadcastWithAlterAliasLock(ctx context.Context, dbName string, collectionName string, alias string) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, alias),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with alter alias lock")
 	}
 	return broadcaster, nil
 }
