@@ -77,6 +77,12 @@ service RootCoord {
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
     
     rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
+
+    rpc AddCollectionFunction(milvus.AddCollectionFunctionRequest) returns (common.Status) {}
+
+    rpc AlterCollectionFunction(milvus.AlterCollectionFunctionRequest) returns (common.Status) {}    
+    
+    rpc DropCollectionFunction(milvus.DropCollectionFunctionRequest) returns (common.Status) {}    
   /**
    * @brief This method is used to create partition
    *

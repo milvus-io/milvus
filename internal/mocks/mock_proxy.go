@@ -92,6 +92,65 @@ func (_c *MockProxy_AddCollectionField_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// AddCollectionFunction provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AddCollectionFunction(_a0 context.Context, _a1 *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFunctionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionFunctionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AddCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionFunction'
+type MockProxy_AddCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// AddCollectionFunction is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddCollectionFunctionRequest
+func (_e *MockProxy_Expecter) AddCollectionFunction(_a0 interface{}, _a1 interface{}) *MockProxy_AddCollectionFunction_Call {
+	return &MockProxy_AddCollectionFunction_Call{Call: _e.mock.On("AddCollectionFunction", _a0, _a1)}
+}
+
+func (_c *MockProxy_AddCollectionFunction_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddCollectionFunctionRequest)) *MockProxy_AddCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionFunctionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AddCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AddCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AddCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)) *MockProxy_AddCollectionFunction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AddFileResource provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) AddFileResource(_a0 context.Context, _a1 *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -442,6 +501,65 @@ func (_c *MockProxy_AlterCollectionField_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MockProxy_AlterCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)) *MockProxy_AlterCollectionField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterCollectionFunction provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterCollectionFunction(_a0 context.Context, _a1 *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AlterCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionFunction'
+type MockProxy_AlterCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionFunction is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionFunctionRequest
+func (_e *MockProxy_Expecter) AlterCollectionFunction(_a0 interface{}, _a1 interface{}) *MockProxy_AlterCollectionFunction_Call {
+	return &MockProxy_AlterCollectionFunction_Call{Call: _e.mock.On("AlterCollectionFunction", _a0, _a1)}
+}
+
+func (_c *MockProxy_AlterCollectionFunction_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionFunctionRequest)) *MockProxy_AlterCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionFunctionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AlterCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AlterCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AlterCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)) *MockProxy_AlterCollectionFunction_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2140,6 +2258,65 @@ func (_c *MockProxy_DropCollection_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 func (_c *MockProxy_DropCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)) *MockProxy_DropCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCollectionFunction provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropCollectionFunction(_a0 context.Context, _a1 *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionFunctionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropCollectionFunctionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DropCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCollectionFunction'
+type MockProxy_DropCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// DropCollectionFunction is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropCollectionFunctionRequest
+func (_e *MockProxy_Expecter) DropCollectionFunction(_a0 interface{}, _a1 interface{}) *MockProxy_DropCollectionFunction_Call {
+	return &MockProxy_DropCollectionFunction_Call{Call: _e.mock.On("DropCollectionFunction", _a0, _a1)}
+}
+
+func (_c *MockProxy_DropCollectionFunction_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropCollectionFunctionRequest)) *MockProxy_DropCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropCollectionFunctionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DropCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DropCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DropCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)) *MockProxy_DropCollectionFunction_Call {
 	_c.Call.Return(run)
 	return _c
 }
