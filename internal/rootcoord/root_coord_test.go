@@ -84,7 +84,9 @@ func initStreamingSystem() {
 	bapi.EXPECT().Close().Return()
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
-	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return()
 	broadcast.Release()
 	broadcast.ResetBroadcaster()
@@ -328,34 +330,6 @@ func TestRootCoord_CreateAlias(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.CreateAlias(ctx, &milvuspb.CreateAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-		ctx := context.Background()
-		resp, err := c.CreateAlias(ctx, &milvuspb.CreateAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.CreateAlias(ctx, &milvuspb.CreateAliasRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
 }
 
 func TestRootCoord_DropAlias(t *testing.T) {
@@ -366,34 +340,6 @@ func TestRootCoord_DropAlias(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.DropAlias(ctx, &milvuspb.DropAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-		ctx := context.Background()
-		resp, err := c.DropAlias(ctx, &milvuspb.DropAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.DropAlias(ctx, &milvuspb.DropAliasRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
 }
 
 func TestRootCoord_AlterAlias(t *testing.T) {
@@ -403,34 +349,6 @@ func TestRootCoord_AlterAlias(t *testing.T) {
 		resp, err := c.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-		ctx := context.Background()
-		resp, err := c.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-		ctx := context.Background()
-		resp, err := c.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
