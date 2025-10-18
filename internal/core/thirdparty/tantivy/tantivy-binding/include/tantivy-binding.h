@@ -500,6 +500,8 @@ void *tantivy_clone_analyzer(void *ptr);
 
 void tantivy_free_analyzer(void *tokenizer);
 
+RustResult tantivy_set_analyzer_options(const char *params);
+
 bool tantivy_index_exist(const char *path);
 
 }  // extern "C"
