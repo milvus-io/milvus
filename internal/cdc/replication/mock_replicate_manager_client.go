@@ -3,7 +3,7 @@
 package replication
 
 import (
-	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	meta "github.com/milvus-io/milvus/internal/cdc/meta"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -52,9 +52,9 @@ func (_c *MockReplicateManagerClient_Close_Call) RunAndReturn(run func()) *MockR
 	return _c
 }
 
-// CreateReplicator provides a mock function with given fields: replicateInfo
-func (_m *MockReplicateManagerClient) CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
-	_m.Called(replicateInfo)
+// CreateReplicator provides a mock function with given fields: channel
+func (_m *MockReplicateManagerClient) CreateReplicator(channel *meta.ReplicateChannel) {
+	_m.Called(channel)
 }
 
 // MockReplicateManagerClient_CreateReplicator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateReplicator'
@@ -63,14 +63,14 @@ type MockReplicateManagerClient_CreateReplicator_Call struct {
 }
 
 // CreateReplicator is a helper method to define mock.On call
-//   - replicateInfo *streamingpb.ReplicatePChannelMeta
-func (_e *MockReplicateManagerClient_Expecter) CreateReplicator(replicateInfo interface{}) *MockReplicateManagerClient_CreateReplicator_Call {
-	return &MockReplicateManagerClient_CreateReplicator_Call{Call: _e.mock.On("CreateReplicator", replicateInfo)}
+//   - channel *meta.ReplicateChannel
+func (_e *MockReplicateManagerClient_Expecter) CreateReplicator(channel interface{}) *MockReplicateManagerClient_CreateReplicator_Call {
+	return &MockReplicateManagerClient_CreateReplicator_Call{Call: _e.mock.On("CreateReplicator", channel)}
 }
 
-func (_c *MockReplicateManagerClient_CreateReplicator_Call) Run(run func(replicateInfo *streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_CreateReplicator_Call {
+func (_c *MockReplicateManagerClient_CreateReplicator_Call) Run(run func(channel *meta.ReplicateChannel)) *MockReplicateManagerClient_CreateReplicator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*streamingpb.ReplicatePChannelMeta))
+		run(args[0].(*meta.ReplicateChannel))
 	})
 	return _c
 }
@@ -80,14 +80,14 @@ func (_c *MockReplicateManagerClient_CreateReplicator_Call) Return() *MockReplic
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_CreateReplicator_Call) RunAndReturn(run func(*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_CreateReplicator_Call {
+func (_c *MockReplicateManagerClient_CreateReplicator_Call) RunAndReturn(run func(*meta.ReplicateChannel)) *MockReplicateManagerClient_CreateReplicator_Call {
 	_c.Run(run)
 	return _c
 }
 
-// RemoveOutdatedReplicators provides a mock function with given fields: aliveReplicates
-func (_m *MockReplicateManagerClient) RemoveOutdatedReplicators(aliveReplicates []*streamingpb.ReplicatePChannelMeta) {
-	_m.Called(aliveReplicates)
+// RemoveOutdatedReplicators provides a mock function with given fields: aliveChannels
+func (_m *MockReplicateManagerClient) RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel) {
+	_m.Called(aliveChannels)
 }
 
 // MockReplicateManagerClient_RemoveOutdatedReplicators_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveOutdatedReplicators'
@@ -96,14 +96,14 @@ type MockReplicateManagerClient_RemoveOutdatedReplicators_Call struct {
 }
 
 // RemoveOutdatedReplicators is a helper method to define mock.On call
-//   - aliveReplicates []*streamingpb.ReplicatePChannelMeta
-func (_e *MockReplicateManagerClient_Expecter) RemoveOutdatedReplicators(aliveReplicates interface{}) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
-	return &MockReplicateManagerClient_RemoveOutdatedReplicators_Call{Call: _e.mock.On("RemoveOutdatedReplicators", aliveReplicates)}
+//   - aliveChannels []*meta.ReplicateChannel
+func (_e *MockReplicateManagerClient_Expecter) RemoveOutdatedReplicators(aliveChannels interface{}) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
+	return &MockReplicateManagerClient_RemoveOutdatedReplicators_Call{Call: _e.mock.On("RemoveOutdatedReplicators", aliveChannels)}
 }
 
-func (_c *MockReplicateManagerClient_RemoveOutdatedReplicators_Call) Run(run func(aliveReplicates []*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
+func (_c *MockReplicateManagerClient_RemoveOutdatedReplicators_Call) Run(run func(aliveChannels []*meta.ReplicateChannel)) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*streamingpb.ReplicatePChannelMeta))
+		run(args[0].([]*meta.ReplicateChannel))
 	})
 	return _c
 }
@@ -113,14 +113,14 @@ func (_c *MockReplicateManagerClient_RemoveOutdatedReplicators_Call) Return() *M
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_RemoveOutdatedReplicators_Call) RunAndReturn(run func([]*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
+func (_c *MockReplicateManagerClient_RemoveOutdatedReplicators_Call) RunAndReturn(run func([]*meta.ReplicateChannel)) *MockReplicateManagerClient_RemoveOutdatedReplicators_Call {
 	_c.Run(run)
 	return _c
 }
 
-// RemoveReplicator provides a mock function with given fields: replicateInfo
-func (_m *MockReplicateManagerClient) RemoveReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
-	_m.Called(replicateInfo)
+// RemoveReplicator provides a mock function with given fields: key, modRevision
+func (_m *MockReplicateManagerClient) RemoveReplicator(key string, modRevision int64) {
+	_m.Called(key, modRevision)
 }
 
 // MockReplicateManagerClient_RemoveReplicator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveReplicator'
@@ -129,14 +129,15 @@ type MockReplicateManagerClient_RemoveReplicator_Call struct {
 }
 
 // RemoveReplicator is a helper method to define mock.On call
-//   - replicateInfo *streamingpb.ReplicatePChannelMeta
-func (_e *MockReplicateManagerClient_Expecter) RemoveReplicator(replicateInfo interface{}) *MockReplicateManagerClient_RemoveReplicator_Call {
-	return &MockReplicateManagerClient_RemoveReplicator_Call{Call: _e.mock.On("RemoveReplicator", replicateInfo)}
+//   - key string
+//   - modRevision int64
+func (_e *MockReplicateManagerClient_Expecter) RemoveReplicator(key interface{}, modRevision interface{}) *MockReplicateManagerClient_RemoveReplicator_Call {
+	return &MockReplicateManagerClient_RemoveReplicator_Call{Call: _e.mock.On("RemoveReplicator", key, modRevision)}
 }
 
-func (_c *MockReplicateManagerClient_RemoveReplicator_Call) Run(run func(replicateInfo *streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveReplicator_Call {
+func (_c *MockReplicateManagerClient_RemoveReplicator_Call) Run(run func(key string, modRevision int64)) *MockReplicateManagerClient_RemoveReplicator_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*streamingpb.ReplicatePChannelMeta))
+		run(args[0].(string), args[1].(int64))
 	})
 	return _c
 }
@@ -146,7 +147,7 @@ func (_c *MockReplicateManagerClient_RemoveReplicator_Call) Return() *MockReplic
 	return _c
 }
 
-func (_c *MockReplicateManagerClient_RemoveReplicator_Call) RunAndReturn(run func(*streamingpb.ReplicatePChannelMeta)) *MockReplicateManagerClient_RemoveReplicator_Call {
+func (_c *MockReplicateManagerClient_RemoveReplicator_Call) RunAndReturn(run func(string, int64)) *MockReplicateManagerClient_RemoveReplicator_Call {
 	_c.Run(run)
 	return _c
 }

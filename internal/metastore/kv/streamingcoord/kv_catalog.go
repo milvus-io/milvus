@@ -41,12 +41,6 @@ func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	}
 }
 
-func NewReplicationCatalog(metaKV kv.MetaKv) metastore.ReplicationCatalog {
-	return &catalog{
-		metaKV: metaKV,
-	}
-}
-
 // catalog is a kv based catalog.
 type catalog struct {
 	metaKV kv.MetaKv
@@ -217,28 +211,6 @@ func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.R
 		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
 	}
 	return config, nil
-}
-
-func (c *catalog) RemoveReplicatePChannel(ctx context.Context, task *streamingpb.ReplicatePChannelMeta) error {
-	key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
-	return c.metaKV.Remove(ctx, key)
-}
-
-func (c *catalog) ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error) {
-	keys, values, err := c.metaKV.LoadWithPrefix(ctx, ReplicatePChannelMetaPrefix)
-	if err != nil {
-		return nil, err
-	}
-	infos := make([]*streamingpb.ReplicatePChannelMeta, 0, len(values))
-	for k, value := range values {
-		info := &streamingpb.ReplicatePChannelMeta{}
-		err = proto.Unmarshal([]byte(value), info)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
-		}
-		infos = append(infos, info)
-	}
-	return infos, nil
 }
 
 func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) string {

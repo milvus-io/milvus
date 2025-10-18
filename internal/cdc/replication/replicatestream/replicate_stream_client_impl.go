@@ -22,17 +22,18 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 const (
@@ -41,12 +42,13 @@ const (
 	pendingMessageQueueMaxSize = 128 * 1024 * 1024
 )
 
+var ErrRoleChanged = errors.New("role changed")
+
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
-	replicateInfo *streamingpb.ReplicatePChannelMeta
-
 	clusterID       string
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
+	channel         *meta.ReplicateChannel
 	pendingMessages MsgQueue
 	metrics         ReplicateMetrics
 
@@ -56,9 +58,9 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, channel *meta.ReplicateChannel) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
-	ctx1 = contextutil.WithClusterID(ctx1, replicateInfo.GetTargetCluster().GetClusterId())
+	ctx1 = contextutil.WithClusterID(ctx1, channel.Value.GetTargetCluster().GetClusterId())
 
 	options := MsgQueueOptions{
 		Capacity: pendingMessageQueueLength,
@@ -67,9 +69,9 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{
 		clusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
-		replicateInfo:   replicateInfo,
+		channel:         channel,
 		pendingMessages: pendingMessages,
-		metrics:         NewReplicateMetrics(replicateInfo),
+		metrics:         NewReplicateMetrics(channel.Value),
 		ctx:             ctx1,
 		cancel:          cancel,
 		finishedCh:      make(chan struct{}),
@@ -81,15 +83,12 @@ func NewReplicateStreamClient(ctx context.Context, replicateInfo *streamingpb.Re
 }
 
 func (r *replicateStreamClient) startInternal() {
-	logger := log.With(
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-	)
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 
 	defer func() {
 		r.metrics.OnClose()
-		logger.Info("replicate stream client closed")
 		close(r.finishedCh)
+		logger.Info("replicate stream client closed")
 	}()
 
 	backoff := backoff.NewExponentialBackOff()
@@ -103,7 +102,13 @@ func (r *replicateStreamClient) startInternal() {
 		// when we need to stop the send/recv loops
 		connCtx, connCancel := context.WithCancel(r.ctx)
 
-		milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(connCtx, r.replicateInfo.GetTargetCluster())
+		if connCtx.Err() != nil {
+			logger.Info("close replicate stream client by ctx done")
+			connCancel()
+			return
+		}
+
+		milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(connCtx, r.channel.Value.GetTargetCluster())
 		if err != nil {
 			logger.Warn("create milvus client failed, retry...", zap.Error(err))
 			time.Sleep(backoff.NextBackOff())
@@ -117,6 +122,7 @@ func (r *replicateStreamClient) startInternal() {
 		}
 		logger.Info("replicate stream client service started")
 		r.metrics.OnConnect()
+		backoff.Reset()
 
 		// reset client and pending messages
 		r.client = client
@@ -125,10 +131,11 @@ func (r *replicateStreamClient) startInternal() {
 		sendCh := r.startSendLoop(connCtx)
 		recvCh := r.startRecvLoop(connCtx)
 
+		var chErr error
 		select {
 		case <-r.ctx.Done():
-		case <-sendCh:
-		case <-recvCh:
+		case chErr = <-sendCh:
+		case chErr = <-recvCh:
 		}
 
 		connCancel() // Cancel the connection context
@@ -138,8 +145,11 @@ func (r *replicateStreamClient) startInternal() {
 		if r.ctx.Err() != nil {
 			logger.Info("close replicate stream client by ctx done")
 			return
+		} else if errors.Is(chErr, ErrRoleChanged) {
+			logger.Info("close replicate stream client by role changed")
+			return
 		} else {
-			logger.Warn("restart replicate stream client")
+			logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
 			r.metrics.OnDisconnect()
 			time.Sleep(backoff.NextBackOff())
 		}
@@ -166,29 +176,28 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	}
 }
 
-func (r *replicateStreamClient) startSendLoop(ctx context.Context) <-chan struct{} {
-	ch := make(chan struct{})
+func (r *replicateStreamClient) startSendLoop(ctx context.Context) <-chan error {
+	ch := make(chan error)
 	go func() {
-		_ = r.sendLoop(ctx)
+		err := r.sendLoop(ctx)
+		ch <- err
 		close(ch)
 	}()
 	return ch
 }
 
-func (r *replicateStreamClient) startRecvLoop(ctx context.Context) <-chan struct{} {
-	ch := make(chan struct{})
+func (r *replicateStreamClient) startRecvLoop(ctx context.Context) <-chan error {
+	ch := make(chan error)
 	go func() {
-		_ = r.recvLoop(ctx)
+		err := r.recvLoop(ctx)
+		ch <- err
 		close(ch)
 	}()
 	return ch
 }
 
 func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
-	logger := log.With(
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-	)
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
 		if err != nil {
 			logger.Warn("send loop closed by unexpected error", zap.Error(err))
@@ -243,10 +252,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
 	defer func() {
-		logger := log.With(
-			zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-			zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-		)
+		logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 		if err != nil {
 			logger.Warn("send message failed", zap.Error(err), log.FieldMessage(msg))
 		} else {
@@ -271,15 +277,12 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
-	logger := log.With(
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-	)
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrRoleChanged) {
 			logger.Warn("recv loop closed by unexpected error", zap.Error(err))
 		} else {
-			logger.Info("recv loop closed")
+			logger.Info("recv loop closed", zap.Error(err))
 		}
 	}()
 	for {
@@ -296,14 +299,14 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 			if lastConfirmedMessageInfo != nil {
 				messages := r.pendingMessages.CleanupConfirmedMessages(lastConfirmedMessageInfo.GetConfirmedTimeTick())
 				for _, msg := range messages {
+					r.metrics.OnConfirmed(msg)
 					if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 						roleChanged := r.handleAlterReplicateConfigMessage(msg)
 						if roleChanged {
 							// Role changed, return and stop replicate.
-							return nil
+							return ErrRoleChanged
 						}
 					}
-					r.metrics.OnConfirmed(msg)
 				}
 			}
 		}
@@ -311,25 +314,23 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (roleChanged bool) {
-	logger := log.With(
-		zap.String("sourceChannel", r.replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", r.replicateInfo.GetTargetChannelName()),
-	)
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
-	prcMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
-	replicateConfig := prcMsg.Header().ReplicateConfiguration
-	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
-	_, err := currentCluster.GetTargetChannel(r.replicateInfo.GetSourceChannelName(),
-		r.replicateInfo.GetTargetCluster().GetClusterId())
-	if err != nil {
+
+	roleChanged = util.IsRoleChangedByAlterReplicateConfigMessage(msg, r.channel.Value)
+	if roleChanged {
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
 		// so we need to remove the replicate pchannel and stop replicate.
-		err := resource.Resource().ReplicationCatalog().RemoveReplicatePChannel(r.ctx, r.replicateInfo)
+		etcdCli := resource.Resource().ETCD()
+		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
 		if err != nil {
 			panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
 		}
-		logger.Info("handle AlterReplicateConfigMessage done, replicate pchannel removed")
+		if ok {
+			logger.Info("handle AlterReplicateConfigMessage done, replicate pchannel removed")
+		} else {
+			logger.Info("handle AlterReplicateConfigMessage done, revision not match, replicate pchannel not removed")
+		}
 		return true
 	}
 	logger.Info("target channel found, skip handle AlterReplicateConfigMessage")
