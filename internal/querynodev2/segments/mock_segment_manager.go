@@ -25,6 +25,39 @@ func (_m *MockSegmentManager) EXPECT() *MockSegmentManager_Expecter {
 	return &MockSegmentManager_Expecter{mock: &_m.Mock}
 }
 
+// AddLoadedBinlogSize provides a mock function with given fields: size
+func (_m *MockSegmentManager) AddLoadedBinlogSize(size int64) {
+	_m.Called(size)
+}
+
+// MockSegmentManager_AddLoadedBinlogSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddLoadedBinlogSize'
+type MockSegmentManager_AddLoadedBinlogSize_Call struct {
+	*mock.Call
+}
+
+// AddLoadedBinlogSize is a helper method to define mock.On call
+//   - size int64
+func (_e *MockSegmentManager_Expecter) AddLoadedBinlogSize(size interface{}) *MockSegmentManager_AddLoadedBinlogSize_Call {
+	return &MockSegmentManager_AddLoadedBinlogSize_Call{Call: _e.mock.On("AddLoadedBinlogSize", size)}
+}
+
+func (_c *MockSegmentManager_AddLoadedBinlogSize_Call) Run(run func(size int64)) *MockSegmentManager_AddLoadedBinlogSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_AddLoadedBinlogSize_Call) Return() *MockSegmentManager_AddLoadedBinlogSize_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegmentManager_AddLoadedBinlogSize_Call) RunAndReturn(run func(int64)) *MockSegmentManager_AddLoadedBinlogSize_Call {
+	_c.Run(run)
+	return _c
+}
+
 // AddLogicalResource provides a mock function with given fields: usage
 func (_m *MockSegmentManager) AddLogicalResource(usage ResourceUsage) {
 	_m.Called(usage)
@@ -484,6 +517,51 @@ func (_c *MockSegmentManager_GetGrowing_Call) RunAndReturn(run func(int64) Segme
 	return _c
 }
 
+// GetLoadedBinlogSize provides a mock function with no fields
+func (_m *MockSegmentManager) GetLoadedBinlogSize() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLoadedBinlogSize")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockSegmentManager_GetLoadedBinlogSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLoadedBinlogSize'
+type MockSegmentManager_GetLoadedBinlogSize_Call struct {
+	*mock.Call
+}
+
+// GetLoadedBinlogSize is a helper method to define mock.On call
+func (_e *MockSegmentManager_Expecter) GetLoadedBinlogSize() *MockSegmentManager_GetLoadedBinlogSize_Call {
+	return &MockSegmentManager_GetLoadedBinlogSize_Call{Call: _e.mock.On("GetLoadedBinlogSize")}
+}
+
+func (_c *MockSegmentManager_GetLoadedBinlogSize_Call) Run(run func()) *MockSegmentManager_GetLoadedBinlogSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_GetLoadedBinlogSize_Call) Return(_a0 int64) *MockSegmentManager_GetLoadedBinlogSize_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegmentManager_GetLoadedBinlogSize_Call) RunAndReturn(run func() int64) *MockSegmentManager_GetLoadedBinlogSize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLogicalResource provides a mock function with no fields
 func (_m *MockSegmentManager) GetLogicalResource() ResourceUsage {
 	ret := _m.Called()
@@ -801,6 +879,39 @@ func (_c *MockSegmentManager_RemoveBy_Call) Return(_a0 int, _a1 int) *MockSegmen
 
 func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(context.Context, ...SegmentFilter) (int, int)) *MockSegmentManager_RemoveBy_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// SubLoadedBinlogSize provides a mock function with given fields: size
+func (_m *MockSegmentManager) SubLoadedBinlogSize(size int64) {
+	_m.Called(size)
+}
+
+// MockSegmentManager_SubLoadedBinlogSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubLoadedBinlogSize'
+type MockSegmentManager_SubLoadedBinlogSize_Call struct {
+	*mock.Call
+}
+
+// SubLoadedBinlogSize is a helper method to define mock.On call
+//   - size int64
+func (_e *MockSegmentManager_Expecter) SubLoadedBinlogSize(size interface{}) *MockSegmentManager_SubLoadedBinlogSize_Call {
+	return &MockSegmentManager_SubLoadedBinlogSize_Call{Call: _e.mock.On("SubLoadedBinlogSize", size)}
+}
+
+func (_c *MockSegmentManager_SubLoadedBinlogSize_Call) Run(run func(size int64)) *MockSegmentManager_SubLoadedBinlogSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_SubLoadedBinlogSize_Call) Return() *MockSegmentManager_SubLoadedBinlogSize_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegmentManager_SubLoadedBinlogSize_Call) RunAndReturn(run func(int64)) *MockSegmentManager_SubLoadedBinlogSize_Call {
+	_c.Run(run)
 	return _c
 }
 
