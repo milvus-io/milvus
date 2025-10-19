@@ -1361,7 +1361,7 @@ func (s *LocalSegment) FinishLoad() error {
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.AddLogicalResource(usage)
-	binlogSize := calculateSegmentLogSize(s.LoadInfo())
+	binlogSize := calculateSegmentMemorySize(s.LoadInfo())
 	s.manager.AddLoadedBinlogSize(binlogSize)
 	s.binlogSize.Store(binlogSize)
 	return nil
