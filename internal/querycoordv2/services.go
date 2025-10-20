@@ -973,6 +973,10 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	}
 
 	if err := s.broadcastCreateResourceGroup(ctx, req); err != nil {
+		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
+			log.Info("create resource group request ignored")
+			return merr.Success(), nil
+		}
 		log.Warn("failed to create resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -1009,6 +1013,10 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 	}
 
 	if err := s.broadcastDropResourceGroup(ctx, req); err != nil {
+		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
+			log.Info("drop resource group request ignored")
+			return merr.Success(), nil
+		}
 		log.Warn("failed to drop resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}

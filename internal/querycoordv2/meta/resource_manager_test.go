@@ -185,7 +185,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 
 	// test delete rg which doesn't exist
 	err = suite.manager.RemoveResourceGroup(ctx, "rg1")
-	suite.NoError(err)
+	suite.ErrorIs(err, ErrResourceGroupOperationIgnored)
 	// test delete default rg
 	err = suite.manager.RemoveResourceGroup(ctx, DefaultResourceGroupName)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)

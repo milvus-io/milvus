@@ -313,7 +313,7 @@ func (rm *ResourceManager) RemoveResourceGroup(ctx context.Context, rgName strin
 func (rm *ResourceManager) CheckIfResourceGroupDropable(ctx context.Context, rgName string) error {
 	if rm.groups[rgName] == nil {
 		// Idempotent promise: delete a non-exist rg should be ok
-		return nil
+		return ErrResourceGroupOperationIgnored
 	}
 
 	// validateResourceGroupIsDeletable will check if rg is deletable.
@@ -339,6 +339,10 @@ func (rm *ResourceManager) CheckIfResourceGroupDropable(ctx context.Context, rgN
 func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
+	if _, ok := rm.groups[rgName]; !ok {
+		// Idempotent promise: delete a non-exist rg should be ok
+		return nil
+	}
 
 	// Remove it from meta storage.
 	if err := rm.catalog.RemoveResourceGroup(ctx, rgName); err != nil {
