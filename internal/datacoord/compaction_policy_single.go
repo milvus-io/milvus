@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // singleCompactionPolicy is to compact one segment with too many delta logs
@@ -89,7 +90,16 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		return nil
 	}
 
-	collection := policy.meta.GetCollection(segment.GetCollectionID())
+	collection, err := policy.handler.GetCollection(ctx, segment.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, unable to get collection from handler",
+			zap.Error(err))
+		return nil
+	}
+	if collection == nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
+		return nil
+	}
 	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
 	if !canTriggerSortCompaction(segment, isPartitionIsolationEnabled) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
@@ -102,16 +112,6 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		return nil
 	}
 
-	collection, err := policy.handler.GetCollection(ctx, segment.GetCollectionID())
-	if err != nil {
-		log.Warn("fail to apply triggerSegmentSortCompaction, unable to get collection from handler",
-			zap.Error(err))
-		return nil
-	}
-	if collection == nil {
-		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
-		return nil
-	}
 	collectionTTL, err := getCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
@@ -155,7 +155,16 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	}
 	views := make([]CompactionView, 0)
 
-	collection := policy.meta.GetCollection(collectionID)
+	collection, err := policy.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, unable to get collection from handler",
+			zap.Error(err))
+		return nil, err
+	}
+	if collection == nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
 	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
