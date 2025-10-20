@@ -79,11 +79,6 @@ func TestReplicate(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	cfg, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
-	if err != nil {
-		panic(err)
-	}
-	t.Logf("cfg: %+v\n", cfg)
 }
 
 func TestReplicateCreateCollection(t *testing.T) {
