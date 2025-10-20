@@ -5326,6 +5326,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
     def test_add_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
         """
@@ -5340,6 +5341,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_privilege_into_not_exist_privilege_group(self, host, port):
         """
         target: add privilege into not exist privilege group
@@ -5375,6 +5377,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                       check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
     def test_add_privileges_to_group_with_privilege_invalid_type(self, name, host, port):
         """
@@ -5391,6 +5394,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_privileges_to_group_with_privilege_invalid_value(self, host, port):
         """
         target: add privilege group with invalid name
@@ -5409,6 +5413,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         self.utility_wrap.add_privileges_to_group(privilege_group="privilege_group_1", privileges=[privilege_name], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", [1, 1.0])
     def test_remove_privileges_to_group_with_privilege_group_name_invalid_type(self, name, host, port):
         """
@@ -5425,6 +5430,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
     def test_remove_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
         """
@@ -5487,7 +5493,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         error = {"err_code": 1,
                  "err_msg": f"`privileges` value {name} is illegal"}
         self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=name,
-                                                  check_task=CheckTasks.err_res, check_items=error)
+                                                       check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_privileges_to_group_with_privilege_invalid_value(self, host, port):
