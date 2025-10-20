@@ -39,18 +39,22 @@ typedef ReaderHandle CFFIPackedReader;
  * from storage based on the manifest file. The manifest contains metadata
  * about the data layout and file locations.
  *
- * @param manifest_path     Path to the manifest file in object storage.
- *                          Must be a valid UTF-8 encoded null-terminated string.
- * @param schema            Arrow schema defining the structure of the data.
- *                          Must be a valid ArrowSchema pointer conforming to
- *                          the Arrow C data interface specification.
- * @param c_packed_reader   Output parameter for the created reader handle.
- *                          On success, will contain a valid reader handle that
- *                          must be released by the caller when no longer needed.
- * @param c_storage_config  Storage configuration containing credentials and
- *                          endpoint information for accessing object storage.
- * @param c_plugin_context  Plugin context for extensibility, may be NULL if
- *                          no plugins are used.
+ * @param manifest_path         Path to the manifest file in object storage.
+ *                              Must be a valid UTF-8 encoded null-terminated string.
+ * @param schema                Arrow schema defining the structure of the data.
+ *                              Must be a valid ArrowSchema pointer conforming to
+ *                              the Arrow C data interface specification.
+ * @param needed_columns        Array of column names to read. If NULL, all columns
+ *                              from the schema will be read.
+ * @param needed_columns_size   Number of column names in the needed_columns array.
+ *                              Must be 0 if needed_columns is NULL.
+ * @param c_packed_reader       Output parameter for the created reader handle.
+ *                              On success, will contain a valid reader handle that
+ *                              must be released by the caller when no longer needed.
+ * @param c_storage_config      Storage configuration containing credentials and
+ *                              endpoint information for accessing object storage.
+ * @param c_plugin_context      Plugin context for extensibility, may be NULL if
+ *                              no plugins are used.
  *
  * @return CStatus indicating success or failure. On failure, the error_msg
  *         field contains details about what went wrong.
@@ -74,19 +78,23 @@ NewPackedFFIReader(const char* manifest_path,
  * as a string instead of reading from a file path. This is useful when the
  * manifest has already been loaded or is generated dynamically.
  *
- * @param manifest_content  The manifest content as a null-terminated string.
- *                          Must be valid JSON or protobuf text format containing
- *                          the manifest data.
- * @param schema            Arrow schema defining the structure of the data.
- *                          Must be a valid ArrowSchema pointer conforming to
- *                          the Arrow C data interface specification.
- * @param c_packed_reader   Output parameter for the created reader handle.
- *                          On success, will contain a valid reader handle that
- *                          must be released by the caller when no longer needed.
- * @param c_storage_config  Storage configuration containing credentials and
- *                          endpoint information for accessing object storage.
- * @param c_plugin_context  Plugin context for extensibility, may be NULL if
- *                          no plugins are used.
+ * @param manifest_content      The manifest content as a null-terminated string.
+ *                              Must be valid JSON or protobuf text format containing
+ *                              the manifest data.
+ * @param schema                Arrow schema defining the structure of the data.
+ *                              Must be a valid ArrowSchema pointer conforming to
+ *                              the Arrow C data interface specification.
+ * @param needed_columns        Array of column names to read. If NULL, all columns
+ *                              from the schema will be read.
+ * @param needed_columns_size   Number of column names in the needed_columns array.
+ *                              Must be 0 if needed_columns is NULL.
+ * @param c_packed_reader       Output parameter for the created reader handle.
+ *                              On success, will contain a valid reader handle that
+ *                              must be released by the caller when no longer needed.
+ * @param c_storage_config      Storage configuration containing credentials and
+ *                              endpoint information for accessing object storage.
+ * @param c_plugin_context      Plugin context for extensibility, may be NULL if
+ *                              no plugins are used.
  *
  * @return CStatus indicating success or failure. On failure, the error_msg
  *         field contains details about what went wrong.
