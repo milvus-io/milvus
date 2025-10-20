@@ -576,16 +576,14 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                 // Use the accessor to get geometry data and validity
                 auto [wkb_data, is_valid] = accessor(i);
 
-                if (is_valid) {
-                    try {
-                        rtree_index->AddGeometry(wkb_data, global_offset);
-                        added_count++;
-                    } catch (std::exception& error) {
-                        PanicInfo(UnexpectedError,
-                                  "Failed to add geometry at offset {}: {}",
-                                  global_offset,
-                                  error.what());
-                    }
+                try {
+                    rtree_index->AddGeometry(wkb_data, global_offset);
+                    added_count++;
+                } catch (std::exception& error) {
+                    PanicInfo(UnexpectedError,
+                              "Failed to add geometry at offset {}: {}",
+                              global_offset,
+                              error.what());
                 }
             }
 
