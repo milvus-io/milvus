@@ -231,7 +231,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         primary_key_field_name = schema.fields[0].name
         for i in range(len(schema.fields)):
             update_field_name = schema.fields[i if i != 0 else 1].name
-            new_row = cf.gen_partial_row_data_by_schema(nb=nb, schema=schema, 
+            new_row = cf.gen_row_data_by_schema(nb=nb, schema=schema, 
                                                         desired_field_names=[primary_key_field_name, update_field_name])
             client.upsert(collection_name, new_row, partial_update=True)
 
@@ -446,7 +446,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
         
         # step 3: Partial Update the nullable field with null
-        new_row = cf.gen_partial_row_data_by_schema(
+        new_row = cf.gen_row_data_by_schema(
             nb=default_nb, 
             schema=schema, 
             desired_field_names=[default_primary_key_field_name, default_int32_field_name], 

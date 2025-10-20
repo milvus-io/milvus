@@ -25,6 +25,10 @@ import bm25s
 import jieba
 import re
 import inspect
+from typing import Optional, Tuple
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone as tzmod
+from datetime import timezone
 
 from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
 
@@ -847,6 +851,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_int8_vec_field(name="image_emb", dim=dim),
         gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
         gen_float_vec_field(name="voice_emb", dim=dim),
+        # gen_timestamptz_field(name="timestamptz", nullable=nullable),
     ]
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
@@ -2266,10 +2271,49 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             else:
                 # gen 20% none data for nullable field
                 return [None if i % 2 == 0 and random.random() < 0.4 else "".join([chr(random.randint(97, 122)) for _ in range(length)]) for i in range(nb)]
+    
+    elif data_type == DataType.TIMESTAMPTZ:
+        if nb is None:
+            return gen_timestamptz_str() if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [gen_timestamptz_str() for _ in range(nb)]
+        # gen 20% none data for nullable field
+        return [None if i % 2 == 0 and random.random() < 0.4 else gen_timestamptz_str() for i in range(nb)]
+    
     else:
         raise MilvusException(message=f"gen data failed, data type {data_type} not implemented")
     return None
 
+def gen_timestamptz_str():
+    """
+    Generate a timestamptz string
+    Example:
+        "2024-12-31 22:00:00"
+        "2024-12-31T22:00:00"
+        "2024-12-31T22:00:00+08:00"
+        "2024-12-31T22:00:00-08:00"
+        "2024-12-31T22:00:00Z"
+    """
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(
+        days=random.randint(0, 365 * 3), seconds=random.randint(0, 86399)
+    )
+    # 2/3 chance to generate timezone-aware string, otherwise naive
+    if random.random() < 2 / 3:
+        # 20% chance to use 'Z' (UTC), always RFC3339 with 'T'
+        if random.random() < 0.2:
+            return base.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        # otherwise use explicit offset
+        offset_hours = random.randint(-12, 14)
+        offset_minutes = random.choice([0, 30])
+        tz = timezone(timedelta(hours=offset_hours, minutes=offset_minutes))
+        local_dt = base.astimezone(tz)
+        tz_str = local_dt.strftime("%z")  # "+0800"
+        tz_str = tz_str[:3] + ":" + tz_str[3:]  # "+08:00"
+        dt_str = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        return dt_str + tz_str
+    else:
+        # naive time string (no timezone), e.g. "2024-12-31 22:00:00"
+        return base.strftime("%Y-%m-%d %H:%M:%S")
 
 def gen_varchar_values(nb: int, length: int = 0):
     return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
@@ -3968,102 +4012,183 @@ def parse_fmod(x: int, y: int) -> int:
 
     return v if x >= 0 else -v
 
-def gen_partial_row_data_by_schema(nb=ct.default_nb, schema=None, desired_field_names=None, num_fields=1,
-                                   start=0, random_pk=False, skip_field_names=[]):
+def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     """
-    Generate row data that contains a subset of fields from the given schema.
+    Convert timestamptz string to desired timezone string
+
     Args:
-        schema: Collection schema or collection info dict. If None, uses default schema.
-        desired_field_names (list[str] | None): Explicit field names to include (intersected with eligible fields).
-        num_fields (int): Number of fields to include if desired_field_names is not provided. Defaults to 1.
-        start (int): Starting value for primary key fields when sequential values are needed.
-        random_pk (bool): Whether to generate random primary key values.
-        skip_field_names (list[str]): Field names to skip.
-        nb (int): Number of rows to generate. Defaults to 1.
+        rows: list of rows data with timestamptz string
+        timestamptz_field_name: name of the timestamptz field
+        timezone: timezone to convert to (default: UTC)
+
     Returns:
-        list[dict]: a list of rows.
-    Notes:
-        - Skips auto_id fields and function output fields.
-        - Primary INT64/VARCHAR fields get sequential values from `start` unless `random_pk=True`.
-        - Works with both schema dicts (from v2 client describe_collection) and ORM schema objects.
+        list of rows data with timestamptz string converted to desired timezone string
     """
-    if schema is None:
-        schema = gen_default_collection_schema()
-    func_output_fields = []
-    # Build list of eligible fields
-    if isinstance(schema, dict):
-        fields = schema.get('fields', [])
-        functions = schema.get('functions', [])
-        for func in functions:
-            output_field_names = func.get('output_field_names', [])
-            func_output_fields.extend(output_field_names)
-        func_output_fields = list(set(func_output_fields))
-        eligible_fields = []
-        for field in fields:
-            field_name = field.get('name', None)
-            if field.get('auto_id', False):
-                continue
-            if field_name in func_output_fields or field_name in skip_field_names:
-                continue
-            eligible_fields.append(field)
-        # Choose subset
-        if desired_field_names:
-            desired_set = set(desired_field_names)
-            chosen_fields = [f for f in eligible_fields if f.get('name') in desired_set]
+    iso_offset_re = re.compile(r"([+-])(\d{2}):(\d{2})$")
+
+    def _days_in_month(year: int, month: int) -> int:
+        if month in (1, 3, 5, 7, 9, 10, 12):
+            return 31
+        if month in (4, 6, 8, 11):
+            return 30
+        # February
+        is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
+        return 29 if is_leap else 28
+
+    def _parse_basic(ts: str) -> Tuple[int, int, int, int, int, int, Optional[Tuple[str, int, int]], bool]:
+        s = ts.strip()
+        s = s.replace(" ", "T", 1)
+        has_z = False
+        if s.endswith("Z") or s.endswith("z"):
+            has_z = True
+            s = s[:-1]
+        # split offset if present
+        m = iso_offset_re.search(s)
+        offset = None
+        if m:
+            sign, hh, mm = m.groups()
+            offset = (sign, int(hh), int(mm))
+            s = s[:m.start()]
+        # now s like YYYY-MM-DDTHH:MM:SS or with fractional seconds
+        if "T" not in s:
+            raise ValueError(f"Invalid timestamp string: {ts}")
+        date_part, time_part = s.split("T", 1)
+        y_str, mon_str, d_str = date_part.split("-")
+        # strip fractional seconds
+        if "." in time_part:
+            time_part = time_part.split(".", 1)[0]
+        hh_str, mi_str, se_str = time_part.split(":")
+        return int(y_str), int(mon_str), int(d_str), int(hh_str), int(mi_str), int(se_str), offset, has_z
+
+    def _apply_offset_to_utc(year: int, month: int, day: int, hour: int, minute: int, second: int, offset: Tuple[str, int, int]) -> Tuple[int, int, int, int, int, int]:
+        sign, oh, om = offset
+        # local time -> UTC
+        delta_minutes = oh * 60 + om
+        if sign == '+':
+            # UTC = local - offset
+            delta_minutes = -delta_minutes
         else:
-            n = max(0, min(len(eligible_fields), num_fields if num_fields is not None else 1))
-            chosen_fields = eligible_fields[:n]
-        rows = []
-        curr_start = start
-        for _ in range(nb):
-            row = {}
-            for field in chosen_fields:
-                fname = field.get('name', None)
-                value = gen_data_by_collection_field(field, random_pk=random_pk)
-                # Override for PKs when not random
-                if not random_pk and field.get('is_primary', False) is True:
-                    if field.get('type', None) == DataType.INT64:
-                        value = curr_start
-                        curr_start += 1
-                    elif field.get('type', None) == DataType.VARCHAR:
-                        value = str(curr_start)
-                        curr_start += 1
-                row[fname] = value
-            rows.append(row)
-        return rows
-    # ORM schema path
-    fields = schema.fields
-    if hasattr(schema, "functions"):
-        functions = schema.functions
-        for func in functions:
-            func_output_fields.extend(func.output_field_names)
-    func_output_fields = list(set(func_output_fields))
-    eligible_fields = []
-    for field in fields:
-        if field.auto_id:
-            continue
-        if field.name in func_output_fields or field.name in skip_field_names:
-            continue
-        eligible_fields.append(field)
-    if desired_field_names:
-        desired_set = set(desired_field_names)
-        chosen_fields = [f for f in eligible_fields if f.name in desired_set]
-    else:
-        n = max(0, min(len(eligible_fields), num_fields if num_fields is not None else 1))
-        chosen_fields = eligible_fields[:n]
-    rows = []
-    curr_start = start
-    for _ in range(nb):
-        row = {}
-        for field in chosen_fields:
-            value = gen_data_by_collection_field(field, random_pk=random_pk)
-            if not random_pk and field.is_primary is True:
-                if field.dtype == DataType.INT64:
-                    value = curr_start
-                    curr_start += 1
-                elif field.dtype == DataType.VARCHAR:
-                    value = str(curr_start)
-                    curr_start += 1
-            row[field.name] = value
-        rows.append(row)
-    return rows
+            # sign '-' means local is behind UTC; UTC = local + offset
+            delta_minutes = +delta_minutes
+        # apply minutes
+        total_minutes = hour * 60 + minute + delta_minutes
+        new_hour = hour
+        new_minute = minute
+        carry_days = 0
+        # normalize down
+        if total_minutes < 0:
+            carry_days = (total_minutes - 59) // (60 * 24)  # negative floor division
+            total_minutes -= carry_days * 60 * 24
+        else:
+            carry_days = total_minutes // (60 * 24)
+            total_minutes = total_minutes % (60 * 24)
+        new_hour = total_minutes // 60
+        new_minute = total_minutes % 60
+        # seconds unchanged here
+        # apply day carry
+        day += carry_days
+        # normalize date
+        while True:
+            if day <= 0:
+                month -= 1
+                if month == 0:
+                    month = 12
+                    year -= 1
+                day += _days_in_month(year, month)
+            else:
+                dim = _days_in_month(year, month)
+                if day > dim:
+                    day -= dim
+                    month += 1
+                    if month == 13:
+                        month = 1
+                        year += 1
+                else:
+                    break
+        return year, month, day, new_hour, new_minute, second
+
+    def _format_with_offset_str(dt: datetime) -> str:
+        # format with colon in tz offset
+        if dt.tzinfo is not None and dt.utcoffset() == tzmod.utc.utcoffset(dt):
+            return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        s = dt.strftime('%Y-%m-%dT%H:%M:%S%z')  # +0800
+        if len(s) >= 5:
+            return s[:-5] + s[-5:-2] + ':' + s[-2:]
+        return s
+
+    def _format_fixed(y: int, m: int, d: int, hh: int, mi: int, ss: int, offset_minutes: int) -> str:
+        if offset_minutes == 0:
+            return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mi:02d}:{ss:02d}Z"
+        sign = '+' if offset_minutes >= 0 else '-'
+        total = abs(offset_minutes)
+        oh, om = divmod(total, 60)
+        return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mi:02d}:{ss:02d}{sign}{oh:02d}:{om:02d}"
+
+    def convert_one(ts: str) -> str:
+        # Try python builtins first for typical range 1..9999
+        raw = ts.strip()
+        # normalize space separator and 'Z'
+        norm = raw.replace(' ', 'T', 1)
+        if norm.endswith('Z') or norm.endswith('z'):
+            norm = norm[:-1] + '+00:00'
+        try:
+            dt = None
+            if iso_offset_re.search(norm):
+                # aware input; convert to target zone
+                dt = datetime.fromisoformat(norm)
+                dt_target = dt.astimezone(ZoneInfo(timezone))
+                return _format_with_offset_str(dt_target)
+            else:
+                # naive; interpret as time in target timezone and output there
+                y, mo, d, hh, mi, ss, _, _ = _parse_basic(raw)
+                if y == 0:
+                    # Cannot use datetime; treat as local-like in target zone with fixed offset fallback
+                    # Asia/Shanghai common case: +08:00
+                    fixed_minutes = 480 if timezone == 'Asia/Shanghai' else 0
+                    return _format_fixed(y, mo, d, hh, mi, ss, fixed_minutes)
+                local = datetime(y, mo, d, hh, mi, ss, tzinfo=ZoneInfo(timezone))
+                return _format_with_offset_str(local)
+        except Exception:
+            # manual fallback (handles year 0 and overflow beyond 9999)
+            y, mo, d, hh, mi, ss, offset, has_z = _parse_basic(raw)
+            # compute UTC components first
+            if offset is None and has_z:
+                uy, um, ud, uh, umi, uss = y, mo, d, hh, mi, ss
+            elif offset is None:
+                # treat naive as in target timezone; need target offset if possible
+                try:
+                    if 1 <= y <= 9999:
+                        local = datetime(y, mo, d, hh, mi, ss, tzinfo=ZoneInfo(timezone))
+                        off_td = local.utcoffset() or tzmod.utc.utcoffset(local)
+                        total = int(off_td.total_seconds() // 60)
+                        # convert to UTC
+                        sign = '+' if total >= 0 else '-'
+                        total = abs(total)
+                        offset = (sign, total // 60, total % 60)
+                    else:
+                        offset = ('+', 8, 0) if timezone == 'Asia/Shanghai' else ('+', 0, 0)
+                except Exception:
+                    offset = ('+', 8, 0) if timezone == 'Asia/Shanghai' else ('+', 0, 0)
+                uy, um, ud, uh, umi, uss = _apply_offset_to_utc(y, mo, d, hh, mi, ss, offset)
+            else:
+                uy, um, ud, uh, umi, uss = _apply_offset_to_utc(y, mo, d, hh, mi, ss, offset)
+
+            # convert UTC to target timezone if feasible
+            try:
+                if 1 <= uy <= 9999:
+                    dt_utc = datetime(uy, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
+                    dt_target = dt_utc.astimezone(ZoneInfo(timezone))
+                    return _format_with_offset_str(dt_target)
+            except Exception:
+                pass
+            # fallback to fixed offset formatting (Asia/Shanghai -> +08:00 else Z)
+            target_minutes = 480 if timezone == 'Asia/Shanghai' else 0
+            return _format_fixed(uy, um, ud, uh, umi, uss, target_minutes)
+
+    new_rows = []
+    for row in rows:
+        if isinstance(row, dict) and timestamptz_field_name in row and isinstance(row[timestamptz_field_name], str):
+            row = row.copy()
+            row[timestamptz_field_name] = convert_one(row[timestamptz_field_name])
+        new_rows.append(row)
+    return new_rows
