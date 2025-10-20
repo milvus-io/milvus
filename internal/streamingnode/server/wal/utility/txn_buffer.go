@@ -83,7 +83,6 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 			zap.Any("messageID", beginMsg.MessageID()),
 		)
 		b.rollbackTxn(beginMsg.TxnContext().TxnID)
-		return
 	}
 	b.builders[beginMsg.TxnContext().TxnID] = message.NewImmutableTxnMessageBuilder(beginMsg)
 	b.bytes += beginMsg.EstimateSize()
