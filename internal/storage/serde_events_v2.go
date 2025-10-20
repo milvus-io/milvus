@@ -18,7 +18,6 @@ package storage
 
 import (
 	"fmt"
-	"io"
 	"path"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -43,63 +43,90 @@ import (
 )
 
 type packedRecordReader struct {
-	paths  [][]string
-	chunk  int
-	reader *packed.PackedReader
+	fieldBinlogs []*datapb.FieldBinlog
+	chunk        int
+	reader       *packed.FFIPackedReader
 
 	bufferSize           int64
 	arrowSchema          *arrow.Schema
+	schema               *schemapb.CollectionSchema
+	schemaHelper         *typeutil.SchemaHelper
 	field2Col            map[FieldID]int
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
+
+	neededColumns []string
 }
 
 var _ RecordReader = (*packedRecordReader)(nil)
 
-func (pr *packedRecordReader) iterateNextBatch() error {
-	if pr.reader != nil {
-		if err := pr.reader.Close(); err != nil {
-			return err
-		}
-	}
-
-	if pr.chunk >= len(pr.paths) {
-		return io.EOF
-	}
-
-	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize, pr.storageConfig, pr.storagePluginContext)
-	pr.chunk++
+func (pr *packedRecordReader) init() error {
+	manifest, err := pr.generateManifest()
 	if err != nil {
-		return errors.Newf("New binlog record packed reader error: %w", err)
+		return err
+	}
+	// TODO add needed column option
+	// neededColumns := lo.Map(pr.schema.Fields, func(field *schemapb.FieldSchema, _ int) string {
+	// 	return field.Name
+	// })
+	reader, err := packed.NewFFIPackedReader(manifest, pr.arrowSchema, pr.neededColumns, pr.bufferSize, pr.storageConfig, pr.storagePluginContext)
+	if err != nil {
+		return err
 	}
 	pr.reader = reader
 	return nil
 }
 
 func (pr *packedRecordReader) Next() (Record, error) {
-	if pr.reader == nil {
-		if err := pr.iterateNextBatch(); err != nil {
-			return nil, err
-		}
+	rec, err := pr.reader.ReadNext()
+	if err != nil {
+		return nil, err
 	}
-
-	for {
-		rec, err := pr.reader.ReadNext()
-		if err == io.EOF {
-			if err := pr.iterateNextBatch(); err != nil {
-				return nil, err
-			}
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		return NewSimpleArrowRecord(rec, pr.field2Col), nil
-	}
+	return NewSimpleArrowRecord(rec, pr.field2Col), nil
 }
 
 func (pr *packedRecordReader) SetNeededFields(fields typeutil.Set[int64]) {
 	// TODO, push down SetNeededFields to packedReader after implemented
 	// no-op for now
+}
+
+type Manifest struct {
+	Version      int            `json:"version"`
+	ColumnGroups []*ColumnGroup `json:"column_groups"`
+}
+
+type ColumnGroup struct {
+	Columns []string `json:"columns"`
+	Format  string   `json:"format"`
+	Paths   []string `json:"paths"`
+}
+
+func (pr *packedRecordReader) generateManifest() (string, error) {
+	m := &Manifest{
+		Version: 0,
+		ColumnGroups: lo.Map(pr.fieldBinlogs, func(binlog *datapb.FieldBinlog, _ int) *ColumnGroup {
+			return &ColumnGroup{
+				Columns: lo.Map(binlog.ChildFields, func(fieldID int64, _ int) string {
+					field, err := pr.schemaHelper.GetFieldFromID(fieldID)
+					if err != nil {
+						// return empty string if field not found
+						return ""
+					}
+					return field.GetName()
+				}),
+				Format: "parquet",
+				Paths: lo.Map(binlog.Binlogs, func(binlog *datapb.Binlog, _ int) string {
+					p := binlog.GetLogPath()
+					if pr.storageConfig.StorageType != "local" {
+						p = path.Join(pr.storageConfig.BucketName, p)
+					}
+					return p
+				}),
+			}
+		}),
+	}
+	bs, err := json.Marshal(m)
+	return string(bs), err
 }
 
 func (pr *packedRecordReader) Close() error {
@@ -109,39 +136,56 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext,
+func newPackedRecordReader(binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
-	field2Col := make(map[FieldID]int)
-	allFields := typeutil.GetAllFieldSchemas(schema)
-	for i, field := range allFields {
-		field2Col[field.FieldID] = i
-	}
-	return &packedRecordReader{
-		paths:                paths,
-		bufferSize:           bufferSize,
-		arrowSchema:          arrowSchema,
-		field2Col:            field2Col,
-		storageConfig:        storageConfig,
-		storagePluginContext: storagePluginContext,
-	}, nil
-}
-
-// Deprecated
-func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
-	bufferSize int64, shouldCopy bool,
-) (*DeserializeReaderImpl[*Value], error) {
-	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil, nil)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return nil, err
 	}
-	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
-	}), nil
+	field2Col := make(map[FieldID]int)
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	neededColumns := make([]string, 0, len(allFields))
+	for i, field := range allFields {
+		field2Col[field.FieldID] = i
+		neededColumns = append(neededColumns, field.Name)
+	}
+	prr := &packedRecordReader{
+		fieldBinlogs:         binlogs,
+		bufferSize:           bufferSize,
+		arrowSchema:          arrowSchema,
+		schema:               schema,
+		schemaHelper:         schemaHelper,
+		field2Col:            field2Col,
+		storageConfig:        storageConfig,
+		storagePluginContext: storagePluginContext,
+
+		neededColumns: neededColumns,
+	}
+
+	err = prr.init()
+	if err != nil {
+		return nil, err
+	}
+
+	return prr, nil
 }
+
+// Deprecated
+// func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
+// 	bufferSize int64, shouldCopy bool,
+// ) (*DeserializeReaderImpl[*Value], error) {
+// 	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
+// 		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
+// 	}), nil
+// }
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
 

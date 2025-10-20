@@ -16,70 +16,60 @@
 
 package storage
 
-import (
-	"io"
-	"testing"
+// func TestPackedSerde(t *testing.T) {
+// 	t.Run("test binlog packed serde v2", func(t *testing.T) {
+// 		t.Skip("storage v2 cgo not ready yet")
+// 		initcore.InitLocalArrowFileSystem("/tmp")
+// 		size := 10
+// 		bucketName := "a-bucket"
+// 		paths := [][]string{{"/tmp/0"}, {"/tmp/1"}}
+// 		bufferSize := int64(10 * 1024 * 1024) // 10MB
+// 		schema := generateTestSchema()
 
-	"github.com/stretchr/testify/assert"
+// 		prepareChunkData := func(chunkPaths []string, size int) {
+// 			blobs, err := generateTestData(size)
+// 			assert.NoError(t, err)
 
-	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/util/initcore"
-)
+// 			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
+// 			assert.NoError(t, err)
 
-func TestPackedSerde(t *testing.T) {
-	t.Run("test binlog packed serde v2", func(t *testing.T) {
-		t.Skip("storage v2 cgo not ready yet")
-		initcore.InitLocalArrowFileSystem("/tmp")
-		size := 10
-		bucketName := "a-bucket"
-		paths := [][]string{{"/tmp/0"}, {"/tmp/1"}}
-		bufferSize := int64(10 * 1024 * 1024) // 10MB
-		schema := generateTestSchema()
+// 			group := storagecommon.ColumnGroup{GroupID: storagecommon.DefaultShortColumnGroupID}
+// 			for i := 0; i < len(schema.Fields); i++ {
+// 				group.Columns = append(group.Columns, i)
+// 			}
+// 			multiPartUploadSize := int64(0)
+// 			batchSize := 7
+// 			writer, err := NewPackedSerializeWriter(bucketName, chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
+// 			assert.NoError(t, err)
 
-		prepareChunkData := func(chunkPaths []string, size int) {
-			blobs, err := generateTestData(size)
-			assert.NoError(t, err)
+// 			for i := 1; i <= size; i++ {
+// 				value, err := reader.NextValue()
+// 				assert.NoError(t, err)
 
-			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
-			assert.NoError(t, err)
+// 				assertTestData(t, i, *value)
+// 				err = writer.WriteValue(*value)
+// 				assert.NoError(t, err)
+// 			}
+// 			err = writer.Close()
+// 			assert.NoError(t, err)
+// 			err = reader.Close()
+// 			assert.NoError(t, err)
+// 		}
 
-			group := storagecommon.ColumnGroup{GroupID: storagecommon.DefaultShortColumnGroupID}
-			for i := 0; i < len(schema.Fields); i++ {
-				group.Columns = append(group.Columns, i)
-			}
-			multiPartUploadSize := int64(0)
-			batchSize := 7
-			writer, err := NewPackedSerializeWriter(bucketName, chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
-			assert.NoError(t, err)
+// 		for _, chunkPaths := range paths {
+// 			prepareChunkData(chunkPaths, size)
+// 		}
 
-			for i := 1; i <= size; i++ {
-				value, err := reader.NextValue()
-				assert.NoError(t, err)
+// 		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize, false)
+// 		assert.NoError(t, err)
+// 		defer reader.Close()
 
-				assertTestData(t, i, *value)
-				err = writer.WriteValue(*value)
-				assert.NoError(t, err)
-			}
-			err = writer.Close()
-			assert.NoError(t, err)
-			err = reader.Close()
-			assert.NoError(t, err)
-		}
-
-		for _, chunkPaths := range paths {
-			prepareChunkData(chunkPaths, size)
-		}
-
-		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize, false)
-		assert.NoError(t, err)
-		defer reader.Close()
-
-		for i := 0; i < size*len(paths); i++ {
-			value, err := reader.NextValue()
-			assert.NoError(t, err)
-			assertTestData(t, i%10+1, *value)
-		}
-		_, err = reader.NextValue()
-		assert.Equal(t, err, io.EOF)
-	})
-}
+// 		for i := 0; i < size*len(paths); i++ {
+// 			value, err := reader.NextValue()
+// 			assert.NoError(t, err)
+// 			assertTestData(t, i%10+1, *value)
+// 		}
+// 		_, err = reader.NextValue()
+// 		assert.Equal(t, err, io.EOF)
+// 	})
+// }
