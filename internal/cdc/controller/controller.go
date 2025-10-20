@@ -133,13 +133,12 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 				return err
 			}
 			for _, e := range event.Events {
-				log.Info("handle replicate pchannel event",
-					zap.String("key", string(e.Kv.Key)),
-					zap.Int64("modRevision", e.Kv.ModRevision),
-					zap.String("eventType", e.Type.String()),
-				)
 				switch e.Type {
 				case mvccpb.PUT:
+					log.Info("handle replicate pchannel PUT event",
+						zap.String("key", string(e.Kv.Key)),
+						zap.Int64("modRevision", e.Kv.ModRevision),
+					)
 					currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 					replicate := meta.MustParseReplicateChannelFromEvent(e)
 					if !strings.Contains(replicate.GetSourceChannelName(), currentClusterID) {
@@ -153,6 +152,10 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 					}
 					resource.Resource().ReplicateManagerClient().CreateReplicator(channel)
 				case mvccpb.DELETE:
+					log.Info("handle replicate pchannel DELETE event",
+						zap.String("key", string(e.Kv.Key)),
+						zap.Int64("prevModRevision", e.PrevKv.ModRevision),
+					)
 					key := string(e.Kv.Key)
 					revision := e.PrevKv.ModRevision
 					resource.Resource().ReplicateManagerClient().RemoveReplicator(key, revision)

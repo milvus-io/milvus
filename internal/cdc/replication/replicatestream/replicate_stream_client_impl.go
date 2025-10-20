@@ -324,7 +324,14 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		etcdCli := resource.Resource().ETCD()
 		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
 		if err != nil {
-			panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
+			logger.Warn("failed to remove replicate pchannel", zap.Error(err))
+			// When performing delete operation on etcd, the context may be canceled by the delete event
+			// for the same key in cdc controller. In this scenario, the delete operation may return `context.Canceled`.
+			// Since the delete event is only generated after the delete operation is committed in etcd,
+			// the delete is guaranteed to have succeeded on the server side. So we can ignore the context canceled error here.
+			if !errors.Is(err, context.Canceled) {
+				panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
+			}
 		}
 		if ok {
 			logger.Info("handle AlterReplicateConfigMessage done, replicate pchannel removed")
