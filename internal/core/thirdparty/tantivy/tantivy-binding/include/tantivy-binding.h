@@ -361,6 +361,11 @@ tantivy_match_query(void* ptr,
                     uintptr_t min_should_match,
                     void* bitset);
 
+RustResult tantivy_match_query_with_minimum(void *ptr,
+                                            const char *query,
+                                            uintptr_t min_should_match,
+                                            void *bitset);
+
 RustResult
 tantivy_phrase_match_query(void* ptr,
                            const char* query,

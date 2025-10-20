@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
+
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -347,10 +348,7 @@ func TestTextMatchMinimumShouldMatch(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
-	// Provide valid field options instead of nil to satisfy CreateCollection's type check
-	analyzerParams := map[string]any{"tokenizer": "standard"}
-	fieldsOption := hp.TNewFieldsOption().TWithAnalyzerParams(analyzerParams)
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, hp.TNewSchemaOption().TWithFunction(function))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), nil, hp.TNewSchemaOption().TWithFunction(function))
 
 	docs := []string{"a b", "a c", "b c", "c", "a b c"}
 	insertOption := hp.TNewDataOption().TWithTextLang(common.DefaultTextLang).TWithTextData(docs)

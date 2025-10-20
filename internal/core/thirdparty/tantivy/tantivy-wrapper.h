@@ -964,6 +964,21 @@ struct TantivyIndexWrapper {
     }
 
     void
+    match_query_with_minimum(const std::string& query,
+                             uintptr_t min_should_match,
+                             void* bitset) {
+        auto array = tantivy_match_query_with_minimum(
+            reader_, query.c_str(), min_should_match, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.match_query_with_minimum: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::None,
+                   "TantivyIndexWrapper.match_query_with_minimum: invalid "
+                   "result type");
+    }
+
+    void
     phrase_match_query(const std::string& query, uint32_t slop, void* bitset) {
         auto array =
             tantivy_phrase_match_query(reader_, query.c_str(), slop, bitset);

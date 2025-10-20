@@ -28,6 +28,22 @@ pub extern "C" fn tantivy_match_query(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_match_query_with_minimum(
+    ptr: *mut c_void,
+    query: *const c_char,
+    min_should_match: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    unsafe {
+        (*real)
+            .match_query_with_minimum(query, min_should_match, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_phrase_match_query(
     ptr: *mut c_void,
     query: *const c_char,
