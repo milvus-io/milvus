@@ -487,9 +487,12 @@ func (o *idfOracle) SyncDistribution() error {
 
 	sealed, _ := snapshot.Peek()
 
-	sealedMap := map[int64]bool{} // sealed diff map, activate segment stats if true, and remove if not in map
+	// intarget segment map
+	targetMap := typeutil.NewSet[UniqueID]()
+	// segment with unreadable target version was not been used,
+	// not remove them till it update version or remove from snapshot(released)
+	reserveMap := typeutil.NewSet[UniqueID]()
 
-	// only remain current target segment and unknown version segment in snapshot.
 	for _, item := range sealed {
 		for _, segment := range item.Segments {
 			if segment.Level == datapb.SegmentLevel_L0 {
@@ -498,12 +501,12 @@ func (o *idfOracle) SyncDistribution() error {
 
 			switch segment.TargetVersion {
 			case snapshot.targetVersion:
-				sealedMap[segment.SegmentID] = true
+				targetMap.Insert(segment.SegmentID)
 				if !o.sealed.Contain(segment.SegmentID) {
 					log.Warn("idf oracle lack some sealed segment", zap.Int64("segment", segment.SegmentID))
 				}
 			case unreadableTargetVersion:
-				sealedMap[segment.SegmentID] = false
+				reserveMap.Insert(segment.SegmentID)
 			}
 		}
 	}
@@ -512,11 +515,11 @@ func (o *idfOracle) SyncDistribution() error {
 
 	var rangeErr error
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
-		// segment was unreadable if in snapshot but not in target.
-		intarget, insnap := sealedMap[segmentID]
+		intarget := targetMap.Contain(segmentID)
+
 		activate := stats.activate.Load()
 		// activate segment if segment in target
-		if insnap && intarget && !activate {
+		if intarget && !activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
 				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
@@ -524,9 +527,8 @@ func (o *idfOracle) SyncDistribution() error {
 			}
 			diff.Merge(stats)
 		} else
-		// deactivate segment if segment not in snapshot
-		// or deactivate segment if segment unreadable (only exist at preload segment)
-		if (!insnap || (insnap && !intarget)) && activate {
+		// deactivate segment if segment not in target.
+		if !intarget && activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
 				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
@@ -557,23 +559,28 @@ func (o *idfOracle) SyncDistribution() error {
 
 	// remove sealed segment not in target
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
-		intarget, insnap := sealedMap[segmentID]
-		activate := stats.activate.Load()
-		// remove if segment not in snapshot
-		// and add before snapshot
-		if !insnap && stats.ts.Before(snapshotTs) {
-			stats.Remove()
-			o.sealed.Remove(segmentID)
-		}
+		reserve := reserveMap.Contain(segmentID)
+		intarget := targetMap.Contain(segmentID)
 
+		activate := stats.activate.Load()
 		// save activate if segment in target.
-		if insnap && intarget && !activate {
+		if intarget && !activate {
 			stats.activate.Store(true)
 		}
 
-		// deactivate if segment unreadable.
-		if insnap && !intarget && activate {
+		// deactivate if segment not in target.
+		if !intarget && activate {
 			stats.activate.Store(false)
+		}
+
+		// remove
+		// if segment not in target and not in reserve list
+		// (means segment target version was old version or segment not in snapshot)
+		// and add before snapshot Ts
+		// (forbid remove some new segment register after current snapshot)
+		if !intarget && !reserve && stats.ts.Before(snapshotTs) {
+			stats.Remove()
+			o.sealed.Remove(segmentID)
 		}
 		return true
 	})
