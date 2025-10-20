@@ -1226,25 +1226,30 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 				baseData := baseScalar.GetJsonData()
 				if updateData != nil && baseData != nil &&
 					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
-					// dynamic field is a json with only 1 level nested struct,
-					// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
-					var baseMap map[string]interface{}
-					var updateMap map[string]interface{}
-					// unmarshal base and update
-					if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
-						return fmt.Errorf("failed to unmarshal base json: %v", err)
+					if len(baseData.Data[baseIdx]) == 0 || len(updateData.Data[updateIdx]) == 0 {
+						// just override if no need to merge
+						baseData.Data[baseIdx] = updateData.Data[updateIdx]
+					} else {
+						// execute merge logic for json field
+						var baseMap map[string]interface{}
+						var updateMap map[string]interface{}
+						// unmarshal base and update
+						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
+							return fmt.Errorf("failed to unmarshal base json: %v", err)
+						}
+						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
+							log.Warn("failed to unmarshal update json", zap.String("update data", string(updateData.Data[updateIdx])), zap.Error(err))
+							return fmt.Errorf("failed to unmarshal update json: %v", err)
+						}
+						// merge
+						mergo.Merge(&baseMap, updateMap, mergo.WithOverride)
+						// marshal back
+						newJSON, err := json.Marshal(baseMap)
+						if err != nil {
+							return fmt.Errorf("failed to marshal merged json: %v", err)
+						}
+						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					}
-					if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
-						return fmt.Errorf("failed to unmarshal update json: %v", err)
-					}
-					// merge
-					mergo.Merge(&baseMap, updateMap, mergo.WithOverride)
-					// marshal back
-					newJSON, err := json.Marshal(baseMap)
-					if err != nil {
-						return fmt.Errorf("failed to marshal merged json: %v", err)
-					}
-					baseScalar.GetJsonData().Data[baseIdx] = newJSON
 				}
 			case *schemapb.ScalarField_TimestamptzData:
 				updateData := updateScalar.GetTimestamptzData()
