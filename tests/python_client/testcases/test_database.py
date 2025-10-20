@@ -11,7 +11,7 @@ from utils.util_log import test_log as log
 prefix = "db"
 
 
-@pytest.mark.tags(CaseLabel.RBAC)
+@pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseParams(TestcaseBase):
     """ Test case of database """
 
@@ -220,7 +220,7 @@ class TestDatabaseParams(TestcaseBase):
                                           check_items=error)
 
 
-@pytest.mark.tags(CaseLabel.RBAC)
+@pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseOperation(TestcaseBase):
 
     def setup_method(self, method):
@@ -624,7 +624,7 @@ class TestDatabaseOperation(TestcaseBase):
         assert self.utility_wrap.list_collections()[0] == []
 
 
-@pytest.mark.tags(CaseLabel.RBAC)
+@pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseOtherApi(TestcaseBase):
     """ test other interface that has db_name params"""
 

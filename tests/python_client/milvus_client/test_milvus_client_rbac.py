@@ -132,11 +132,13 @@ class TestMilvusClientRbacBase(TestMilvusClientV2Base):
         self.create_user(client, user_name=user_name, password=password)
         new_password = cf.gen_str_by_length()
         self.update_password(client, user_name=user_name, old_password=password, new_password=new_password)
+        self.close(client)
         # check
         uri = f"http://{host}:{port}"
         client, _ = self.init_milvus_client(uri=uri, user=user_name, password=new_password)
         res = self.list_databases(client)[0]
         assert res == []
+        self.close(client)
         self.init_milvus_client(uri=uri, user=user_name, password=password,
                                 check_task=CheckTasks.check_auth_failure)
 
@@ -658,6 +660,82 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         self.add_privileges_to_group(client, privilege_group=name, privileges=["Insert"], 
                                      check_task=CheckTasks.err_res,
                                      check_items={ct.err_code: 1100, ct.err_msg: error_msg})
+        
+        # cleanup
+        self.drop_role(client, role_name=role_name)
+
+    def test_milvus_client_add_privilege_into_not_exist_privilege_group(self, host, port):
+        """
+        target: test milvus client api add privilege into not exist privilege group
+        method: add privilege into not exist privilege group
+        expected: raise exception
+        """
+        client = self._client()
+        role_name = cf.gen_unique_str(role_pre)
+        self.create_role(client, role_name=role_name)
+        
+        privilege_group_name = "privilege_group_not_exist"
+        error_msg = f"there is no privilege group name [{privilege_group_name}] defined in system"
+        self.add_privileges_to_group(client, privilege_group=privilege_group_name, privileges=["Insert"], 
+                                     check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 1100, ct.err_msg: error_msg})
+        
+        # cleanup
+        self.drop_role(client, role_name=role_name)
+
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff", "invalid_privilege"])
+    def test_milvus_client_add_privileges_to_group_with_privilege_invalid(self, name, host, port):
+        """
+        target: test milvus client api add privilege group with invalid privilege type
+        method: add privilege group with invalid privilege type
+        expected: raise exception
+        """
+        client = self._client()
+        role_name = cf.gen_unique_str(role_pre)
+        self.create_role(client, role_name=role_name)
+        
+        error_msg = f"`privileges` value {name} is illegal"
+        self.add_privileges_to_group(client, privilege_group="privilege_group_1", privileges=name, 
+                                     check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 1, ct.err_msg: error_msg})
+        
+        # cleanup
+        self.drop_role(client, role_name=role_name)
+
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
+    def test_milvus_client_remove_privileges_to_group_with_privilege_group_name_invalid(self, name, host, port):
+        """
+        target: test milvus client api remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        client = self._client()
+        role_name = cf.gen_unique_str(role_pre)
+        self.create_role(client, role_name=role_name)
+        
+        error_msg = f"{name}"
+        self.remove_privileges_from_group(client, privilege_group=name, privileges=["Insert"], 
+                                          check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: error_msg})
+        
+        # cleanup
+        self.drop_role(client, role_name=role_name)
+
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff", "invalid_privilege"])
+    def test_milvus_client_remove_privileges_to_group_with_privilege_invalid(self, name, host, port):
+        """
+        target: test milvus client api remove privilege group with invalid privilege type
+        method: remove privilege group with invalid privilege type
+        expected: raise exception
+        """
+        client = self._client()
+        role_name = cf.gen_unique_str(role_pre)
+        self.create_role(client, role_name=role_name)
+        
+        error_msg = f"`privileges` value {name} is illegal"
+        self.remove_privileges_from_group(client, privilege_group="privilege_group_1", privileges=name, 
+                                          check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: error_msg})
         
         # cleanup
         self.drop_role(client, role_name=role_name)
@@ -1370,6 +1448,8 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.describe_role(client, role_name=role_name, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 65535, ct.err_msg: error_msg})
+
+
 
 
 
