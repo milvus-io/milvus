@@ -291,6 +291,55 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	enableMatch(schema)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	for _, v := range []int64{1, 2, 1000} {
+		expr := fmt.Sprintf(`text_match(VarCharField, "query", minimum_should_match=%d)`, v)
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+
+		predicates := plan.GetVectorAnns().GetPredicates()
+		assert.NotNil(t, predicates)
+		ure := predicates.GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatch, ure.GetOp())
+		assert.Equal(t, "query", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, v, extra[0].GetInt64Val())
+	}
+
+	{
+		expr := `text_match(VarCharField, "query", minimum_should_match=0)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "minimum_should_match should be >= 1")
+	}
+
+	{
+		expr := `text_match(VarCharField, "query", minimum_should_match=1001)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "minimum_should_match should be <= 1000")
+	}
+
+	{
+		expr := `text_match(VarCharField, "query", minimum_should_match=1.5)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+}
+
 func TestExpr_PhraseMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
