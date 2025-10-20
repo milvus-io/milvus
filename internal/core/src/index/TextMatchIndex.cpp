@@ -302,7 +302,8 @@ TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
 }
 
 TargetBitmap
-TextMatchIndex::MatchQuery(const std::string& query) {
+TextMatchIndex::MatchQuery(const std::string& query,
+                           uint32_t min_should_match) {
     tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
     if (shouldTriggerCommit()) {
         Commit();
@@ -310,10 +311,14 @@ TextMatchIndex::MatchQuery(const std::string& query) {
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count opeartion of tantivy may be get older cnt if the index is committed with new tantivy segment.
+    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    wrapper_->match_query(query, &bitset);
+    if (min_should_match > 1) {
+        wrapper_->match_query_with_minimum(query, min_should_match, &bitset);
+    } else {
+        wrapper_->match_query(query, &bitset);
+    }
     return bitset;
 }
 
@@ -327,7 +332,7 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count opeartion of tantivy may be get older cnt if the index is committed with new tantivy segment.
+    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
     wrapper_->phrase_match_query(query, slop, &bitset);
