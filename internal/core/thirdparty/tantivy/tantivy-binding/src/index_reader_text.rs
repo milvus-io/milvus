@@ -38,7 +38,7 @@ impl IndexReaderWrapper {
         searcher
             .search(&query, &collector)
             .map_err(TantivyBindingError::TantivyError)
-    }   
+    }
 
     pub(crate) fn match_query_with_minimum(
         &self,
