@@ -362,10 +362,11 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 				log.Info("Success to trigger a compaction, try to submit",
 					zap.String("eventType", eventType.String()),
 					zap.String("reason", reason),
-					zap.String("output view", outView.String()))
+					zap.String("output view", outView.String()),
+					zap.Int64("triggerID", outView.GetTriggerID()))
 
 				switch eventType {
-				case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE:
+				case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
