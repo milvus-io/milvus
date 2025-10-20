@@ -83,7 +83,7 @@ services:
       - "2181:2181"
 
   kafka:
-    image: 'bitnami/kafka:3.1.0'
+    image: 'bitnamilegacy/kafka:3.1.0'
     ports:
       - '9092:9092'
     environment:
