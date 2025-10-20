@@ -68,7 +68,6 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         }
     }
 
-
  private:
     VectorPtr
     EvalForIndexSegment();
