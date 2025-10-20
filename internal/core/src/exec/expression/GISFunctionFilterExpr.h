@@ -63,6 +63,9 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     void
     MoveCursor() {
+        if (segment_->type() == SegmentType::Sealed) {
+            SegmentExpr::MoveCursor();
+        }
     }
 
 
