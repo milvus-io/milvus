@@ -468,7 +468,15 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 	defer sp.End()
 
 	fields := inputs[0].([]*schemapb.FieldData)
-	idsList := inputs[1].([]*schemapb.IDs)
+	var idsList []*schemapb.IDs
+	switch inputs[1].(type) {
+	case *schemapb.IDs:
+		idsList = []*schemapb.IDs{inputs[1].(*schemapb.IDs)}
+	case []*schemapb.IDs:
+		idsList = inputs[1].([]*schemapb.IDs)
+	default:
+		panic(fmt.Sprintf("invalid ids type: %T", inputs[1]))
+	}
 	if len(fields) == 0 {
 		emptyFields := make([][]*schemapb.FieldData, len(idsList))
 		return []any{emptyFields}, nil
@@ -1103,8 +1111,13 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 	}
 	if t.SearchRequest.GetIsAdvanced() && t.needRequery {
 		if len(t.functionScore.GetAllInputFieldIDs()) > 0 {
+			// When the function score need field data, we need to requery to fetch the field data before rerank.
+			// The requery will fetch the field data of all search results,
+			// so there's some memory overhead.
 			return newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, t)
 		} else {
+			// Otherwise, we can rerank and limit the requery size to the limit.
+			// so the memory overhead is less than the hybridSearchWithRequeryAndRerankByFieldDataPipe.
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}
