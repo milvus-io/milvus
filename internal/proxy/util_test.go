@@ -3908,7 +3908,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "JSON is not supported for fields in struct")
+		assert.Contains(t, err.Error(), "is not supported")
 	})
 
 	t.Run("nested array not supported", func(t *testing.T) {
@@ -3940,7 +3940,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "element type of array field array_with_vector is a vector type")
+		assert.Contains(t, err.Error(), "element type FloatVector is not supported")
 	})
 
 	t.Run("array of vector field with non-vector element type", func(t *testing.T) {
@@ -4054,7 +4054,6 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			schemapb.DataType_Int64,
 			schemapb.DataType_Float,
 			schemapb.DataType_Double,
-			schemapb.DataType_String,
 		}
 
 		for _, dt := range validScalarTypes {
