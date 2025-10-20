@@ -33,7 +33,8 @@ StorageV2FSCache::Get(const Key& key) {
     std::promise<milvus_storage::ArrowFileSystemPtr> p;
     std::shared_future<milvus_storage::ArrowFileSystemPtr> f = p.get_future();
 
-    auto [iter, inserted] = concurrent_map_.emplace(key, Value(std::move(p), f));
+    auto [iter, inserted] =
+        concurrent_map_.emplace(key, Value(std::move(p), f));
     if (!inserted) {
         return iter->second.second.get();
     }
@@ -70,8 +71,7 @@ StorageV2FSCache::Get(const Key& key) {
         auto fs = result.value();
         iter->second.first.set_value(fs);
         return fs;
-    }
-    catch (...) {
+    } catch (...) {
         try {
             iter->second.first.set_exception(std::current_exception());
         } catch (...) {
@@ -82,6 +82,5 @@ StorageV2FSCache::Get(const Key& key) {
         return nullptr;
     }
 }
-
 
 }  // namespace milvus::storage
