@@ -67,7 +67,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED:
 			// The task is recovered from the remote cluster, so it doesn't hold the resource lock.
 			// but the task execution order should be protected by the order of broadcastID (by ackCallbackScheduler)
-			if isAllDone(task.task) {
+			if task.isControlChannelAcked() || isAllDone(task.task) {
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:

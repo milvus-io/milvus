@@ -150,7 +150,9 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 			return err
 		}
 	}
-	if funcutil.IsControlChannel(msg.VChannel()) {
+	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig {
+		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
+		// will not affect the recovery storage, so skip it.
 		return nil
 	}
 
