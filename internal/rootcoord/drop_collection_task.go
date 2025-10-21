@@ -79,7 +79,7 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 		CollectionID:   collMeta.CollectionID,
 		DbID:           collMeta.DBID,
 		CollectionName: t.Req.CollectionName,
-		DbName:         t.Req.DbName,
+		DbName:         collMeta.DBName,
 	}
 	t.vchannels = collMeta.VirtualChannelNames
 	return nil

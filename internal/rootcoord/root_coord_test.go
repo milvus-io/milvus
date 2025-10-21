@@ -98,7 +98,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	RegisterDDLCallbacks(core)
 
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0"))
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
 	streaming.SetWALForTest(wal)
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
