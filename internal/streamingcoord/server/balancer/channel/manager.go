@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -406,7 +408,10 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 		return nil
 	}
 
-	newIncomingCDCTasks := cm.getNewIncomingTask(config, result.Results)
+	appendResults := lo.MapKeys(result.Results, func(_ *message.AppendResult, key string) string {
+		return funcutil.ToPhysicalChannel(key)
+	})
+	newIncomingCDCTasks := cm.getNewIncomingTask(config, appendResults)
 	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx,
 		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: config.GetReplicateConfiguration()},
 		newIncomingCDCTasks); err != nil {
