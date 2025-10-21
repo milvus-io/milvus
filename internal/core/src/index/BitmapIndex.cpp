@@ -1106,19 +1106,15 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
     if (is_mmap_) {
         for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
              it++) {
-            for (const auto& v : it->second) {
-                if (v == idx) {
-                    return it->first;
-                }
+            if (it->second.contains(idx)) {
+                return it->first;
             }
         }
     } else {
         if (build_mode_ == BitmapIndexBuildMode::ROARING) {
             for (auto it = data_.begin(); it != data_.end(); it++) {
-                for (const auto& v : it->second) {
-                    if (v == idx) {
-                        return it->first;
-                    }
+                if (it->second.contains(idx)) {
+                    return it->first;
                 }
             }
         } else {
