@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
@@ -78,8 +79,8 @@ type searchTask struct {
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
-
-	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
+	highlightTasks         []*highlightTask
+	resultBuf              *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
@@ -452,12 +453,16 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		// set analyzer name for sub search
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", subReq.GetSearchParams())
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, subReq.GetSearchParams())
 		if err == nil {
 			internalSubReq.AnalyzerName = analyzer
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+		if err := t.addHighlightTask(subReq.GetSearchParams(), internalSubReq.GetMetricType(), internalSubReq.FieldId, subReq.GetPlaceholderGroup(), internalSubReq.GetAnalyzerName()); err != nil {
+			return err
+		}
+
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
@@ -544,6 +549,103 @@ func (t *searchTask) fillResult() {
 	t.result.CollectionName = t.collectionName
 }
 
+func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(placeholder, pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+	}
+
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	return texts, nil
+}
+
+func (t *searchTask) addHighlightTask(params []*commonpb.KeyValuePair, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	// appen highlight fields
+	if value, err := funcutil.GetAttrByKeyFromRepeatedKV(HighlightKey, params); err == nil {
+		params := map[string]any{}
+		if err := json.Unmarshal([]byte(value), &params); err == nil {
+			task := &highlightTask{
+				HighlightTask: &querypb.HighlightTask{},
+			}
+
+			if htype, ok := params[highlightTypeKey]; ok {
+				switch htype {
+				case "BM25":
+					if metricType != metric.BM25 {
+						return merr.WrapErrParameterInvalidMsg(`BM25 highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
+					}
+					function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
+					if !ok {
+						return merr.WrapErrServiceInternal(`Search with highlight failed, input field of BM25 annsField not found`)
+					}
+					task.FieldId = function.InputFieldIds[0]
+					task.FieldName = function.InputFieldNames[0]
+				default:
+					return merr.WrapErrParameterInvalidMsg(`Search with highlight failed, unknown highlight type: %s`, htype)
+				}
+			} else {
+				return merr.WrapErrParameterInvalidMsg(`Search with highlight failed, no highlight type`)
+			}
+
+			if preTags, ok := params[PreTagsKey]; ok {
+				tags, ok := preTags.([]any)
+				if !ok {
+					return merr.WrapErrParameterInvalidMsg("pre_tags should be string list")
+				}
+
+				task.preTags = make([][]byte, len(tags))
+				for i, tag := range tags {
+					if s, ok := tag.(string); ok {
+						task.preTags[i] = []byte(s)
+					} else {
+						return merr.WrapErrParameterInvalidMsg("pre_tags item should be string")
+					}
+				}
+			} else {
+				task.preTags = [][]byte{[]byte(DefaultPreTag)}
+			}
+
+			if postTags, ok := params[PostTagsKey]; ok {
+				tags, ok := postTags.([]any)
+				if !ok {
+					return merr.WrapErrParameterInvalidMsg("post_tags should be string list")
+				}
+
+				task.postTags = make([][]byte, len(tags))
+				for i, tag := range tags {
+					if s, ok := tag.(string); ok {
+						task.postTags[i] = []byte(s)
+					} else {
+						return merr.WrapErrParameterInvalidMsg("post_tags item should be string")
+					}
+				}
+			} else {
+				task.postTags = [][]byte{[]byte(DefaultPostTag)}
+			}
+
+			texts, err := t.getBM25SearchTexts(placeholder)
+			if err != nil {
+				return err
+			}
+
+			task.TargetTexts = texts
+			if analyzerName != "" {
+				task.TargetAnalyzers = []string{analyzerName}
+			}
+
+			t.highlightTasks = append(t.highlightTasks, task)
+		}
+	}
+	return nil
+}
+
 func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
@@ -621,10 +723,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
 	if t.SearchRequest.MetricType == metric.BM25 {
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", t.request.GetSearchParams())
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
 		if err == nil {
 			t.SearchRequest.AnalyzerName = analyzer
 		}
+	}
+	if err := t.addHighlightTask(t.request.GetSearchParams(), t.SearchRequest.MetricType, t.SearchRequest.FieldId, t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+		return err
 	}
 
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
@@ -801,7 +906,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.isRecallEvaluation = isRecallEvaluation
 
 	// call pipeline
-	pipeline, err := newBuiltInPipeline(t)
+	pipeline, err := newSearchPipeline(t)
 	if err != nil {
 		log.Warn("Faild to create post process pipeline")
 		return err

@@ -4873,3 +4873,215 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchTask_AddHighlightTask(t *testing.T) {
+	paramtable.Init()
+
+	// Create a schema with BM25 function
+	schema := &schemapb.CollectionSchema{
+		Name: "test_highlight_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "text_field",
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  101,
+				Name:     "sparse_field",
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse_field"},
+				OutputFieldIds:   []int64{101},
+			},
+		},
+	}
+
+	placeholder := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Type:   commonpb.PlaceholderType_VarChar,
+			Values: [][]byte{[]byte("test_str")},
+		}},
+	}
+
+	placeholderBytes, err := proto.Marshal(placeholder)
+	require.NoError(t, err)
+
+	t.Run("BM25 highlight success", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "BM25"}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.highlightTasks))
+		assert.Equal(t, int64(100), task.highlightTasks[0].FieldId)
+		assert.Equal(t, "text_field", task.highlightTasks[0].FieldName)
+	})
+
+	t.Run("BM25 highlight with custom tags", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "BM25", "pre_tags": ["<b>", "<strong>"], "post_tags": ["</b>", "</strong>"]}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.highlightTasks))
+		assert.Equal(t, 2, len(task.highlightTasks[0].preTags))
+		assert.Equal(t, []byte("<b>"), task.highlightTasks[0].preTags[0])
+		assert.Equal(t, 2, len(task.highlightTasks[0].postTags))
+		assert.Equal(t, []byte("</b>"), task.highlightTasks[0].postTags[0])
+	})
+
+	t.Run("BM25 highlight with wrong metric type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+			SearchRequest: &internalpb.SearchRequest{},
+			request:       &milvuspb.SearchRequest{},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "BM25"}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.L2, 101, placeholderBytes, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "BM25 highlight only support with metric type")
+	})
+
+	t.Run("highlight with unknown type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "UNKNOWN"}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown highlight type")
+	})
+
+	t.Run("highlight without type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no highlight type")
+	})
+
+	t.Run("highlight with invalid JSON", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `invalid json`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		// Should not error when JSON parsing fails (returns nil from funcutil.GetAttrByKeyFromRepeatedKV)
+		assert.NoError(t, err)
+	})
+
+	t.Run("highlight with invalid pre_tags type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "BM25", "pre_tags": "not_an_array"}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "pre_tags should be string list")
+	})
+
+	t.Run("highlight with non-existent BM25 field", func(t *testing.T) {
+		schemaWithoutBM25 := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector_field",
+					DataType: schemapb.DataType_FloatVector,
+				},
+			},
+		}
+
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schemaWithoutBM25,
+			},
+		}
+
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   HighlightKey,
+				Value: `{"type": "BM25"}`,
+			},
+		}
+
+		err := task.addHighlightTask(params, metric.BM25, 100, placeholderBytes, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "input field of BM25 annsField not found")
+	})
+}
