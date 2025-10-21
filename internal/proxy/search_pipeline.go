@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
@@ -36,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -112,6 +115,7 @@ const (
 	organizeOp           = "organize"
 	filterFieldOp        = "filter_field"
 	lambdaOp             = "lambda"
+	highlightOp          = "highlight"
 )
 
 var opFactory = map[string]func(t *searchTask, params map[string]any) (operator, error){
@@ -122,6 +126,7 @@ var opFactory = map[string]func(t *searchTask, params map[string]any) (operator,
 	requeryOp:            newRequeryOperator,
 	lambdaOp:             newLambdaOperator,
 	filterFieldOp:        newFilterFieldOperator,
+	highlightOp:          newHighlightOperator,
 }
 
 func NewNode(info *nodeDef, t *searchTask) (*Node, error) {
@@ -592,6 +597,153 @@ func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs 
 	return []any{result}, nil
 }
 
+const (
+	PreTagsKey       = "pre_tags"
+	PostTagsKey      = "post_tags"
+	highlightTypeKey = "type"
+	DefaultPreTag    = "<em>"
+	DefaultPostTag   = "</em>"
+)
+
+type highlightTask struct {
+	*querypb.HighlightTask
+	preTags  [][]byte
+	postTags [][]byte
+}
+
+type highlightOperator struct {
+	tasks        []*highlightTask
+	fieldSchemas []*schemapb.FieldSchema
+	lbPolicy     LBPolicy
+	scheduler    *taskScheduler
+
+	collectionName string
+	collectionID   int64
+	dbName         string
+
+	preTag  []byte
+	postTag []byte
+}
+
+func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
+	return &highlightOperator{
+		tasks:          t.highlightTasks,
+		lbPolicy:       t.lb,
+		scheduler:      t.node.(*Proxy).sched,
+		fieldSchemas:   typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
+		collectionName: t.request.CollectionName,
+		collectionID:   t.CollectionID,
+		dbName:         t.request.DbName,
+	}, nil
+}
+
+func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	datas := result.Results.GetFieldsData()
+	req := &querypb.GetHighlightRequest{
+		Topks: result.GetResults().GetTopks(),
+		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),
+	}
+
+	for _, task := range req.GetTasks() {
+		textFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == task.GetFieldId() })
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
+		}
+		task.Texts = textFieldDatas.GetScalars().GetStringData().GetData()
+
+		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
+			return schema.GetFieldID() == task.GetFieldId()
+		})
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, field not found in schema %s: %d", task.GetFieldName(), task.GetFieldId())
+		}
+
+		// if use multi analyzer
+		// get analyzer field data
+		helper := typeutil.CreateFieldSchemaHelper(field)
+		if v, ok := helper.GetMultiAnalyzerParams(); ok {
+			params := map[string]any{}
+			err := json.Unmarshal([]byte(v), params)
+			if err != nil {
+				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params-: %v", err)
+			}
+			analyzerField, ok := params["by_field"]
+			if !ok {
+				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params, no by_field")
+			}
+
+			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldName == analyzerField.(string) })
+			if !ok {
+				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
+			}
+			task.Analyzers = analyzerFieldDatas.GetScalars().GetStringData().GetData()
+		}
+	}
+
+	task := &HighlightTask{
+		ctx:                 ctx,
+		lb:                  op.lbPolicy,
+		Condition:           NewTaskCondition(ctx),
+		GetHighlightRequest: req,
+		collectionName:      op.collectionName,
+		collectionID:        op.collectionID,
+		dbName:              op.dbName,
+	}
+	if err := op.scheduler.dqQueue.Enqueue(task); err != nil {
+		return nil, err
+	}
+
+	if err := task.WaitToFinish(); err != nil {
+		return nil, err
+	}
+
+	rowNum := len(result.Results.GetScores())
+	HighlightResults := []*commonpb.HighlightResult{}
+	if rowNum != 0 {
+		rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
+			return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
+		})
+
+		for i, task := range req.GetTasks() {
+			HighlightResults = append(HighlightResults, &commonpb.HighlightResult{
+				FieldName: task.GetFieldName(),
+				Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
+			})
+		}
+	}
+
+	result.Results.HighlightResults = HighlightResults
+	return []any{result}, nil
+}
+
+func buildStringFragments(task *highlightTask, i int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
+	bytes := []byte(task.Texts[i])
+	preTagsNum := len(task.preTags)
+	postTagsNum := len(task.postTags)
+	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
+	for _, frag := range frags {
+		fragBytes := []byte{}
+		cursor := int(frag.GetStartOffset())
+		for i := 0; i < len(frag.GetOffsets())/2; i++ {
+			startOffset := int(frag.Offsets[i<<1])
+			endOffset := int(frag.Offsets[(i<<1)+1])
+			if cursor < startOffset {
+				fragBytes = append(fragBytes, bytes[cursor:startOffset]...)
+			}
+			fragBytes = append(fragBytes, task.preTags[i%preTagsNum]...)
+			fragBytes = append(fragBytes, bytes[startOffset:endOffset]...)
+			fragBytes = append(fragBytes, task.postTags[i%postTagsNum]...)
+			cursor = endOffset
+		}
+		if cursor < int(frag.GetEndOffset()) {
+			fragBytes = append(fragBytes, bytes[cursor:frag.GetEndOffset()]...)
+		}
+		result.Fragments = append(result.Fragments, string(fragBytes))
+	}
+	return result
+}
+
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	multipleMilvusResults := inputs[0].([]*milvuspb.SearchResults)
 	idInt64Type := false
@@ -648,6 +800,17 @@ func newPipeline(pipeDef *pipelineDef, t *searchTask) (*pipeline, error) {
 	return &pipeline{name: pipeDef.name, nodes: nodes}, nil
 }
 
+func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
+	for _, def := range nodes {
+		node, err := NewNode(def, t)
+		if err != nil {
+			return err
+		}
+		p.nodes = append(p.nodes, node)
+	}
+	return nil
+}
+
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.String()))
 	msg := opMsg{}
@@ -678,6 +841,20 @@ type pipelineDef struct {
 	nodes []*nodeDef
 }
 
+var filterFieldNode = &nodeDef{
+	name:    "filter_field",
+	inputs:  []string{"result"},
+	outputs: []string{"output"},
+	opName:  filterFieldOp,
+}
+
+var highlightNode = &nodeDef{
+	name:    "highlight",
+	inputs:  []string{"result"},
+	outputs: []string{"output"},
+	opName:  highlightOp,
+}
+
 var searchPipe = &pipelineDef{
 	name: "search",
 	nodes: []*nodeDef{
@@ -698,12 +875,6 @@ var searchPipe = &pipelineDef{
 				},
 			},
 			opName: lambdaOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
 		},
 	},
 }
@@ -763,12 +934,6 @@ var searchWithRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
-		},
 	},
 }
 
@@ -820,12 +985,6 @@ var searchWithRerankPipe = &pipelineDef{
 				},
 			},
 			opName: lambdaOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
 		},
 	},
 }
@@ -895,12 +1054,6 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
-		},
 	},
 }
 
@@ -918,12 +1071,6 @@ var hybridSearchPipe = &pipelineDef{
 			inputs:  []string{"reduced", "metrics"},
 			outputs: []string{"result"},
 			opName:  rerankOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
 		},
 	},
 }
@@ -1026,12 +1173,6 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
-		},
 	},
 }
 
@@ -1127,4 +1268,24 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 		}
 	}
 	return nil, fmt.Errorf("Unsupported pipeline")
+}
+
+func newSearchPipeline(t *searchTask) (*pipeline, error) {
+	p, err := newBuiltInPipeline(t)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(t.highlightTasks) > 0 {
+		err := p.AddNodes(t, highlightNode, filterFieldNode)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err := p.AddNodes(t, filterFieldNode)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
 }
