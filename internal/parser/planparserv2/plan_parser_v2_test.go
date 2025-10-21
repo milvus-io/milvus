@@ -340,6 +340,13 @@ func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 	}
 
 	{
+		expr := `text_match(VarCharField, "query", minimum_should_match={min})`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "minimum_should_match should be a const integer expression")
+	}
+
+	{
 		expr := `text_match(VarCharField, "query", minimum_should_match=9223372036854775808)`
 		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 		assert.Error(t, err)
