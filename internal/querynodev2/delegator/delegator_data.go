@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -1000,4 +1001,76 @@ func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexR
 		}
 	}
 	return nil
+}
+
+func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	result := []*querypb.HighlightResult{}
+	for _, task := range req.GetTasks() {
+		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the high light field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
+		}
+		topks := req.GetTopks()
+		var searchTokens [][]*milvuspb.AnalyzerToken
+		var textTokens [][]*milvuspb.AnalyzerToken
+		var err error
+
+		if len(analyzer.GetInputFields()) == 1 {
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts())
+			if err != nil {
+				return nil, err
+			}
+
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
+			if err != nil {
+				return nil, err
+			}
+		} else if len(analyzer.GetInputFields()) == 2 {
+			var targetAnalyzers []string
+			if len(task.Analyzers) == 1 && len(task.GetTargetTexts()) > 1 {
+				targetAnalyzers = make([]string, len(task.GetTargetTexts()))
+				for i := 0; i < len(task.GetTargetTexts()); i++ {
+					targetAnalyzers[i] = task.Analyzers[0]
+				}
+			} else if len(task.Analyzers) == 0 {
+				targetAnalyzers = make([]string, len(task.GetTargetTexts()))
+				for i := 0; i < len(task.GetTargetTexts()); i++ {
+					targetAnalyzers[i] = "default"
+				}
+			} else {
+				targetAnalyzers = task.GetAnalyzers()
+			}
+
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts(), targetAnalyzers)
+			if err != nil {
+				return nil, err
+			}
+
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzers())
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		textIdx := 0
+		for i, targetTokens := range searchTokens {
+			targetSet := typeutil.NewSet[string]()
+			for _, token := range targetTokens {
+				targetSet.Insert(token.GetToken())
+			}
+
+			for j := 0; j < int(topks[i]); j++ {
+				offsets := []int64{}
+				for _, token := range textTokens[textIdx] {
+					if targetSet.Contain(token.GetToken()) {
+						offsets = append(offsets, token.GetStartOffset(), token.GetEndOffset())
+					}
+				}
+				result = append(result, &querypb.HighlightResult{Fragments: []*querypb.HighlightFragment{{StartOffset: 0, EndOffset: int64(len(task.Texts[textIdx])), Offsets: offsets}}})
+				textIdx++
+			}
+		}
+	}
+
+	return result, nil
 }
