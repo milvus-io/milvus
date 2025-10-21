@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
@@ -47,6 +48,7 @@ var ErrReplicationRemoved = errors.New("replication removed")
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
 	clusterID       string
+	targetClient    cluster.MilvusClient
 	client          milvuspb.MilvusService_CreateReplicateStreamClient
 	channel         *meta.ReplicateChannel
 	pendingMessages MsgQueue
@@ -58,7 +60,7 @@ type replicateStreamClient struct {
 }
 
 // NewReplicateStreamClient creates a new ReplicateStreamClient.
-func NewReplicateStreamClient(ctx context.Context, channel *meta.ReplicateChannel) ReplicateStreamClient {
+func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, channel *meta.ReplicateChannel) ReplicateStreamClient {
 	ctx1, cancel := context.WithCancel(ctx)
 	ctx1 = contextutil.WithClusterID(ctx1, channel.Value.GetTargetCluster().GetClusterId())
 
@@ -69,6 +71,7 @@ func NewReplicateStreamClient(ctx context.Context, channel *meta.ReplicateChanne
 	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{
 		clusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		targetClient:    c,
 		channel:         channel,
 		pendingMessages: pendingMessages,
 		metrics:         NewReplicateMetrics(channel.Value),
@@ -95,65 +98,67 @@ func (r *replicateStreamClient) startInternal() {
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
 	backoff.MaxElapsedTime = 0
-	backoff.Reset()
 
 	for {
-		if r.ctx.Err() != nil {
-			logger.Info("close replicate stream client due to ctx done")
+		restart := r.startReplicating(backoff)
+		if !restart {
 			return
 		}
+		time.Sleep(backoff.NextBackOff())
+	}
+}
 
-		// Create a local context for this connection that can be canceled
-		// when we need to stop the send/recv loops
-		connCtx, connCancel := context.WithCancel(r.ctx)
+func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needRestart bool) {
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+	if r.ctx.Err() != nil {
+		logger.Info("close replicate stream client due to ctx done")
+		return false
+	}
 
-		milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(connCtx, r.channel.Value.GetTargetCluster())
-		if err != nil {
-			logger.Warn("create milvus client failed, retry...", zap.Error(err))
-			time.Sleep(backoff.NextBackOff())
-			connCancel()
-			continue
-		}
-		client, err := milvusClient.CreateReplicateStream(connCtx)
-		if err != nil {
-			logger.Warn("create milvus replicate stream failed, retry...", zap.Error(err))
-			time.Sleep(backoff.NextBackOff())
-			connCancel()
-			continue
-		}
-		logger.Info("replicate stream client service started")
-		r.metrics.OnConnect()
-		backoff.Reset()
+	// Create a local context for this connection that can be canceled
+	// when we need to stop the send/recv loops
+	connCtx, connCancel := context.WithCancel(r.ctx)
+	defer connCancel()
 
-		// reset client and pending messages
-		r.client = client
-		r.pendingMessages.SeekToHead()
+	client, err := r.targetClient.CreateReplicateStream(connCtx)
+	if err != nil {
+		logger.Warn("create milvus replicate stream failed, retry...", zap.Error(err))
+		return true
+	}
+	defer client.CloseSend()
 
-		sendCh := r.startSendLoop(connCtx)
-		recvCh := r.startRecvLoop(connCtx)
+	logger.Info("replicate stream client service started")
+	r.metrics.OnConnect()
+	backoff.Reset()
 
-		var chErr error
-		select {
-		case <-r.ctx.Done():
-		case chErr = <-sendCh:
-		case chErr = <-recvCh:
-		}
+	// reset client and pending messages
+	r.client = client
+	r.pendingMessages.SeekToHead()
 
-		connCancel() // Cancel the connection context
-		<-sendCh
-		<-recvCh // wait for send/recv loops to exit
+	sendCh := r.startSendLoop(connCtx)
+	recvCh := r.startRecvLoop(connCtx)
 
-		if r.ctx.Err() != nil {
-			logger.Info("close replicate stream client due to ctx done")
-			return
-		} else if errors.Is(chErr, ErrReplicationRemoved) {
-			logger.Info("close replicate stream client due to replication removed")
-			return
-		} else {
-			logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
-			r.metrics.OnDisconnect()
-			time.Sleep(backoff.NextBackOff())
-		}
+	var chErr error
+	select {
+	case <-r.ctx.Done():
+	case chErr = <-sendCh:
+	case chErr = <-recvCh:
+	}
+
+	connCancel() // Cancel the connection context
+	<-sendCh
+	<-recvCh // wait for send/recv loops to exit
+
+	if r.ctx.Err() != nil {
+		logger.Info("close replicate stream client due to ctx done")
+		return false
+	} else if errors.Is(chErr, ErrReplicationRemoved) {
+		logger.Info("close replicate stream client due to replication removed")
+		return false
+	} else {
+		logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
+		r.metrics.OnDisconnect()
+		return true
 	}
 }
 
@@ -205,7 +210,6 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 		} else {
 			logger.Info("send loop closed")
 		}
-		r.client.CloseSend()
 	}()
 	for {
 		select {
@@ -327,9 +331,10 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		if err != nil {
 			logger.Warn("failed to remove replicate pchannel", zap.Error(err))
 			// When performing delete operation on etcd, the context may be canceled by the delete event
-			// for the same key in cdc controller. In this scenario, the delete operation may return `context.Canceled`.
-			// Since the delete event is only generated after the delete operation is committed in etcd,
-			// the delete is guaranteed to have succeeded on the server side. So we can ignore the context canceled error here.
+			// in cdc controller and then return `context.Canceled` error.
+			// Since the delete event is generated after the delete operation is committed in etcd,
+			// the delete is guaranteed to have succeeded on the server side.
+			// So we can ignore the context canceled error here.
 			if !errors.Is(err, context.Canceled) {
 				panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
 			}

@@ -21,7 +21,6 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 )
 
@@ -44,13 +43,6 @@ func OptReplicateManagerClient(replicateManagerClient replication.ReplicateManag
 	}
 }
 
-// OptClusterClient provides the cluster client to the resource.
-func OptClusterClient(clusterClient cluster.ClusterClient) optResourceInit {
-	return func(r *resourceImpl) {
-		r.clusterClient = clusterClient
-	}
-}
-
 // Done finish all initialization of resources.
 func Init(opts ...optResourceInit) {
 	newR := &resourceImpl{}
@@ -58,10 +50,7 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 
-	newR.clusterClient = cluster.NewClusterClient()
-
 	assertNotNil(newR.ETCD())
-	assertNotNil(newR.ClusterClient())
 	assertNotNil(newR.ReplicateManagerClient())
 	r = newR
 }
@@ -78,18 +67,12 @@ func Resource() *resourceImpl {
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
 	etcdClient             *clientv3.Client
-	clusterClient          cluster.ClusterClient
 	replicateManagerClient replication.ReplicateManagerClient
 }
 
 // ETCD returns the etcd client.
 func (r *resourceImpl) ETCD() *clientv3.Client {
 	return r.etcdClient
-}
-
-// ClusterClient returns the cluster client.
-func (r *resourceImpl) ClusterClient() cluster.ClusterClient {
-	return r.clusterClient
 }
 
 // ReplicateManagerClient returns the replicate manager client.

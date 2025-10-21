@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -38,13 +37,6 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 	mockMilvusClient.EXPECT().GetReplicateInfo(mock.Anything, mock.Anything).
 		Return(nil, assert.AnError).Maybe()
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil).Maybe()
-
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil).Maybe()
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
 
 	manager := NewReplicateManager()
 

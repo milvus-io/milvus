@@ -25,9 +25,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -55,6 +55,8 @@ var _ Replicator = (*channelReplicator)(nil)
 type channelReplicator struct {
 	channel       *meta.ReplicateChannel
 	createRscFunc replicatestream.CreateReplicateStreamClientFunc
+	createMcFunc  cluster.CreateMilvusClientFunc
+	targetClient  cluster.MilvusClient
 
 	asyncNotifier *syncutil.AsyncTaskNotifier[struct{}]
 }
@@ -65,6 +67,7 @@ func NewChannelReplicator(channel *meta.ReplicateChannel) Replicator {
 	return &channelReplicator{
 		channel:       channel,
 		createRscFunc: createRscFunc,
+		createMcFunc:  cluster.NewMilvusClient,
 		asyncNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 	}
 }
@@ -93,6 +96,10 @@ func (r *channelReplicator) StartReplication() {
 // replicateLoop starts the replicate loop.
 func (r *channelReplicator) replicateLoop() error {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	err := r.initializeTargetClient()
+	if err != nil {
+		return err
+	}
 	cp, err := r.getReplicateCheckpoint()
 	if err != nil {
 		return err
@@ -107,7 +114,7 @@ func (r *channelReplicator) replicateLoop() error {
 	})
 	defer scanner.Close()
 
-	rsc := r.createRscFunc(ctx, r.channel)
+	rsc := r.createRscFunc(ctx, r.targetClient, r.channel)
 	// replicate stream client will close it self,
 	// so we need to close the replicate stream client when the replicate loop is stopped.
 
@@ -137,23 +144,34 @@ func (r *channelReplicator) replicateLoop() error {
 	}
 }
 
+func (r *channelReplicator) initializeTargetClient() error {
+	if r.targetClient != nil {
+		// close the old target client
+		r.targetClient.Close(r.asyncNotifier.Context())
+	}
+	ctx, cancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
+	defer cancel()
+	milvusClient, err := r.createMcFunc(ctx, r.channel.Value.GetTargetCluster())
+	if err != nil {
+		return errors.Wrap(err, "failed to create target client")
+	}
+	r.targetClient = milvusClient
+	log.Info("target client initialized", zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	return nil
+}
+
 func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
 
 	ctx, cancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
 	defer cancel()
-	milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(ctx, r.channel.Value.GetTargetCluster())
-	if err != nil {
-		return nil, err
-	}
-	defer milvusClient.Close(ctx)
 
 	sourceClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	req := &milvuspb.GetReplicateInfoRequest{
 		SourceClusterId: sourceClusterID,
 		TargetPchannel:  r.channel.Value.GetTargetChannelName(),
 	}
-	replicateInfo, err := milvusClient.GetReplicateInfo(ctx, req)
+	replicateInfo, err := r.targetClient.GetReplicateInfo(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +195,9 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 }
 
 func (r *channelReplicator) StopReplication() {
+	if r.targetClient != nil {
+		r.targetClient.Close(r.asyncNotifier.Context())
+	}
 	r.asyncNotifier.Cancel()
 	r.asyncNotifier.BlockUntilFinish()
 }

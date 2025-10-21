@@ -19,6 +19,7 @@ package replicatemanager
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -56,13 +56,6 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 		}, nil)
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)
 
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil)
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
 	scanner := mock_streaming.NewMockScanner(t)
 	scanner.EXPECT().Close().Return()
 	wal := mock_streaming.NewMockWALAccesser(t)
@@ -71,23 +64,31 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 
 	rs := replicatestream.NewMockReplicateStreamClient(t)
 
-	cluster := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
+	mc := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
 		SourceChannelName: "test-source-channel",
 		TargetChannelName: "test-target-channel",
-		TargetCluster:     cluster,
+		TargetCluster:     mc,
 	}
 	replicator := NewChannelReplicator(&meta.ReplicateChannel{
 		Value:       replicateInfo,
 		ModRevision: 0,
 	})
+	assert.NotNil(t, replicator)
+
 	replicator.(*channelReplicator).createRscFunc = func(ctx context.Context,
-		replicateInfo *meta.ReplicateChannel,
+		c cluster.MilvusClient,
+		rm *meta.ReplicateChannel,
 	) replicatestream.ReplicateStreamClient {
 		return rs
 	}
-	assert.NotNil(t, replicator)
+	replicator.(*channelReplicator).createMcFunc = func(ctx context.Context,
+		cluster *commonpb.MilvusCluster,
+	) (cluster.MilvusClient, error) {
+		return mockMilvusClient, nil
+	}
 
 	replicator.StartReplication()
+	time.Sleep(200 * time.Millisecond)
 	replicator.StopReplication()
 }

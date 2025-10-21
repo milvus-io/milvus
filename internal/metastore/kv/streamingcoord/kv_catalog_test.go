@@ -135,25 +135,10 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
 		return kvStorage[s], nil
 	})
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
-		keys := make([]string, 0, len(kvStorage))
-		vals := make([]string, 0, len(kvStorage))
-		for k, v := range kvStorage {
-			if strings.HasPrefix(k, s) {
-				keys = append(keys, k)
-				vals = append(vals, v)
-			}
-		}
-		return keys, vals, nil
-	})
 	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
 		for k, v := range kvs {
 			kvStorage[k] = v
 		}
-		return nil
-	})
-	kv.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) error {
-		delete(kvStorage, key)
 		return nil
 	})
 

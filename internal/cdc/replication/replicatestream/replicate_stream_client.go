@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -40,4 +41,4 @@ type ReplicateStreamClient interface {
 	Close()
 }
 
-type CreateReplicateStreamClientFunc func(ctx context.Context, rm *meta.ReplicateChannel) ReplicateStreamClient
+type CreateReplicateStreamClientFunc func(ctx context.Context, c cluster.MilvusClient, rm *meta.ReplicateChannel) ReplicateStreamClient
