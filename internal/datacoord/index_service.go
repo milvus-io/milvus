@@ -59,6 +59,13 @@ func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int
 			return field.Name, nil
 		}
 	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.FieldID == fieldID {
+				return subField.Name, nil
+			}
+		}
+	}
 	return "", nil
 }
 
