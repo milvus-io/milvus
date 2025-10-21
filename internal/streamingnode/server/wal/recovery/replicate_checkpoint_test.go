@@ -30,7 +30,7 @@ func TestUpdateCheckpoint(t *testing.T) {
 	assert.Nil(t, rs.checkpoint.ReplicateCheckpoint.MessageID)
 	assert.Zero(t, rs.checkpoint.ReplicateCheckpoint.TimeTick)
 
-	replicateMsg := message.NewReplicateMessage("test3", message.NewCreateDatabaseMessageBuilderV2().
+	replicateMsg := message.MustNewReplicateMessage("test3", message.NewCreateDatabaseMessageBuilderV2().
 		WithHeader(&message.CreateDatabaseMessageHeader{}).
 		WithBody(&message.CreateDatabaseMessageBody{}).
 		WithVChannel("test3-rootcoord-dml_0").
