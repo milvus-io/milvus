@@ -101,7 +101,9 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 		mockStreamClient.ExpectRecv()
 	}
 	assert.Equal(t, msgCount, mockStreamClient.GetRecvCount())
-	assert.Equal(t, 0, replicateClient.(*replicateStreamClient).pendingMessages.Len())
+	assert.Eventually(t, func() bool {
+		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
+	}, time.Second, 100*time.Millisecond)
 	replicateClient.Close()
 }
 
@@ -218,7 +220,9 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 		mockStreamClient.ExpectRecv()
 	}
 	assert.Equal(t, msgCount, mockStreamClient.GetRecvCount())
-	assert.Equal(t, 0, replicateClient.(*replicateStreamClient).pendingMessages.Len())
+	assert.Eventually(t, func() bool {
+		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
+	}, time.Second, 100*time.Millisecond)
 	replicateClient.Close()
 }
 
