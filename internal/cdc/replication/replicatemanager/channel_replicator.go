@@ -128,8 +128,8 @@ func (r *channelReplicator) replicateLoop() error {
 			}
 			logger.Debug("replicate message success", log.FieldMessage(msg))
 			if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-				if util.IsRoleChangedByAlterReplicateConfigMessage(msg, r.channel.Value) {
-					logger.Info("role changed, stop replicate channel")
+				if util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value) {
+					logger.Info("replication removed, stop replicate channel")
 					return nil
 				}
 			}

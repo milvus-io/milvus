@@ -110,7 +110,7 @@ func (c *controller) startWatchLoop() {
 				continue
 			}
 			c.recoverReplicatePChannelMeta(m.Channels)
-			eventCh := c.watchEvents(m.Revision)
+			eventCh := c.watchEvents(m.Revision + 1)
 			err = c.watchLoop(eventCh)
 			if err == nil {
 				break

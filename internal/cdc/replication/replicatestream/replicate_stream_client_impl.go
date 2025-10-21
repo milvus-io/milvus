@@ -42,7 +42,7 @@ const (
 	pendingMessageQueueMaxSize = 128 * 1024 * 1024
 )
 
-var ErrRoleChanged = errors.New("role changed")
+var ErrReplicationRemoved = errors.New("replication removed")
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
 type replicateStreamClient struct {
@@ -98,26 +98,27 @@ func (r *replicateStreamClient) startInternal() {
 	backoff.Reset()
 
 	for {
+		if r.ctx.Err() != nil {
+			logger.Info("close replicate stream client due to ctx done")
+			return
+		}
+
 		// Create a local context for this connection that can be canceled
 		// when we need to stop the send/recv loops
 		connCtx, connCancel := context.WithCancel(r.ctx)
-
-		if connCtx.Err() != nil {
-			logger.Info("close replicate stream client by ctx done")
-			connCancel()
-			return
-		}
 
 		milvusClient, err := resource.Resource().ClusterClient().CreateMilvusClient(connCtx, r.channel.Value.GetTargetCluster())
 		if err != nil {
 			logger.Warn("create milvus client failed, retry...", zap.Error(err))
 			time.Sleep(backoff.NextBackOff())
+			connCancel()
 			continue
 		}
 		client, err := milvusClient.CreateReplicateStream(connCtx)
 		if err != nil {
 			logger.Warn("create milvus replicate stream failed, retry...", zap.Error(err))
 			time.Sleep(backoff.NextBackOff())
+			connCancel()
 			continue
 		}
 		logger.Info("replicate stream client service started")
@@ -143,10 +144,10 @@ func (r *replicateStreamClient) startInternal() {
 		<-recvCh // wait for send/recv loops to exit
 
 		if r.ctx.Err() != nil {
-			logger.Info("close replicate stream client by ctx done")
+			logger.Info("close replicate stream client due to ctx done")
 			return
-		} else if errors.Is(chErr, ErrRoleChanged) {
-			logger.Info("close replicate stream client by role changed")
+		} else if errors.Is(chErr, ErrReplicationRemoved) {
+			logger.Info("close replicate stream client due to replication removed")
 			return
 		} else {
 			logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
@@ -279,7 +280,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
-		if err != nil && !errors.Is(err, ErrRoleChanged) {
+		if err != nil && !errors.Is(err, ErrReplicationRemoved) {
 			logger.Warn("recv loop closed by unexpected error", zap.Error(err))
 		} else {
 			logger.Info("recv loop closed", zap.Error(err))
@@ -301,10 +302,10 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 				for _, msg := range messages {
 					r.metrics.OnConfirmed(msg)
 					if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-						roleChanged := r.handleAlterReplicateConfigMessage(msg)
-						if roleChanged {
-							// Role changed, return and stop replicate.
-							return ErrRoleChanged
+						replicationRemoved := r.handleAlterReplicateConfigMessage(msg)
+						if replicationRemoved {
+							// Replication removed, return and stop replicate.
+							return ErrReplicationRemoved
 						}
 					}
 				}
@@ -313,12 +314,12 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 	}
 }
 
-func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (roleChanged bool) {
+func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (replicationRemoved bool) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
 
-	roleChanged = util.IsRoleChangedByAlterReplicateConfigMessage(msg, r.channel.Value)
-	if roleChanged {
+	replicationRemoved = util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value)
+	if replicationRemoved {
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
 		// so we need to remove the replicate pchannel and stop replicate.
 		etcdCli := resource.Resource().ETCD()
