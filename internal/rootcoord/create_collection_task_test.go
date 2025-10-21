@@ -22,10 +22,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -34,6 +34,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -45,16 +46,6 @@ func Test_createCollectionTask_validate(t *testing.T) {
 	t.Run("empty request", func(t *testing.T) {
 		task := createCollectionTask{
 			Req: nil,
-		}
-		err := task.validate(context.TODO())
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid msg type", func(t *testing.T) {
-		task := createCollectionTask{
-			Req: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
-			},
 		}
 		err := task.validate(context.TODO())
 		assert.Error(t, err)
@@ -101,13 +92,16 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		).Return(map[int64][]int64{1: {1, 2}})
 
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
-			Return(&model.Database{Name: "db1"}, nil).Once()
+			Return(&model.Database{Name: "db1"}, nil)
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
 			Core: core,
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 		err := task.validate(context.TODO())
@@ -117,6 +111,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			Core: core,
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 		err = task.validate(context.TODO())
@@ -148,6 +145,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
+			},
 		}
 		err := task.validate(context.TODO())
 		assert.Error(t, err)
@@ -169,6 +169,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
+			},
 		}
 
 		err = task.validate(context.TODO())
@@ -182,13 +185,16 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
-			Return(&model.Database{Name: "db1"}, nil).Once()
+			Return(&model.Database{Name: "db1"}, nil)
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
 			Core: core,
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 		err := task.validate(context.TODO())
@@ -198,6 +204,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			Core: core,
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 		err = task.validate(context.TODO())
@@ -222,6 +231,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				NumPartitions: 256,
 				ShardsNum:     2,
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 		err := task.validate(context.TODO())
@@ -253,6 +265,9 @@ func Test_createCollectionTask_validate(t *testing.T) {
 				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				NumPartitions: 2,
 				ShardsNum:     2,
+			},
+			header: &message.CreateCollectionMessageHeader{
+				DbId: util.DefaultDBID,
 			},
 		}
 
@@ -888,19 +903,6 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 }
 
 func Test_createCollectionTask_prepareSchema(t *testing.T) {
-	t.Run("failed to unmarshal", func(t *testing.T) {
-		collectionName := funcutil.GenRandomStr()
-		task := createCollectionTask{
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-				Schema:         []byte("invalid schema"),
-			},
-		}
-		err := task.prepareSchema(context.TODO())
-		assert.Error(t, err)
-	})
-
 	t.Run("contain system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		schema := &schemapb.CollectionSchema{
@@ -911,16 +913,16 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				{Name: TimeStampFieldName},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
-		err = task.prepareSchema(context.TODO())
+		err := task.prepareSchema(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -938,16 +940,16 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
-		err = task.prepareSchema(context.TODO())
+		err := task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -965,16 +967,16 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
-		err = task.prepareSchema(context.TODO())
+		err := task.prepareSchema(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -993,21 +995,23 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
-		err = task.prepareSchema(context.TODO())
+		err := task.prepareSchema(context.TODO())
 		assert.Error(t, err)
 	})
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
+	initStreamingSystemAndCore(t)
+
 	paramtable.Init()
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.On("GetDatabaseByName",
@@ -1021,39 +1025,14 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		util.DefaultDBID: {1, 2},
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNumPerDB.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
-
-	t.Run("invalid msg type", func(t *testing.T) {
-		core := newTestCore(withMeta(meta))
-		task := &createCollectionTask{
-			Core: core,
-			Req: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
-			},
-		}
-		err := task.Prepare(context.Background())
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid schema", func(t *testing.T) {
-		core := newTestCore(withMeta(meta))
-		collectionName := funcutil.GenRandomStr()
-		task := &createCollectionTask{
-			Core: core,
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-				Schema:         []byte("invalid schema"),
-			},
-		}
-		err := task.Prepare(context.Background())
-		assert.Error(t, err)
-	})
 
 	t.Run("failed to assign id", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
@@ -1066,8 +1045,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				{Name: field1},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
@@ -1075,10 +1052,13 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
-		err = task.Prepare(context.Background())
+		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -1103,19 +1083,20 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 
 		task := createCollectionTask{
 			Core: core,
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
 			},
 		}
 		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum.GetAsInt() + 1) // no enough channels.
-		err = task.Prepare(context.Background())
+		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 		task.Req.ShardsNum = common.DefaultShardsNum
 		err = task.Prepare(context.Background())
@@ -1123,7 +1104,70 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
+	initStreamingSystemAndCore(t)
+
+	paramtable.Init()
+	meta := mockrootcoord.NewIMetaTable(t)
+	t.Run("with db properties", func(t *testing.T) {
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+		task.Req.ShardsNum = common.DefaultShardsNum
+		err := task.Prepare(context.Background())
+		assert.Len(t, task.body.CollectionSchema.Properties, 1)
+		assert.Len(t, task.Req.Properties, 1)
+		assert.NoError(t, err)
+	})
+}
+
 func Test_createCollectionTask_PartitionKey(t *testing.T) {
+	initStreamingSystemAndCore(t)
+
 	paramtable.Init()
 	defer cleanTestEnv()
 
@@ -1143,6 +1187,8 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		util.DefaultDBID: {1, 2},
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -1164,35 +1210,41 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		AutoID:      false,
 		Fields:      []*schemapb.FieldSchema{partitionKeyField},
 	}
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
-
 	task := createCollectionTask{
 		Core: core,
 		Req: &milvuspb.CreateCollectionRequest{
 			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			CollectionName: collectionName,
-			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
+		},
+		header: &message.CreateCollectionMessageHeader{},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
 		},
 	}
 
 	t.Run("without num partition", func(t *testing.T) {
 		task.Req.NumPartitions = 0
-		err = task.Prepare(context.Background())
+		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
 
 	t.Run("num partition too large", func(t *testing.T) {
 		task.Req.NumPartitions = Params.RootCoordCfg.MaxPartitionNum.GetAsInt64() + 1
-		err = task.Prepare(context.Background())
+		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
 
 	task.Req.NumPartitions = common.DefaultPartitionsWithPartitionKey
+	task.body.CollectionSchema = &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "",
+		AutoID:      false,
+		Fields:      []*schemapb.FieldSchema{partitionKeyField},
+	}
 
 	t.Run("normal case", func(t *testing.T) {
-		err = task.Prepare(context.Background())
+		err := task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
 }
@@ -1240,13 +1292,9 @@ func TestNamespaceProperty(t *testing.T) {
 
 	t.Run("test namespace enabled", func(t *testing.T) {
 		schema := initSchema()
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
-
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
 				Properties: []*commonpb.KeyValuePair{
 					{
 						Key:   common.NamespaceEnabledKey,
@@ -1254,9 +1302,13 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
 		}
 
-		err = task.handleNamespaceField(ctx, schema)
+		err := task.handleNamespaceField(ctx, schema)
 		assert.NoError(t, err)
 		assert.True(t, hasNamespaceField(schema))
 	})
@@ -1269,13 +1321,10 @@ func TestNamespaceProperty(t *testing.T) {
 			DataType:       schemapb.DataType_Int64,
 			IsPartitionKey: true,
 		})
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
 				Properties: []*commonpb.KeyValuePair{
 					{
 						Key:   common.PartitionKeyIsolationKey,
@@ -1283,22 +1332,23 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
 		}
 
-		err = task.handleNamespaceField(ctx, schema)
+		err := task.handleNamespaceField(ctx, schema)
 		assert.NoError(t, err)
 		assert.False(t, hasNamespaceField(schema))
 	})
 
 	t.Run("test namespace enabled with isolation", func(t *testing.T) {
 		schema := initSchema()
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
 				Properties: []*commonpb.KeyValuePair{
 					{
 						Key:   common.NamespaceEnabledKey,
@@ -1310,9 +1360,13 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
 		}
 
-		err = task.handleNamespaceField(ctx, schema)
+		err := task.handleNamespaceField(ctx, schema)
 		assert.NoError(t, err)
 		assert.True(t, hasNamespaceField(schema))
 	})
@@ -1325,13 +1379,10 @@ func TestNamespaceProperty(t *testing.T) {
 			DataType:       schemapb.DataType_Int64,
 			IsPartitionKey: true,
 		})
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Schema:         marshaledSchema,
 				Properties: []*commonpb.KeyValuePair{
 					{
 						Key:   common.NamespaceEnabledKey,
@@ -1339,9 +1390,13 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
 		}
 
-		err = task.handleNamespaceField(ctx, schema)
+		err := task.handleNamespaceField(ctx, schema)
 		assert.Error(t, err)
 	})
 }
