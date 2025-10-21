@@ -2408,3 +2408,9 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 	}
 	return needProcessFunctions, nil
 }
+
+// ConcatStructFieldName transforms struct field names to structName[fieldName] format
+// This ensures global uniqueness while allowing same field names across different structs
+func ConcatStructFieldName(structName string, fieldName string) string {
+	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
