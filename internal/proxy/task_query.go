@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -69,7 +70,8 @@ type queryTask struct {
 
 	plan             *planpb.PlanNode
 	partitionKeyMode bool
-	lb               LBPolicy
+	shardclientMgr   shardclient.ShardClientMgr
+	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
 	fastSkip         bool
 
@@ -580,12 +582,12 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		zap.String("requestType", "query"))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:             t.request.GetDbName(),
-		collectionID:   t.CollectionID,
-		collectionName: t.collectionName,
-		nq:             1,
-		exec:           t.queryShard,
+	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             1,
+		Exec:           t.queryShard,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -735,13 +737,13 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
-		return errInvalidShardLeaders
+		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode query result error", zap.Any("errorCode", result.GetStatus().GetErrorCode()), zap.String("reason", result.GetStatus().GetReason()))

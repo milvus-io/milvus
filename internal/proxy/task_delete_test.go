@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -683,7 +684,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 	t.Run("simple delete task failed", func(t *testing.T) {
 		mockMgr := NewMockChannelsMgr(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 
 		expr := "pk in [1,2,3]"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
@@ -722,7 +723,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 	t.Run("complex delete query rpc failed", func(t *testing.T) {
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
 		require.NoError(t, err)
@@ -749,8 +750,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
@@ -764,7 +765,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
 		require.NoError(t, err)
@@ -795,8 +796,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 		}
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -830,7 +831,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
 		require.NoError(t, err)
@@ -860,8 +861,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -893,7 +894,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
 		require.NoError(t, err)
@@ -923,8 +924,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -957,7 +958,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
 		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
 		require.NoError(t, err)
@@ -987,8 +988,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -1025,7 +1026,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
@@ -1059,8 +1060,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			return workload.Exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
