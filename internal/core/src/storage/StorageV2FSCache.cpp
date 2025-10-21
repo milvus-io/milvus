@@ -27,7 +27,7 @@ StorageV2FSCache::Instance() {
 milvus_storage::ArrowFileSystemPtr
 StorageV2FSCache::Get(const Key& key) {
     {
-        std::unique_lock lck(mutex_);
+        std::shared_lock lck(mutex_);
         auto it = concurrent_map_.find(key);
         if (it != concurrent_map_.end()) {
             return it->second.second.get();
@@ -40,7 +40,7 @@ StorageV2FSCache::Get(const Key& key) {
     auto [iter, inserted] =
         concurrent_map_.emplace(key, Value(std::move(p), f));
     if (!inserted) {
-        std::unique_lock lck(mutex_);
+        std::shared_lock lck(mutex_);
         // double check: avoid iter has been earsed by other thread
         auto it = concurrent_map_.find(key);
         if (it != concurrent_map_.end()) {
