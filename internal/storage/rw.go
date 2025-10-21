@@ -70,9 +70,6 @@ type rwOptions struct {
 }
 
 func (o *rwOptions) validate() error {
-	if o.storageConfig == nil {
-		return merr.WrapErrServiceInternal("storage config is nil")
-	}
 	if o.collectionID == 0 {
 		log.Warn("storage config collection id is empty when init BinlogReader")
 		// return merr.WrapErrServiceInternal("storage config collection id is empty")
@@ -86,6 +83,9 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
 	case StorageV2:
+		if o.storageConfig == nil {
+			return merr.WrapErrServiceInternal("storage config is nil")
+		}
 	default:
 		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
 	}
