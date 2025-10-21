@@ -2471,6 +2471,49 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 	})
 }
 
+func (suite *ServiceSuite) TestGetHighlight() {
+	ctx := context.Background()
+
+	suite.Run("node not healthy", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := suite.node.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Channel: suite.vchannel,
+			Topks:   []int64{10},
+		})
+
+		suite.NoError(err)
+		suite.Error(merr.Error(resp.GetStatus()))
+	})
+
+	suite.Run("normal case", func() {
+		delegator := &delegator.MockShardDelegator{}
+		suite.node.delegators.Insert(suite.vchannel, delegator)
+		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+		delegator.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
+			[]*querypb.HighlightResult{}, nil)
+		resp, err := suite.node.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Channel: suite.vchannel,
+			Topks:   []int64{1, 1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldName:       "text_field",
+					FieldId:         100,
+					TargetTexts:     []string{"target text", "target text2"},
+					TargetAnalyzers: []string{"standard"},
+					Texts:           []string{"text", "text2"},
+					Analyzers:       []string{"standard"},
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.NoError(merr.Error(resp.GetStatus()))
+		suite.NotNil(resp.Results)
+	})
+}
+
 func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)

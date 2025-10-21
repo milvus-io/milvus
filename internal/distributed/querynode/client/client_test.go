@@ -117,6 +117,9 @@ func Test_NewClient(t *testing.T) {
 		r23, err := client.ValidateAnalyzer(ctx, nil)
 		retCheck(retNotNil, r23, err)
 
+		r24, err := client.GetHighlight(ctx, nil)
+		retCheck(retNotNil, r24, err)
+
 		// stream rpc
 		client, err := client.QueryStream(ctx, nil)
 		retCheck(retNotNil, client, err)
