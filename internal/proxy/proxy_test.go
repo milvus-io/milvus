@@ -1745,7 +1745,7 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	fieldName := ConcatStructFieldName(structField, subFieldFVec)
+	fieldName := typeutil.ConcatStructFieldName(structField, subFieldFVec)
 	wg.Add(1)
 	t.Run("create index for embedding list field", func(t *testing.T) {
 		defer wg.Done()
