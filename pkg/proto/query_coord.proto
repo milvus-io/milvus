@@ -174,6 +174,8 @@ service QueryNode {
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+    rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
+    
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
     rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
 }
@@ -1010,6 +1012,43 @@ message AnalyzerInfo{
 message ValidateAnalyzerRequest{
     common.MsgBase base = 1;
     repeated AnalyzerInfo analyzer_infos = 2;
+}
+
+// HighlightTask fetch highlight for all queries at one field
+// len(target_texts) == len(topks) == nq
+// len(texts) == sum(topks)
+message HighlightTask{
+    string field_name = 1;
+    int64 field_id = 2;
+    repeated string target_texts = 3;
+    repeated string target_analyzers = 4;
+
+    repeated string texts = 5;
+    repeated string analyzers = 6;
+}
+
+message GetHighlightRequest{
+    common.MsgBase base = 1;
+    string channel = 2;
+    repeated int64 topks = 3;
+    repeated HighlightTask tasks=4;
+}
+
+// start_offset and end_offset are fragment offset in the original text
+// number of offsets always be 2 * number of highlight terms in the fragment
+message HighlightFragment{      
+    int64 start_offset = 1;
+    int64 end_offset = 2;
+    repeated int64 offsets = 3;
+}
+
+message HighlightResult{       
+    repeated HighlightFragment fragments = 2;
+}
+
+message GetHighlightResponse{
+    common.Status status = 1;
+    repeated HighlightResult results = 2;
 }
 
 message ListLoadedSegmentsRequest {
