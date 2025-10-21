@@ -19,13 +19,12 @@ package cluster
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type MilvusClient interface {
@@ -45,8 +44,7 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 		APIKey:  cluster.GetConnectionParam().GetToken(),
 	})
 	if err != nil {
-		log.Warn("failed to create milvus client", zap.Error(err))
-		return nil, err
+		return nil, errors.Wrap(err, "failed to create milvus client")
 	}
 	return cli, nil
 }

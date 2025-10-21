@@ -57,6 +57,9 @@ type channelReplicator struct {
 	createRscFunc replicatestream.CreateReplicateStreamClientFunc
 	createMcFunc  cluster.CreateMilvusClientFunc
 	targetClient  cluster.MilvusClient
+	streamClient  replicatestream.ReplicateStreamClient
+	msgScanner    streaming.Scanner
+	msgChan       adaptor.ChanMessageHandler
 
 	asyncNotifier *syncutil.AsyncTaskNotifier[struct{}]
 }
@@ -77,56 +80,74 @@ func (r *channelReplicator) StartReplication() {
 	logger.Info("start replicate channel")
 	go func() {
 		defer r.asyncNotifier.Finish(struct{}{})
+	INIT_LOOP:
 		for {
-			err := r.replicateLoop()
-			if err != nil {
-				if r.asyncNotifier.Context().Err() != nil {
-					break
+			select {
+			case <-r.asyncNotifier.Context().Done():
+				return
+			default:
+				err := r.init()
+				if err != nil {
+					logger.Warn("initialize replicator failed", zap.Error(err))
+					continue
 				}
-				logger.Warn("replicate channel failed", zap.Error(err))
-				time.Sleep(10 * time.Second)
-				continue
+				break INIT_LOOP
 			}
-			break
 		}
-		logger.Info("stop replicate channel")
+		r.startConsumeLoop()
 	}()
 }
 
-// replicateLoop starts the replicate loop.
-func (r *channelReplicator) replicateLoop() error {
+func (r *channelReplicator) init() error {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
-	err := r.initializeTargetClient()
-	if err != nil {
-		return err
+	// init target client
+	if r.targetClient == nil {
+		dialCtx, dialCancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
+		defer dialCancel()
+		milvusClient, err := r.createMcFunc(dialCtx, r.channel.Value.GetTargetCluster())
+		if err != nil {
+			return err
+		}
+		r.targetClient = milvusClient
+		logger.Info("target client initialized")
 	}
-	cp, err := r.getReplicateCheckpoint()
-	if err != nil {
-		return err
+	// init msg scanner
+	if r.msgScanner == nil {
+		cp, err := r.getReplicateCheckpoint()
+		if err != nil {
+			return err
+		}
+		ch := make(adaptor.ChanMessageHandler)
+		scanner := streaming.WAL().Read(r.asyncNotifier.Context(), streaming.ReadOption{
+			PChannel:       r.channel.Value.GetSourceChannelName(),
+			DeliverPolicy:  options.DeliverPolicyStartFrom(cp.MessageID),
+			DeliverFilters: []options.DeliverFilter{options.DeliverFilterTimeTickGT(cp.TimeTick)},
+			MessageHandler: ch,
+		})
+		r.msgScanner = scanner
+		r.msgChan = ch
+		logger.Info("scanner initialized", zap.Any("checkpoint", cp))
 	}
-	ch := make(adaptor.ChanMessageHandler)
-	ctx := r.asyncNotifier.Context()
-	scanner := streaming.WAL().Read(ctx, streaming.ReadOption{
-		PChannel:       r.channel.Value.GetSourceChannelName(),
-		DeliverPolicy:  options.DeliverPolicyStartFrom(cp.MessageID),
-		DeliverFilters: []options.DeliverFilter{options.DeliverFilterTimeTickGT(cp.TimeTick)},
-		MessageHandler: ch,
-	})
-	defer scanner.Close()
+	// init replicate stream client
+	if r.streamClient == nil {
+		r.streamClient = r.createRscFunc(r.asyncNotifier.Context(), r.targetClient, r.channel)
+		logger.Info("stream client initialized")
+	}
+	return nil
+}
 
-	rsc := r.createRscFunc(ctx, r.targetClient, r.channel)
-	// replicate stream client will close it self,
-	// so we need to close the replicate stream client when the replicate loop is stopped.
-
-	logger.Info("start replicate channel loop", zap.Any("startFrom", cp))
+// startConsumeLoop starts the replicate loop.
+func (r *channelReplicator) startConsumeLoop() {
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	logger.Info("start consume loop")
 
 	for {
 		select {
-		case <-ctx.Done():
-			logger.Info("replicate channel stopped")
-			return nil
-		case msg := <-ch:
-			err := rsc.Replicate(msg)
+		case <-r.asyncNotifier.Context().Done():
+			logger.Info("consume loop stopped")
+			return
+		case msg := <-r.msgChan:
+			err := r.streamClient.Replicate(msg)
 			if err != nil {
 				if !errors.Is(err, replicatestream.ErrReplicateIgnored) {
 					panic(fmt.Sprintf("replicate message failed due to unrecoverable error: %v", err))
@@ -136,28 +157,12 @@ func (r *channelReplicator) replicateLoop() error {
 			logger.Debug("replicate message success", log.FieldMessage(msg))
 			if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 				if util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value) {
-					logger.Info("replication removed, stop replicate channel")
-					return nil
+					logger.Info("replication removed, stop consume loop")
+					return
 				}
 			}
 		}
 	}
-}
-
-func (r *channelReplicator) initializeTargetClient() error {
-	if r.targetClient != nil {
-		// close the old target client
-		r.targetClient.Close(r.asyncNotifier.Context())
-	}
-	ctx, cancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
-	defer cancel()
-	milvusClient, err := r.createMcFunc(ctx, r.channel.Value.GetTargetCluster())
-	if err != nil {
-		return errors.Wrap(err, "failed to create target client")
-	}
-	r.targetClient = milvusClient
-	log.Info("target client initialized", zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
-	return nil
 }
 
 func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
@@ -173,7 +178,7 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 	}
 	replicateInfo, err := r.targetClient.GetReplicateInfo(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to get replicate info")
 	}
 
 	checkpoint := replicateInfo.GetCheckpoint()
@@ -195,9 +200,15 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 }
 
 func (r *channelReplicator) StopReplication() {
+	r.asyncNotifier.Cancel()
+	r.asyncNotifier.BlockUntilFinish() // wait for the start goroutine to finish
 	if r.targetClient != nil {
 		r.targetClient.Close(r.asyncNotifier.Context())
 	}
-	r.asyncNotifier.Cancel()
-	r.asyncNotifier.BlockUntilFinish()
+	if r.streamClient != nil {
+		r.streamClient.Close()
+	}
+	if r.msgScanner != nil {
+		r.msgScanner.Close()
+	}
 }

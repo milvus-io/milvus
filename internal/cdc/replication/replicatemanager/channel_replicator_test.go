@@ -63,6 +63,7 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	streaming.SetWALForTest(wal)
 
 	rs := replicatestream.NewMockReplicateStreamClient(t)
+	rs.EXPECT().Close().Return()
 
 	mc := &commonpb.MilvusCluster{ClusterId: "test-cluster"}
 	replicateInfo := &streamingpb.ReplicatePChannelMeta{
