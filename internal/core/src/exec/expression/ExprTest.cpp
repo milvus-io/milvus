@@ -12001,7 +12001,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
              [](std::variant<int64_t, bool, double, std::string_view> v,
                 bool valid) {
                  if (!valid) {
-                     return false;
+                     return true;
                  }
                  return !std::get<bool>(v);
              },
