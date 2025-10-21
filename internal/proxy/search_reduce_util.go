@@ -99,7 +99,13 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
 		limit = int64(hitNum)
-		ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit)
+		// Find the first non-empty FieldsData as template
+		for _, result := range subSearchResultData {
+			if len(result.GetFieldsData()) > 0 {
+				ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+				break
+			}
+		}
 	}
 
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
@@ -186,7 +192,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: []*schemapb.FieldData{},
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -202,6 +208,14 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+
+	// Find the first non-empty FieldsData as template
+	for _, result := range subSearchResultData {
+		if len(result.GetFieldsData()) > 0 {
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			break
+		}
 	}
 
 	var (
@@ -280,7 +294,9 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				groupEntities := groupByValMap[groupVal]
 				for _, groupEntity := range groupEntities {
 					subResData := subSearchResultData[groupEntity.subSearchIdx]
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+					if len(ret.Results.FieldsData) > 0 {
+						retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+					}
 					typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 					ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
 					if err := typeutil.AppendGroupByValue(ret.Results, groupVal, subResData.GetGroupByFieldValue().GetType()); err != nil {
@@ -330,7 +346,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: []*schemapb.FieldData{},
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -346,6 +362,14 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+
+	// Find the first non-empty FieldsData as template
+	for _, result := range subSearchResultData {
+		if len(result.GetFieldsData()) > 0 {
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			break
+		}
 	}
 
 	subSearchNum := len(subSearchResultData)
@@ -401,7 +425,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				}
 				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				if len(ret.Results.FieldsData) > 0 {
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				}
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				cursors[subSearchIdx]++
@@ -515,8 +541,13 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		return ret, nil
 	}
 
-	// init FieldsData
-	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+	// Find the first non-empty FieldsData as template
+	for _, result := range searchResults {
+		if len(result.GetResults().GetFieldsData()) > 0 {
+			ret.Results.FieldsData = typeutil.PrepareResultFieldData(result.GetResults().GetFieldsData(), limit)
+			break
+		}
+	}
 
 	totalCount := limit * groupSize
 	if err := setupIdListForSearchResult(ret, pkType, totalCount); err != nil {
@@ -643,7 +674,9 @@ func rankSearchResultDataByGroup(ctx context.Context,
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				loc := pk2DataOffset[i][group.idList[idx]]
-				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
+				if len(ret.Results.FieldsData) > 0 {
+					typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), int64(loc.offset))
+				}
 				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
 			}
 			returnedRowNum += len(group.idList)
@@ -712,8 +745,13 @@ func rankSearchResultDataByPk(ctx context.Context,
 		return ret, nil
 	}
 
-	// init FieldsData
-	ret.Results.FieldsData = typeutil.PrepareResultFieldData(searchResults[0].GetResults().GetFieldsData(), limit)
+	// Find the first non-empty FieldsData as template
+	for _, result := range searchResults {
+		if len(result.GetResults().GetFieldsData()) > 0 {
+			ret.Results.FieldsData = typeutil.PrepareResultFieldData(result.GetResults().GetFieldsData(), limit)
+			break
+		}
+	}
 
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
 		return ret, nil
@@ -783,7 +821,9 @@ func rankSearchResultDataByPk(ctx context.Context,
 			}
 			ret.Results.Scores = append(ret.Results.Scores, score)
 			loc := pk2DataOffset[i][keys[index]]
-			typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), loc.offset)
+			if len(ret.Results.FieldsData) > 0 {
+				typeutil.AppendFieldData(ret.Results.FieldsData, searchResults[loc.resultIdx].GetResults().GetFieldsData(), loc.offset)
+			}
 		}
 	}
 
