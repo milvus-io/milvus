@@ -32,10 +32,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -46,16 +49,24 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -95,8 +106,41 @@ type ServiceSuite struct {
 	server *Server
 }
 
+func initStreamingSystem() {
+	t := common.NewEmptyMockT()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0"))
+	streaming.SetWALForTest(wal)
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		results := make(map[string]*message.AppendResult)
+		for _, vchannel := range msg.BroadcastHeader().VChannels {
+			results[vchannel] = &message.AppendResult{
+				MessageID:              walimplstest.NewTestMessageID(1),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			}
+		}
+		registry.CallMessageAckCallback(context.Background(), msg, results)
+		return &types.BroadcastAppendResult{}, nil
+	})
+	bapi.EXPECT().Close().Return()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().Close().Return()
+	broadcast.Release()
+	broadcast.ResetBroadcaster()
+	broadcast.Register(mb)
+}
+
 func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Init()
+
+	initStreamingSystem()
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{
@@ -236,6 +280,9 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
+
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(suite.server)
 }
 
 func (suite *ServiceSuite) TestShowCollections() {
