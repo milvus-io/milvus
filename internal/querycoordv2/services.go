@@ -972,8 +972,11 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		return merr.Status(err), nil
 	}
 
-	err := s.meta.ResourceManager.AddResourceGroup(ctx, req.GetResourceGroup(), req.GetConfig())
-	if err != nil {
+	if err := s.broadcastCreateResourceGroup(ctx, req); err != nil {
+		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
+			log.Info("create resource group request ignored")
+			return merr.Success(), nil
+		}
 		log.Warn("failed to create resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -991,8 +994,7 @@ func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateRe
 		return merr.Status(err), nil
 	}
 
-	err := s.meta.ResourceManager.UpdateResourceGroups(ctx, req.GetResourceGroups())
-	if err != nil {
+	if err := s.broadcastUpdateResourceGroups(ctx, req); err != nil {
 		log.Warn("failed to update resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -1010,22 +1012,19 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByResourceGroup(ctx, req.GetResourceGroup())
-	if len(replicas) > 0 {
-		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
-		return merr.Status(errors.Wrap(err,
-			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()))), nil
-	}
-
-	err := s.meta.ResourceManager.RemoveResourceGroup(ctx, req.GetResourceGroup())
-	if err != nil {
+	if err := s.broadcastDropResourceGroup(ctx, req); err != nil {
+		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
+			log.Info("drop resource group request ignored")
+			return merr.Success(), nil
+		}
 		log.Warn("failed to drop resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
 }
 
-// go:deprecated TransferNode transfer nodes between resource groups.
+// Deprecated: TransferNode transfer nodes between resource groups.
+// Use UpdateResourceGroups instead.
 func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("source", req.GetSourceResourceGroup()),
@@ -1039,12 +1038,10 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		return merr.Status(err), nil
 	}
 
-	// Move node from source resource group to target resource group.
-	if err := s.meta.ResourceManager.TransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode())); err != nil {
+	if err := s.broadcastTransferNode(ctx, req); err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
-
 	return merr.Success(), nil
 }
 

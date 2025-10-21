@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -686,6 +687,7 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 
 	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
 	suite.hackBroker(server)
+	registry.ResetRegistration()
 	err = server.Init()
 	return server, err
 }
