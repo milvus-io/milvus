@@ -220,7 +220,10 @@ pull_request_rules:
       - -files~=^(?!tests\/python_client).+
       - label!=manual-pass
       - label=ci-passed
-      - -or: *WHEN_E2E_TEST_SUCCESS
+      - not:
+          or:
+            - status-success=cpu-e2e
+            - status-success=ci-v2/e2e-default
     actions:
       label:
         remove:
