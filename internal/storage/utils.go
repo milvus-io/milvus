@@ -1600,7 +1600,6 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 	batchRows := int64(insertData.GetRowNum())
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
-
 	for _, field := range allFields {
 		// Skip function output fields and system fields
 		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
