@@ -26,6 +26,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -2413,4 +2414,13 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 // This ensures global uniqueness while allowing same field names across different structs
 func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
+// ExtractStructFieldName extracts fieldName from structName[fieldName] format
+func ExtractStructFieldName(fieldName string) (string, error) {
+	parts := strings.Split(fieldName, "[")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid struct field name: %s", fieldName)
+	}
+	return parts[1][:len(parts[1])-1], nil
 }
