@@ -31,10 +31,11 @@ import (
 // It will start a background goroutine to sweep the tombstones periodically.
 // Once the tombstone is safe to be removed, it will be removed by the background goroutine.
 func NewTombstoneSweeper() TombstoneSweeper {
-	ts := &tombstoneSweeperimpl{
+	ts := &tombstoneSweeperImpl{
 		notifier:   syncutil.NewAsyncTaskNotifier[struct{}](),
 		incoming:   make(chan Tombstone),
 		tombstones: make(map[string]Tombstone),
+		interval:   5 * time.Minute,
 	}
 	ts.SetLogger(log.With(log.FieldModule(typeutil.RootCoordRole), log.FieldComponent("tombstone_sweeper")))
 	go ts.background()
@@ -42,47 +43,51 @@ func NewTombstoneSweeper() TombstoneSweeper {
 }
 
 // TombstoneSweeper is a sweeper for the tombstones.
-type tombstoneSweeperimpl struct {
+type tombstoneSweeperImpl struct {
 	log.Binder
 
 	notifier   *syncutil.AsyncTaskNotifier[struct{}]
 	incoming   chan Tombstone
 	tombstones map[string]Tombstone
+	interval   time.Duration
+	// TODO: add metrics for the tombstone sweeper.
 }
 
 // AddTombstone adds a tombstone to the sweeper.
-func (s *tombstoneSweeperimpl) AddTombstone(tombstone Tombstone) {
+func (s *tombstoneSweeperImpl) AddTombstone(tombstone Tombstone) {
 	select {
 	case <-s.notifier.Context().Done():
 	case s.incoming <- tombstone:
 	}
 }
 
-func (s *tombstoneSweeperimpl) background() {
+func (s *tombstoneSweeperImpl) background() {
 	defer func() {
 		s.notifier.Finish(struct{}{})
 		s.Logger().Info("tombstone sweeper background exit")
 	}()
-	s.Logger().Info("tombstone sweeper background start")
+	s.Logger().Info("tombstone sweeper background start", zap.Duration("interval", s.interval))
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
-	select {
-	case tombstone := <-s.incoming:
-		if _, ok := s.tombstones[tombstone.ID()]; !ok {
-			s.tombstones[tombstone.ID()] = tombstone
-			s.Logger().Info("tombstone added", zap.String("tombstone", tombstone.ID()))
+	for {
+		select {
+		case tombstone := <-s.incoming:
+			if _, ok := s.tombstones[tombstone.ID()]; !ok {
+				s.tombstones[tombstone.ID()] = tombstone
+				s.Logger().Info("tombstone added", zap.String("tombstone", tombstone.ID()))
+			}
+		case <-ticker.C:
+			s.triggerGCTombstone(s.notifier.Context())
+		case <-s.notifier.Context().Done():
+			return
 		}
-	case <-ticker.C:
-		s.triggerGCTombstone(s.notifier.Context())
-	case <-s.notifier.Context().Done():
-		return
 	}
 }
 
 // triggerGCTombstone triggers the garbage collection of the tombstones.
-func (s *tombstoneSweeperimpl) triggerGCTombstone(ctx context.Context) {
+func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
 	if len(s.tombstones) == 0 {
 		return
 	}
@@ -102,6 +107,7 @@ func (s *tombstoneSweeperimpl) triggerGCTombstone(ctx context.Context) {
 		}
 		if err := tombstone.Remove(ctx); err != nil {
 			s.Logger().Warn("fail to remove tombstone", zap.String("tombstone", tombstoneID), zap.Error(err))
+			continue
 		}
 		delete(s.tombstones, tombstoneID)
 		s.Logger().Info("tombstone removed", zap.String("tombstone", tombstoneID))
@@ -109,7 +115,7 @@ func (s *tombstoneSweeperimpl) triggerGCTombstone(ctx context.Context) {
 }
 
 // Close closes the tombstone sweeper.
-func (s *tombstoneSweeperimpl) Close() {
+func (s *tombstoneSweeperImpl) Close() {
 	s.notifier.Cancel()
 	s.notifier.BlockUntilFinish()
 }

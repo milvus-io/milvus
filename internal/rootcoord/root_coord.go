@@ -721,7 +721,9 @@ func (c *Core) GracefulStop() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
-	c.tombstoneSweeper.Close()
+	if c.tombstoneSweeper != nil {
+		c.tombstoneSweeper.Close()
+	}
 	c.stopExecutor()
 	c.stopScheduler()
 

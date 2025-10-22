@@ -1490,7 +1490,7 @@ func TestMetaTable_AddPartition(t *testing.T) {
 				100: {Name: "test", CollectionID: 100},
 			},
 		}
-		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreating})
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.Error(t, err)
 	})
 
@@ -1508,7 +1508,7 @@ func TestMetaTable_AddPartition(t *testing.T) {
 				100: {Name: "test", CollectionID: 100},
 			},
 		}
-		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreating})
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.NoError(t, err)
 	})
 }
