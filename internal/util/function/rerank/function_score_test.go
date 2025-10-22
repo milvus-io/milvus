@@ -408,6 +408,68 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 	}
 }
 
+func (s *FunctionScoreSuite) TestExprFunctionCreationAndProcess() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+			},
+			{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	// create expr rerank function which only needs an expression
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{},
+		Params: []*commonpb.KeyValuePair{
+			{Key: reranker, Value: ExprName},
+			{Key: ExprCodeKey, Value: "score + 1.0"},
+		},
+	}
+
+	funcScores := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
+
+	f, err := NewFunctionScore(schema, funcScores)
+	s.NoError(err)
+	s.Equal(ExprName, f.RerankName())
+
+	// verify Process works end-to-end with a simple search result
+	{
+		nq := int64(1)
+		searchData := &milvuspb.SearchResults{Results: embedding.GenSearchResultData(nq, 3, schemapb.DataType_Int64, "ts", 102)}
+		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 0, -1, -1, 1, false, "", []string{"COSINE"}), []*milvuspb.SearchResults{searchData})
+		s.NoError(err)
+		s.Equal(int64(3), ret.Results.TopK)
+	}
+}
+
+func (s *FunctionScoreSuite) TestWasmFunctionMissingCode() {
+	schema := &schemapb.CollectionSchema{
+		Name:   "test",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "test",
+		Type: schemapb.FunctionType_Rerank,
+		Params: []*commonpb.KeyValuePair{
+			{Key: reranker, Value: WasmName},
+			// intentionally omit wasm_code param
+		},
+	}
+
+	funcScores := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
+
+	_, err := NewFunctionScore(schema, funcScores)
+	s.ErrorContains(err, "WASM bytecode not provided in params")
+}
+
 func (s *FunctionScoreSuite) TestFunctionUtil() {
 	g1 := &Group[int64]{
 		idList:    []int64{1, 2, 3},
