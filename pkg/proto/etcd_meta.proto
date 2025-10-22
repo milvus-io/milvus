@@ -64,7 +64,7 @@ message CollectionInfo {
   // deprecate
   repeated uint64 partition_created_timestamps = 9;
   int32 shards_num = 10;
-  repeated common.KeyDataPair start_positions = 11 [deprecated = true]; // use shard_create_checkpoints instead
+  repeated common.KeyDataPair start_positions = 11;
   common.ConsistencyLevel consistency_level = 12;
   CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
   repeated common.KeyValuePair properties = 14;
