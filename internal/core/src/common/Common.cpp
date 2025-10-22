@@ -30,6 +30,8 @@ std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
     DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
 std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
     DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED);
+std::atomic<bool> ENABLE_PARQUET_STATS_SKIP_INDEX(
+    DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX);
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -70,6 +72,13 @@ SetDefaultConfigParamTypeCheck(bool val) {
     CONFIG_PARAM_TYPE_CHECK_ENABLED.store(val);
     LOG_INFO("set default config param type check enabled: {}",
              CONFIG_PARAM_TYPE_CHECK_ENABLED.load());
+}
+
+void
+SetDefaultEnableParquetStatsSkipIndex(bool val) {
+    ENABLE_PARQUET_STATS_SKIP_INDEX.store(val);
+    LOG_INFO("set default enable parquet stats: {}",
+             ENABLE_PARQUET_STATS_SKIP_INDEX.load());
 }
 
 void

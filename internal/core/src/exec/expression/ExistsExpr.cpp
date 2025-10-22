@@ -98,7 +98,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(executor->IsNotNull()));
+                    std::move(executor->Exists()));
                 break;
             }
 
@@ -204,23 +204,28 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
-        cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(active_count_, true);
         TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
 
-        // process shredding data
-        auto shredding_fields = index->GetShreddingFields(pointer);
+        // process shredding data, for exists, we only need to check the fields
+        // that start with the given prefix which contains the given pointer
+        auto shredding_fields = index->GetShreddingFieldsWithPrefix(pointer);
         for (const auto& field : shredding_fields) {
-            index->ExecutorForGettingValid(op_ctx_, field, valid_res_view);
-            res_view |= valid_res_view;
+            TargetBitmap temp_valid(active_count_, true);
+            TargetBitmapView temp_valid_view(temp_valid);
+            index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
+            res_view |= temp_valid_view;
         }
 
         if (!index->CanSkipShared(pointer)) {
-            // process shared data
-            index->ExecuteExistsPathForSharedData(pointer, res_view);
+            // process shared data, need to check if the value is empty
+            // which match the semantics of exists in Json.h
+            index->ExecuteForSharedData(
+                op_ctx_,
+                pointer,
+                [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                    res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                });
         }
-        cached_index_chunk_id_ = 0;
     }
 
     TargetBitmap result;

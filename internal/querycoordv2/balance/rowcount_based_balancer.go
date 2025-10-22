@@ -433,7 +433,7 @@ func (b *nodeItem) setPriority(priority int) {
 }
 
 func (b *nodeItem) getPriorityWithCurrentScoreDelta(delta float64) int {
-	return int((b.currentScore + delta) - b.assignedScore)
+	return int(math.Ceil((b.currentScore + delta) - b.assignedScore))
 }
 
 func (b *nodeItem) getCurrentScore() float64 {

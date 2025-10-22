@@ -47,11 +47,13 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -398,6 +400,17 @@ func (s *Server) initMessageCallback() {
 		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 		if err != nil {
 			return err
+		}
+		balancer, err := balance.GetWithContext(ctx)
+		if err != nil {
+			return err
+		}
+		channelAssignment, err := balancer.GetLatestChannelAssignment()
+		if err != nil {
+			return err
+		}
+		if channelAssignment.ReplicateConfiguration != nil {
+			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
 	})

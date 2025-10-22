@@ -101,19 +101,26 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 class TextMatchIndexHolder {
  public:
     explicit TextMatchIndexHolder(
-        std::unique_ptr<milvus::index::TextMatchIndex> index)
-        : index_(std::move(index)), size_(index_ ? index_->ByteSize() : 0) {
-        if (size_ > 0) {
-            milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-                {size_, 0});
-        }
+        std::unique_ptr<milvus::index::TextMatchIndex> index, bool mmap_enabled)
+        : index_(std::move(index)), loaded_size_([&]() {
+              if (!index_) {
+                  return milvus::cachinglayer::ResourceUsage(0, 0);
+              }
+              if (mmap_enabled) {
+                  return milvus::cachinglayer::ResourceUsage(
+                      0, index_->ByteSize());
+              } else {
+                  return milvus::cachinglayer::ResourceUsage(index_->ByteSize(),
+                                                             0);
+              }
+          }()) {
+        milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            loaded_size_);
     }
 
     ~TextMatchIndexHolder() {
-        if (size_ > 0) {
-            milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
-                {size_, 0});
-        }
+        milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            loaded_size_);
     }
 
     milvus::index::TextMatchIndex*
@@ -123,7 +130,7 @@ class TextMatchIndexHolder {
 
  private:
     std::unique_ptr<milvus::index::TextMatchIndex> index_;
-    int64_t size_;
+    const milvus::cachinglayer::ResourceUsage loaded_size_;
 };
 
 }  // namespace milvus::index

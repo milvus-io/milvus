@@ -358,6 +358,15 @@ class SegmentInternalInterface : public SegmentInterface {
         skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
+    void
+    LoadSkipIndexFromStatistics(
+        FieldId field_id,
+        DataType data_type,
+        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+        skip_index_.LoadSkipFromStatistics(
+            get_segment_id(), field_id, data_type, statistics);
+    }
+
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
 
@@ -425,12 +434,14 @@ class SegmentInternalInterface : public SegmentInterface {
     /**
      * search offset by possible pk values and mvcc timestamp
      *
+     * @param bitset The final bitset after id array filtering,
+     *  `false` means that the entity will be filtered out.
      * @param id_array possible pk values
-     * @param timestamp mvcc timestamp 
-     * @return all the hit entries in vector of offsets
+     * this interface is used for internal expression calculation,
+     * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
-    virtual std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+    virtual void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose

@@ -83,3 +83,7 @@ func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 func UpdateDefaultConfigParamTypeCheck(enable bool) {
 	C.SetDefaultConfigParamTypeCheck(C.bool(enable))
 }
+
+func UpdateDefaultEnableParquetStatsSkipIndex(enable bool) {
+	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enable))
+}
