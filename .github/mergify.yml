@@ -214,6 +214,18 @@ pull_request_rules:
   # Remove ci-passed labels when tests fail
   # ==========================================================================
 
+  - name: Remove ci-passed when E2E test not success for tests changed
+    conditions:
+      - or: *BRANCHES
+      - -files~=^(?!tests\/python_client).+
+      - label!=manual-pass
+      - label=ci-passed
+      - -or: *WHEN_E2E_TEST_SUCCESS
+    actions:
+      label:
+        remove:
+          - ci-passed
+
   # ==========================================================================
   # CONSOLIDATED MIGRATION FAILURE HANDLING
   # Handle failure scenarios during CI system migration with optimized rules
