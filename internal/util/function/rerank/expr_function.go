@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-// ExprRerank allows users to define reranking logic using expressions
+// ExprRerank allows users to define reranking logic using golang expression language https://github.com/expr-lang/expr
 type ExprRerank[T PKType] struct {
 	RerankBase
 
@@ -27,7 +27,6 @@ const (
 	ExprNormalizeKey = "normalize"
 )
 
-// toFloat64 converts various numeric types to float64
 func toFloat64(v interface{}) float64 {
 	switch val := v.(type) {
 	case float64:
@@ -45,7 +44,7 @@ func toFloat64(v interface{}) float64 {
 	}
 }
 
-// mathFunctions contains all mathematical functions for expr-lang
+// mathFunctions contains all mathematical functions for expr-lang https://github.com/expr-lang/expr/blob/main/docs/language.md#math-functions
 // Created once at package level to avoid recreating functions on every call
 var mathFunctions = map[string]interface{}{
 	// Basic math functions with type conversion
@@ -118,19 +117,16 @@ func newExprFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 	}
 
 	// Create environment with mathematical functions
-	// Pre-size map to avoid growth during insertion: 3 core variables + len(mathFunctions)
 	env := make(map[string]interface{}, 3+len(mathFunctions))
 
 	env["score"] = float32(0)
 	env["rank"] = int(0)
 	env["fields"] = map[string]interface{}{}
 
-	// Add mathematical functions to the environment (just copying references)
 	for name, fn := range mathFunctions {
 		env[name] = fn
 	}
 
-	// Compile the expression
 	program, err := expr.Compile(exprCode, expr.Env(env))
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile expression: %w", err)
@@ -169,20 +165,15 @@ func (e *ExprRerank[T]) processOneSearchData(ctx context.Context, searchParams *
 				continue // Already processed (use first occurrence)
 			}
 
-			// Prepare environment with dynamic values and math functions
-			// Pre-size map to avoid growth during insertion: 3 core variables + len(mathFunctions)
 			env := make(map[string]interface{}, 3+len(mathFunctions))
 
 			env["score"] = scores[idx]
 			env["rank"] = idx
 
-			// Add mathematical functions to the runtime environment (just copying references)
 			for name, fn := range mathFunctions {
 				env[name] = fn
 			}
 
-			// Add field values to environment
-			// Pre-size fields map for typical field count
 			fields := make(map[string]interface{}, len(e.inputFieldNames))
 			for fieldIdx, fieldName := range e.inputFieldNames {
 				if fieldIdx < len(col.data) {
@@ -222,7 +213,6 @@ func (e *ExprRerank[T]) processOneSearchData(ctx context.Context, searchParams *
 				return nil, fmt.Errorf("failed to execute expression for id %v: %w", id, err)
 			}
 
-			// Convert output to float32 (fast path for common types)
 			var newScore float32
 			switch v := output.(type) {
 			case float64:
