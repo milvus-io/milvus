@@ -698,26 +698,26 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 	}
 
 	rowNum := len(result.Results.GetScores())
-	rowFragments := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightFragments {
+	rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
 		return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
 	})
 
-	highlightDatas := []*commonpb.HighlightDatas{}
+	HighlightResult := []*commonpb.HighlightResult{}
 	for i, task := range req.GetTasks() {
-		highlightDatas = append(highlightDatas, &commonpb.HighlightDatas{
+		HighlightResult = append(HighlightResult, &commonpb.HighlightResult{
 			FieldName: task.GetFieldName(),
-			Fragments: rowFragments[i*rowNum : (i+1)*rowNum],
+			Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
 		})
 	}
-	result.Results.HighlightDatas = highlightDatas
+	result.Results.HighlightResults = HighlightResult
 	return []any{result}, nil
 }
 
-func buildStringFragments(task *highlightTask, i int, frags []*querypb.HighlightFragment) *commonpb.HighlightFragments {
+func buildStringFragments(task *highlightTask, i int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
 	bytes := []byte(task.Texts[i])
 	preTagsNum := len(task.preTags)
 	postTagsNum := len(task.postTags)
-	result := &commonpb.HighlightFragments{Placeholder: make([][]byte, 0)}
+	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
 	for _, frag := range frags {
 		fragBytes := []byte{}
 		cursor := int(frag.GetStartOffset())
@@ -735,7 +735,7 @@ func buildStringFragments(task *highlightTask, i int, frags []*querypb.Highlight
 		if cursor < int(frag.GetEndOffset()) {
 			fragBytes = append(fragBytes, bytes[cursor:frag.GetEndOffset()]...)
 		}
-		result.Placeholder = append(result.Placeholder, fragBytes)
+		result.Fragments = append(result.Fragments, string(fragBytes))
 	}
 	return result
 }

@@ -7629,6 +7629,9 @@ func (x *RunAnalyzerRequest) GetWithHash() bool {
 	return false
 }
 
+// HighlightTask fetch highlight for all queries at one field
+// len(target_texts) == len(topks) == nq
+// len(texts) == sum(topks)
 type HighlightTask struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -7787,6 +7790,8 @@ func (x *GetHighlightRequest) GetTasks() []*HighlightTask {
 	return nil
 }
 
+// start_offset and end_offset are fragment offset in the original text
+// number of offsets always be 2 * number of highlight terms in the fragment
 type HighlightFragment struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

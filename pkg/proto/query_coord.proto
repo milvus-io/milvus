@@ -997,6 +997,9 @@ message RunAnalyzerRequest{
     bool with_hash = 7;
 }
 
+// HighlightTask fetch highlight for all queries at one field
+// len(target_texts) == len(topks) == nq
+// len(texts) == sum(topks)
 message HighlightTask{
     string field_name = 1;
     int64 field_id = 2;
@@ -1014,6 +1017,8 @@ message GetHighlightRequest{
     repeated HighlightTask tasks=4;
 }
 
+// start_offset and end_offset are fragment offset in the original text
+// number of offsets always be 2 * number of highlight terms in the fragment
 message HighlightFragment{      
     int64 start_offset = 1;
     int64 end_offset = 2;
