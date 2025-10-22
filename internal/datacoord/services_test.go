@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -81,24 +80,6 @@ func (s *ServerSuite) TearDownTest() {
 
 func TestServerSuite(t *testing.T) {
 	suite.Run(t, new(ServerSuite))
-}
-
-func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *msgstream.DataNodeTtMsg {
-	return &msgstream.DataNodeTtMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		DataNodeTtMsg: &msgpb.DataNodeTtMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   msgType,
-				Timestamp: t,
-				SourceID:  sourceID,
-			},
-			ChannelName:   ch,
-			Timestamp:     t,
-			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: 2, NumRows: 100}},
-		},
-	}
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {

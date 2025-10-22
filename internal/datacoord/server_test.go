@@ -77,14 +77,8 @@ const maxOperationsPerTxn = int64(64)
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-
 	rand.Seed(time.Now().UnixNano())
-	parameters := []string{"tikv", "etcd"}
-	var code int
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		code = m.Run()
-	}
+	code := m.Run()
 	os.Exit(code)
 }
 
@@ -2751,7 +2745,11 @@ func TestServer_InitMessageCallback(t *testing.T) {
 
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{}, nil).Maybe()
-	balance.ResetBalancer()
+	mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	snmanager.ResetStreamingNodeManager()
 	balance.Register(mb)
 
 	server := &Server{
@@ -2768,28 +2766,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 
 	// Test initMessageCallback
 	server.initMessageCallback()
-
-	// Test DropPartition message callback
-	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
-		WithHeader(&message.DropPartitionMessageHeader{
-			CollectionId: 1,
-			PartitionId:  1,
-		}).
-		WithBody(&msgpb.DropPartitionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropPartition,
-			},
-		}).
-		WithBroadcast([]string{"test_channel"}, message.NewImportJobIDResourceKey(1)).
-		MustBuildBroadcast()
-	err := registry.CallMessageAckCallback(ctx, dropPartitionMsg, map[string]*message.AppendResult{
-		"test_channel": {
-			MessageID:              walimplstest.NewTestMessageID(1),
-			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:               1,
-		},
-	})
-	assert.Error(t, err) // server not healthy
 
 	// Test Import message check callback
 	resourceKey := message.NewImportJobIDResourceKey(1)

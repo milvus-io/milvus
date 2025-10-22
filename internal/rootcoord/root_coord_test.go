@@ -96,6 +96,11 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	)
 	registry.ResetRegistration()
 	RegisterDDLCallbacks(core)
+	// TODO: we should merge all coordinator code into one package unit,
+	// so these mock code can be replaced with the real code.
+	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+		return nil
+	})
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()

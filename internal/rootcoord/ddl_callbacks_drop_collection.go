@@ -21,9 +21,11 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -104,24 +106,20 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			// }
 
 			// 2. drop the collection index.
-			if err := c.broker.DropCollectionIndex(ctx, collectionID, nil); err != nil {
+			dropIndexMsg := message.NewDropIndexMessageBuilderV2().
+				WithHeader(&message.DropIndexMessageHeader{
+					CollectionId: collectionID,
+				}).
+				WithBody(&message.DropIndexMessageBody{}).
+				WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+				MustBuildBroadcast().
+				WithBroadcastID(msg.BroadcastHeader().BroadcastID)
+
+			if err := registry.CallMessageAckCallback(ctx, dropIndexMsg, map[string]*message.AppendResult{
+				streaming.WAL().ControlChannel(): result,
+			}); err != nil {
 				return errors.Wrap(err, "failed to drop collection index")
 			}
-			// TODO: after DropIndex is supported, we should uncomment the following code.
-			// dropIndexMsg := message.NewDropIndexMessageBuilderV2().
-			// 	WithHeader(&message.DropIndexMessageHeader{
-			// 		CollectionId: collectionID,
-			// 	}).
-			// 	WithBody(&message.DropIndexMessageBody{}).
-			// 	WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-			// 	MustBuildBroadcast().
-			// 	WithBroadcastID(msg.BroadcastHeader().BroadcastID)
-
-			// if err := registry.CallMessageAckCallback(ctx, dropIndexMsg, map[string]*message.AppendResult{
-			// 	streaming.WAL().ControlChannel(): result,
-			// }); err != nil {
-			//   return errors.Wrap(err, "failed to drop collection index")
-			// }
 
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {

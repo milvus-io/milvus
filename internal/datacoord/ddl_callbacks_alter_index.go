@@ -19,10 +19,11 @@ package datacoord
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/samber/lo"
 )
 
 func (s *DDLCallbacks) alterIndexV2AckCallback(ctx context.Context, result message.BroadcastResultAlterIndexMessageV2) error {
