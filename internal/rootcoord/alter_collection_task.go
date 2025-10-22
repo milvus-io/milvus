@@ -389,6 +389,9 @@ func ResetFieldProperties(coll *model.Collection, fieldName string, newProps []*
 		}
 	}
 	for _, structField := range coll.StructArrayFields {
+		if structField.Name == fieldName {
+			return merr.WrapErrParameterInvalidMsg("struct field has no properties to alter", fieldName)
+		}
 		for i, field := range structField.Fields {
 			if field.Name == fieldName {
 				structField.Fields[i].TypeParams = newProps
@@ -406,6 +409,9 @@ func GetFieldProperties(coll *model.Collection, fieldName string) ([]*commonpb.K
 		}
 	}
 	for _, structField := range coll.StructArrayFields {
+		if structField.Name == fieldName {
+			return nil, merr.WrapErrParameterInvalidMsg("struct field has no properties", fieldName)
+		}
 		for _, field := range structField.Fields {
 			if field.Name == fieldName {
 				return field.TypeParams, nil
