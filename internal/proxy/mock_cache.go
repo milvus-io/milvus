@@ -757,69 +757,6 @@ func (_c *MockCache_GetPrivilegeInfo_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// GetShard provides a mock function with given fields: ctx, withCache, database, collectionName, collectionID, channel
-func (_m *MockCache) GetShard(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64, channel string) ([]nodeInfo, error) {
-	ret := _m.Called(ctx, withCache, database, collectionName, collectionID, channel)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetShard")
-	}
-
-	var r0 []nodeInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64, string) ([]nodeInfo, error)); ok {
-		return rf(ctx, withCache, database, collectionName, collectionID, channel)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64, string) []nodeInfo); ok {
-		r0 = rf(ctx, withCache, database, collectionName, collectionID, channel)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]nodeInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, bool, string, string, int64, string) error); ok {
-		r1 = rf(ctx, withCache, database, collectionName, collectionID, channel)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockCache_GetShard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetShard'
-type MockCache_GetShard_Call struct {
-	*mock.Call
-}
-
-// GetShard is a helper method to define mock.On call
-//   - ctx context.Context
-//   - withCache bool
-//   - database string
-//   - collectionName string
-//   - collectionID int64
-//   - channel string
-func (_e *MockCache_Expecter) GetShard(ctx interface{}, withCache interface{}, database interface{}, collectionName interface{}, collectionID interface{}, channel interface{}) *MockCache_GetShard_Call {
-	return &MockCache_GetShard_Call{Call: _e.mock.On("GetShard", ctx, withCache, database, collectionName, collectionID, channel)}
-}
-
-func (_c *MockCache_GetShard_Call) Run(run func(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64, channel string)) *MockCache_GetShard_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(bool), args[2].(string), args[3].(string), args[4].(int64), args[5].(string))
-	})
-	return _c
-}
-
-func (_c *MockCache_GetShard_Call) Return(_a0 []nodeInfo, _a1 error) *MockCache_GetShard_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockCache_GetShard_Call) RunAndReturn(run func(context.Context, bool, string, string, int64, string) ([]nodeInfo, error)) *MockCache_GetShard_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetShardLeaderList provides a mock function with given fields: ctx, database, collectionName, collectionID, withCache
 func (_m *MockCache) GetShardLeaderList(ctx context.Context, database string, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	ret := _m.Called(ctx, database, collectionName, collectionID, withCache)
@@ -1041,53 +978,6 @@ func (_c *MockCache_InvalidateShardLeaderCache_Call) Return() *MockCache_Invalid
 
 func (_c *MockCache_InvalidateShardLeaderCache_Call) RunAndReturn(run func([]int64)) *MockCache_InvalidateShardLeaderCache_Call {
 	_c.Run(run)
-	return _c
-}
-
-// ListShardLocation provides a mock function with no fields
-func (_m *MockCache) ListShardLocation() map[int64]nodeInfo {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ListShardLocation")
-	}
-
-	var r0 map[int64]nodeInfo
-	if rf, ok := ret.Get(0).(func() map[int64]nodeInfo); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]nodeInfo)
-		}
-	}
-
-	return r0
-}
-
-// MockCache_ListShardLocation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListShardLocation'
-type MockCache_ListShardLocation_Call struct {
-	*mock.Call
-}
-
-// ListShardLocation is a helper method to define mock.On call
-func (_e *MockCache_Expecter) ListShardLocation() *MockCache_ListShardLocation_Call {
-	return &MockCache_ListShardLocation_Call{Call: _e.mock.On("ListShardLocation")}
-}
-
-func (_c *MockCache_ListShardLocation_Call) Run(run func()) *MockCache_ListShardLocation_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCache_ListShardLocation_Call) Return(_a0 map[int64]nodeInfo) *MockCache_ListShardLocation_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCache_ListShardLocation_Call) RunAndReturn(run func() map[int64]nodeInfo) *MockCache_ListShardLocation_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -1328,7 +1218,8 @@ func (_c *MockCache_UpdateCredential_Call) RunAndReturn(run func(*internalpb.Cre
 func NewMockCache(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockCache {
+},
+) *MockCache {
 	mock := &MockCache{}
 	mock.Mock.Test(t)
 

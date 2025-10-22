@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package shardclient
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -42,9 +43,9 @@ type CostMetrics struct {
 }
 
 type LookAsideBalancer struct {
-	clientMgr shardClientMgr
+	clientMgr ShardClientMgr
 
-	knownNodeInfos *typeutil.ConcurrentMap[int64, nodeInfo]
+	knownNodeInfos *typeutil.ConcurrentMap[int64, NodeInfo]
 	metricsMap     *typeutil.ConcurrentMap[int64, *CostMetrics]
 	// query node id -> number of consecutive heartbeat failures
 	failedHeartBeatCounter *typeutil.ConcurrentMap[int64, *atomic.Int64]
@@ -62,18 +63,18 @@ type LookAsideBalancer struct {
 	workloadToleranceFactor float64
 }
 
-func NewLookAsideBalancer(clientMgr shardClientMgr) *LookAsideBalancer {
+func NewLookAsideBalancer(clientMgr ShardClientMgr) *LookAsideBalancer {
 	balancer := &LookAsideBalancer{
 		clientMgr:              clientMgr,
-		knownNodeInfos:         typeutil.NewConcurrentMap[int64, nodeInfo](),
+		knownNodeInfos:         typeutil.NewConcurrentMap[int64, NodeInfo](),
 		metricsMap:             typeutil.NewConcurrentMap[int64, *CostMetrics](),
 		failedHeartBeatCounter: typeutil.NewConcurrentMap[int64, *atomic.Int64](),
 		closeCh:                make(chan struct{}),
 	}
 
-	balancer.metricExpireInterval = Params.ProxyCfg.CostMetricsExpireTime.GetAsInt64()
-	balancer.checkWorkloadRequestNum = Params.ProxyCfg.CheckWorkloadRequestNum.GetAsInt64()
-	balancer.workloadToleranceFactor = Params.ProxyCfg.WorkloadToleranceFactor.GetAsFloat()
+	balancer.metricExpireInterval = paramtable.Get().ProxyCfg.CostMetricsExpireTime.GetAsInt64()
+	balancer.checkWorkloadRequestNum = paramtable.Get().ProxyCfg.CheckWorkloadRequestNum.GetAsInt64()
+	balancer.workloadToleranceFactor = paramtable.Get().ProxyCfg.WorkloadToleranceFactor.GetAsFloat()
 
 	return balancer
 }
@@ -90,9 +91,9 @@ func (b *LookAsideBalancer) Close() {
 	})
 }
 
-func (b *LookAsideBalancer) RegisterNodeInfo(nodeInfos []nodeInfo) {
+func (b *LookAsideBalancer) RegisterNodeInfo(nodeInfos []NodeInfo) {
 	for _, node := range nodeInfos {
-		b.knownNodeInfos.Insert(node.nodeID, node)
+		b.knownNodeInfos.Insert(node.NodeID, node)
 	}
 }
 
@@ -227,7 +228,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 1, 60)
 	defer b.wg.Done()
 
-	checkHealthInterval := Params.ProxyCfg.CheckQueryNodeHealthInterval.GetAsDuration(time.Millisecond)
+	checkHealthInterval := paramtable.Get().ProxyCfg.CheckQueryNodeHealthInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(checkHealthInterval)
 	defer ticker.Stop()
 	log.Info("Start check query node health loop")
@@ -241,11 +242,11 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 		case <-ticker.C:
 			var futures []*conc.Future[any]
 			now := time.Now()
-			b.knownNodeInfos.Range(func(node int64, info nodeInfo) bool {
+			b.knownNodeInfos.Range(func(node int64, info NodeInfo) bool {
 				futures = append(futures, pool.Submit(func() (any, error) {
 					metrics, ok := b.metricsMap.Get(node)
 					if !ok || now.UnixMilli()-metrics.ts.Load() > checkHealthInterval.Milliseconds() {
-						checkTimeout := Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
+						checkTimeout := paramtable.Get().ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
 						ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 						defer cancel()
 
@@ -301,14 +302,14 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) {
 		zap.Int64("times", failures.Load()),
 		zap.Error(err))
 
-	if failures.Load() < Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
+	if failures.Load() < paramtable.Get().ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
 		return
 	}
 
 	// if the total time of consecutive heartbeat failures reach the session.ttl, remove the offline query node
-	limit := Params.CommonCfg.SessionTTL.GetAsDuration(time.Second).Seconds() /
-		Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond).Seconds()
-	if failures.Load() > Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() && float64(failures.Load()) >= limit {
+	limit := paramtable.Get().CommonCfg.SessionTTL.GetAsDuration(time.Second).Seconds() /
+		paramtable.Get().ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond).Seconds()
+	if failures.Load() > paramtable.Get().ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() && float64(failures.Load()) >= limit {
 		log.Info("the heartbeat failures has reach it's upper limit, remove the query node",
 			zap.Int64("nodeID", node))
 		// stop the heartbeat
