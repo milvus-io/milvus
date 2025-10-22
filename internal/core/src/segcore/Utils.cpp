@@ -1118,13 +1118,20 @@ LoadArrowReaderForJsonStatsFromRemote(
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel,
-                          milvus::proto::common::LoadPriority priority) {
+                          milvus::proto::common::LoadPriority priority,
+                          storage::FieldDataMeta field_meta,
+                          storage::IndexMeta index_meta) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
 
-        auto codec_futures = storage::GetObjectData(
-            rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
+        auto codec_futures =
+            storage::GetObjectData(rcm.get(),
+                                   remote_files,
+                                   field_meta,
+                                   index_meta,
+                                   milvus::PriorityForLoad(priority),
+                                   false);
         for (auto& codec_future : codec_futures) {
             auto reader = codec_future.get()->GetReader();
             channel->push(reader);
@@ -1139,12 +1146,18 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority) {
+                         milvus::proto::common::LoadPriority priority,
+                         storage::FieldDataMeta field_meta,
+                         storage::IndexMeta index_meta) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto codec_futures = storage::GetObjectData(
-            rcm.get(), remote_files, milvus::PriorityForLoad(priority));
+        auto codec_futures =
+            storage::GetObjectData(rcm.get(),
+                                   remote_files,
+                                   field_meta,
+                                   index_meta,
+                                   milvus::PriorityForLoad(priority));
         for (auto& codec_future : codec_futures) {
             auto field_data = codec_future.get()->GetFieldData();
             channel->push(field_data);

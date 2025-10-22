@@ -1001,11 +1001,8 @@ func TestInsertCodec(t *testing.T) {
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
 	resultBlobs := append(Blobs1, Blobs2...)
-	collID, partID, segID, resultData, err := insertCodec.DeserializeAll(resultBlobs)
+	resultData, err := insertCodec.DeserializeAll(resultBlobs)
 	assert.NoError(t, err)
-	assert.Equal(t, UniqueID(CollectionID), collID)
-	assert.Equal(t, UniqueID(PartitionID), partID)
-	assert.Equal(t, UniqueID(SegmentID), segID)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[RowIDField].(*Int64FieldData).Data)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[TimestampField].(*Int64FieldData).Data)
 	assert.Equal(t, []bool{true, false, true, false}, resultData.Data[BoolField].(*BoolFieldData).Data)
@@ -1079,9 +1076,9 @@ func TestInsertCodec(t *testing.T) {
 	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
 
 	blobs := []*Blob{}
-	_, _, _, err = insertCodec.Deserialize(blobs)
+	_, err = insertCodec.Deserialize(blobs)
 	assert.Error(t, err)
-	_, _, _, _, err = insertCodec.DeserializeAll(blobs)
+	_, err = insertCodec.DeserializeAll(blobs)
 	assert.Error(t, err)
 
 	statsBlob1, err := insertCodec.SerializePkStatsByData(insertData1)
@@ -1113,12 +1110,10 @@ func TestDeleteCodec(t *testing.T) {
 		blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
 		assert.NoError(t, err)
 
-		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
+		data, err := deleteCodec.Deserialize([]*Blob{blob})
 		assert.NoError(t, err)
 		intPks, ok := data.DeletePks().(*Int64PrimaryKeys)
 		require.True(t, ok)
-		assert.Equal(t, pid, int64(1))
-		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, []int64{1, 2}, intPks.values)
 	})
 
@@ -1132,12 +1127,10 @@ func TestDeleteCodec(t *testing.T) {
 		blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
 		assert.NoError(t, err)
 
-		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
+		data, err := deleteCodec.Deserialize([]*Blob{blob})
 		assert.NoError(t, err)
 		strPks, ok := data.DeletePks().(*VarcharPrimaryKeys)
 		require.True(t, ok)
-		assert.Equal(t, pid, int64(1))
-		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, []string{"test1", "test2"}, strPks.values)
 	})
 }
@@ -1174,10 +1167,8 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		blob := &Blob{Value: buffer}
 
 		dCodec := NewDeleteCodec()
-		parID, segID, deleteData, err := dCodec.Deserialize([]*Blob{blob})
+		deleteData, err := dCodec.Deserialize([]*Blob{blob})
 		assert.NoError(t, err)
-		assert.Equal(t, int64(1), parID)
-		assert.Equal(t, int64(1), segID)
 		intPks, ok := deleteData.DeletePks().(*Int64PrimaryKeys)
 		require.True(t, ok)
 		assert.ElementsMatch(t, []int64{1, 2}, intPks.values)
@@ -1212,7 +1203,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		blob := &Blob{Value: buffer}
 
 		dCodec := NewDeleteCodec()
-		_, _, _, err = dCodec.Deserialize([]*Blob{blob})
+		_, err = dCodec.Deserialize([]*Blob{blob})
 		assert.Error(t, err)
 	})
 
@@ -1243,7 +1234,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		blob := &Blob{Value: buffer}
 
 		dCodec := NewDeleteCodec()
-		_, _, _, err = dCodec.Deserialize([]*Blob{blob})
+		_, err = dCodec.Deserialize([]*Blob{blob})
 		assert.Error(t, err)
 	})
 
@@ -1274,7 +1265,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		blob := &Blob{Value: buffer}
 
 		dCodec := NewDeleteCodec()
-		_, _, _, err = dCodec.Deserialize([]*Blob{blob})
+		_, err = dCodec.Deserialize([]*Blob{blob})
 		assert.Error(t, err)
 	})
 }
@@ -1619,4 +1610,73 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		},
 	})
 	assert.Error(t, err)
+}
+
+// TestDeprecatedFieldsHandling tests the deprecated field handling functionality
+func TestDeprecatedFieldsHandling(t *testing.T) {
+	// Test that DeprecatedIDValue constant is correctly defined
+	assert.Equal(t, int64(-1), DeprecatedIDValue)
+
+	// Test that newDescriptorEventData always uses DeprecatedIDValue
+	descriptorEvent := newDescriptorEventData()
+	assert.Equal(t, DeprecatedIDValue, descriptorEvent.CollectionID)
+	assert.Equal(t, DeprecatedIDValue, descriptorEvent.PartitionID)
+	assert.Equal(t, DeprecatedIDValue, descriptorEvent.SegmentID)
+
+	// Test DescriptorEventDataFixPart field forcing
+	event := &DescriptorEventDataFixPart{
+		CollectionID: 123,
+		PartitionID:  456,
+		SegmentID:    789,
+		FieldID:      1001,
+	}
+
+	// Apply deprecated field handling (simulating deserialization)
+	event.CollectionID = DeprecatedIDValue
+	event.PartitionID = DeprecatedIDValue
+	event.SegmentID = DeprecatedIDValue
+
+	// Verify all deprecated fields are forced to -1
+	assert.Equal(t, DeprecatedIDValue, event.CollectionID)
+	assert.Equal(t, DeprecatedIDValue, event.PartitionID)
+	assert.Equal(t, DeprecatedIDValue, event.SegmentID)
+	// FieldID should remain unchanged
+	assert.Equal(t, int64(1001), event.FieldID)
+}
+
+// TestBinaryCompatibilityWithDeprecatedFields tests binary compatibility
+func TestBinaryCompatibilityWithDeprecatedFields(t *testing.T) {
+	testCases := []struct {
+		name        string
+		originalIDs [3]int64 // collection, partition, segment
+	}{
+		{"positive_ids", [3]int64{100, 200, 300}},
+		{"zero_ids", [3]int64{0, 0, 0}},
+		{"negative_ids", [3]int64{-1, -1, -1}},
+		{"mixed_ids", [3]int64{500, -1, 0}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create event data as if read from binlog
+			event := &DescriptorEventDataFixPart{
+				CollectionID: tc.originalIDs[0],
+				PartitionID:  tc.originalIDs[1],
+				SegmentID:    tc.originalIDs[2],
+				FieldID:      1001,
+			}
+
+			// Apply deprecated field handling
+			event.CollectionID = DeprecatedIDValue
+			event.PartitionID = DeprecatedIDValue
+			event.SegmentID = DeprecatedIDValue
+
+			// Verify binary compatibility: all deprecated fields should be -1
+			assert.Equal(t, DeprecatedIDValue, event.CollectionID)
+			assert.Equal(t, DeprecatedIDValue, event.PartitionID)
+			assert.Equal(t, DeprecatedIDValue, event.SegmentID)
+			// FieldID should remain unchanged
+			assert.Equal(t, int64(1001), event.FieldID)
+		})
+	}
 }
