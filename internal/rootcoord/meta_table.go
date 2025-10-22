@@ -55,6 +55,7 @@ var (
 	errIgnoredCreateCollection = errors.New("ignored create collection") // create collection with same schema, so it can be ignored.
 	errIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
 	errIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
+	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
 )
 
 type MetaTableChecker interface {

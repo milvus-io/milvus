@@ -141,7 +141,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
 	require.Error(t, err)
 	// drop a dropped collection should be idempotent.
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{

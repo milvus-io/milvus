@@ -16,14 +16,22 @@
 
 package messageutil
 
-import "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+import (
+	"google.golang.org/protobuf/proto"
 
-// IsSchemaChange checks if the put collection message is a schema change message.
-func IsSchemaChange(header *message.AlterCollectionMessageHeader) bool {
-	for _, path := range header.UpdateMask.GetPaths() {
-		if path == message.FieldMaskCollectionSchema {
-			return true
-		}
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+)
+
+// MustGetSchemaFromCreateCollectionMessageBody gets the schema from the create collection request.
+func MustGetSchemaFromCreateCollectionMessageBody(request *message.CreateCollectionRequest) *schemapb.CollectionSchema {
+	if schema := request.GetCollectionSchema(); schema != nil {
+		return schema
 	}
-	return false
+	// compatible before 2.6.1
+	schema := &schemapb.CollectionSchema{}
+	if err := proto.Unmarshal(request.GetSchema(), schema); err != nil {
+		panic("failed to unmarshal collection schema")
+	}
+	return schema
 }

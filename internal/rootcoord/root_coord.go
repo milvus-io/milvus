@@ -490,7 +490,6 @@ func (c *Core) Init() error {
 		initError = c.initInternal()
 		RegisterDDLCallbacks(c)
 	})
-
 	log.Info("RootCoord init successfully")
 	return initError
 }
@@ -614,13 +613,16 @@ func (c *Core) restore(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// restore the tombstone into the tombstone sweeper.
 		for _, coll := range colls {
-			if coll.State == pb.CollectionState_CollectionDropping {
+			// CollectionCreating is a deprecated status,
+			// we cannot promise the coordinator handle it correctly, so just treat it as a tombstone.
+			if coll.State == pb.CollectionState_CollectionDropping || coll.State == pb.CollectionState_CollectionCreating {
 				c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, coll.CollectionID))
 				continue
 			}
 			for _, part := range coll.Partitions {
-				if part.State == pb.PartitionState_PartitionDropping {
+				if part.State == pb.PartitionState_PartitionDropping || part.State == pb.PartitionState_PartitionCreating {
 					c.tombstoneSweeper.AddTombstone(newPartitionTombstone(c.meta, c.broker, coll.CollectionID, part.PartitionID))
 				}
 			}
@@ -904,7 +906,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 
 	if err := c.broadcastCreateCollectionV1(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredCreateCollection) {
-			logger.Info("create collection with same schema, ignore it")
+			logger.Info("create existed collection with same schema, ignore it")
 			metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
@@ -1471,31 +1473,26 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropPartition")
-
-	log.Ctx(ctx).Info("received request to drop partition",
-		zap.String("role", typeutil.RootCoordRole),
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
 		zap.String("collection", in.GetCollectionName()),
 		zap.String("partition", in.GetPartitionName()))
+	logger.Info("received request to drop partition")
 
 	if err := c.broadcastDropPartition(ctx, in); err != nil {
-		log.Ctx(ctx).Info("failed to drop partition",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("collection", in.GetCollectionName()),
-			zap.String("partition", in.GetPartitionName()))
-
+		if errors.Is(err, errIgnoredDropPartition) {
+			logger.Info("drop partition that not found, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Warn("failed to drop partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	// metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropPartition").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to drop partition",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("collection", in.GetCollectionName()),
-		zap.String("partition", in.GetPartitionName()))
+	logger.Info("done to drop partition")
 	return merr.Success(), nil
 }
 
