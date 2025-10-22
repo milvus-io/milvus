@@ -130,19 +130,6 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 	}, nil
 }
 
-// Deprecated
-func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
-	bufferSize int64, shouldCopy bool,
-) (*DeserializeReaderImpl[*Value], error) {
-	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
-	}), nil
-}
-
 var _ RecordWriter = (*packedRecordWriter)(nil)
 
 type packedRecordWriter struct {
@@ -284,20 +271,6 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 		columnGroupCompressed:   columnGroupCompressed,
 		storageConfig:           storageConfig,
 	}, nil
-}
-
-// Deprecated, todo remove
-func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
-	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
-) (*SerializeWriterImpl[*Value], error) {
-	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
-	}
-	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema)
-	}, batchSize), nil
 }
 
 var _ BinlogRecordWriter = (*PackedBinlogRecordWriter)(nil)
