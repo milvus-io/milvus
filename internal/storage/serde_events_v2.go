@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,9 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -43,63 +40,18 @@ import (
 )
 
 type packedRecordReader struct {
-	paths  [][]string
-	chunk  int
-	reader *packed.PackedReader
-
-	bufferSize           int64
-	arrowSchema          *arrow.Schema
-	field2Col            map[FieldID]int
-	storageConfig        *indexpb.StorageConfig
-	storagePluginContext *indexcgopb.StoragePluginContext
+	reader    *packed.PackedReader
+	field2Col map[FieldID]int
 }
 
 var _ RecordReader = (*packedRecordReader)(nil)
 
-func (pr *packedRecordReader) iterateNextBatch() error {
-	if pr.reader != nil {
-		if err := pr.reader.Close(); err != nil {
-			return err
-		}
-	}
-
-	if pr.chunk >= len(pr.paths) {
-		return io.EOF
-	}
-
-	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize, pr.storageConfig, pr.storagePluginContext)
-	pr.chunk++
-	if err != nil {
-		return errors.Newf("New binlog record packed reader error: %w", err)
-	}
-	pr.reader = reader
-	return nil
-}
-
 func (pr *packedRecordReader) Next() (Record, error) {
-	if pr.reader == nil {
-		if err := pr.iterateNextBatch(); err != nil {
-			return nil, err
-		}
+	rec, err := pr.reader.ReadNext()
+	if err != nil {
+		return nil, err
 	}
-
-	for {
-		rec, err := pr.reader.ReadNext()
-		if err == io.EOF {
-			if err := pr.iterateNextBatch(); err != nil {
-				return nil, err
-			}
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		return NewSimpleArrowRecord(rec, pr.field2Col), nil
-	}
-}
-
-func (pr *packedRecordReader) SetNeededFields(fields typeutil.Set[int64]) {
-	// TODO, push down SetNeededFields to packedReader after implemented
-	// no-op for now
+	return NewSimpleArrowRecord(rec, pr.field2Col), nil
 }
 
 func (pr *packedRecordReader) Close() error {
@@ -109,7 +61,12 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext,
+func newPackedRecordReader(
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
@@ -120,27 +77,34 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	return &packedRecordReader{
-		paths:                paths,
-		bufferSize:           bufferSize,
-		arrowSchema:          arrowSchema,
-		field2Col:            field2Col,
-		storageConfig:        storageConfig,
-		storagePluginContext: storagePluginContext,
-	}, nil
-}
-
-// Deprecated
-func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
-	bufferSize int64, shouldCopy bool,
-) (*DeserializeReaderImpl[*Value], error) {
-	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil, nil)
+	reader, err := packed.NewPackedReader(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, err
 	}
-	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
-	}), nil
+	return &packedRecordReader{
+		reader:    reader,
+		field2Col: field2Col,
+	}, nil
+}
+
+func newIterativePackedRecordReader(
+	paths [][]string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) *IterativeRecordReader {
+	chunk := 0
+	return &IterativeRecordReader{
+		iterate: func() (RecordReader, error) {
+			if chunk >= len(paths) {
+				return nil, io.EOF
+			}
+			currentPaths := paths[chunk]
+			chunk++
+			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext)
+		},
+	}
 }
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
@@ -237,7 +201,22 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*packedRecordWriter, error) {
+func NewPackedRecordWriter(
+	bucketName string,
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordWriter, error) {
+	// Validate PK field exists before proceeding
+	_, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
@@ -321,8 +300,8 @@ type PackedBinlogRecordWriter struct {
 
 	// writer and stats generated at runtime
 	writer              *packedRecordWriter
-	pkstats             *PrimaryKeyStats
-	bm25Stats           map[int64]*BM25Stats
+	pkCollector         *PkStatsCollector
+	bm25Collector       *Bm25StatsCollector
 	tsFrom              typeutil.Timestamp
 	tsTo                typeutil.Timestamp
 	rowNum              int64
@@ -339,6 +318,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		return err
 	}
 
+	// Track timestamps
 	tsArray := r.Column(common.TimeStampField).(*array.Int64)
 	rows := r.Len()
 	for i := 0; i < rows; i++ {
@@ -349,31 +329,14 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		if ts > pw.tsTo {
 			pw.tsTo = ts
 		}
+	}
 
-		switch schemapb.DataType(pw.pkstats.PkType) {
-		case schemapb.DataType_Int64:
-			pkArray := r.Column(pw.pkstats.FieldID).(*array.Int64)
-			pk := &Int64PrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			pw.pkstats.Update(pk)
-		case schemapb.DataType_VarChar:
-			pkArray := r.Column(pw.pkstats.FieldID).(*array.String)
-			pk := &VarCharPrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			pw.pkstats.Update(pk)
-		default:
-			panic("invalid data type")
-		}
-
-		for fieldID, stats := range pw.bm25Stats {
-			field, ok := r.Column(fieldID).(*array.Binary)
-			if !ok {
-				return errors.New("bm25 field value not found")
-			}
-			stats.AppendBytes(field.Value(i))
-		}
+	// Collect statistics
+	if err := pw.pkCollector.Collect(r); err != nil {
+		return err
+	}
+	if err := pw.bm25Collector.Collect(r); err != nil {
+		return err
 	}
 
 	err := pw.writer.Write(r)
@@ -434,9 +397,6 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	if err := pw.writeStats(); err != nil {
 		return err
 	}
-	if err := pw.writeBm25Stats(); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -468,89 +428,39 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 }
 
 func (pw *PackedBinlogRecordWriter) writeStats() error {
-	if pw.pkstats == nil {
-		return nil
-	}
-
-	id, err := pw.allocator.AllocOne()
+	// Write PK stats
+	pkStatsMap, err := pw.pkCollector.Digest(
+		pw.collectionID,
+		pw.partitionID,
+		pw.segmentID,
+		pw.storageConfig.GetRootPath(),
+		pw.rowNum,
+		pw.allocator,
+		pw.BlobsWriter,
+	)
 	if err != nil {
 		return err
 	}
+	// Extract single PK stats from map
+	for _, statsLog := range pkStatsMap {
+		pw.statsLog = statsLog
+		break
+	}
 
-	codec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
-		ID:     pw.collectionID,
-		Schema: pw.schema,
-	})
-	sblob, err := codec.SerializePkStats(pw.pkstats, pw.rowNum)
+	// Write BM25 stats
+	bm25StatsLog, err := pw.bm25Collector.Digest(
+		pw.collectionID,
+		pw.partitionID,
+		pw.segmentID,
+		pw.storageConfig.GetRootPath(),
+		pw.rowNum,
+		pw.allocator,
+		pw.BlobsWriter,
+	)
 	if err != nil {
 		return err
 	}
-
-	sblob.Key = metautil.BuildStatsLogPath(pw.storageConfig.GetRootPath(),
-		pw.collectionID, pw.partitionID, pw.segmentID, pw.pkstats.FieldID, id)
-
-	if err := pw.BlobsWriter([]*Blob{sblob}); err != nil {
-		return err
-	}
-
-	pw.statsLog = &datapb.FieldBinlog{
-		FieldID: pw.pkstats.FieldID,
-		Binlogs: []*datapb.Binlog{
-			{
-				LogSize:    int64(len(sblob.GetValue())),
-				MemorySize: int64(len(sblob.GetValue())),
-				LogPath:    sblob.Key,
-				EntriesNum: pw.rowNum,
-			},
-		},
-	}
-	return nil
-}
-
-func (pw *PackedBinlogRecordWriter) writeBm25Stats() error {
-	if len(pw.bm25Stats) == 0 {
-		return nil
-	}
-	id, _, err := pw.allocator.Alloc(uint32(len(pw.bm25Stats)))
-	if err != nil {
-		return err
-	}
-
-	if pw.bm25StatsLog == nil {
-		pw.bm25StatsLog = make(map[FieldID]*datapb.FieldBinlog)
-	}
-	for fid, stats := range pw.bm25Stats {
-		bytes, err := stats.Serialize()
-		if err != nil {
-			return err
-		}
-		key := metautil.BuildBm25LogPath(pw.storageConfig.GetRootPath(),
-			pw.collectionID, pw.partitionID, pw.segmentID, fid, id)
-		blob := &Blob{
-			Key:        key,
-			Value:      bytes,
-			RowNum:     stats.NumRow(),
-			MemorySize: int64(len(bytes)),
-		}
-		if err := pw.BlobsWriter([]*Blob{blob}); err != nil {
-			return err
-		}
-
-		fieldLog := &datapb.FieldBinlog{
-			FieldID: fid,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize:    int64(len(blob.GetValue())),
-					MemorySize: int64(len(blob.GetValue())),
-					LogPath:    key,
-					EntriesNum: pw.rowNum,
-				},
-			},
-		}
-
-		pw.bm25StatsLog[fid] = fieldLog
-		id++
-	}
+	pw.bm25StatsLog = bm25StatsLog
 
 	return nil
 }
@@ -588,27 +498,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		log.Warn("failed to get pk field from schema")
-		return nil, err
-	}
-	stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
-	if err != nil {
-		return nil, err
-	}
-	bm25FieldIDs := lo.FilterMap(schema.GetFunctions(), func(function *schemapb.FunctionSchema, _ int) (int64, bool) {
-		if function.GetType() == schemapb.FunctionType_BM25 {
-			return function.GetOutputFieldIds()[0], true
-		}
-		return 0, false
-	})
-	bm25Stats := make(map[int64]*BM25Stats, len(bm25FieldIDs))
-	for _, fid := range bm25FieldIDs {
-		bm25Stats[fid] = NewBM25Stats()
-	}
 
-	return &PackedBinlogRecordWriter{
+	writer := &PackedBinlogRecordWriter{
 		collectionID:         collectionID,
 		partitionID:          partitionID,
 		segmentID:            segmentID,
@@ -620,12 +511,23 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		bufferSize:           bufferSize,
 		multiPartUploadSize:  multiPartUploadSize,
 		columnGroups:         columnGroups,
-		pkstats:              stats,
-		bm25Stats:            bm25Stats,
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
+		tsFrom:               typeutil.MaxTimestamp,
+		tsTo:                 0,
+	}
 
-		tsFrom: typeutil.MaxTimestamp,
-		tsTo:   0,
-	}, nil
+	// Create stats collectors
+	writer.pkCollector, err = NewPkStatsCollector(
+		collectionID,
+		schema,
+		maxRowNum,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	writer.bm25Collector = NewBm25StatsCollector(schema)
+
+	return writer, nil
 }

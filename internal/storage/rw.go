@@ -71,9 +71,6 @@ type rwOptions struct {
 }
 
 func (o *rwOptions) validate() error {
-	if o.storageConfig == nil {
-		return merr.WrapErrServiceInternal("storage config is nil")
-	}
 	if o.collectionID == 0 {
 		log.Warn("storage config collection id is empty when init BinlogReader")
 		// return merr.WrapErrServiceInternal("storage config collection id is empty")
@@ -87,6 +84,9 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
 	case StorageV2:
+		if o.storageConfig == nil {
+			return merr.WrapErrServiceInternal("storage config is nil")
+		}
 	default:
 		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
 	}
@@ -267,7 +267,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if err != nil {
 			return nil, err
 		}
-		rr, err = newCompositeBinlogRecordReader(schema, blobsReader, binlogReaderOpts...)
+		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
@@ -289,15 +289,13 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		rr, err = newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		// FIXME: add needed fields support
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
 	if err != nil {
 		return nil, err
-	}
-	if rwOptions.neededFields != nil {
-		rr.SetNeededFields(rwOptions.neededFields)
 	}
 	return rr, nil
 }
@@ -361,4 +359,37 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+}
+
+func NewDeltalogWriter(
+	ctx context.Context,
+	collectionID, partitionID, segmentID, logID UniqueID,
+	pkType schemapb.DataType,
+	path string,
+	option ...RwOption,
+) (RecordWriter, error) {
+	rwOptions := DefaultWriterOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+}
+
+func NewDeltalogReader(
+	pkField *schemapb.FieldSchema,
+	paths []string,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
 }
