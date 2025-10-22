@@ -85,9 +85,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		collectionID: collectionID,
 	}
 
-	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	err := InitMetaCache(ctx, queryCoord, shardMgr)
+	err := InitMetaCache(ctx, queryCoord)
 	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
 }

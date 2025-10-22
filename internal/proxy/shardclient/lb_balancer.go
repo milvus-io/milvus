@@ -13,41 +13,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package proxy
+
+package shardclient
 
 import (
 	"context"
 
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-type RoundRobinBalancer struct {
-	idx atomic.Int64
+type LBBalancer interface {
+	RegisterNodeInfo(nodeInfos []NodeInfo)
+	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error)
+	CancelWorkload(node int64, nq int64)
+	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
+	Start(ctx context.Context)
+	Close()
 }
-
-func NewRoundRobinBalancer() *RoundRobinBalancer {
-	return &RoundRobinBalancer{}
-}
-
-func (b *RoundRobinBalancer) RegisterNodeInfo(nodeInfos []nodeInfo) {}
-
-func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
-	if len(availableNodes) == 0 {
-		return -1, merr.ErrNodeNotAvailable
-	}
-
-	idx := b.idx.Inc()
-	return availableNodes[int(idx)%len(availableNodes)], nil
-}
-
-func (b *RoundRobinBalancer) CancelWorkload(node int64, nq int64) {
-}
-
-func (b *RoundRobinBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}
-
-func (b *RoundRobinBalancer) Start(ctx context.Context) {}
-
-func (b *RoundRobinBalancer) Close() {}

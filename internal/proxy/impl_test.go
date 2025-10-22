@@ -40,6 +40,7 @@ import (
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -247,8 +248,8 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	node.sched.Start()
 	defer node.sched.Close()
 
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, qc, mgr)
+	// mgr := newShardClientMgr()
+	InitMetaCache(ctx, qc)
 
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 
@@ -329,8 +330,8 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	node.sched.Start()
 	defer node.sched.Close()
 
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, qc, mgr)
+	// mgr := newShardClientMgr()
+	InitMetaCache(ctx, qc)
 
 	t.Run("create resource group", func(t *testing.T) {
 		resp, err := node.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
@@ -1162,7 +1163,7 @@ func TestProxyDescribeCollection(t *testing.T) {
 	}, nil).Maybe()
 	mixCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 	var err error
-	globalMetaCache, err = NewMetaCache(mixCoord, nil)
+	globalMetaCache, err = NewMetaCache(mixCoord)
 	assert.NoError(t, err)
 
 	t.Run("not healthy", func(t *testing.T) {
@@ -1589,9 +1590,9 @@ func TestProxy_InvalidateShardLeaderCache(t *testing.T) {
 		cacheBak := globalMetaCache
 		defer func() { globalMetaCache = cacheBak }()
 		// set expectations
-		cache := NewMockCache(t)
-		cache.EXPECT().InvalidateShardLeaderCache(mock.Anything)
-		globalMetaCache = cache
+		mockShardClientMgr := shardclient.NewMockShardClientManager(t)
+		mockShardClientMgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return()
+		node.shardMgr = mockShardClientMgr
 
 		resp, err := node.InvalidateShardLeaderCache(context.TODO(), &proxypb.InvalidateShardLeaderCacheRequest{})
 		assert.NoError(t, err)
@@ -1698,7 +1699,7 @@ func TestRunAnalyzer(t *testing.T) {
 			fieldMap: fieldMap,
 		}, nil)
 
-		lb := NewMockLBPolicy(t)
+		lb := shardclient.NewMockLBPolicy(t)
 		lb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Return(nil)
 		p.lbPolicy = lb
 
