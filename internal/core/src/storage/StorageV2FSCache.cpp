@@ -14,6 +14,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include "milvus-storage/filesystem/fs.h"
+#include "log/Log.h"
 
 namespace milvus::storage {
 
@@ -25,9 +26,12 @@ StorageV2FSCache::Instance() {
 
 milvus_storage::ArrowFileSystemPtr
 StorageV2FSCache::Get(const Key& key) {
-    auto it = concurrent_map_.find(key);
-    if (it != concurrent_map_.end()) {
-        return it->second.second.get();
+    {
+        std::shared_lock lck(mutex_);
+        auto it = concurrent_map_.find(key);
+        if (it != concurrent_map_.end()) {
+            return it->second.second.get();
+        }
     }
 
     std::promise<milvus_storage::ArrowFileSystemPtr> p;
@@ -36,7 +40,13 @@ StorageV2FSCache::Get(const Key& key) {
     auto [iter, inserted] =
         concurrent_map_.emplace(key, Value(std::move(p), f));
     if (!inserted) {
-        return iter->second.second.get();
+        std::shared_lock lck(mutex_);
+        // double check: avoid iter has been earsed by other thread
+        auto it = concurrent_map_.find(key);
+        if (it != concurrent_map_.end()) {
+            return it->second.second.get();
+        }
+        return nullptr;
     }
 
     try {
@@ -62,6 +72,8 @@ StorageV2FSCache::Get(const Key& key) {
         auto result = milvus_storage::CreateArrowFileSystem(conf);
 
         if (!result.ok()) {
+            LOG_WARN("create arrow file system failed, error: {}",
+                     result.status().ToString());
             iter->second.first.set_value(nullptr);
             std::unique_lock lck(mutex_);
             concurrent_map_.unsafe_erase(iter);
