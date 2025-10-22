@@ -111,7 +111,7 @@ func NewDispatcher(
 	if err != nil {
 		return nil, err
 	}
-	if position != nil && len(position.MsgID) != 0 {
+	if position != nil && position.MsgID != nil {
 		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
 		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)

@@ -43,7 +43,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	if err := proto.Unmarshal(req.GetSchema(), schema); err != nil {
 		return err
 	}
-	if req.GetShardsNum() == 0 {
+	if req.GetShardsNum() <= 0 {
 		req.ShardsNum = common.DefaultShardsNum
 	}
 	if _, err := typeutil.GetPartitionKeyFieldSchema(schema); err == nil {
