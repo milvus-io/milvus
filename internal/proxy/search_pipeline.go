@@ -325,6 +325,7 @@ type requeryOperator struct {
 	queryChannelsTs    map[string]Timestamp
 	consistencyLevel   commonpb.ConsistencyLevel
 	guaranteeTimestamp uint64
+	namespace          *string
 
 	node types.ProxyComponent
 }
@@ -352,6 +353,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		partitionNames:     t.request.GetPartitionNames(),
 		partitionIDs:       t.SearchRequest.GetPartitionIDs(),
 		node:               t.node,
+		namespace:          t.request.Namespace,
 	}, nil
 }
 
@@ -386,8 +388,10 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		PartitionNames:        op.partitionNames,
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    op.guaranteeTimestamp,
+		Namespace:             op.namespace,
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
+	plan.Namespace = op.namespace
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -404,13 +408,14 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			PartitionIDs:     op.partitionIDs, // use search partitionIDs
 			ConsistencyLevel: op.consistencyLevel,
 		},
-		request:      queryReq,
-		plan:         plan,
-		mixCoord:     op.node.(*Proxy).mixCoord,
-		lb:           op.node.(*Proxy).lbPolicy,
-		channelsMvcc: channelsMvcc,
-		fastSkip:     true,
-		reQuery:      true,
+		request:        queryReq,
+		plan:           plan,
+		mixCoord:       op.node.(*Proxy).mixCoord,
+		lb:             op.node.(*Proxy).lbPolicy,
+		shardclientMgr: op.node.(*Proxy).shardMgr,
+		channelsMvcc:   channelsMvcc,
+		fastSkip:       true,
+		reQuery:        true,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
 	if err != nil {
@@ -468,7 +473,15 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 	defer sp.End()
 
 	fields := inputs[0].([]*schemapb.FieldData)
-	idsList := inputs[1].([]*schemapb.IDs)
+	var idsList []*schemapb.IDs
+	switch inputs[1].(type) {
+	case *schemapb.IDs:
+		idsList = []*schemapb.IDs{inputs[1].(*schemapb.IDs)}
+	case []*schemapb.IDs:
+		idsList = inputs[1].([]*schemapb.IDs)
+	default:
+		panic(fmt.Sprintf("invalid ids type: %T", inputs[1]))
+	}
 	if len(fields) == 0 {
 		emptyFields := make([][]*schemapb.FieldData, len(idsList))
 		return []any{emptyFields}, nil
@@ -915,8 +928,8 @@ var hybridSearchPipe = &pipelineDef{
 	},
 }
 
-var hybridSearchWithRequeryPipe = &pipelineDef{
-	name: "hybridSearchWithRequery",
+var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
+	name: "hybridSearchWithRequeryAndRerankByDataPipe",
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
@@ -1022,6 +1035,69 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 	},
 }
 
+var hybridSearchWithRequeryPipe = &pipelineDef{
+	name: "hybridSearchWithRequeryPipe",
+	nodes: []*nodeDef{
+		{
+			name:    "reduce",
+			inputs:  []string{"input", "storage_cost"},
+			outputs: []string{"reduced", "metrics"},
+			opName:  hybridSearchReduceOp,
+		},
+		{
+			name:    "rerank",
+			inputs:  []string{"reduced", "metrics"},
+			outputs: []string{"rank_result"},
+			opName:  rerankOp,
+		},
+		{
+			name:    "pick_ids",
+			inputs:  []string{"rank_result"},
+			outputs: []string{"ids"},
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					return []any{
+						inputs[0].(*milvuspb.SearchResults).Results.Ids,
+					}, nil
+				},
+			},
+			opName: lambdaOp,
+		},
+		{
+			name:    "requery",
+			inputs:  []string{"ids", "storage_cost"},
+			outputs: []string{"fields", "storage_cost"},
+			opName:  requeryOp,
+		},
+		{
+			name:    "organize",
+			inputs:  []string{"fields", "ids"},
+			outputs: []string{"organized_fields"},
+			opName:  organizeOp,
+		},
+		{
+			name:    "result",
+			inputs:  []string{"rank_result", "organized_fields"},
+			outputs: []string{"result"},
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					result := inputs[0].(*milvuspb.SearchResults)
+					fields := inputs[1].([][]*schemapb.FieldData)
+					result.Results.FieldsData = fields[0]
+					return []any{result}, nil
+				},
+			},
+			opName: lambdaOp,
+		},
+		{
+			name:    "filter_field",
+			inputs:  []string{"result"},
+			outputs: []string{"output"},
+			opName:  filterFieldOp,
+		},
+	},
+}
+
 func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
 		return newPipeline(searchPipe, t)
@@ -1039,7 +1115,16 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 		return newPipeline(hybridSearchPipe, t)
 	}
 	if t.SearchRequest.GetIsAdvanced() && t.needRequery {
-		return newPipeline(hybridSearchWithRequeryPipe, t)
+		if len(t.functionScore.GetAllInputFieldIDs()) > 0 {
+			// When the function score need field data, we need to requery to fetch the field data before rerank.
+			// The requery will fetch the field data of all search results,
+			// so there's some memory overhead.
+			return newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, t)
+		} else {
+			// Otherwise, we can rerank and limit the requery size to the limit.
+			// so the memory overhead is less than the hybridSearchWithRequeryAndRerankByFieldDataPipe.
+			return newPipeline(hybridSearchWithRequeryPipe, t)
+		}
 	}
 	return nil, fmt.Errorf("Unsupported pipeline")
 }

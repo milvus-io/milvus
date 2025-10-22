@@ -17,6 +17,8 @@
 #include "Expr.h"
 
 #include "common/EasyAssert.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 #include "exec/expression/AlwaysTrueExpr.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/BinaryRangeExpr.h"
@@ -39,7 +41,6 @@
 #include "monitor/Monitor.h"
 
 #include <memory>
-
 namespace milvus {
 namespace exec {
 
@@ -49,6 +50,8 @@ ExprSet::Eval(int32_t begin,
               bool initialize,
               EvalCtx& context,
               std::vector<VectorPtr>& results) {
+    tracer::AutoSpan span("ExprSet::Eval", tracer::GetRootSpan(), true);
+
     results.resize(exprs_.size());
     for (size_t i = begin; i < end; ++i) {
         exprs_[i]->Eval(context, results[i]);

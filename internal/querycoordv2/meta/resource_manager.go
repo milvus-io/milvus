@@ -42,7 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var ErrNodeNotEnough = errors.New("nodes not enough")
+var (
+	ErrNodeNotEnough                 = errors.New("nodes not enough")
+	ErrResourceGroupOperationIgnored = errors.New("operation ignored")
+)
 
 type ResourceManager struct {
 	incomingNode typeutil.UniqueSet // incomingNode is a temporary set for incoming hangup node,
@@ -120,15 +123,18 @@ func (rm *ResourceManager) Recover(ctx context.Context) error {
 	return nil
 }
 
-// AddResourceGroup create a new ResourceGroup.
-// Do no changed with node, all node will be reassign to new resource group by auto recover.
+// Deprecated: only for compatibility with unittest.
 func (rm *ResourceManager) AddResourceGroup(ctx context.Context, rgName string, cfg *rgpb.ResourceGroupConfig) error {
+	if err := rm.CheckIfResourceGroupAddable(ctx, rgName, cfg); err != nil {
+		return err
+	}
+	return rm.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{rgName: cfg})
+}
+
+// CheckIfResourceGroupAddable check if a resource group can be added.
+func (rm *ResourceManager) CheckIfResourceGroupAddable(ctx context.Context, rgName string, cfg *rgpb.ResourceGroupConfig) error {
 	if len(rgName) == 0 {
 		return merr.WrapErrParameterMissing("resource group name couldn't be empty")
-	}
-	if cfg == nil {
-		// Use default config if not set, compatible with old client.
-		cfg = newResourceGroupConfig(0, 0)
 	}
 
 	rm.rwmutex.Lock()
@@ -137,7 +143,7 @@ func (rm *ResourceManager) AddResourceGroup(ctx context.Context, rgName string, 
 		// Idempotent promise.
 		// If resource group already exist, check if configuration is the same,
 		if proto.Equal(rm.groups[rgName].GetConfig(), cfg) {
-			return nil
+			return ErrResourceGroupOperationIgnored
 		}
 		return merr.WrapErrResourceGroupAlreadyExist(rgName)
 	}
@@ -150,31 +156,12 @@ func (rm *ResourceManager) AddResourceGroup(ctx context.Context, rgName string, 
 	if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
 		return err
 	}
-
-	rg := NewResourceGroup(rgName, cfg, rm.nodeMgr)
-	if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
-		log.Warn("failed to add resource group",
-			zap.String("rgName", rgName),
-			zap.Any("config", cfg),
-			zap.Error(err),
-		)
-		return merr.WrapErrResourceGroupServiceAvailable()
-	}
-
-	rm.setupInMemResourceGroup(rg)
-	log.Info("add resource group",
-		zap.String("rgName", rgName),
-		zap.Any("config", cfg),
-	)
-
-	// notify that resource group config has been changed.
-	rm.rgChangedNotifier.NotifyAll()
 	return nil
 }
 
-// UpdateResourceGroups update resource group configuration.
+// AlterResourceGroups alter resource group configuration.
 // Only change the configuration, no change with node. all node will be reassign by auto recover.
-func (rm *ResourceManager) UpdateResourceGroups(ctx context.Context, rgs map[string]*rgpb.ResourceGroupConfig) error {
+func (rm *ResourceManager) AlterResourceGroups(ctx context.Context, rgs map[string]*rgpb.ResourceGroupConfig) error {
 	if len(rgs) == 0 {
 		return nil
 	}
@@ -184,16 +171,40 @@ func (rm *ResourceManager) UpdateResourceGroups(ctx context.Context, rgs map[str
 	return rm.updateResourceGroups(ctx, rgs)
 }
 
-// updateResourceGroups update resource group configuration.
-func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[string]*rgpb.ResourceGroupConfig) error {
-	modifiedRG := make([]*ResourceGroup, 0, len(rgs))
-	updates := make([]*querypb.ResourceGroup, 0, len(rgs))
+// CheckIfResourceGroupsUpdatable check if resource groups can be updated.
+func (rm *ResourceManager) CheckIfResourceGroupsUpdatable(ctx context.Context, rgs map[string]*rgpb.ResourceGroupConfig) error {
+	if len(rgs) == 0 {
+		return nil
+	}
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+
 	for rgName, cfg := range rgs {
 		if _, ok := rm.groups[rgName]; !ok {
 			return merr.WrapErrResourceGroupNotFound(rgName)
 		}
 		if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// updateResourceGroups update resource group configuration.
+func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[string]*rgpb.ResourceGroupConfig) error {
+	modifiedRG := make([]*ResourceGroup, 0, len(rgs))
+	updates := make([]*querypb.ResourceGroup, 0, len(rgs))
+	for rgName, cfg := range rgs {
+		// redundant check for safety, it will always be checked by CheckIfResourceGroupsUpdatable and CheckIfResourceGroupAddable.
+		if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
+			return err
+		}
+		if _, ok := rm.groups[rgName]; !ok {
+			// create new resource group
+			newRG := NewResourceGroup(rgName, cfg, rm.nodeMgr)
+			modifiedRG = append(modifiedRG, newRG)
+			updates = append(updates, newRG.GetMeta())
+			continue
 		}
 		// Update with copy on write.
 		mrg := rm.groups[rgName].CopyForWrite()
@@ -229,24 +240,32 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 	return nil
 }
 
-// go:deprecated TransferNode transfer node from source resource group to target resource group.
-// Deprecated, use Declarative API `UpdateResourceGroups` instead.
+// Deprecated: only for compatibility with unittest.
 func (rm *ResourceManager) TransferNode(ctx context.Context, sourceRGName string, targetRGName string, nodeNum int) error {
+	rgs, err := rm.CheckIfTransferNode(ctx, sourceRGName, targetRGName, nodeNum)
+	if err != nil {
+		return err
+	}
+	return rm.AlterResourceGroups(ctx, rgs)
+}
+
+// Deprecated: use declarative API `UpdateResourceGroups` instead.
+func (rm *ResourceManager) CheckIfTransferNode(ctx context.Context, sourceRGName string, targetRGName string, nodeNum int) (map[string]*rgpb.ResourceGroupConfig, error) {
 	if sourceRGName == targetRGName {
-		return merr.WrapErrParameterInvalidMsg("source resource group and target resource group should not be the same, resource group: %s", sourceRGName)
+		return nil, merr.WrapErrParameterInvalidMsg("source resource group and target resource group should not be the same, resource group: %s", sourceRGName)
 	}
 	if nodeNum <= 0 {
-		return merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", nodeNum))
+		return nil, merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", nodeNum))
 	}
 
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
 
 	if rm.groups[sourceRGName] == nil {
-		return merr.WrapErrResourceGroupNotFound(sourceRGName)
+		return nil, merr.WrapErrResourceGroupNotFound(sourceRGName)
 	}
 	if rm.groups[targetRGName] == nil {
-		return merr.WrapErrResourceGroupNotFound(targetRGName)
+		return nil, merr.WrapErrResourceGroupNotFound(targetRGName)
 	}
 
 	sourceRG := rm.groups[sourceRGName]
@@ -254,7 +273,7 @@ func (rm *ResourceManager) TransferNode(ctx context.Context, sourceRGName string
 
 	// Check if source resource group has enough node to transfer.
 	if len(sourceRG.GetNodes()) < nodeNum {
-		return merr.WrapErrResourceGroupNodeNotEnough(sourceRGName, len(sourceRG.GetNodes()), nodeNum)
+		return nil, merr.WrapErrResourceGroupNodeNotEnough(sourceRGName, len(sourceRG.GetNodes()), nodeNum)
 	}
 
 	// Compatible with old version.
@@ -276,20 +295,25 @@ func (rm *ResourceManager) TransferNode(ctx context.Context, sourceRGName string
 	if targetCfg.Requests.NodeNum > targetCfg.Limits.NodeNum {
 		targetCfg.Limits.NodeNum = targetCfg.Requests.NodeNum
 	}
-	return rm.updateResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+	return map[string]*rgpb.ResourceGroupConfig{
 		sourceRGName: sourceCfg,
 		targetRGName: targetCfg,
-	})
+	}, nil
 }
 
-// RemoveResourceGroup remove resource group.
+// Deprecated: only for compatibility with unittest.
 func (rm *ResourceManager) RemoveResourceGroup(ctx context.Context, rgName string) error {
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
+	if err := rm.CheckIfResourceGroupDropable(ctx, rgName); err != nil {
+		return err
+	}
+	return rm.DropResourceGroup(ctx, rgName)
+}
 
+// CheckIfResourceGroupDropable check if resource group can be dropped.
+func (rm *ResourceManager) CheckIfResourceGroupDropable(ctx context.Context, rgName string) error {
 	if rm.groups[rgName] == nil {
 		// Idempotent promise: delete a non-exist rg should be ok
-		return nil
+		return ErrResourceGroupOperationIgnored
 	}
 
 	// validateResourceGroupIsDeletable will check if rg is deletable.
@@ -307,6 +331,17 @@ func (rm *ResourceManager) RemoveResourceGroup(ctx context.Context, rgName strin
 			)
 			return err
 		}
+	}
+	return nil
+}
+
+// DropResourceGroup drop resource group.
+func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string) error {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+	if _, ok := rm.groups[rgName]; !ok {
+		// Idempotent promise: delete a non-exist rg should be ok
+		return nil
 	}
 
 	// Remove it from meta storage.
@@ -917,6 +952,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 				zap.Int64("node", node),
 				zap.Error(err),
 			)
+			return "", err
 		}
 
 		// Commit updates to memory.

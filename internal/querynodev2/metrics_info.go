@@ -153,6 +153,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			NumFlowGraph:        node.pipelineManager.Num(),
 		},
 		GrowingSegmentsSize: totalGrowingSize,
+		LoadedBinlogSize:    node.manager.Segment.GetLoadedBinlogSize(),
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
 			CollectionIDs: lo.Keys(collections),

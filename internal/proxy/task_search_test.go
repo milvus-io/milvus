@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -67,9 +68,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	mgr := newShardClientMgr()
 
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -638,8 +638,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		ctx = context.TODO()
 	)
 	require.NoError(t, err)
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -1039,8 +1038,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *searchTask {
@@ -1105,8 +1103,6 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
-	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
 
 	{
@@ -1266,8 +1262,7 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	defer qc.Close()
@@ -2925,13 +2920,18 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	mgr := NewMockShardClientManager(t)
+	mgr := shardclient.NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	lb := NewLBPolicyImpl(mgr)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]string{"mock_qn"}, nil).Maybe()
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
+		{NodeID: 1, Address: "mock_qn", Serviceable: true},
+	}, nil).Maybe()
+	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	lb := shardclient.NewLBPolicyImpl(mgr)
 
 	defer rc.Close()
 
-	err = InitMetaCache(ctx, rc, mgr)
+	err = InitMetaCache(ctx, rc)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -3027,8 +3027,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			Nq:             2,
 			DslType:        commonpb.DslType_BoolExprV1,
 		},
-		mixCoord: rc,
-		lb:       lb,
+		mixCoord:       rc,
+		lb:             lb,
+		shardClientMgr: mgr,
 	}
 	for i := 0; i < len(fieldName2Types); i++ {
 		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
@@ -4066,10 +4067,17 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
-	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
 	globalMetaCache = cache
+
+	mgr := shardclient.NewMockShardClientManager(t)
+	// mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]string{"mock_qn"}, nil).Maybe()
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
+		{NodeID: 1, Address: "mock_qn", Serviceable: true},
+	}, nil).Maybe()
+	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	node.shardMgr = mgr
 
 	t.Run("Test normal", func(t *testing.T) {
 		collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
@@ -4115,9 +4123,9 @@ func TestSearchTask_Requery(t *testing.T) {
 				}, nil
 			})
 
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			err = workload.exec(ctx, 0, qn, "")
+		lb := shardclient.NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+			err = workload.Exec(ctx, 0, qn, "")
 			assert.NoError(t, err)
 		}).Return(nil)
 		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return()
@@ -4153,6 +4161,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			tr:                     timerecord.NewTimeRecorder("search"),
 			node:                   node,
 			translatedOutputFields: outputFields,
+			shardClientMgr:         mgr,
 		}
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
@@ -4199,9 +4208,9 @@ func TestSearchTask_Requery(t *testing.T) {
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock err 1"))
 
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
+		lb := shardclient.NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+			_ = workload.Exec(ctx, 0, qn, "")
 		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
@@ -4216,9 +4225,10 @@ func TestSearchTask_Requery(t *testing.T) {
 			request: &milvuspb.SearchRequest{
 				CollectionName: collectionName,
 			},
-			schema: schema,
-			tr:     timerecord.NewTimeRecorder("search"),
-			node:   node,
+			schema:         schema,
+			tr:             timerecord.NewTimeRecorder("search"),
+			node:           node,
+			shardClientMgr: mgr,
 		}
 
 		op, err := newRequeryOperator(qt, nil)
@@ -4235,9 +4245,9 @@ func TestSearchTask_Requery(t *testing.T) {
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock err 1"))
 
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
+		lb := shardclient.NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+			_ = workload.Exec(ctx, 0, qn, "")
 		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
@@ -4265,11 +4275,12 @@ func TestSearchTask_Requery(t *testing.T) {
 					Ids: resultIDs,
 				},
 			},
-			needRequery: true,
-			schema:      schema,
-			resultBuf:   typeutil.NewConcurrentSet[*internalpb.SearchResults](),
-			tr:          timerecord.NewTimeRecorder("search"),
-			node:        node,
+			needRequery:    true,
+			schema:         schema,
+			resultBuf:      typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			tr:             timerecord.NewTimeRecorder("search"),
+			node:           node,
+			shardClientMgr: mgr,
 		}
 		scores := make([]float32, rows)
 		for i := range scores {

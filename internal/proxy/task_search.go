@@ -19,11 +19,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -84,7 +86,8 @@ type searchTask struct {
 
 	mixCoord        types.MixCoordClient
 	node            types.ProxyComponent
-	lb              LBPolicy
+	lb              shardclient.LBPolicy
+	shardClientMgr  shardclient.ShardClientMgr
 	queryChannelsTs map[string]Timestamp
 	queryInfos      []*planpb.QueryInfo
 	relatedDataSize int64
@@ -173,6 +176,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			log.Warn("failed to get partition ids", zap.Error(err))
 			return err
 		}
+	}
+	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
+	if err != nil {
+		return err
 	}
 
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
@@ -486,6 +493,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
 		}
+		plan.Namespace = t.request.Namespace
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
@@ -597,6 +605,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
 	}
+	plan.Namespace = t.request.Namespace
 
 	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
 	if err != nil {
@@ -718,12 +727,12 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
-	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:             t.request.GetDbName(),
-		collectionID:   t.SearchRequest.CollectionID,
-		collectionName: t.collectionName,
-		nq:             t.Nq,
-		exec:           t.searchShard,
+	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.SearchRequest.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             t.Nq,
+		Exec:           t.searchShard,
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
@@ -928,13 +937,14 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode search return error", zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		// globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
-		return errInvalidShardLeaders
+		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode search result error",

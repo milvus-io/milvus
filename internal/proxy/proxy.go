@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -96,7 +97,7 @@ type Proxy struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	session  *sessionutil.Session
-	shardMgr shardClientMgr
+	shardMgr shardclient.ShardClientMgr
 
 	searchResultCh chan *internalpb.SearchResults
 
@@ -105,7 +106,7 @@ type Proxy struct {
 	closeCallbacks []func()
 
 	// for load balance in replicas
-	lbPolicy LBPolicy
+	lbPolicy shardclient.LBPolicy
 
 	// resource manager
 	resourceManager resource.Manager
@@ -124,17 +125,14 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
-	mgr := newShardClientMgr()
-	lbPolicy := NewLBPolicyImpl(mgr)
-	lbPolicy.Start(ctx)
 	resourceManager := resource.NewManager(10*time.Second, 20*time.Second, make(map[string]time.Duration))
 	node := &Proxy{
-		ctx:             ctx1,
-		cancel:          cancel,
-		searchResultCh:  make(chan *internalpb.SearchResults, n),
-		shardMgr:        mgr,
-		simpleLimiter:   NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
-		lbPolicy:        lbPolicy,
+		ctx:            ctx1,
+		cancel:         cancel,
+		searchResultCh: make(chan *internalpb.SearchResults, n),
+		// shardMgr:        mgr,
+		simpleLimiter: NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
+		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 	}
@@ -247,11 +245,14 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
-	if err := InitMetaCache(node.ctx, node.mixCoord, node.shardMgr); err != nil {
+	if err := InitMetaCache(node.ctx, node.mixCoord); err != nil {
 		log.Warn("failed to init meta cache", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
+
+	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
+	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
 
 	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
 
@@ -272,6 +273,8 @@ func (node *Proxy) Start() error {
 
 	node.shardMgr.Start()
 	log.Debug("start shard client manager done", zap.String("role", typeutil.ProxyRole))
+
+	node.lbPolicy.Start(node.ctx)
 
 	if err := node.sched.Start(); err != nil {
 		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))

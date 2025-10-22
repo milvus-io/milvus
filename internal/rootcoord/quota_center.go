@@ -1378,6 +1378,22 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 		return err
 	}
 
+	// check disk quota of loaded collections
+	totalLoadedDiskQuota := Params.QuotaConfig.LoadedDiskQuota.GetAsFloat()
+	totalLoaded := 0.0
+	for _, queryNodeMetrics := range q.queryNodeMetrics {
+		// for streaming node, queryNodeMetrics.LoadedBinlogSize is always 0
+		totalLoaded += float64(queryNodeMetrics.LoadedBinlogSize)
+	}
+	if totalLoaded >= totalLoadedDiskQuota {
+		log.RatedWarn(10, "cluster loaded disk quota exceeded", zap.Float64("total loaded", totalLoaded), zap.Float64("total loaded disk quota", totalLoadedDiskQuota))
+		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil)
+		if err != nil {
+			log.Warn("fail to force deny writing", zap.Error(err))
+		}
+		return err
+	}
+
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	dbSizeInfo := make(map[int64]int64)
 	collections := make([]int64, 0)
@@ -1434,7 +1450,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	dbIDs := make([]int64, 0)
-	checkDiskQuota := func(dbID, binlogSize int64, quota float64) {
+	appendIfExceeded := func(dbID, binlogSize int64, quota float64) {
 		if float64(binlogSize) >= quota {
 			log.RatedWarn(10, "db disk quota exceeded",
 				zap.Int64("db", dbID),
@@ -1451,7 +1467,7 @@ func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 			if dbDiskQuotaStr := db.GetProperty(common.DatabaseDiskQuotaKey); dbDiskQuotaStr != "" {
 				if dbDiskQuotaBytes, err := strconv.ParseFloat(dbDiskQuotaStr, 64); err == nil {
 					dbDiskQuotaMB := dbDiskQuotaBytes * 1024 * 1024
-					checkDiskQuota(dbID, binlogSize, dbDiskQuotaMB)
+					appendIfExceeded(dbID, binlogSize, dbDiskQuotaMB)
 					continue
 				} else {
 					log.Warn("invalid configuration for diskQuota.mb",
@@ -1460,7 +1476,7 @@ func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 				}
 			}
 		}
-		checkDiskQuota(dbID, binlogSize, Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
+		appendIfExceeded(dbID, binlogSize, Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
 	}
 	return dbIDs
 }

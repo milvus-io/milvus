@@ -55,8 +55,7 @@ func InitEmptyGlobalCache() {
 	emptyMock := common.NewEmptyMockT()
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
 	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
-	mgr := newShardClientMgr()
-	globalMetaCache, err = NewMetaCache(mixcoord, mgr)
+	globalMetaCache, err = NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)
 	}

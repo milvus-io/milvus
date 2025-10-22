@@ -34,7 +34,6 @@ JsonFlatIndex::build_index_for_json(
             auto json = static_cast<const Json*>(data->RawValue(i));
             auto exists = path_exists(json->dom_doc(), tokens);
             if (!exists || !json->exist(nested_path_)) {
-                null_offset_.push_back(offset);
                 wrapper_->add_json_array_data(nullptr, 0, offset++);
                 continue;
             }

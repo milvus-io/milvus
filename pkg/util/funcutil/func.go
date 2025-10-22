@@ -300,6 +300,11 @@ func IsControlChannel(channel string) bool {
 	return strings.HasSuffix(channel, ControlChannelSuffix)
 }
 
+// IsOnPhysicalChannel checks if the channel is on the physical channel
+func IsOnPhysicalChannel(channel string, physicalChannel string) bool {
+	return strings.HasPrefix(channel, physicalChannel)
+}
+
 // ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
 	if IsPhysicalChannel(vchannel) {

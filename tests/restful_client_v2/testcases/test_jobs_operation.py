@@ -1020,6 +1020,7 @@ class TestCreateImportJob(TestBase):
         time.sleep(10)
         c_restore = Collection(restore_collection_name)
         # since we import both original and sorted segments, the number of entities should be 2x
+        time.sleep(10)
         logger.info(f"c.num_entities: {c.num_entities}, c_restore.num_entities: {c_restore.num_entities}")
         assert c.num_entities*2 == c_restore.num_entities
 

@@ -1808,7 +1808,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                 case OpType::NotEqual: {
                     f = [&](int64_t value, bool valid) {
                         if (!valid) {
-                            return false;
+                            return true;
                         }
                         return value != testcase.val;
                     };
@@ -1938,7 +1938,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
     for (const auto& testcase : array_cases) {
         auto check = [&](OpType op, bool valid) {
             if (!valid) {
-                return false;
+                return op == OpType::NotEqual ? true : false;
             }
             if (testcase.nested_path[0] == "array" && op == OpType::Equal) {
                 return true;
@@ -12001,7 +12001,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
              [](std::variant<int64_t, bool, double, std::string_view> v,
                 bool valid) {
                  if (!valid) {
-                     return false;
+                     return true;
                  }
                  return !std::get<bool>(v);
              },
@@ -17543,7 +17543,7 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
     });
 }
 
-TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
+TEST(ExprTest, ParseGISFunctionFilterExprs) {
     // Build Schema
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
@@ -17552,12 +17552,10 @@ TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
     auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
     auto pk_id = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_id);
-
     // Generate data and load
     int64_t N = 1000;
     auto dataset = DataGen(schema, N);
     auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
-
     // Test plan with gisfunction_filter_expr
     std::string raw_plan = R"PLAN(vector_anns: <
             field_id: 100
@@ -17579,17 +17577,13 @@ TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
             >
             placeholder_tag: "$0"
         >)PLAN";
-
     // Convert and parse
-    auto bin_plan = translate_text_plan_with_metric_type(raw_plan);
+    auto bin_plan = translate_text_plan_to_binary_plan(raw_plan.c_str());
     auto plan =
         CreateSearchPlanByExpr(schema, bin_plan.data(), bin_plan.size());
-
     // If parsing fails, test will fail with exception
     // If parsing succeeds, ParseGISFunctionFilterExprs is covered
-
     // Execute search to verify execution logic
-
     auto ph_raw = CreatePlaceholderGroup(5, dim, 123);
     auto ph_grp = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
     auto sr = seg->Search(plan.get(), ph_grp.get(), MAX_TIMESTAMP);

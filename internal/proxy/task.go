@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -71,8 +72,6 @@ const (
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
-	// offsets for embedding list search
-	LimsKey = "lims"
 	// key for timestamptz translation
 	TimezoneKey   = "timezone"
 	TimefieldsKey = "time_fields"
@@ -3032,7 +3031,7 @@ type RunAnalyzerTask struct {
 	collectionID typeutil.UniqueID
 	fieldID      typeutil.UniqueID
 	dbName       string
-	lb           LBPolicy
+	lb           shardclient.LBPolicy
 
 	result *milvuspb.RunAnalyzerResponse
 }
@@ -3124,12 +3123,12 @@ func (t *RunAnalyzerTask) runAnalyzerOnShardleader(ctx context.Context, nodeID i
 }
 
 func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, CollectionWorkLoad{
-		db:             t.dbName,
-		collectionName: t.GetCollectionName(),
-		collectionID:   t.collectionID,
-		nq:             int64(len(t.GetPlaceholder())),
-		exec:           t.runAnalyzerOnShardleader,
+	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.dbName,
+		CollectionName: t.GetCollectionName(),
+		CollectionID:   t.collectionID,
+		Nq:             int64(len(t.GetPlaceholder())),
+		Exec:           t.runAnalyzerOnShardleader,
 	})
 
 	return err

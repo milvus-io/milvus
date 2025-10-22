@@ -251,16 +251,18 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		b.Append(true)
 
 		valuesArray := la.ListValues()
-		valueBuilder := b.ValueBuilder()
-
 		var totalSize uint64 = 0
+		valueBuilder := b.ValueBuilder()
 		switch vb := valueBuilder.(type) {
-		case *array.Float32Builder:
-			if floatArray, ok := valuesArray.(*array.Float32); ok {
-				for i := start; i < end; i++ {
-					vb.Append(floatArray.Value(int(i)))
-					totalSize += 4
-				}
+		case *array.FixedSizeBinaryBuilder:
+			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
+			if !ok {
+				return 0, fmt.Errorf("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+			}
+			for i := start; i < end; i++ {
+				val := fixedArray.Value(int(i))
+				vb.Append(val)
+				totalSize += uint64(len(val))
 			}
 		default:
 			return 0, fmt.Errorf("unsupported value builder type in ListBuilder: %T", valueBuilder)

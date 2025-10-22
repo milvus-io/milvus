@@ -32,8 +32,10 @@ import (
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -600,7 +602,7 @@ func createTestUpdateTask() *upsertTask {
 		collectionID: 1001,
 		node: &Proxy{
 			mixCoord: mcClient,
-			lbPolicy: NewLBPolicyImpl(nil),
+			lbPolicy: shardclient.NewLBPolicyImpl(nil),
 		},
 	}
 
@@ -1354,4 +1356,181 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	}
 	assert.NotNil(t, valueField)
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
+}
+
+// Test ToCompressedFormatNullable for Geometry and Timestamptz types
+func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
+	t.Run("timestamptz with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Timestamptz,
+			FieldName: "timestamp_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: []int64{1000, 0, 3000, 0},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1000, 3000}, field.GetScalars().GetTimestamptzData().GetData())
+		assert.Equal(t, []bool{true, false, true, false}, field.ValidData)
+	})
+
+	t.Run("geometry WKT with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geometry_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: []string{"POINT (1 2)", "", "POINT (5 6)"},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"POINT (1 2)", "POINT (5 6)"}, field.GetScalars().GetGeometryWktData().GetData())
+	})
+
+	t.Run("geometry WKB with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geometry_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
+							Data: [][]byte{{0x01, 0x02}, nil, {0x05, 0x06}},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{{0x01, 0x02}, {0x05, 0x06}}, field.GetScalars().GetGeometryData().GetData())
+	})
+}
+
+// Test GenNullableFieldData for Geometry and Timestamptz types
+func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
+	t.Run("generate timestamptz nullable field", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:   100,
+			Name:      "timestamp_field",
+			DataType:  schemapb.DataType_Timestamptz,
+			IsDynamic: false,
+		}
+
+		upsertIDSize := 5
+		fieldData, err := GenNullableFieldData(field, upsertIDSize)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData)
+		assert.Equal(t, int64(100), fieldData.FieldId)
+		assert.Equal(t, "timestamp_field", fieldData.FieldName)
+		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, fieldData.GetScalars().GetTimestamptzData().GetData(), upsertIDSize)
+	})
+
+	t.Run("generate geometry nullable field", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:   101,
+			Name:      "geometry_field",
+			DataType:  schemapb.DataType_Geometry,
+			IsDynamic: false,
+		}
+
+		upsertIDSize := 3
+		fieldData, err := GenNullableFieldData(field, upsertIDSize)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData)
+		assert.Equal(t, int64(101), fieldData.FieldId)
+		assert.Equal(t, "geometry_field", fieldData.FieldName)
+		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, fieldData.GetScalars().GetGeometryWktData().GetData(), upsertIDSize)
+	})
+}
+
+func TestUpsertTask_PlanNamespace_AfterPreExecute(t *testing.T) {
+	mockey.PatchConvey("TestUpsertTask_PlanNamespace_AfterPreExecute", t, func() {
+		// Setup global meta cache and common mocks
+		globalMetaCache = &MetaCache{}
+		mockey.Mock(GetReplicateID).Return("", nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
+		mockey.Mock((*MetaCache).GetPartitionID).Return(int64(1002), nil).Build()
+		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+		mockey.Mock(validatePartitionTag).Return(nil).Build()
+
+		// Schema with namespace enabled
+		mockey.Mock((*MetaCache).GetCollectionSchema).To(func(_ *MetaCache, _ context.Context, _ string, _ string) (*schemaInfo, error) {
+			info := createTestSchema()
+			info.CollectionSchema.Properties = append(info.CollectionSchema.Properties, &commonpb.KeyValuePair{Key: common.NamespaceEnabledKey, Value: "true"})
+			return info, nil
+		}).Build()
+
+		// Capture plan to verify namespace
+		var capturedPlan *planpb.PlanNode
+		mockey.Mock(planparserv2.CreateRequeryPlan).To(func(_ *schemapb.FieldSchema, _ *schemapb.IDs) *planpb.PlanNode {
+			capturedPlan = &planpb.PlanNode{}
+			return capturedPlan
+		}).Build()
+
+		// Mock query to return a valid result for queryPreExecute merge path
+		mockey.Mock((*Proxy).query).Return(&milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id",
+					FieldId:   100,
+					Type:      schemapb.DataType_Int64,
+					Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+				},
+				{
+					FieldName: "name",
+					FieldId:   102,
+					Type:      schemapb.DataType_VarChar,
+					Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+				},
+				{
+					FieldName: "vector",
+					FieldId:   101,
+					Type:      schemapb.DataType_FloatVector,
+					Field:     &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 256)}}}},
+				},
+			},
+		}, segcore.StorageCost{}, nil).Build()
+
+		// Build task
+		task := createTestUpdateTask()
+		ns := "ns-1"
+		task.req.PartialUpdate = true
+		task.req.Namespace = &ns
+
+		// Skip insert/delete heavy logic
+		mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+		mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, capturedPlan)
+		assert.NotNil(t, capturedPlan.Namespace)
+		assert.Equal(t, *task.req.Namespace, *capturedPlan.Namespace)
+	})
 }

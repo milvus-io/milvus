@@ -360,7 +360,7 @@ class ValueExpr : public ITypeExpr {
     ToString() const override {
         std::stringstream ss;
         ss << "ValueExpr: {"
-           << " val:" << val_.DebugString() << "}";
+           << " val:" << val_.ShortDebugString() << "}";
         return ss.str();
     }
 
@@ -393,10 +393,10 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
         std::stringstream ss;
         ss << "UnaryRangeFilterExpr: {columnInfo:" << column_.ToString()
            << " op_type:" << milvus::proto::plan::OpType_Name(op_type_)
-           << " val:" << val_.DebugString() << " extra_values: [";
+           << " val:" << val_.ShortDebugString() << " extra_values: [";
 
         for (size_t i = 0; i < extra_values_.size(); i++) {
-            ss << extra_values_[i].DebugString();
+            ss << extra_values_[i].ShortDebugString();
             if (i != extra_values_.size() - 1) {
                 ss << ", ";
             }
@@ -518,7 +518,7 @@ class TermFilterExpr : public ITypeFilterExpr {
         std::string values;
 
         for (const auto& val : vals_) {
-            values += val.DebugString() + ", ";
+            values += val.ShortDebugString() + ", ";
         }
 
         std::stringstream ss;
@@ -615,8 +615,8 @@ class BinaryRangeFilterExpr : public ITypeFilterExpr {
     ToString() const override {
         std::stringstream ss;
         ss << "BinaryRangeFilterExpr:[Column: " << column_.ToString()
-           << ", Lower Value: " << lower_val_.DebugString()
-           << ", Upper Value: " << upper_val_.DebugString()
+           << ", Lower Value: " << lower_val_.ShortDebugString()
+           << ", Upper Value: " << upper_val_.ShortDebugString()
            << ", Lower Inclusive: " << (lower_inclusive_ ? "true" : "false")
            << ", Upper Inclusive: " << (upper_inclusive_ ? "true" : "false")
            << "]";
@@ -660,8 +660,8 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
            << ", Operator Type: " << milvus::proto::plan::OpType_Name(op_type_)
            << ", Arith Operator Type: "
            << milvus::proto::plan::ArithOpType_Name(arith_op_type_)
-           << ", Value: " << value_.DebugString()
-           << ", Right Operand: " << right_operand_.DebugString() << "]";
+           << ", Value: " << value_.ShortDebugString()
+           << ", Right Operand: " << right_operand_.ShortDebugString() << "]";
 
         return ss.str();
     }
@@ -694,9 +694,9 @@ class TimestamptzArithCompareExpr : public ITypeFilterExpr {
         ss << "TimestamptzArithCompareExpr:[Column: "
            << timestamp_column_.ToString()
            << ", ArithOp: " << milvus::proto::plan::ArithOpType_Name(arith_op_)
-           << ", Interval: " << interval_.DebugString()
+           << ", Interval: " << interval_.ShortDebugString()
            << ", CompareOp: " << milvus::proto::plan::OpType_Name(compare_op_)
-           << ", CompareValue: " << compare_value_.DebugString() << "]";
+           << ", CompareValue: " << compare_value_.ShortDebugString() << "]";
         return ss.str();
     }
 
@@ -857,7 +857,7 @@ class JsonContainsExpr : public ITypeFilterExpr {
     ToString() const override {
         std::string values;
         for (const auto& val : vals_) {
-            values += val.DebugString() + ", ";
+            values += val.ShortDebugString() + ", ";
         }
         return fmt::format(
             "JsonContainsExpr:[Column: {}, Operator: {}, Same Type: {}, "

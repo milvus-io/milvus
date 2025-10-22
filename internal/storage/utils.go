@@ -1601,6 +1601,8 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
+	case schemapb.DataType_JSON:
+		return fieldSchema.GetDefaultValue().GetBytesData()
 	default:
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
@@ -1665,20 +1667,21 @@ func SortFieldBinlogs(fieldBinlogs map[int64]*datapb.FieldBinlog) []*datapb.Fiel
 }
 
 // VectorArrayToArrowType converts VectorArray element type to the corresponding Arrow type
-// Note: This returns the element type (e.g., float32), not a list type
+// Note: This returns the element type (e.g., FixedSizeBinary), not a list type
 // The caller is responsible for wrapping it in a list if needed
-func VectorArrayToArrowType(elementType schemapb.DataType) (arrow.DataType, error) {
+func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataType, error) {
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		return arrow.PrimitiveTypes.Float32, nil
+		// Each vector is stored as a fixed-size binary chunk
+		return &arrow.FixedSizeBinaryType{ByteWidth: dim * 4}, nil
 	case schemapb.DataType_BinaryVector:
-		return nil, merr.WrapErrParameterInvalidMsg("BinaryVector in VectorArray not implemented yet")
+		return &arrow.FixedSizeBinaryType{ByteWidth: (dim + 7) / 8}, nil
 	case schemapb.DataType_Float16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Float16Vector in VectorArray not implemented yet")
+		return &arrow.FixedSizeBinaryType{ByteWidth: dim * 2}, nil
 	case schemapb.DataType_BFloat16Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("BFloat16Vector in VectorArray not implemented yet")
+		return &arrow.FixedSizeBinaryType{ByteWidth: dim * 2}, nil
 	case schemapb.DataType_Int8Vector:
-		return nil, merr.WrapErrParameterInvalidMsg("Int8Vector in VectorArray not implemented yet")
+		return &arrow.FixedSizeBinaryType{ByteWidth: dim}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
 	}

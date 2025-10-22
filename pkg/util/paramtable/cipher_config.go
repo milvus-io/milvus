@@ -9,11 +9,12 @@ const cipherYamlFile = "hook.yaml"
 type cipherConfig struct {
 	cipherBase *BaseTable
 
-	SoPathGo              ParamItem `refreshable:"false"`
-	SoPathCpp             ParamItem `refreshable:"false"`
-	DefaultRootKey        ParamItem `refreshable:"false"`
-	RotationPeriodInHours ParamItem `refreshable:"false"`
-	KmsProvider           ParamItem `refreshable:"false"`
+	SoPathGo               ParamItem `refreshable:"false"`
+	SoPathCpp              ParamItem `refreshable:"false"`
+	DefaultRootKey         ParamItem `refreshable:"false"`
+	RotationPeriodInHours  ParamItem `refreshable:"false"`
+	UpdatePerieldInMinutes ParamItem `refreshable:"false"`
+	EnalbeDiskEncryption   ParamItem `refreshable:"false"`
 }
 
 func (c *cipherConfig) init(base *BaseTable) {
@@ -45,11 +46,19 @@ func (c *cipherConfig) init(base *BaseTable) {
 	}
 	c.RotationPeriodInHours.Init(base.mgr)
 
-	c.KmsProvider = ParamItem{
-		Key:     "cipherPlugin.kmsProvider",
-		Version: "2.6.1",
+	c.UpdatePerieldInMinutes = ParamItem{
+		Key:          "cipherPlugin.updatePerieldInMinutes",
+		Version:      "2.6.1",
+		DefaultValue: "60",
 	}
-	c.KmsProvider.Init(base.mgr)
+	c.UpdatePerieldInMinutes.Init(base.mgr)
+
+	c.EnalbeDiskEncryption = ParamItem{
+		Key:          "cipherPlugin.enableDiskEncryption",
+		Version:      "2.6.1",
+		DefaultValue: "false",
+	}
+	c.EnalbeDiskEncryption.Init(base.mgr)
 }
 
 func (c *cipherConfig) Save(key string, value string) error {

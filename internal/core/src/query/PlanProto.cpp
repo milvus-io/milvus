@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "common/Geometry.h"
+#include "common/Consts.h"
+#include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
@@ -42,6 +44,25 @@ ProtoParser::PlanOptionsFromProto(
               plan_options.expr_use_json_stats);
 }
 
+expr::TypedExprPtr
+MergeExprWithNamespace(const SchemaPtr schema,
+                       const expr::TypedExprPtr& expr,
+                       const std::string& namespace_) {
+    auto namespace_field_id =
+        schema->get_field_id(FieldName(NAMESPACE_FIELD_NAME));
+    proto::plan::GenericValue namespace_value;
+    namespace_value.set_string_val(namespace_);
+
+    auto namespace_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(namespace_field_id, DataType::VARCHAR),
+        OpType::Equal,
+        namespace_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto and_expr = std::make_shared<milvus::expr::LogicalBinaryExpr>(
+        milvus::expr::LogicalBinaryExpr::OpType::And, expr, namespace_expr);
+    return and_expr;
+}
+
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
@@ -50,6 +71,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     auto expr_parser = [&]() -> plan::PlanNodePtr {
         auto expr = ParseExprs(anns_proto.predicates());
+        if (plan_node_proto.has_namespace_()) {
+            expr = MergeExprWithNamespace(
+                schema, expr, plan_node_proto.namespace_());
+        }
         return std::make_shared<plan::FilterBitsNode>(
             milvus::plan::GetNextPlanNodeId(), expr);
     };
@@ -150,6 +175,10 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
         auto expr = ParseExprs(anns_proto.predicates());
+        if (plan_node_proto.has_namespace_()) {
+            expr = MergeExprWithNamespace(
+                schema, expr, plan_node_proto.namespace_());
+        }
         plannode = std::make_shared<plan::FilterNode>(
             milvus::plan::GetNextPlanNodeId(), expr, sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
@@ -248,6 +277,10 @@ ProtoParser::RetrievePlanNodeFromProto(
             auto& predicate_proto = plan_node_proto.predicates();
             auto expr_parser = [&]() -> plan::PlanNodePtr {
                 auto expr = ParseExprs(predicate_proto);
+                if (plan_node_proto.has_namespace_()) {
+                    expr = MergeExprWithNamespace(
+                        schema, expr, plan_node_proto.namespace_());
+                }
                 return std::make_shared<plan::FilterBitsNode>(
                     milvus::plan::GetNextPlanNodeId(), expr);
             }();
@@ -263,6 +296,10 @@ ProtoParser::RetrievePlanNodeFromProto(
                     [&](const proto::plan::Expr& predicate_proto)
                     -> plan::PlanNodePtr {
                     auto expr = ParseExprs(predicate_proto);
+                    if (plan_node_proto.has_namespace_()) {
+                        expr = MergeExprWithNamespace(
+                            schema, expr, plan_node_proto.namespace_());
+                    }
                     return std::make_shared<plan::FilterBitsNode>(
                         milvus::plan::GetNextPlanNodeId(), expr, sources);
                 };
@@ -321,7 +358,7 @@ ProtoParser::RetrievePlanNodeFromProto(
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create search plan from proto: {}",
-              plan_node_proto.DebugString());
+              plan_node_proto.ShortDebugString());
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);
@@ -345,7 +382,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create retrieve plan from proto: {}",
-              plan_node_proto.DebugString());
+              plan_node_proto.ShortDebugString());
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);

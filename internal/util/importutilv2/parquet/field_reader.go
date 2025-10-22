@@ -25,6 +25,9 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -666,15 +669,23 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 	if data == nil {
 		return nil, nil, nil
 	}
-	byteArr := make([][]byte, 0)
-	for i, str := range data.([]string) {
+	wkbValues := make([][]byte, 0)
+	for i, wktValue := range data.([]string) {
 		if !validData[i] {
-			byteArr = append(byteArr, []byte(nil))
+			wkbValues = append(wkbValues, []byte(nil))
 			continue
 		}
-		byteArr = append(byteArr, []byte(str))
+		geomT, err := wkt.Unmarshal(wktValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, nil, err
+		}
+		wkbValues = append(wkbValues, wkbValue)
 	}
-	return byteArr, validData, nil
+	return wkbValues, validData, nil
 }
 
 func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
@@ -686,11 +697,20 @@ func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
 	if data == nil {
 		return nil, nil
 	}
-	byteArr := make([][]byte, 0)
-	for _, str := range data.([]string) {
-		byteArr = append(byteArr, []byte(str))
+
+	wkbValues := make([][]byte, 0)
+	for _, wktValue := range data.([]string) {
+		geomT, err := wkt.Unmarshal(wktValue)
+		if err != nil {
+			return nil, err
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, err
+		}
+		wkbValues = append(wkbValues, wkbValue)
 	}
-	return byteArr, nil
+	return wkbValues, nil
 }
 
 func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
@@ -1845,34 +1865,49 @@ func ReadVectorArrayData(pcr *FieldReader, count int64) (any, error) {
 			if chunk.NullN() > 0 {
 				return nil, WrapNullRowErr(pcr.field)
 			}
+			// ArrayOfVector is stored as list of fixed size binary
 			listReader, ok := chunk.(*array.List)
 			if !ok {
 				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 			}
-			listFloat32Reader, ok := listReader.ListValues().(*array.Float32)
+
+			fixedBinaryReader, ok := listReader.ListValues().(*array.FixedSizeBinary)
 			if !ok {
-				return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+				return nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
 			}
+
+			// Check that each vector has the correct byte size (dim * 4 bytes for float32)
+			expectedByteSize := int(dim) * 4
+			actualByteSize := fixedBinaryReader.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+			if actualByteSize != expectedByteSize {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("vector byte size mismatch: expected %d, got %d for field '%s'",
+					expectedByteSize, actualByteSize, pcr.field.GetName()))
+			}
+
 			offsets := listReader.Offsets()
 			for i := 1; i < len(offsets); i++ {
 				start, end := offsets[i-1], offsets[i]
-				floatCount := end - start
-				if floatCount%int32(dim) != 0 {
-					return nil, merr.WrapErrImportFailed(fmt.Sprintf("vectors in VectorArray should be aligned with dim: %d", dim))
-				}
+				vectorCount := end - start
 
-				arrLength := floatCount / int32(dim)
-				if err = common.CheckArrayCapacity(int(arrLength), maxCapacity, pcr.field); err != nil {
+				if err = common.CheckArrayCapacity(int(vectorCount), maxCapacity, pcr.field); err != nil {
 					return nil, err
 				}
 
-				arrData := make([]float32, floatCount)
-				copy(arrData, listFloat32Reader.Float32Values()[start:end])
+				// Convert binary data to float32 array using arrow's built-in conversion
+				totalFloats := vectorCount * int32(dim)
+				floatData := make([]float32, totalFloats)
+				for j := int32(0); j < vectorCount; j++ {
+					vectorIndex := start + j
+					binaryData := fixedBinaryReader.Value(int(vectorIndex))
+					vectorFloats := arrow.Float32Traits.CastFromBytes(binaryData)
+					copy(floatData[j*int32(dim):(j+1)*int32(dim)], vectorFloats)
+				}
+
 				data = append(data, &schemapb.VectorField{
 					Dim: dim,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: arrData,
+							Data: floatData,
 						},
 					},
 				})

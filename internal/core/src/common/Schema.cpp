@@ -94,8 +94,8 @@ Schema::ConvertToArrowSchema() const {
         std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
         auto data_type = meta.get_data_type();
         if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type =
-                GetArrowDataTypeForVectorArray(meta.get_element_type());
+            arrow_data_type = GetArrowDataTypeForVectorArray(
+                meta.get_element_type(), meta.get_dim());
         } else {
             arrow_data_type = GetArrowDataType(data_type, dim);
         }

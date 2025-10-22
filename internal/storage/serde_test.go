@@ -268,41 +268,48 @@ func TestCalculateArraySize(t *testing.T) {
 }
 
 func TestArrayOfVectorArrowType(t *testing.T) {
+	dim := 128 // Test dimension
 	tests := []struct {
 		name          string
 		elementType   schemapb.DataType
+		dim           int
 		expectedChild arrow.DataType
 	}{
 		{
 			name:          "FloatVector",
 			elementType:   schemapb.DataType_FloatVector,
-			expectedChild: arrow.PrimitiveTypes.Float32,
+			dim:           dim,
+			expectedChild: &arrow.FixedSizeBinaryType{ByteWidth: dim * 4},
 		},
 		{
 			name:          "BinaryVector",
 			elementType:   schemapb.DataType_BinaryVector,
-			expectedChild: arrow.PrimitiveTypes.Uint8,
+			dim:           dim,
+			expectedChild: &arrow.FixedSizeBinaryType{ByteWidth: (dim + 7) / 8},
 		},
 		{
 			name:          "Float16Vector",
 			elementType:   schemapb.DataType_Float16Vector,
-			expectedChild: arrow.PrimitiveTypes.Uint8,
+			dim:           dim,
+			expectedChild: &arrow.FixedSizeBinaryType{ByteWidth: dim * 2},
 		},
 		{
 			name:          "BFloat16Vector",
 			elementType:   schemapb.DataType_BFloat16Vector,
-			expectedChild: arrow.PrimitiveTypes.Uint8,
+			dim:           dim,
+			expectedChild: &arrow.FixedSizeBinaryType{ByteWidth: dim * 2},
 		},
 		{
 			name:          "Int8Vector",
 			elementType:   schemapb.DataType_Int8Vector,
-			expectedChild: arrow.PrimitiveTypes.Int8,
+			dim:           dim,
+			expectedChild: &arrow.FixedSizeBinaryType{ByteWidth: dim},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			arrowType := getArrayOfVectorArrowType(tt.elementType)
+			arrowType := getArrayOfVectorArrowType(tt.elementType, tt.dim)
 			assert.NotNil(t, arrowType)
 
 			listType, ok := arrowType.(*arrow.ListType)

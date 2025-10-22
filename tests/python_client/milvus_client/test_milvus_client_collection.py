@@ -2,7 +2,6 @@ import pytest
 import numpy
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -4530,6 +4529,15 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
                 and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
                 supported_types.append((k.lower(), v))
         for field_name, data_type in supported_types:
+            if field_name.lower().startswith("_"):
+                # skip private fields           
+                continue
+            if data_type == DataType.STRUCT:
+                # add struct field
+                struct_schema = client.create_struct_field_schema()
+                struct_schema.add_field("struct_scalar_field", DataType.INT64)
+                schema.add_field(field_name, DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema, max_capacity=10)
+                continue
             # Skip INT64 and VARCHAR as they're already added as primary key  
             if data_type != DataType.INT64 and data_type != DataType.VARCHAR: 
                 schema.add_field(field_name, data_type)

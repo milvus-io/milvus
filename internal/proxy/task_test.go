@@ -473,8 +473,7 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		cache := globalMetaCache
 		defer func() { globalMetaCache = cache }()
 		root := buildRoot(true)
-		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, root, mgr)
+		err := InitMetaCache(ctx, root)
 		assert.NoError(t, err)
 
 		task := &alterCollectionTask{
@@ -495,8 +494,7 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		cache := globalMetaCache
 		defer func() { globalMetaCache = cache }()
 		root := buildRoot(false)
-		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, root, mgr)
+		err := InitMetaCache(ctx, root)
 		assert.NoError(t, err)
 
 		task := &alterCollectionTask{
@@ -1602,8 +1600,7 @@ func TestHasCollectionTask(t *testing.T) {
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mixc, mgr)
+	InitMetaCache(ctx, mixc)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1699,8 +1696,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mixc, mgr)
+	InitMetaCache(ctx, mixc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1757,8 +1753,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	mix := NewMixCoordMock()
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mix, mgr)
+	InitMetaCache(ctx, mix)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1816,8 +1811,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mix, mgr)
+	InitMetaCache(ctx, mix)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1876,8 +1870,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mix, mgr)
+	InitMetaCache(ctx, mix)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2238,8 +2231,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -2467,8 +2459,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	ctx := context.Background()
 
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, mixc, mgr)
+	err = InitMetaCache(ctx, mixc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -3086,9 +3077,8 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	indexID := int64(1000)
 
-	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, rc, shardMgr)
+	_ = InitMetaCache(ctx, rc)
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
@@ -3212,9 +3202,8 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	indexID := int64(1000)
 
-	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, qc, shardMgr)
+	_ = InitMetaCache(ctx, qc)
 
 	qc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
@@ -3297,8 +3286,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	defer mixc.Close()
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mixc, mgr)
+	InitMetaCache(ctx, mixc)
 
 	createRGReq := &milvuspb.CreateResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3335,8 +3323,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 	defer mixc.Close()
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mixc, mgr)
+	InitMetaCache(ctx, mixc)
 
 	dropRGReq := &milvuspb.DropResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3372,8 +3359,7 @@ func TestTransferNodeTask(t *testing.T) {
 
 	defer mixc.Close()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, mixc, mgr)
+	InitMetaCache(ctx, mixc)
 
 	req := &milvuspb.TransferNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -3410,8 +3396,7 @@ func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockMixCoordClientInterface{}
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, mgr)
+	InitMetaCache(ctx, rc)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 
@@ -3458,8 +3443,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, mgr)
+	InitMetaCache(ctx, rc)
 
 	req := &milvuspb.ListResourceGroupsRequest{
 		Base: &commonpb.MsgBase{
@@ -3508,8 +3492,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, mgr)
+	InitMetaCache(ctx, rc)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
@@ -3558,8 +3541,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, mgr)
+	InitMetaCache(ctx, rc)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
@@ -3807,7 +3789,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check default partitions
-		err = InitMetaCache(ctx, rc, nil)
+		err = InitMetaCache(ctx, rc)
 		assert.NoError(t, err)
 		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
@@ -3886,8 +3868,7 @@ func TestPartitionKey(t *testing.T) {
 	defer qc.Close()
 	ctx := context.Background()
 
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, qc, mgr)
+	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4121,8 +4102,7 @@ func TestDefaultPartition(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, qc, mgr)
+	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4302,8 +4282,7 @@ func TestClusteringKey(t *testing.T) {
 
 	ctx := context.Background()
 
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, qc, mgr)
+	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4439,7 +4418,7 @@ func TestClusteringKey(t *testing.T) {
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -4481,8 +4460,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 func TestTaskPartitionKeyIsolation(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, qc, mgr)
+	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestPartitionKeyIsolation"
@@ -4828,7 +4806,7 @@ func TestInsertForReplicate(t *testing.T) {
 
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_field_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -4880,7 +4858,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 func TestAlterCollectionField(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_field"
 
 	// Create collection with string and array fields
@@ -5483,7 +5461,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 
 func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	InitMetaCache(context.Background(), qc)
 	ctx := context.Background()
 	collectionName := "test_alter_allow_insert_autoid_autoid_false"
 
