@@ -79,6 +79,7 @@ type queryTask struct {
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
+	resolvedTimezoneStr  string
 
 	storageCost segcore.StorageCost
 }
@@ -233,9 +234,9 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
-	timezoneStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimezoneKey, queryParamsPair)
-	if err == nil {
-		timezone = timezoneStr
+	timezone, _ = funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, queryParamsPair)
+	if (timezone != "") && !funcutil.IsTimezoneValid(timezone) {
+		return nil, merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
 	}
 
 	extractTimeFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, queryParamsPair)
@@ -457,9 +458,16 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
-	_, colTimezone := getColTimezone(colInfo)
-	timezonePreference := []string{t.queryParams.timezone, colTimezone}
-	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}); err != nil {
+	if t.queryParams.timezone != "" {
+		// validated in queryParams, no need to validate again
+		t.resolvedTimezoneStr = t.queryParams.timezone
+		log.Debug("determine timezone from request", zap.String("user defined timezone", t.resolvedTimezoneStr))
+	} else {
+		t.resolvedTimezoneStr = getColTimezone(colInfo)
+		log.Debug("determine timezone from collection", zap.Any("collection timezone", t.resolvedTimezoneStr))
+	}
+
+	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
 	}
 	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
@@ -666,31 +674,17 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
-	// Translate timestamp to ISO string
-	collName := t.request.GetCollectionName()
-	dbName := t.request.GetDbName()
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
-	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
-		return err
-	}
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
-	if err != nil {
-		log.Warn("fail to get collection info", zap.Error(err))
-		return err
-	}
-	_, colTimezone := getColTimezone(colInfo)
 	if !t.reQuery {
 		if len(t.queryParams.extractTimeFields) > 0 {
 			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
-			err = extractFieldsFromResults(t.result.GetFieldsData(), []string{t.queryParams.timezone, colTimezone}, t.queryParams.extractTimeFields)
+			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)
 			if err != nil {
 				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
 				return err
 			}
 		} else {
 			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
-			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone)
+			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
 			if err != nil {
 				log.Warn("fail to translate timestamp", zap.Error(err))
 				return err

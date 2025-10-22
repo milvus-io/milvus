@@ -73,7 +73,6 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 	// key for timestamptz translation
-	TimezoneKey   = "timezone"
 	TimefieldsKey = "time_fields"
 
 	SearchIterV2Key        = "search_iter_v2"
@@ -415,6 +414,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
+	}
+
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
 	// validate clustering key
@@ -1203,9 +1208,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 		// Check the validation of timezone
-		err := checkTimezone(t.Properties...)
-		if err != nil {
-			return err
+		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
+		if exist && !funcutil.IsTimezoneValid(userDefinedTimezone) {
+			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)

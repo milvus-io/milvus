@@ -12,11 +12,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ParserVisitorArgs struct {
-	TimezonePreference []string
+	Timezone string
 }
 
 type ParserVisitor struct {
@@ -1920,7 +1921,7 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
-func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareContext) interface{} {
+func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().Accept(v)
 	if err != nil {
@@ -1952,7 +1953,7 @@ func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareCo
 
 	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 
-	timestamptzInt64, err := parseISOWithTimezone(unquotedCompareStr, v.args.TimezonePreference)
+	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
@@ -1974,5 +1975,88 @@ func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareCo
 	return &ExprWithType{
 		expr:     newExpr,
 		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
+	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	identifier := ctx.Identifier().GetText()
+	if err != nil {
+		return fmt.Errorf("can not translate identifier: %s", identifier)
+	}
+	if colExpr.dataType != schemapb.DataType_Timestamptz {
+		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
+	}
+
+	arithOp := planpb.ArithOpType_Unknown
+	interval := &planpb.Interval{}
+	if ctx.GetOp1() != nil {
+		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
+		rawIntervalStr := ctx.GetInterval_string().GetText()
+		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+		if err != nil {
+			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+		}
+		interval, err = parseISODuration(unquotedIntervalStr)
+		if err != nil {
+			return err
+		}
+	}
+
+	rawCompareStr := ctx.GetCompare_string().GetText()
+	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
+	if err != nil {
+		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
+	}
+
+	originalCompareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
+
+	compareOp := reverseCompareOp(originalCompareOp)
+
+	if compareOp == planpb.OpType_Invalid && originalCompareOp != planpb.OpType_Invalid {
+		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
+	}
+
+	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
+	if err != nil {
+		return err
+	}
+
+	newExpr := &planpb.Expr{
+		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+				TimestamptzColumn: toColumnInfo(colExpr),
+				ArithOp:           arithOp,
+				Interval:          interval,
+				CompareOp:         compareOp,
+				CompareValue: &planpb.GenericValue{
+					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+				},
+			},
+		},
+	}
+
+	return &ExprWithType{
+		expr:     newExpr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func reverseCompareOp(op planpb.OpType) planpb.OpType {
+	switch op {
+	case planpb.OpType_LessThan:
+		return planpb.OpType_GreaterThan
+	case planpb.OpType_LessEqual:
+		return planpb.OpType_GreaterEqual
+	case planpb.OpType_GreaterThan:
+		return planpb.OpType_LessThan
+	case planpb.OpType_GreaterEqual:
+		return planpb.OpType_LessEqual
+	case planpb.OpType_Equal:
+		return planpb.OpType_Equal
+	case planpb.OpType_NotEqual:
+		return planpb.OpType_NotEqual
+	default:
+		return planpb.OpType_Invalid
 	}
 }

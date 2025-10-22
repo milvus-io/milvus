@@ -344,8 +344,9 @@ type SchemaHelper struct {
 	partitionKeyOffset  int
 	clusteringKeyOffset int
 	dynamicFieldOffset  int
-	// include sub fields in StructArrayField
+	// include sub-fields in StructArrayField
 	allFields []*schemapb.FieldSchema
+	timezone  string
 }
 
 // CreateSchemaHelper returns a new SchemaHelper object
@@ -403,7 +404,24 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 			schemaHelper.dynamicFieldOffset = offset
 		}
 	}
+
+	found := false
+	for _, kv := range schema.GetProperties() {
+		if kv.Key == common.TimezoneKey {
+			schemaHelper.timezone = kv.Value
+			found = true
+			break
+		}
+	}
+	if !found {
+		schemaHelper.timezone = common.DefaultTimezone
+	}
 	return &schemaHelper, nil
+}
+
+// GetTimezone returns the timezone string associated with the schema.
+func (helper *SchemaHelper) GetTimezone() string {
+	return helper.timezone
 }
 
 // GetPrimaryKeyField returns the schema of the primary key
@@ -608,8 +626,7 @@ func IsVectorArrayType(dataType schemapb.DataType) bool {
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64,
-		schemapb.DataType_Timestamptz:
+		schemapb.DataType_Int32, schemapb.DataType_Int64:
 		return true
 	default:
 		return false
@@ -622,6 +639,10 @@ func IsJSONType(dataType schemapb.DataType) bool {
 
 func IsGeometryType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Geometry
+}
+
+func IsTimestamptzType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Timestamptz
 }
 
 func IsArrayType(dataType schemapb.DataType) bool {
@@ -677,7 +698,7 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce
