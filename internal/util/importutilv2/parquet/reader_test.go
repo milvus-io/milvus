@@ -667,7 +667,7 @@ func TestParquetReaderWithStructArray(t *testing.T) {
 					Fields: []*schemapb.FieldSchema{
 						{
 							FieldID:     201,
-							Name:        "int_array",
+							Name:        "struct_array[int_array]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
 							TypeParams: []*commonpb.KeyValuePair{
@@ -676,7 +676,7 @@ func TestParquetReaderWithStructArray(t *testing.T) {
 						},
 						{
 							FieldID:     202,
-							Name:        "float_array",
+							Name:        "struct_array[float_array]",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Float,
 							TypeParams: []*commonpb.KeyValuePair{
@@ -685,7 +685,7 @@ func TestParquetReaderWithStructArray(t *testing.T) {
 						},
 						{
 							FieldID:     203,
-							Name:        "vector_array",
+							Name:        "struct_array[vector_array]",
 							DataType:    schemapb.DataType_ArrayOfVector,
 							ElementType: schemapb.DataType_FloatVector,
 							TypeParams: []*commonpb.KeyValuePair{
@@ -702,7 +702,7 @@ func TestParquetReaderWithStructArray(t *testing.T) {
 		filePath := fmt.Sprintf("/tmp/test_struct_array_%d.parquet", rand.Int())
 		defer os.Remove(filePath)
 
-		numRows := 10
+		numRows := 50
 		f, err := os.Create(filePath)
 		assert.NoError(t, err)
 

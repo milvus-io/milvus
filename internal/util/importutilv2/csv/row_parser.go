@@ -172,21 +172,21 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
 		}
 		for key, value := range row {
-			field_name := typeutil.ConcatStructFieldName(structName, key)
-			field, ok := subFieldsMap[field_name]
+			fieldName := typeutil.ConcatStructFieldName(structName, key)
+			field, ok := subFieldsMap[fieldName]
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", field_name))
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", fieldName))
 			}
 			strVal, ok := value.(string)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid value type for field %s, expect string but got %T", field_name, value))
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid value type for field %s, expect string but got %T", fieldName, value))
 			}
 
 			data, err := r.parseEntity(field, strVal, true)
 			if err != nil {
 				return nil, err
 			}
-			buf[field_name] = append(buf[field_name], data)
+			buf[fieldName] = append(buf[fieldName], data)
 		}
 	}
 
