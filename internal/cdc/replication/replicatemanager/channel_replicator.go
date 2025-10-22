@@ -80,7 +80,6 @@ func (r *channelReplicator) StartReplication() {
 	logger.Info("start replicate channel")
 	go func() {
 		defer func() {
-			r.asyncNotifier.Finish(struct{}{})
 			if r.streamClient != nil {
 				r.streamClient.Close()
 			}
@@ -90,6 +89,7 @@ func (r *channelReplicator) StartReplication() {
 			if r.targetClient != nil {
 				r.targetClient.Close(r.asyncNotifier.Context())
 			}
+			r.asyncNotifier.Finish(struct{}{})
 		}()
 	INIT_LOOP:
 		for {
