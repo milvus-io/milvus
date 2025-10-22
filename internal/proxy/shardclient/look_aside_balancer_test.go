@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package shardclient
 
 import (
 	"context"
@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type LookAsideBalancerSuite struct {
@@ -308,12 +309,12 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 		},
 	}, nil).Maybe()
 	suite.clientMgr.ExpectedCalls = nil
-	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ni nodeInfo) (types.QueryNodeClient, error) {
-		if ni.nodeID == 1 {
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ni NodeInfo) (types.QueryNodeClient, error) {
+		if ni.NodeID == 1 {
 			return qn, nil
 		}
 
-		if ni.nodeID == 2 {
+		if ni.NodeID == 2 {
 			return qn2, nil
 		}
 		return nil, errors.New("unexpected node")
@@ -323,19 +324,19 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	metrics1.ts.Store(time.Now().UnixMilli())
 	metrics1.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(1, metrics1)
-	suite.balancer.RegisterNodeInfo([]nodeInfo{
+	suite.balancer.RegisterNodeInfo([]NodeInfo{
 		{
-			nodeID: 1,
+			NodeID: 1,
 		},
 	})
 	metrics2 := &CostMetrics{}
 	metrics2.ts.Store(time.Now().UnixMilli())
 	metrics2.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(2, metrics2)
-	suite.balancer.knownNodeInfos.Insert(2, nodeInfo{})
-	suite.balancer.RegisterNodeInfo([]nodeInfo{
+	suite.balancer.knownNodeInfos.Insert(2, NodeInfo{})
+	suite.balancer.RegisterNodeInfo([]NodeInfo{
 		{
-			nodeID: 2,
+			NodeID: 2,
 		},
 	})
 	suite.Eventually(func() bool {
@@ -363,9 +364,9 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 	metrics1.ts.Store(time.Now().UnixMilli())
 	metrics1.unavailable.Store(true)
 	suite.balancer.metricsMap.Insert(2, metrics1)
-	suite.balancer.RegisterNodeInfo([]nodeInfo{
+	suite.balancer.RegisterNodeInfo([]NodeInfo{
 		{
-			nodeID: 2,
+			NodeID: 2,
 		},
 	})
 
@@ -398,9 +399,9 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	metrics1 := &CostMetrics{}
 	metrics1.ts.Store(time.Now().UnixMilli())
 	suite.balancer.metricsMap.Insert(3, metrics1)
-	suite.balancer.RegisterNodeInfo([]nodeInfo{
+	suite.balancer.RegisterNodeInfo([]NodeInfo{
 		{
-			nodeID: 3,
+			NodeID: 3,
 		},
 	})
 	suite.Eventually(func() bool {
@@ -415,8 +416,9 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 }
 
 func (suite *LookAsideBalancerSuite) TestNodeOffline() {
-	Params.Save(Params.CommonCfg.SessionTTL.Key, "10")
-	Params.Save(Params.ProxyCfg.HealthCheckTimeout.Key, "1000")
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.SessionTTL.Key, "10")
+	params.Save(params.ProxyCfg.HealthCheckTimeout.Key, "1000")
 	// mock qn down for a while and then recover
 	qn3 := mocks.NewMockQueryNodeClient(suite.T())
 	suite.clientMgr.ExpectedCalls = nil
@@ -430,9 +432,9 @@ func (suite *LookAsideBalancerSuite) TestNodeOffline() {
 	metrics1 := &CostMetrics{}
 	metrics1.ts.Store(time.Now().UnixMilli())
 	suite.balancer.metricsMap.Insert(3, metrics1)
-	suite.balancer.RegisterNodeInfo([]nodeInfo{
+	suite.balancer.RegisterNodeInfo([]NodeInfo{
 		{
-			nodeID: 3,
+			NodeID: 3,
 		},
 	})
 	suite.Eventually(func() bool {

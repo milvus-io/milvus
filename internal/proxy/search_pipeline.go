@@ -404,13 +404,14 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			PartitionIDs:     op.partitionIDs, // use search partitionIDs
 			ConsistencyLevel: op.consistencyLevel,
 		},
-		request:      queryReq,
-		plan:         plan,
-		mixCoord:     op.node.(*Proxy).mixCoord,
-		lb:           op.node.(*Proxy).lbPolicy,
-		channelsMvcc: channelsMvcc,
-		fastSkip:     true,
-		reQuery:      true,
+		request:        queryReq,
+		plan:           plan,
+		mixCoord:       op.node.(*Proxy).mixCoord,
+		lb:             op.node.(*Proxy).lbPolicy,
+		shardclientMgr: op.node.(*Proxy).shardMgr,
+		channelsMvcc:   channelsMvcc,
+		fastSkip:       true,
+		reQuery:        true,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
 	if err != nil {
