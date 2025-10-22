@@ -54,9 +54,7 @@ func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.Drop
 
 	channels := make([]string, 0, len(dropCollectionTask.vchannels)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	for _, vchannel := range dropCollectionTask.vchannels {
-		channels = append(channels, vchannel)
-	}
+	channels = append(channels, dropCollectionTask.vchannels...)
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(dropCollectionTask.header).
 		WithBody(dropCollectionTask.body).

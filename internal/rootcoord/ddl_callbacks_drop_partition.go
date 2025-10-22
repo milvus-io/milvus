@@ -21,13 +21,11 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -59,9 +57,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		}
 	}
 	if partID == common.InvalidPartitionID {
-		log.Ctx(ctx).Warn("drop an non-existent partition", zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()))
-		// make dropping partition idempotent.
-		return nil
+		return errIgnoredDropPartition
 	}
 
 	channels := make([]string, 0, collMeta.ShardsNum+1)

@@ -18,11 +18,11 @@ package tombstone
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 

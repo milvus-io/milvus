@@ -94,7 +94,7 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 	// 4. check collection * shard * partition
 	var newPartNum int64 = 1
 	if t.Req.GetNumPartitions() > 0 {
-		newPartNum = int64(t.Req.GetNumPartitions())
+		newPartNum = t.Req.GetNumPartitions()
 	}
 	return checkGeneralCapacity(ctx, 1, newPartNum, t.Req.GetShardsNum(), t.Core)
 }
