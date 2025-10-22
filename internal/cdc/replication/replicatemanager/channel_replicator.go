@@ -79,7 +79,18 @@ func (r *channelReplicator) StartReplication() {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
 	logger.Info("start replicate channel")
 	go func() {
-		defer r.asyncNotifier.Finish(struct{}{})
+		defer func() {
+			r.asyncNotifier.Finish(struct{}{})
+			if r.streamClient != nil {
+				r.streamClient.Close()
+			}
+			if r.msgScanner != nil {
+				r.msgScanner.Close()
+			}
+			if r.targetClient != nil {
+				r.targetClient.Close(r.asyncNotifier.Context())
+			}
+		}()
 	INIT_LOOP:
 		for {
 			select {
@@ -201,14 +212,5 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 
 func (r *channelReplicator) StopReplication() {
 	r.asyncNotifier.Cancel()
-	r.asyncNotifier.BlockUntilFinish() // wait for the start goroutine to finish
-	if r.targetClient != nil {
-		r.targetClient.Close(r.asyncNotifier.Context())
-	}
-	if r.streamClient != nil {
-		r.streamClient.Close()
-	}
-	if r.msgScanner != nil {
-		r.msgScanner.Close()
-	}
+	r.asyncNotifier.BlockUntilFinish()
 }
