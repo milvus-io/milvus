@@ -631,8 +631,12 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 		return err
 	}
 
-	collection.SetRefreshNotifier(readyCh)
-	return nil
+	err = s.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(readyCh))
+	// if collection already released, treat as success
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return nil
+	}
+	return err
 }
 
 // This is totally same to refreshCollection, remove it for now
