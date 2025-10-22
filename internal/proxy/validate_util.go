@@ -189,7 +189,9 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 		case schemapb.DataType_ArrayOfStruct:
 			panic("unreachable, array of struct should have been flattened")
 		case schemapb.DataType_Timestamptz:
-			// TODO: Add check logic for timestamptz data
+			if err := v.checkTimestamptzFieldData(field, helper.GetTimezone()); err != nil {
+				return err
+			}
 		default:
 		}
 	}
@@ -940,16 +942,6 @@ func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 	return nil
 }
 
-func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	data := field.GetScalars().GetTimestamptzData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need long int array", "got nil", msg)
-	}
-	// TODO: Additional checks?
-	return nil
-}
-
 func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
@@ -1139,6 +1131,43 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		msg := fmt.Sprintf("unsupported element type for ArrayOfVector: %v", fieldSchema.GetElementType())
 		return merr.WrapErrParameterInvalid("supported vector type", fieldSchema.GetElementType().String(), msg)
 	}
+}
+
+// checkTimestamptzFieldData validates the input string data for a Timestamptz field,
+// converts it into UTC Unix Microseconds (int64), and replaces the data in place.
+func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, timezone string) error {
+	// 1. Structural Check: Data must be present and must be a string array
+	scalarField := field.GetScalars()
+	if scalarField == nil || scalarField.GetStringData() == nil {
+		log.Warn("timestamptz field data is not string array", zap.String("fieldName", field.GetFieldName()))
+		return merr.WrapErrParameterInvalidMsg("timestamptz field data must be a string array")
+	}
+
+	stringData := scalarField.GetStringData().GetData()
+	utcTimestamps := make([]int64, len(stringData))
+
+	// 2. Validation and Conversion Loop
+	for i, isoStr := range stringData {
+		// Use the centralized parser (funcutil.ParseTimeTz) for validation and parsing.
+		t, err := funcutil.ParseTimeTz(isoStr, timezone)
+		if err != nil {
+			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.Error(err))
+			// Use the recommended refined error message structure
+			const invalidMsg = "invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC')"
+			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, invalidMsg)
+		}
+
+		// Convert the time object to Unix Microseconds (int64)
+		utcTimestamps[i] = t.UnixMicro()
+	}
+
+	// 3. In-Place Data Replacement: Replace StringData with converted TimestamptzData (int64)
+	field.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
+		TimestamptzData: &schemapb.TimestamptzArray{
+			Data: utcTimestamps,
+		},
+	}
+	return nil
 }
 
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) (int, bool) {
