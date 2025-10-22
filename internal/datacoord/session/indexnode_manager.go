@@ -52,9 +52,11 @@ type WorkerManager interface {
 }
 
 type WorkerSlots struct {
-	NodeID         int64
-	TotalSlots     int64
-	AvailableSlots int64
+	NodeID              int64
+	AvailableCpuSlot    float64
+	TotalCpuSlot        float64
+	AvailableMemorySlot float64
+	TotalMemorySlot     float64
 }
 
 // IndexNodeManager is used to manage the client of IndexNode.
@@ -156,9 +158,11 @@ func (nm *IndexNodeManager) QuerySlots() map[typeutil.UniqueID]*WorkerSlots {
 				mu.Lock()
 				defer mu.Unlock()
 				nodeSlots[nodeID] = &WorkerSlots{
-					NodeID:         nodeID,
-					TotalSlots:     resp.GetTotalSlots(),
-					AvailableSlots: resp.GetAvailableSlots(),
+					NodeID:              nodeID,
+					TotalCpuSlot:        resp.GetTotalCpuSlots(),
+					AvailableCpuSlot:    resp.GetAvailableCpuSlots(),
+					TotalMemorySlot:     resp.GetTotalMemorySlots(),
+					AvailableMemorySlot: resp.GetAvailableMemorySlots(),
 				}
 			}(nodeID)
 		}

@@ -199,3 +199,22 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
 }
+
+func (suite *UtilSuite) TestCalculateStatsTaskSlotV2() {
+	segmentSize := int64(512 * 1024 * 1024)
+	cpuSlot, memorySlot := calculateStatsTaskSlot(segmentSize)
+	suite.Equal(1.0, cpuSlot)
+	suite.Equal(2.0, memorySlot)
+}
+
+func (suite *UtilSuite) TestCalculateIndexTaskSlotV2() {
+	fieldSize := int64(3 * 1024 * 1024 * 1024)
+	cpuSlot, memorySlot := calculateIndexTaskSlot(fieldSize, true)
+	suite.Equal(8.0, cpuSlot)
+	suite.Equal(12.0, memorySlot)
+
+	fieldSize = int64(300 * 1024 * 1024)
+	cpuSlot, memorySlot = calculateIndexTaskSlot(fieldSize, false)
+	suite.Equal(2.0, cpuSlot)
+	suite.Equal(300.0/1024*4, memorySlot)
+}

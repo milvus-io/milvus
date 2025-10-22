@@ -18,10 +18,12 @@ package datacoord
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -119,6 +121,7 @@ func (s *taskScheduler) reloadFromMeta() {
 			if segIndex.IsDeleted {
 				continue
 			}
+			taskCpuSlot, taskMemorySlot := calculateIndexTaskSlot(segment.getSegmentSize(), IsVectorIndex(s.meta, segment.GetCollectionID(), segIndex.IndexID))
 			task := &indexBuildTask{
 				taskID: segIndex.BuildID,
 				nodeID: segIndex.NodeID,
@@ -127,7 +130,8 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
-				taskSlot: calculateIndexTaskSlot(segment.getSegmentSize()),
+				cpuSlot:    taskCpuSlot,
+				memorySlot: taskMemorySlot,
 				req: &workerpb.CreateJobRequest{
 					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 					BuildID:   segIndex.BuildID,
@@ -174,9 +178,9 @@ func (s *taskScheduler) reloadFromMeta() {
 	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
 	for taskID, t := range allStatsTasks {
 		segment := s.meta.GetHealthySegment(s.ctx, t.GetSegmentID())
-		taskSlot := int64(0)
+		taskCpuSlot, taskMemorySlot := float64(0), float64(0)
 		if segment != nil {
-			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
+			taskCpuSlot, taskMemorySlot = calculateStatsTaskSlot(segment.getSegmentSize())
 		}
 		task := &statsTask{
 			taskID:          taskID,
@@ -192,7 +196,8 @@ func (s *taskScheduler) reloadFromMeta() {
 				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 				TaskID:    taskID,
 			},
-			taskSlot:   taskSlot,
+			cpuSlot:    taskCpuSlot,
+			memorySlot: taskMemorySlot,
 			queueTime:  time.Now(),
 			startTime:  time.Now(),
 			endTime:    time.Now(),
@@ -380,8 +385,8 @@ func (s *taskScheduler) run() {
 			break
 		}
 
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(workerSlots, taskSlot)
+		taskCpuSlot, taskMemorySlot := task.GetTaskSlot()
+		nodeID := s.pickNode(workerSlots, taskCpuSlot, taskMemorySlot, task.GetTaskType())
 
 		wg.Add(1)
 		go func(task Task, nodeID UniqueID) {
@@ -623,29 +628,40 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	return false
 }
 
-func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, cpuSlot, memorySlot float64, taskType string) int64 {
 	s.slotsMutex.Lock()
 	defer s.slotsMutex.Unlock()
 
-	var fallbackNodeID int64 = -1
-	var maxAvailable int64 = -1
+	var nodeID int64 = NullNodeID
+	if len(workerSlots) <= 0 {
+		return nodeID
+	}
 
-	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
+	workerSlotsList := lo.Values(workerSlots)
+
+	sort.Slice(workerSlotsList, func(i, j int) bool {
+		if workerSlotsList[i].AvailableMemorySlot != workerSlotsList[j].AvailableMemorySlot {
+			return workerSlotsList[i].AvailableCpuSlot > workerSlotsList[j].AvailableCpuSlot
 		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
+		return workerSlotsList[i].AvailableMemorySlot > workerSlotsList[j].AvailableMemorySlot
+	})
+
+	optimal := workerSlotsList[0]
+	if memorySlot >= optimal.AvailableMemorySlot {
+		if optimal.TotalMemorySlot == optimal.AvailableMemorySlot {
+			nodeID = optimal.NodeID
+		}
+	} else {
+		if cpuSlot <= optimal.AvailableCpuSlot || taskType != indexpb.JobType_JobTypeIndexJob.String() || optimal.AvailableCpuSlot == optimal.TotalCpuSlot {
+			nodeID = optimal.NodeID
 		}
 	}
 
-	if fallbackNodeID != -1 {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+	if nodeID != NullNodeID {
+		workerSlots[nodeID].AvailableCpuSlot -= cpuSlot
+		workerSlots[nodeID].AvailableMemorySlot -= memorySlot
 	}
-	return -1
+	return nodeID
 }
 
 func (s *taskScheduler) hasAvailableSlots(workerSlots map[int64]*session.WorkerSlots) bool {
@@ -653,7 +669,7 @@ func (s *taskScheduler) hasAvailableSlots(workerSlots map[int64]*session.WorkerS
 	defer s.slotsMutex.RUnlock()
 
 	for _, ws := range workerSlots {
-		if ws.AvailableSlots > 0 {
+		if ws.AvailableMemorySlot > 0 {
 			return true
 		}
 	}

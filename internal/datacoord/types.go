@@ -28,7 +28,7 @@ type Task interface {
 	GetTaskID() int64
 	GetNodeID() int64
 	ResetTask(mt *meta)
-	GetTaskSlot() int64
+	GetTaskSlot() (float64, float64)
 	PreCheck(ctx context.Context, dependency *taskScheduler) bool
 	CheckTaskHealthy(mt *meta) bool
 	SetState(state indexpb.JobState, failReason string)

@@ -134,6 +134,10 @@ func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
 }
 
+func (it *indexBuildTask) GetSlotV2() (float64, float64) {
+	return it.req.GetCpuSlot(), it.req.GetMemorySlot()
+}
+
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.queueDur = it.tr.RecordSpan()
 	log.Ctx(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),

@@ -3951,6 +3951,14 @@ type dataCoordConfig struct {
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 
 	FlushAllMaxParallelTasks ParamItem `refreshable:"true"`
+
+	StatsTaskMemoryFactor       ParamItem `refreshable:"true"`
+	ScalarIndexTaskMemoryFactor ParamItem `refreshable:"true"`
+	VectorIndexTaskMemoryFactor ParamItem `refreshable:"true"`
+
+	StatsTaskCPUFactor       ParamItem `refreshable:"true"`
+	ScalarIndexTaskCPUFactor ParamItem `refreshable:"true"`
+	VectorIndexTaskCPUFactor ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -5006,6 +5014,60 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       false,
 	}
 	p.FlushAllMaxParallelTasks.Init(base.mgr)
+
+	p.StatsTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.statsTaskMemoryFactor",
+		Version:      "2.5.22",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing stats tasks",
+		Export:       false,
+	}
+	p.StatsTaskMemoryFactor.Init(base.mgr)
+
+	p.ScalarIndexTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.scalarIndexTaskMemoryFactor",
+		Version:      "2.5.22",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing scalar index tasks",
+		Export:       false,
+	}
+	p.ScalarIndexTaskMemoryFactor.Init(base.mgr)
+
+	p.VectorIndexTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.VectorIndexTaskMemoryFactor",
+		Version:      "2.5.22",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing vector index tasks",
+		Export:       false,
+	}
+	p.VectorIndexTaskMemoryFactor.Init(base.mgr)
+
+	p.StatsTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.statsTaskCpuFactor",
+		Version:      "2.5.22",
+		DefaultValue: "1",
+		Doc:          "Estimated number of CPU cores used by each stats task during execution",
+		Export:       false,
+	}
+	p.StatsTaskCPUFactor.Init(base.mgr)
+
+	p.ScalarIndexTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.scalarIndexTaskCpuFactor",
+		Version:      "2.5.22",
+		DefaultValue: "2",
+		Doc:          "Estimated number of CPU cores used by each scalar index task during execution",
+		Export:       false,
+	}
+	p.ScalarIndexTaskCPUFactor.Init(base.mgr)
+
+	p.VectorIndexTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.vectorIndexTaskCpuFactor",
+		Version:      "2.5.22",
+		DefaultValue: "8",
+		Doc:          "Estimated number of CPU cores used by each vector index task during execution",
+		Export:       false,
+	}
+	p.VectorIndexTaskCPUFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

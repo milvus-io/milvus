@@ -514,6 +514,35 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return s.size.Load()
 }
 
+// getSegmentSize use cached value when segment is immutable
+func (s *SegmentInfo) getFieldSize(fieldID int64) int64 {
+	var size int64
+	for _, binlogs := range s.GetBinlogs() {
+		if binlogs.GetFieldID() == fieldID {
+			for _, l := range binlogs.GetBinlogs() {
+				size += l.GetMemorySize()
+			}
+		}
+	}
+
+	for _, deltaLogs := range s.GetDeltalogs() {
+		if deltaLogs.GetFieldID() == fieldID {
+			for _, l := range deltaLogs.GetBinlogs() {
+				size += l.GetMemorySize()
+			}
+		}
+	}
+
+	for _, statsLogs := range s.GetStatslogs() {
+		if statsLogs.GetFieldID() == fieldID {
+			for _, l := range statsLogs.GetBinlogs() {
+				size += l.GetMemorySize()
+			}
+		}
+	}
+	return size
+}
+
 // Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
 	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {

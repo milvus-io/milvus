@@ -304,7 +304,7 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 		originSegmentSize = originSegment.getSegmentSize() * 2
 	}
 
-	taskSlot := calculateStatsTaskSlot(originSegmentSize)
+	cpuSlot, memorySlot := calculateStatsTaskSlot(originSegmentSize)
 	t := &indexpb.StatsTask{
 		CollectionID:    originSegment.GetCollectionID(),
 		PartitionID:     originSegment.GetPartitionID(),
@@ -328,12 +328,13 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 		}
 		return err
 	}
-	jm.scheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), subJobType, taskSlot))
+	jm.scheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), subJobType, cpuSlot, memorySlot))
 	log.Ctx(jm.ctx).Info("submit stats task success", zap.Int64("taskID", taskID),
 		zap.String("subJobType", subJobType.String()),
 		zap.Int64("collectionID", originSegment.GetCollectionID()),
 		zap.Int64("originSegmentID", originSegmentID),
-		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("taskSlot", taskSlot))
+		zap.Int64("targetSegmentID", targetSegmentID),
+		zap.Float64("cpuSlot", cpuSlot), zap.Float64("memorySlot", memorySlot))
 	return nil
 }
 

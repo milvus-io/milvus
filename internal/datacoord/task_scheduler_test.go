@@ -856,9 +856,11 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 		return map[int64]*session.WorkerSlots{
 			1: {
-				NodeID:         1,
-				TotalSlots:     16,
-				AvailableSlots: 16,
+				NodeID:              1,
+				TotalCpuSlot:        16,
+				AvailableCpuSlot:    16,
+				TotalMemorySlot:     16,
+				AvailableMemorySlot: 16,
 			},
 		}
 	})
@@ -872,6 +874,14 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 			tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 			segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
 		}))
+	mt.collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+			},
+		},
+	})
 
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
@@ -985,7 +995,7 @@ func (s *taskSchedulerSuite) Test_scheduler() {
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", IsPrimaryKey: true, IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-				{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
+				{FieldID: s.fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
 			},
 		},
 	}, nil)
@@ -1006,9 +1016,11 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 			return map[int64]*session.WorkerSlots{
 				1: {
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
+					NodeID:              1,
+					TotalCpuSlot:        16,
+					AvailableCpuSlot:    16,
+					TotalMemorySlot:     16,
+					AvailableMemorySlot: 16,
 				},
 			}
 		})
@@ -1080,9 +1092,11 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 			return map[int64]*session.WorkerSlots{
 				1: {
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
+					NodeID:              1,
+					TotalCpuSlot:        16,
+					AvailableCpuSlot:    16,
+					TotalMemorySlot:     16,
+					AvailableMemorySlot: 16,
 				},
 			}
 		})
@@ -1336,9 +1350,11 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 			return map[int64]*session.WorkerSlots{
 				1: {
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
+					NodeID:              1,
+					TotalCpuSlot:        16,
+					AvailableCpuSlot:    16,
+					TotalMemorySlot:     16,
+					AvailableMemorySlot: 16,
 				},
 			}
 		})
@@ -1411,6 +1427,14 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 			IndexID:      indexID,
 			BuildID:      buildID,
 			IndexState:   commonpb.IndexState_Unissued,
+		})
+		mt.collections.Insert(s.collectionID, &collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: s.fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
 		})
 		cm := mocks.NewChunkManager(s.T())
 		cm.EXPECT().RootPath().Return("ut-index")
@@ -1578,9 +1602,11 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 		return map[int64]*session.WorkerSlots{
 			1: {
-				NodeID:         1,
-				TotalSlots:     16,
-				AvailableSlots: 16,
+				NodeID:              1,
+				TotalCpuSlot:        16,
+				AvailableCpuSlot:    16,
+				TotalMemorySlot:     16,
+				AvailableMemorySlot: 16,
 			},
 		}
 	})
@@ -2111,6 +2137,14 @@ func (s *taskSchedulerSuite) Test_reload() {
 				tasks:           tasks,
 				segmentID2Tasks: secondaryIndex,
 			}))
+		mt.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
+		})
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
@@ -2153,6 +2187,14 @@ func (s *taskSchedulerSuite) Test_reload() {
 				segmentID2Tasks: secondaryIndex,
 				keyLock:         lock.NewKeyLock[UniqueID](),
 			}))
+		mt.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
+		})
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		mt.segments.segments[1000].isCompacting = true
@@ -2195,6 +2237,14 @@ func (s *taskSchedulerSuite) Test_reload() {
 				segmentID2Tasks: secondaryIndex,
 				keyLock:         lock.NewKeyLock[UniqueID](),
 			}))
+		mt.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
+		})
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		mt.segments.segments[1000].isCompacting = true
@@ -2238,6 +2288,14 @@ func (s *taskSchedulerSuite) Test_reload() {
 				segmentID2Tasks: secondaryIndex,
 				keyLock:         lock.NewKeyLock[UniqueID](),
 			}))
+		mt.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
+		})
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
 		mt.segments.segments[1000].isCompacting = false
@@ -2281,6 +2339,14 @@ func (s *taskSchedulerSuite) Test_reload() {
 				segmentID2Tasks: secondaryIndex,
 				keyLock:         lock.NewKeyLock[UniqueID](),
 			}))
+		mt.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+				},
+			},
+		})
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
 		mt.segments.segments[1000].isCompacting = false
@@ -2304,9 +2370,11 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]*session.WorkerSlots {
 		return map[int64]*session.WorkerSlots{
 			1: {
-				NodeID:         1,
-				TotalSlots:     16,
-				AvailableSlots: 16,
+				NodeID:              1,
+				TotalCpuSlot:        16,
+				AvailableCpuSlot:    16,
+				TotalMemorySlot:     16,
+				AvailableMemorySlot: 16,
 			},
 		}
 	})
@@ -2380,7 +2448,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	}
 	scheduler.Start()
 
-	scheduler.enqueue(newStatsTask(taskID, segID, targetSegID, indexpb.StatsSubJob_Sort, 1))
+	scheduler.enqueue(newStatsTask(taskID, segID, targetSegID, indexpb.StatsSubJob_Sort, 1, 1))
 	for {
 		time.Sleep(time.Second)
 		if scheduler.pendingTasks.TaskCount() == 0 {

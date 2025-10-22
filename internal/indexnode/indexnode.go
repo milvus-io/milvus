@@ -116,7 +116,9 @@ type IndexNode struct {
 
 	binlogIO io.BinlogIO
 
-	totalSlot int64
+	totalSlot  int64
+	cpuSlot    float64
+	memorySlot float64
 
 	initOnce     sync.Once
 	stateLock    sync.Mutex
@@ -144,6 +146,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 
 	b.sched = sc
 	b.totalSlot = calculateNodeSlots()
+	b.cpuSlot, b.memorySlot = calculateNodeSlotsV2()
 	expr.Register("indexnode", b)
 	return b
 }

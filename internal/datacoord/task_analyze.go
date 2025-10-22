@@ -117,8 +117,8 @@ func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
 }
 
-func (at *analyzeTask) GetTaskSlot() int64 {
-	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+func (at *analyzeTask) GetTaskSlot() (float64, float64) {
+	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(), Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
 }
 
 func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -228,6 +228,8 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	at.req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	taskSlot := Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 	at.req.TaskSlot = taskSlot
+	at.req.CpuSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
+	at.req.MemorySlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
 
 	return true
 }

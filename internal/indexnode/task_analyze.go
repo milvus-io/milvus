@@ -75,6 +75,10 @@ func (at *analyzeTask) GetSlot() int64 {
 	return at.req.GetTaskSlot()
 }
 
+func (at *analyzeTask) GetSlotV2() (float64, float64) {
+	return at.req.GetCpuSlot(), at.req.GetMemorySlot()
+}
+
 func (at *analyzeTask) PreExecute(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
