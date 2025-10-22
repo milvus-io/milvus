@@ -19,11 +19,11 @@ package messageutil
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMustGetSchemaFromCreateCollectionMessageBody(t *testing.T) {
