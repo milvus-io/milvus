@@ -343,6 +343,9 @@ func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 		expr := `text_match(VarCharField, "query", minimum_should_match={min})`
 		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 		assert.Error(t, err)
+		// grammar rejects placeholder before visitor; accept either parse error or visitor error
+		errMsg := err.Error()
+		assert.True(t, strings.Contains(errMsg, "mismatched input") || strings.Contains(errMsg, "minimum_should_match should be a const integer expression"), errMsg)
 	}
 
 	{
@@ -350,6 +353,12 @@ func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid minimum_should_match value")
+	}
+
+	{
+		expr := `text_match(VarCharField, "\中国")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
 	}
 }
 
