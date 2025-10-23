@@ -18,32 +18,32 @@
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/bson_inverted.h"
 #include "storage/FileManager.h"
 
-namespace milvus::segcore::storagev2translator {
+namespace milvus::segcore::storagev1translator {
 
-struct JsonStatsLoadInfo {
+struct BsonInvertedIndexLoadInfo {
     bool enable_mmap;
-    std::string mmap_dir_path;
     int64_t segment_id;
     int64_t field_id;
-    int64_t stats_size;
+    int64_t index_size;
+    std::vector<std::string> index_files;
+    uint32_t load_priority;
 };
 
-// Translator for JSON Key Stats (non-knowhere index). It loads a single-cell
-// JsonKeyStats instance for a sealed segment field and exposes it to the cache
+// Translator for BsonInvertedIndex in json stats. It loads a single-cell
+// BsonInvertedIndex instance for json stats shared field and exposes it to the cache
 // layer with a stable key and resource usage.
-class JsonStatsTranslator
-    : public milvus::cachinglayer::Translator<milvus::index::JsonKeyStats> {
+class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
+                                        milvus::index::BsonInvertedIndex> {
  public:
-    JsonStatsTranslator(
-        JsonStatsLoadInfo load_info,
-        milvus::tracer::TraceContext ctx,
-        milvus::storage::FileManagerContext file_manager_context,
-        milvus::Config config);
+    BsonInvertedIndexTranslator(
+        BsonInvertedIndexLoadInfo load_info,
+        std::shared_ptr<milvus::storage::DiskFileManagerImpl>
+            disk_file_manager);
 
-    ~JsonStatsTranslator() override = default;
+    ~BsonInvertedIndexTranslator() override = default;
 
     size_t
     num_cells() const override;
@@ -55,30 +55,25 @@ class JsonStatsTranslator
               milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
 
+    int64_t
+    cells_storage_bytes(
+        const std::vector<milvus::cachinglayer::cid_t>&) const override;
+
     const std::string&
     key() const override;
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::JsonKeyStats>>>
+                          std::unique_ptr<milvus::index::BsonInvertedIndex>>>
     get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
-    Meta*
+    milvus::cachinglayer::Meta*
     meta() override;
 
-    int64_t
-    cells_storage_bytes(
-        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
-        constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
-        return std::max(load_info_.stats_size, MIN_STORAGE_BYTES);
-    }
-
  private:
-    milvus::tracer::TraceContext ctx_;
-    milvus::storage::FileManagerContext file_manager_context_;
-    milvus::Config config_;
+    BsonInvertedIndexLoadInfo load_info_;
+    std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager_;
     std::string key_;
-    JsonStatsLoadInfo load_info_{};
     milvus::cachinglayer::Meta meta_;
 };
 
-}  // namespace milvus::segcore::storagev2translator
+}  // namespace milvus::segcore::storagev1translator

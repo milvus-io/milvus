@@ -26,6 +26,8 @@
 #include "segcore/SegmentInterface.h"
 #include "common/bson_view.h"
 #include "exec/expression/Utils.h"
+#include "index/json_stats/bson_inverted.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
 namespace exec {
@@ -554,7 +556,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
-    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
+    PinWrapper<index::BsonInvertedIndex*> bson_index_;
 };
 }  //namespace exec
 }  // namespace milvus
