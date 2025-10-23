@@ -367,6 +367,12 @@ func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid minimum_should_match value")
 	}
+
+	{
+		expr := `text_match(VarCharField, "\中国")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
 }
 
 func TestExpr_TextMatch_MinShouldMatch_Omitted(t *testing.T) {
