@@ -571,8 +571,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -713,8 +712,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
+        if (bson_index_.get() == nullptr) {
+            bson_index_ = index->GetBsonIndex(op_ctx_);
+        }
+        AssertInfo(bson_index_.get() != nullptr,
+                   "bson index is not loaded for field: {}",
+                   expr_->column_.field_id_.get());
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_.get(), pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
