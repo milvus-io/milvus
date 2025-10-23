@@ -1061,9 +1061,12 @@ class SkipIndexStatsBuilder {
     std::unique_ptr<FieldChunkMetrics>
     LoadMetrics(const metricsInfo<T>& info) const {
         if (info.total_rows_ - info.null_count_ == 0) {
-            return nullptr;
+            return std::make_unique<NoneFieldChunkMetrics>();
         }
         if constexpr (std::is_same_v<T, bool>) {
+            if (info.contains_true_ && info.contains_false_) {
+                return std::make_unique<NoneFieldChunkMetrics>();
+            }
             return std::make_unique<BooleanFieldChunkMetrics>(
                 info.contains_true_, info.contains_false_);
         }

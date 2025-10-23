@@ -132,8 +132,7 @@ SkipIndexStatsBuilder::Build(
         }
         case arrow::Type::STRING: {
             const metricsInfo<std::string>& info =
-                ProcessFieldMetrics<std::string, arrow::StringArray>(batches,
-                                                                     col_idx);
+                ProcessStringFieldMetrics(batches, col_idx);
             return LoadMetrics<std::string>(info);
         }
     }
