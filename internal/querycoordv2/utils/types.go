@@ -90,6 +90,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		IsSorted:         segment.GetIsSorted(),
 		TextStatsLogs:    segment.GetTextStatsLogs(),
 		JsonKeyStatsLogs: segment.GetJsonKeyStats(),
+		ManifestPath:     segment.GetManifestPath(),
 	}
 	return loadInfo
 }
