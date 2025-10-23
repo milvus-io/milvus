@@ -62,7 +62,7 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 			// not throw this error because no need to fail because of one collection
 			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
-		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Schema)
+		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
 		if isPartitionKeySorted {
 			partitionKeySortViews = append(partitionKeySortViews, collectionViews...)
 		} else {
@@ -127,7 +127,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	}
 
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Schema)
+		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) &&
 			!segment.isCompacting && // not compacting now

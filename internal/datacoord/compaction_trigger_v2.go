@@ -301,7 +301,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 				continue
 			}
 			collection := m.meta.GetCollection(segment.GetCollectionID())
-			if !IsPartitionKeySortCompactionEnabled(collection.Schema) {
+			if !IsPartitionKeySortCompactionEnabled(collection.Properties) {
 				m.notify(ctx, TriggerTypeSort, []CompactionView{view})
 			} else {
 				m.notify(ctx, TriggerTypePartitionKeySort, []CompactionView{view})
@@ -548,7 +548,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 	typ := datapb.CompactionType_ClusteringCompaction
-	if IsPartitionKeySortCompactionEnabled(collection.Schema) {
+	if IsPartitionKeySortCompactionEnabled(collection.Properties) {
 		typ = datapb.CompactionType_MixCompaction
 	}
 	task := &datapb.CompactionTask{

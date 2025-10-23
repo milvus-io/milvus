@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -63,7 +62,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			log.Warn("fail to trigger single compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
 		views = append(views, collectionViews...)
-		if IsPartitionKeySortCompactionEnabled(collection.Schema) {
+		if IsPartitionKeySortCompactionEnabled(collection.Properties) {
 			partitionKeySortViews = append(partitionKeySortViews, collectionSortViews...)
 		} else {
 			sortViews = append(sortViews, collectionSortViews...)
@@ -100,7 +99,7 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil
 	}
-	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
+	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
 	if !canTriggerSortCompaction(segment, isPartitionIsolationEnabled) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
 			zap.String("state", segment.GetState().String()),
@@ -137,8 +136,8 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	return view
 }
 
-func IsPartitionKeySortCompactionEnabled(schema *schemapb.CollectionSchema) bool {
-	iso, _ := common.IsPartitionKeyIsolationKvEnabled(schema.Properties...)
+func IsPartitionKeySortCompactionEnabled(properties map[string]string) bool {
+	iso, _ := common.IsPartitionKeyIsolationPropEnabled(properties)
 	return Params.CommonCfg.EnableNamespace.GetAsBool() && iso
 }
 
@@ -165,7 +164,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Schema)
+	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return canTriggerSortCompaction(seg, isPartitionIsolationEnabled)
