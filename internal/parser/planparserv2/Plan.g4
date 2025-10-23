@@ -8,6 +8,7 @@ expr:
 	| StringLiteral											                     # String
 	| (Identifier|Meta)           			      							     # Identifier
 	| JSONIdentifier                                                             # JSONIdentifier
+	| StructIdentifier                                                           # StructIdentifier
 	| LBRACE Identifier RBRACE                                                   # TemplateVariable
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
@@ -35,10 +36,10 @@ expr:
 	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
 	| STWithin'('Identifier','StringLiteral')'									 # STWithin
 	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
-	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
+	| ArrayLength'('(Identifier | JSONIdentifier | StructIdentifier)')'          # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
-	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
-	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
+	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructIdentifier) op2 = (LT | LE) expr	 # Range
+	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                     # Relational
 	| expr op = (EQ | NE) expr								                     # Equality
 	| expr BAND expr										                     # BitAnd
@@ -46,8 +47,8 @@ expr:
 	| expr BOR expr											                     # BitOr
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
-	| (Identifier | JSONIdentifier) ISNULL                                                          # IsNull
-	| (Identifier | JSONIdentifier) ISNOTNULL                                                       # IsNotNull;
+	| (Identifier | JSONIdentifier | StructIdentifier) ISNULL                    # IsNull
+	| (Identifier | JSONIdentifier | StructIdentifier) ISNOTNULL                # IsNotNull;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
@@ -135,6 +136,7 @@ Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
+StructIdentifier: Identifier ('[' Identifier ']')+ ('[' DecimalConstant ']')*;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

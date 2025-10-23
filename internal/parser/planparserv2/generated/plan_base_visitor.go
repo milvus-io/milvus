@@ -167,6 +167,10 @@ func (v *BasePlanVisitor) VisitBitXor(ctx *BitXorContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitStructIdentifier(ctx *StructIdentifierContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
 	return v.VisitChildren(ctx)
 }

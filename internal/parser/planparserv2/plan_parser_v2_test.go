@@ -48,11 +48,27 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_VarChar,
 	})
 
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
+			{
+				FieldID: 133, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID: 134, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+		},
+	}
+
 	return &schemapb.CollectionSchema{
 		Name:               "test",
 		Description:        "schema for test used",
 		AutoID:             true,
 		Fields:             fields,
+		StructArrayFields:  []*schemapb.StructArrayFieldSchema{structArrayField},
 		EnableDynamicField: EnableDynamicField,
 	}
 }
@@ -87,12 +103,34 @@ func assertInvalidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr stri
 	assert.Error(t, err, exprStr)
 }
 
+func TestExpr_StructArray(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		// Access struct sub-field (entire array)
+		`array_contains(struct_array[sub_str], "test")`,
+		`array_length(struct_array[sub_str]) > 0`,
+		`struct_array[sub_int][0] == 123`,
+		// Access struct sub-field array element
+		`struct_array[sub_str][0] == "aaa"`,
+		`struct_array[sub_int][1] > 100`,
+		// Use in term expression
+		`struct_array[sub_str][0] in ["a", "b", "c"]`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_Term(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
 	exprStrs := []string{
+		`struct_array[sub_str][0] == "aaa"`,
 		`BoolField in [true, false]`,
 		`Int8Field in [1, 2]`,
 		`Int16Field in [3, 4]`,

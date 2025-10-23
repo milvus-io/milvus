@@ -127,6 +127,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#BitXor.
 	VisitBitXor(ctx *BitXorContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#StructIdentifier.
+	VisitStructIdentifier(ctx *StructIdentifierContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Exists.
 	VisitExists(ctx *ExistsContext) interface{}
 
