@@ -23,6 +23,7 @@ func TestBroadcastService(t *testing.T) {
 
 	fb := syncutil.NewFuture[broadcaster.Broadcaster]()
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
+	mba.EXPECT().Close().Return()
 	mb := mock_broadcaster.NewMockBroadcaster(t)
 	fb.Set(mb)
 	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
