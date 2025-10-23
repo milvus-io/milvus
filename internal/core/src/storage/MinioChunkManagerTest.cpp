@@ -31,10 +31,6 @@ class MinioChunkManagerTest : public testing::Test {
     virtual void
     SetUp() {
         configs_ = StorageConfig{};
-        const char* env_addr = std::getenv("MINIO_ADDRESS");
-        if (env_addr != nullptr && env_addr[0] != '\0') {
-            configs_.address = std::string(env_addr);
-        }
         chunk_manager_ = std::make_unique<MinioChunkManager>(configs_);
     }
 
@@ -42,53 +38,6 @@ class MinioChunkManagerTest : public testing::Test {
     MinioChunkManagerPtr chunk_manager_;
     StorageConfig configs_;
 };
-
-//StorageConfig
-//get_aliyun_cloud_storage_config() {
-//    auto endpoint = "oss-cn-shanghai.aliyuncs.com:443";
-//    auto accessKey = "";
-//    auto accessValue = "";
-//    auto rootPath = "files";
-//    auto useSSL = false;
-//    auto sslCACert = "";
-//    auto useIam = true;
-//    auto iamEndPoint = "";
-//    auto bucketName = "vdc-infra-poc";
-//    auto cloudProvider = "aliyun";
-//    auto logLevel = "error";
-//    auto region = "";
-//
-//    return StorageConfig{endpoint,
-//                         bucketName,
-//                         accessKey,
-//                         accessValue,
-//                         rootPath,
-//                         "minio",
-//                         cloudProvider,
-//                         iamEndPoint,
-//                         logLevel,
-//                         region,
-//                         useSSL,
-//                         sslCACert,
-//                         useIam};
-//}
-
-//class AliyunChunkManagerTest : public testing::Test {
-// public:
-//    AliyunChunkManagerTest() {
-//    }
-//    ~AliyunChunkManagerTest() {
-//    }
-//
-//    virtual void
-//    SetUp() {
-//        chunk_manager_ = std::make_unique<MinioChunkManager>(
-//            get_aliyun_cloud_storage_config());
-//    }
-//
-// protected:
-//    MinioChunkManagerPtr chunk_manager_;
-//};
 
 TEST_F(MinioChunkManagerTest, InitFailed) {
     auto configs = StorageConfig{};
