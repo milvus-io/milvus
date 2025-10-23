@@ -30,10 +30,6 @@ get_default_remote_storage_config() {
     StorageConfig storage_config;
     storage_config.storage_type = "remote";
     storage_config.address = "localhost:9000";
-    char const* tmp = getenv("MINIO_ADDRESS");
-    if (tmp != NULL) {
-        storage_config.address = string(tmp);
-    }
     storage_config.bucket_name = get_default_bucket_name();
     storage_config.access_key_id = "minioadmin";
     storage_config.access_key_value = "minioadmin";
