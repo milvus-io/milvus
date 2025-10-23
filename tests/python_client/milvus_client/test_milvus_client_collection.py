@@ -4521,13 +4521,20 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR, dim=default_dim)
         # Add all supported scalar data types from DataType.__members__
         supported_types = []
-        for k, v in DataType.__members__.items():
-            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
-                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
-                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
-                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
-                and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
-                supported_types.append((k.lower(), v))
+        for member in DataType:
+            if member and member.name.startswith("_") and member not in (
+                DataType.UNKNOWN,
+                DataType.STRING,
+                DataType.VARCHAR,
+                DataType.FLOAT_VECTOR,
+                DataType.BINARY_VECTOR,
+                DataType.ARRAY, 
+                DataType.FLOAT16_VECTOR,
+                DataType.BFLOAT16_VECTOR,
+                DataType.INT8_VECTOR,
+                DataType.SPARSE_FLOAT_VECTOR,
+            ):
+                supported_types.append((member.name.lower(), member.value))
         for field_name, data_type in supported_types:
             if field_name.lower().startswith("_"):
                 # skip private fields           
