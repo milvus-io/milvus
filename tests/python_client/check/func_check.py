@@ -588,9 +588,8 @@ class ResponseChecker:
             if isinstance(query_res, list):
                 result = pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
                 if result is False:
-                    pass # Only for debug
-                    # log.debug(f"query expected: {exp_res}")
-                    # log.debug(f"query actual: {query_res}")
+                    # Only for debug, compare the result with deepdiff
+                    pc.compare_lists_with_epsilon_ignore_dict_order_deepdiff(a=query_res, b=exp_res)
                 assert result
                 return result
             else:
