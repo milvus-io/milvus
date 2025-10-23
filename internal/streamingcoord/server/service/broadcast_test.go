@@ -30,6 +30,7 @@ func TestBroadcastService(t *testing.T) {
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil)
 	mb.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
 	mb.EXPECT().LegacyAck(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mb.EXPECT().Close().Return().Maybe()
 	broadcast.Register(mb)
 
 	msg := message.NewCreateCollectionMessageBuilderV1().

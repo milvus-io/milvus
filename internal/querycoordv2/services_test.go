@@ -131,7 +131,7 @@ func initStreamingSystem() {
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
-	mb.EXPECT().Close().Return()
+	mb.EXPECT().Close().Return().Maybe()
 	broadcast.ResetBroadcaster()
 	broadcast.Register(mb)
 }
