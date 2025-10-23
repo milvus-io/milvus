@@ -28,6 +28,7 @@
 #include "arrow/type_fwd.h"
 #include "arrow/array/array_primitive.h"
 #include "parquet/statistics.h"
+#include "index/Utils.h"
 #include "common/BloomFilter.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -771,7 +772,11 @@ NewFieldMetrics(const nlohmann::json& data) {
 
 class SkipIndexStatsBuilder {
  public:
-    SkipIndexStatsBuilder() {
+    SkipIndexStatsBuilder() = default;
+    SkipIndexStatsBuilder(const Config& config) {
+        disable_bloom_filter_ =
+            GetValueFromConfig<bool>(config, "disable_bloom_filter")
+                .has_value();
     }
 
     std::unique_ptr<FieldChunkMetrics>
@@ -832,12 +837,12 @@ class SkipIndexStatsBuilder {
     ProcessFieldMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
         int col_idx) const {
-        MetricsDataType<T> min, max;
+        T min, max;
         int64_t total_rows = 0;
         int64_t null_count = 0;
         bool contains_true = false;
         bool contains_false = false;
-        ankerl::unordered_dense::set<MetricsDataType<T>> unique_values;
+        ankerl::unordered_dense::set<T> unique_values;
 
         bool has_first_valid = false;
         for (const auto& batch : batches) {
@@ -848,12 +853,7 @@ class SkipIndexStatsBuilder {
                     null_count++;
                     continue;
                 }
-                MetricsDataType<T> value;
-                if constexpr (std::is_same_v<T, std::string>) {
-                    value = array->GetView(i);
-                } else {
-                    value = array->Value(i);
-                }
+                T value = array->Value(i);
                 if constexpr (std::is_same_v<T, bool>) {
                     if (value) {
                         contains_true = true;
@@ -874,8 +874,10 @@ class SkipIndexStatsBuilder {
                         max = value;
                     }
                 }
-                if constexpr (std::is_integral_v<T> ||
-                              std::is_same_v<T, std::string>) {
+                if (disable_bloom_filter_) {
+                    continue;
+                }
+                if constexpr (std::is_integral_v<T>) {
                     unique_values.insert(value);
                 }
             }
@@ -923,7 +925,8 @@ class SkipIndexStatsBuilder {
                         max = value;
                     }
                 }
-                if (unique_values.find(value) != unique_values.end()) {
+                if (disable_bloom_filter_ ||
+                    unique_values.find(value) != unique_values.end()) {
                     continue;
                 }
                 unique_values.insert(value);
@@ -956,12 +959,12 @@ class SkipIndexStatsBuilder {
                         const bool* valid_data,
                         int64_t count) const {
         bool has_first_valid = false;
-        MetricsDataType<T> min, max;
+        T min, max;
         int64_t total_rows = count;
         int64_t null_count = 0;
         bool contains_true = false;
         bool contains_false = false;
-        ankerl::unordered_dense::set<MetricsDataType<T>> unique_values;
+        ankerl::unordered_dense::set<T> unique_values;
 
         for (int64_t i = 0; i < count; i++) {
             T value = data[i];
@@ -989,7 +992,10 @@ class SkipIndexStatsBuilder {
                     max = value;
                 }
             }
-            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+            if (disable_bloom_filter_) {
+                continue;
+            }
+            if constexpr (std::is_integral_v<T>) {
                 unique_values.insert(value);
             }
         }
@@ -1032,7 +1038,8 @@ class SkipIndexStatsBuilder {
                     max = value;
                 }
             }
-            if (unique_values.find(value) != unique_values.end()) {
+            if (disable_bloom_filter_ ||
+                unique_values.find(value) != unique_values.end()) {
                 continue;
             }
             unique_values.insert(value);
@@ -1081,6 +1088,12 @@ class SkipIndexStatsBuilder {
         if constexpr (std::is_floating_point_v<T>) {
             return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
         }
+        if (disable_bloom_filter_) {
+            if constexpr (std::is_same_v<T, std::string>) {
+                return std::make_unique<StringFieldChunkMetrics>(min, max);
+            }
+            return std::make_unique<IntFieldChunkMetrics<T>>(min, max);
+        }
         BloomFilterPtr bloom_filter =
             NewBloomFilterWithType(info.unique_values_.size(),
                                    DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE,
@@ -1114,6 +1127,9 @@ class SkipIndexStatsBuilder {
         return std::make_unique<IntFieldChunkMetrics<T>>(
             min, max, std::move(bloom_filter));
     }
+
+ private:
+    bool disable_bloom_filter_ = false;
 };
 
 }  // namespace milvus::index
