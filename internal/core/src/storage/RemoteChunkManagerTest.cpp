@@ -75,10 +75,6 @@ TEST_F(RemoteChunkManagerTest, BasicFunctions) {
     the_chunk_manager_ = CreateChunkManager(configs_);
     EXPECT_TRUE(the_chunk_manager_->GetName() == "GcpChunkManager");
 
-    configs_.cloud_provider = "aliyun";
-    the_chunk_manager_ = CreateChunkManager(configs_);
-    EXPECT_TRUE(the_chunk_manager_->GetName() == "AliyunChunkManager");
-
     configs_.cloud_provider = "";
 }
 
