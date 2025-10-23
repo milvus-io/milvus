@@ -58,21 +58,21 @@ func Test_CheckGrpcReady(t *testing.T) {
 func Test_GetValidLocalIPNoValid(t *testing.T) {
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(127, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
-	ip := GetValidLocalIP(addrs)
+	ip := GetValidLocalIP(addrs, false)
 	assert.Equal(t, "", ip)
 }
 
 func Test_GetValidLocalIPIPv4(t *testing.T) {
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
-	ip := GetValidLocalIP(addrs)
+	ip := GetValidLocalIP(addrs, false)
 	assert.Equal(t, "100.1.1.1", ip)
 }
 
 func Test_GetValidLocalIPIPv6(t *testing.T) {
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
-	ip := GetValidLocalIP(addrs)
+	ip := GetValidLocalIP(addrs, false)
 	assert.Equal(t, "[800::]", ip)
 }
 
@@ -80,42 +80,66 @@ func Test_GetValidLocalIPIPv4Priority(t *testing.T) {
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
-	ip := GetValidLocalIP(addrs)
+	ip := GetValidLocalIP(addrs, false)
 	assert.Equal(t, "100.1.1.1", ip)
 }
 
+func Test_GetValidLocalIPIPv6Priority(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs, true)
+	assert.Equal(t, "[800::]", ip)
+}
+
+func Test_GetValidLocalIPv6(t *testing.T) {
+	t.Run("invalid_local_ipv6", func(t *testing.T) {
+		addrs := make([]net.Addr, 0, 1)
+		addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+		ip := GetValidLocalIPv6(addrs)
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("valid_local_ipv6", func(t *testing.T) {
+		addrs := make([]net.Addr, 0, 1)
+		addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+		ip := GetValidLocalIPv6(addrs)
+		assert.Equal(t, "[800::]", ip)
+	})
+}
+
 func Test_GetLocalIP(t *testing.T) {
-	ip := GetLocalIP()
+	ip := GetLocalIP(false)
 	assert.NotNil(t, ip)
 	assert.NotZero(t, len(ip))
 }
 
 func Test_GetIP(t *testing.T) {
 	t.Run("empty_fallback_auto", func(t *testing.T) {
-		ip := GetIP("")
+		ip := GetIP("", false)
 		assert.NotNil(t, ip)
 		assert.NotZero(t, len(ip))
 	})
 
 	t.Run("valid_ip", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			ip := GetIP("8.8.8.8")
+			ip := GetIP("8.8.8.8", false)
 			assert.Equal(t, "8.8.8.8", ip)
 		})
 	})
 
 	t.Run("invalid_ip", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			ip := GetIP("null")
+			ip := GetIP("null", false)
 			assert.Equal(t, "null", ip)
 		}, "non ip format, could be hostname or service name")
 
 		assert.Panics(t, func() {
-			GetIP("0.0.0.0")
+			GetIP("0.0.0.0", false)
 		}, "input is unspecified ip address, panicking")
 
 		assert.Panics(t, func() {
-			GetIP("224.0.0.1")
+			GetIP("224.0.0.1", false)
 		}, "input is multicast ip address, panicking")
 	})
 }

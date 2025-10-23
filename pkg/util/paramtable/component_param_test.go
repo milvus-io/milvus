@@ -153,6 +153,10 @@ func TestComponentParam(t *testing.T) {
 			params.CommonCfg.ClusterID.GetAsInt()
 		})
 		params.Save("common.clusterID", "0")
+
+		assert.Equal(t, false, params.CommonCfg.PreferIPv6Address.GetAsBool())
+		params.Save("common.preferIPv6Address", "true")
+		assert.Equal(t, true, params.CommonCfg.PreferIPv6Address.GetAsBool())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
