@@ -58,10 +58,11 @@ func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 	}
 }
 
-// GetIP return the ip address
-func GetIP(ip string) string {
+// GetIP return the ip address.
+// if preferIPv6Address is true, returns the first valid ipv6 address, otherwise returns the first valid ipv4 address.
+func GetIP(ip string, preferIPv6Address bool) string {
 	if len(ip) == 0 {
-		return GetLocalIP()
+		return GetLocalIP(preferIPv6Address)
 	}
 
 	// Support setting CIDR in the IP field to match interfaces based on CIDR. For example: 192.168.0.0/16
@@ -96,10 +97,11 @@ func GetIP(ip string) string {
 }
 
 // GetLocalIP return the local ip address
-func GetLocalIP() string {
+// if preferIPv6Address is true, returns the first valid ipv6 address, otherwise returns the first valid ipv4 address.
+func GetLocalIP(preferIPv6Address bool) string {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
-		ip := GetValidLocalIP(addrs)
+		ip := GetValidLocalIP(addrs, preferIPv6Address)
 		if len(ip) != 0 {
 			return ip
 		}
@@ -107,8 +109,16 @@ func GetLocalIP() string {
 	return "127.0.0.1"
 }
 
-// GetValidLocalIP return the first valid local ip address
-func GetValidLocalIP(addrs []net.Addr) string {
+// GetValidLocalIP return the first valid local ip address.
+// if preferIPv6Address is true, returns the first valid ipv6 address, otherwise returns the first valid ipv4 address.
+func GetValidLocalIP(addrs []net.Addr, preferIPv6Address bool) string {
+	if preferIPv6Address { // if preferIPv6Address is true, prefer to returns valid ipv6 addresses
+		localIPv6 := GetValidLocalIPv6(addrs)
+		if localIPv6 != "" {
+			return localIPv6
+		}
+	}
+
 	// Search for valid ipv4 addresses
 	for _, addr := range addrs {
 		ipaddr, ok := addr.(*net.IPNet)
@@ -117,6 +127,11 @@ func GetValidLocalIP(addrs []net.Addr) string {
 		}
 	}
 	// Search for valid ipv6 addresses
+	return GetValidLocalIPv6(addrs)
+}
+
+// GetValidLocalIPv6 return the first valid local ipv6 address, otherwise returns empty string.
+func GetValidLocalIPv6(addrs []net.Addr) string {
 	for _, addr := range addrs {
 		ipaddr, ok := addr.(*net.IPNet)
 		if ok && ipaddr.IP.IsGlobalUnicast() && ipaddr.IP.To16() != nil && ipaddr.IP.To4() == nil {
