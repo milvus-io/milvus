@@ -122,16 +122,12 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {
 	// TODO: redundant channel watch by now, remove it in future.
 	startPosition := adaptor.MustGetMQWrapperIDFromMessage(appendResult.MessageID).Serialize()
-	// semantically, we should use the last confirmed message id to setup the start position, like following:
-	//   startPosition := adaptor.MustGetMQWrapperIDFromMessage(appendResult.LastConfirmedMessageID).Serialize()
-	// but currently, the zero message id will be serialized to nil if using woodpecker,
-	// some code assertions will panic if the start position is nil.
-	// so we use the message id here, because the vchannel is created by CreateCollectionMessage,
-	// so the message id will promise to consume all message in the vchannel like LastConfirmedMessageID.
+	// semantically, we should use the last confirmed message id to setup the start position.
+	// same as following `newCollectionModelWithMessage`.
 	resp, err := c.mixCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:    header.CollectionId,
 		ChannelNames:    []string{vchannel},
-		StartPositions:  []*commonpb.KeyDataPair{{Key: vchannel, Data: startPosition}},
+		StartPositions:  []*commonpb.KeyDataPair{{Key: funcutil.ToPhysicalChannel(vchannel), Data: startPosition}},
 		Schema:          body.CollectionSchema,
 		CreateTimestamp: appendResult.TimeTick,
 	})
@@ -155,7 +151,13 @@ func newCollectionModelWithMessage(header *message.CreateCollectionMessageHeader
 			}
 			continue
 		}
-		startPosition[funcutil.ToPhysicalChannel(vchannel)] = adaptor.MustGetMQWrapperIDFromMessage(appendResult.LastConfirmedMessageID).Serialize()
+		startPosition[funcutil.ToPhysicalChannel(vchannel)] = adaptor.MustGetMQWrapperIDFromMessage(appendResult.MessageID).Serialize()
+		// semantically, we should use the last confirmed message id to setup the start position, like following:
+		//   startPosition := adaptor.MustGetMQWrapperIDFromMessage(appendResult.LastConfirmedMessageID).Serialize()
+		// but currently, the zero message id will be serialized to nil if using woodpecker,
+		// some code assertions will panic if the start position is nil.
+		// so we use the message id here, because the vchannel is created by CreateCollectionMessage,
+		// so the message id will promise to consume all message in the vchannel like LastConfirmedMessageID.
 	}
 	newCollInfo.StartPositions = toKeyDataPairs(startPosition)
 	return newCollInfo
