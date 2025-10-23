@@ -384,6 +384,12 @@ func Test_NewClient(t *testing.T) {
 
 		r40, err := client.CheckBalanceStatus(ctx, nil)
 		retCheck(retNotNil, r40, err)
+
+		r41, err := client.RunAnalyzer(ctx, nil)
+		retCheck(retNotNil, r41, err)
+
+		r42, err := client.ValidateAnalyzer(ctx, nil)
+		retCheck(retNotNil, r42, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[MixCoordClient]{

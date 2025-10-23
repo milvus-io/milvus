@@ -1642,6 +1642,16 @@ func (coord *MixCoordMock) ListFileResources(ctx context.Context, req *milvuspb.
 	}, nil
 }
 
+func (coord *MixCoordMock) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	return &milvuspb.RunAnalyzerResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
