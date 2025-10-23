@@ -359,7 +359,7 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		IsSorted:         src.GetIsSorted(),
 		TextStatsLogs:    convertTextIndexStats(src.GetTextStatsLogs()),
 		Bm25Logs:         convertFieldBinlogs(src.GetBm25Logs()),
-		JsonKeyStatsLogs: convertJsonKeyStats(src.GetJsonKeyStatsLogs()),
+		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
 		Priority:         src.GetPriority(),
 	}
 }
@@ -464,8 +464,8 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segc
 	return result
 }
 
-// convertJsonKeyStats converts datapb.JsonKeyStats to segcorepb.JsonKeyStats.
-func convertJsonKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorepb.JsonKeyStats {
+// convertJSONKeyStats converts datapb.JsonKeyStats to segcorepb.JsonKeyStats.
+func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorepb.JsonKeyStats {
 	if src == nil {
 		return nil
 	}
