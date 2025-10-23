@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 #include "storage/MinioChunkManager.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -30,6 +31,10 @@ class MinioChunkManagerTest : public testing::Test {
     virtual void
     SetUp() {
         configs_ = StorageConfig{};
+        const char* env_addr = std::getenv("MINIO_ADDRESS");
+        if (env_addr != nullptr && env_addr[0] != '\0') {
+            configs_.address = std::string(env_addr);
+        }
         chunk_manager_ = std::make_unique<MinioChunkManager>(configs_);
     }
 
