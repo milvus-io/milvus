@@ -88,9 +88,9 @@ func (_c *MockShardClientManager_DeprecateShardCache_Call) RunAndReturn(run func
 	return _c
 }
 
-// GetClient provides a mock function with given fields: ctx, nodeInfo1
-func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo1 NodeInfo) (types.QueryNodeClient, error) {
-	ret := _m.Called(ctx, nodeInfo1)
+// GetClient provides a mock function with given fields: ctx, nodeInfo
+func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo NodeInfo) (types.QueryNodeClient, error) {
+	ret := _m.Called(ctx, nodeInfo)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetClient")
@@ -99,10 +99,10 @@ func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo1 NodeI
 	var r0 types.QueryNodeClient
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, NodeInfo) (types.QueryNodeClient, error)); ok {
-		return rf(ctx, nodeInfo1)
+		return rf(ctx, nodeInfo)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, NodeInfo) types.QueryNodeClient); ok {
-		r0 = rf(ctx, nodeInfo1)
+		r0 = rf(ctx, nodeInfo)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(types.QueryNodeClient)
@@ -110,7 +110,7 @@ func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo1 NodeI
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, NodeInfo) error); ok {
-		r1 = rf(ctx, nodeInfo1)
+		r1 = rf(ctx, nodeInfo)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -125,12 +125,12 @@ type MockShardClientManager_GetClient_Call struct {
 
 // GetClient is a helper method to define mock.On call
 //   - ctx context.Context
-//   - nodeInfo1 nodeInfo
-func (_e *MockShardClientManager_Expecter) GetClient(ctx interface{}, nodeInfo1 interface{}) *MockShardClientManager_GetClient_Call {
-	return &MockShardClientManager_GetClient_Call{Call: _e.mock.On("GetClient", ctx, nodeInfo1)}
+//   - nodeInfo NodeInfo
+func (_e *MockShardClientManager_Expecter) GetClient(ctx interface{}, nodeInfo interface{}) *MockShardClientManager_GetClient_Call {
+	return &MockShardClientManager_GetClient_Call{Call: _e.mock.On("GetClient", ctx, nodeInfo)}
 }
 
-func (_c *MockShardClientManager_GetClient_Call) Run(run func(ctx context.Context, nodeInfo1 NodeInfo)) *MockShardClientManager_GetClient_Call {
+func (_c *MockShardClientManager_GetClient_Call) Run(run func(ctx context.Context, nodeInfo NodeInfo)) *MockShardClientManager_GetClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(NodeInfo))
 	})
@@ -455,8 +455,7 @@ func (_c *MockShardClientManager_Start_Call) RunAndReturn(run func()) *MockShard
 func NewMockShardClientManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockShardClientManager {
+}) *MockShardClientManager {
 	mock := &MockShardClientManager{}
 	mock.Mock.Test(t)
 

@@ -2075,7 +2075,7 @@ func TestBM25Checker(t *testing.T) {
 	}
 
 	for _, field := range schema.Fields {
-		isBm25 := IsBM25FunctionOutputField(field, schema)
+		isBm25 := typeutil.IsBM25FunctionOutputField(field, schema)
 		if field.FieldID == 103 {
 			assert.True(t, isBm25)
 		} else {

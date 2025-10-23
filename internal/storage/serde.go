@@ -46,7 +46,6 @@ type Record interface {
 
 type RecordReader interface {
 	Next() (Record, error)
-	SetNeededFields(fields typeutil.Set[int64])
 	Close() error
 }
 

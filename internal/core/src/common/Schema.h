@@ -214,8 +214,18 @@ class Schema {
     }
 
     void
+    set_namespace_field_id(FieldId field_id) {
+        this->namespace_field_id_opt_ = field_id;
+    }
+
+    void
     set_schema_version(uint64_t version) {
         this->schema_version_ = version;
+    }
+
+    std::optional<FieldId>
+    get_namespace_field_id() const {
+        return this->namespace_field_id_opt_;
     }
 
     uint64_t
@@ -348,6 +358,7 @@ class Schema {
 
     std::optional<FieldId> primary_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
+    std::optional<FieldId> namespace_field_id_opt_;
 
     // field partial load list
     // work as hint now

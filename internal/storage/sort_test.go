@@ -31,12 +31,10 @@ func TestSort(t *testing.T) {
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(10, 3)
 		assert.NoError(t, err)
-		reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-		assert.NoError(t, err)
+		reader10 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 		blobs, err = generateTestDataWithSeed(20, 3)
 		assert.NoError(t, err)
-		reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-		assert.NoError(t, err)
+		reader20 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 		rr := []RecordReader{reader20, reader10}
 		return rr
 	}
@@ -82,12 +80,10 @@ func TestMergeSort(t *testing.T) {
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(1000, 5000)
 		assert.NoError(t, err)
-		reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-		assert.NoError(t, err)
+		reader10 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 		blobs, err = generateTestDataWithSeed(4000, 5000)
 		assert.NoError(t, err)
-		reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-		assert.NoError(t, err)
+		reader20 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 		rr := []RecordReader{reader20, reader10}
 		return rr
 	}
@@ -138,12 +134,10 @@ func BenchmarkSort(b *testing.B) {
 	batch := 500000
 	blobs, err := generateTestDataWithSeed(batch, batch)
 	assert.NoError(b, err)
-	reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-	assert.NoError(b, err)
+	reader10 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 	blobs, err = generateTestDataWithSeed(batch*2+1, batch)
 	assert.NoError(b, err)
-	reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-	assert.NoError(b, err)
+	reader20 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 	rr := []RecordReader{reader20, reader10}
 
 	rw := &MockRecordWriter{
@@ -174,12 +168,10 @@ func TestSortByMoreThanOneField(t *testing.T) {
 
 	blobs, err := generateTestDataWithSeed(10, batchSize)
 	assert.NoError(t, err)
-	reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-	assert.NoError(t, err)
+	reader10 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 	blobs, err = generateTestDataWithSeed(20, batchSize)
 	assert.NoError(t, err)
-	reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
-	assert.NoError(t, err)
+	reader20 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
 	rr := []RecordReader{reader20, reader10}
 
 	lastPK := int64(-1)

@@ -99,7 +99,7 @@ type MockLBBalancer_RegisterNodeInfo_Call struct {
 }
 
 // RegisterNodeInfo is a helper method to define mock.On call
-//   - nodeInfos []nodeInfo
+//   - nodeInfos []NodeInfo
 func (_e *MockLBBalancer_Expecter) RegisterNodeInfo(nodeInfos interface{}) *MockLBBalancer_RegisterNodeInfo_Call {
 	return &MockLBBalancer_RegisterNodeInfo_Call{Call: _e.mock.On("RegisterNodeInfo", nodeInfos)}
 }
@@ -251,8 +251,7 @@ func (_c *MockLBBalancer_UpdateCostMetrics_Call) RunAndReturn(run func(int64, *i
 func NewMockLBBalancer(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockLBBalancer {
+}) *MockLBBalancer {
 	mock := &MockLBBalancer{}
 	mock.Mock.Test(t)
 

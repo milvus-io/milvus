@@ -53,7 +53,7 @@ type Collection struct {
 	Schema          *schemapb.CollectionSchema
 }
 
-func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
+func (collection *Collection) setRefreshNotifier(notifier chan struct{}) {
 	collection.mut.Lock()
 	defer collection.mut.Unlock()
 
@@ -574,6 +574,22 @@ func (m *CollectionManager) UpdateCollectionLoadPercent(ctx context.Context, col
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
 	}
 	return collectionPercent, m.putCollection(ctx, saveCollection, newCollection)
+}
+
+func (m *CollectionManager) UpdateCollection(ctx context.Context, collectionID int64, ops ...CollectionOperator) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotLoaded(collectionID)
+	}
+
+	for _, op := range ops {
+		op(collection)
+	}
+	m.collections[collectionID] = collection
+	return nil
 }
 
 // RemoveCollection removes collection and its partitions.

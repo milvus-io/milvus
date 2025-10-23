@@ -267,8 +267,7 @@ func (_c *MockLBPolicy_UpdateCostMetrics_Call) RunAndReturn(run func(int64, *int
 func NewMockLBPolicy(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockLBPolicy {
+}) *MockLBPolicy {
 	mock := &MockLBPolicy{}
 	mock.Mock.Test(t)
 

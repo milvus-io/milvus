@@ -4114,7 +4114,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("is_flush", [True, False])
     @pytest.mark.parametrize("is_release", [True, False])

@@ -33,6 +33,7 @@
 
 #include "index/VectorDiskIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 #include "index/StringIndexMarisa.h"
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
@@ -90,7 +91,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
         return std::make_unique<HybridScalarIndex<std::string>>(
             create_index_info.tantivy_index_version, file_manager_context);
     }
-    return CreateStringIndexMarisa(file_manager_context);
+    return CreateStringIndexSort(file_manager_context);
 #else
     ThrowInfo(Unsupported, "unsupported platform");
 #endif

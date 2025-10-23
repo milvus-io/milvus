@@ -241,18 +241,6 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 	})
 }
 
-func (s *StorageV1SerializerSuite) TestSerializeDelete() {
-	s.Run("serialize_normal", func() {
-		pack := s.getBasicPack()
-		pack.WithDeleteData(s.getDeleteBuffer())
-		pack.WithTimeRange(50, 100)
-
-		blob, err := s.serializer.serializeDeltalog(pack)
-		s.NoError(err)
-		s.NotNil(blob)
-	})
-}
-
 func (s *StorageV1SerializerSuite) TestBadSchema() {
 	mockCache := metacache.NewMockMetaCache(s.T())
 	_, err := NewStorageSerializer(mockCache, &schemapb.CollectionSchema{})
