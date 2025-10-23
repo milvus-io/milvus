@@ -79,11 +79,6 @@ func TestReplicate(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	cfg, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
-	if err != nil {
-		panic(err)
-	}
-	t.Logf("cfg: %+v\n", cfg)
 }
 
 func TestReplicateCreateCollection(t *testing.T) {
@@ -126,7 +121,7 @@ func TestReplicateCreateCollection(t *testing.T) {
 		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
 			pulsar.NewMessageID(1, 2, 3, 4),
 		))
-		_, err := streaming.WAL().Replicate().Append(context.Background(), message.NewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+		_, err := streaming.WAL().Replicate().Append(context.Background(), message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
 		if err != nil {
 			panic(err)
 		}

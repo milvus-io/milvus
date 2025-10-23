@@ -40,8 +40,6 @@ type RootCoordCatalog interface {
 
 	// GetCredential gets the credential info for the username, returns error if no credential exists for this username.
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
-	// CreateCredential creates credential by Username and EncryptedPassword in crediential. Please make sure credential.Username isn't empty before calling this API. Credentials already exists will be altered.
-	CreateCredential(ctx context.Context, credential *model.Credential) error
 	// AlterCredential does exactly the same as CreateCredential
 	AlterCredential(ctx context.Context, credential *model.Credential) error
 	// DropCredential removes the credential of this username
@@ -207,25 +205,10 @@ type QueryCoordCatalog interface {
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
-// ReplicationCatalog is the interface for replication catalog
-// it's used by CDC component.
-type ReplicationCatalog interface {
-	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
-	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
-	RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error
-
-	// ListReplicatePChannels lists all replicate pchannels from metastore.
-	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.
-	// the task is written by streaming coord, SaveReplicateConfiguration operation.
-	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
-}
-
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 // All write operation of catalog is reliable, the error will only be returned if the ctx is canceled,
 // otherwise it will retry until success.
 type StreamingCoordCataLog interface {
-	ReplicationCatalog
-
 	// GetCChannel get the control channel from metastore.
 	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
 

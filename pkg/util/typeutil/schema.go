@@ -2430,6 +2430,33 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 	return needProcessFunctions, nil
 }
 
+func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fn := range coll.GetFunctions() {
+		if fn.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fn.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
+}
+
 // ConcatStructFieldName transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
 func ConcatStructFieldName(structName string, fieldName string) string {

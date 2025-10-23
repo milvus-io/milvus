@@ -21,25 +21,13 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/cdc/cluster"
-	"github.com/milvus-io/milvus/internal/cdc/controller"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
 )
 
 var r *resourceImpl // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
-
-// OptMetaKV provides the meta kv to the resource.
-func OptMetaKV(metaKV kv.MetaKv) optResourceInit {
-	return func(r *resourceImpl) {
-		r.metaKV = metaKV
-	}
-}
 
 // OptETCD provides the etcd client to the resource.
 func OptETCD(etcd *clientv3.Client) optResourceInit {
@@ -55,27 +43,6 @@ func OptReplicateManagerClient(replicateManagerClient replication.ReplicateManag
 	}
 }
 
-// OptReplicationCatalog provides the replication catalog to the resource.
-func OptReplicationCatalog(catalog metastore.ReplicationCatalog) optResourceInit {
-	return func(r *resourceImpl) {
-		r.catalog = catalog
-	}
-}
-
-// OptClusterClient provides the cluster client to the resource.
-func OptClusterClient(clusterClient cluster.ClusterClient) optResourceInit {
-	return func(r *resourceImpl) {
-		r.clusterClient = clusterClient
-	}
-}
-
-// OptController provides the controller to the resource.
-func OptController(controller controller.Controller) optResourceInit {
-	return func(r *resourceImpl) {
-		r.controller = controller
-	}
-}
-
 // Done finish all initialization of resources.
 func Init(opts ...optResourceInit) {
 	newR := &resourceImpl{}
@@ -83,15 +50,8 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 
-	newR.catalog = streamingcoord.NewReplicationCatalog(newR.MetaKV())
-	newR.clusterClient = cluster.NewClusterClient()
-
-	assertNotNil(newR.MetaKV())
 	assertNotNil(newR.ETCD())
-	assertNotNil(newR.ReplicationCatalog())
-	assertNotNil(newR.ClusterClient())
 	assertNotNil(newR.ReplicateManagerClient())
-	assertNotNil(newR.Controller())
 	r = newR
 }
 
@@ -106,17 +66,8 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	metaKV                 kv.MetaKv
 	etcdClient             *clientv3.Client
-	catalog                metastore.ReplicationCatalog
-	clusterClient          cluster.ClusterClient
 	replicateManagerClient replication.ReplicateManagerClient
-	controller             controller.Controller
-}
-
-// MetaKV returns the meta kv.
-func (r *resourceImpl) MetaKV() kv.MetaKv {
-	return r.metaKV
 }
 
 // ETCD returns the etcd client.
@@ -124,24 +75,9 @@ func (r *resourceImpl) ETCD() *clientv3.Client {
 	return r.etcdClient
 }
 
-// ReplicationCatalog returns the replication catalog.
-func (r *resourceImpl) ReplicationCatalog() metastore.ReplicationCatalog {
-	return r.catalog
-}
-
-// ClusterClient returns the cluster client.
-func (r *resourceImpl) ClusterClient() cluster.ClusterClient {
-	return r.clusterClient
-}
-
 // ReplicateManagerClient returns the replicate manager client.
 func (r *resourceImpl) ReplicateManagerClient() replication.ReplicateManagerClient {
 	return r.replicateManagerClient
-}
-
-// Controller returns the controller.
-func (r *resourceImpl) Controller() controller.Controller {
-	return r.controller
 }
 
 // assertNotNil panics if the resource is nil.

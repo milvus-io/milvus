@@ -129,6 +129,10 @@ type Server struct {
 	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// for balance streaming node request
+	// now only used for run analyzer and validate analyzer
+	nodeIdx atomic.Uint32
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -377,6 +381,7 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
+	RegisterDDLCallbacks(s)
 	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return err
 }

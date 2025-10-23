@@ -62,7 +62,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -488,6 +487,7 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
+		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
 
@@ -495,22 +495,7 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) initCredentials(initCtx context.Context) error {
-	credInfo, _ := c.meta.GetCredential(initCtx, util.UserRoot)
-	if credInfo == nil {
-		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
-		if err != nil {
-			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
-			return err
-		}
-		log.Ctx(initCtx).Info("RootCoord init user root")
-		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
-		if err != nil {
-			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
-			return err
-		}
-		return nil
-	}
-	return nil
+	return c.meta.InitCredential(initCtx)
 }
 
 func (c *Core) initRbac(initCtx context.Context) error {
@@ -531,7 +516,7 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
-		return c.initBuiltinRoles()
+		return c.initBuiltinRoles(initCtx)
 	}
 	return nil
 }
@@ -580,22 +565,22 @@ func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 	return nil
 }
 
-func (c *Core) initBuiltinRoles() error {
-	log := log.Ctx(c.ctx)
+func (c *Core) initBuiltinRoles(ctx context.Context) error {
+	log := log.Ctx(ctx)
 	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
 	for role, privilegesJSON := range rolePrivilegesMap {
-		err := c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err := c.meta.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Error("create a builtin role fail", zap.String("roleName", role), zap.Error(err))
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
-			privilegeName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
+			privilegeName, err := c.getMetastorePrivilegeName(ctx, privilege[util.RoleConfigPrivilege])
 			if err != nil {
 				return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 			}
 
-			err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			err = c.meta.OperatePrivilege(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
 				ObjectName: privilege[util.RoleConfigObjectName],
@@ -822,28 +807,12 @@ func (c *Core) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRe
 	log.Ctx(ctx).Info("received request to create database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-	t := &createDatabaseTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to create database",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := c.broadcastCreateDatabase(ctx, in); err != nil {
 		log.Ctx(ctx).Info("failed to create database",
 			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("dbName", in.GetDbName()),
-			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
-
+			zap.Int64("msgID", in.GetBase().GetMsgID()))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -852,7 +821,7 @@ func (c *Core) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRe
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Ctx(ctx).Info("done to create database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()),
-		zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
 	return merr.Success(), nil
 }
 
@@ -868,26 +837,15 @@ func (c *Core) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseReques
 	log.Ctx(ctx).Info("received request to drop database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-	t := &dropDatabaseTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to drop database", zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := c.broadcastDropDatabase(ctx, in); err != nil {
+		if errors.Is(err, merr.ErrDatabaseNotFound) {
+			log.Ctx(ctx).Info("drop a database that not found, ignore it", zap.String("dbName", in.GetDbName()))
+			return merr.Success(), nil
+		}
 		log.Ctx(ctx).Info("failed to drop database", zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("dbName", in.GetDbName()),
-			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
-
+			zap.Int64("msgID", in.GetBase().GetMsgID()))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -896,8 +854,7 @@ func (c *Core) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseReques
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.CleanupRootCoordDBMetrics(in.GetDbName())
 	log.Ctx(ctx).Info("done to drop database", zap.String("role", typeutil.RootCoordRole),
-		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
-		zap.Uint64("ts", t.GetTs()))
+		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 	return merr.Success(), nil
 }
 
@@ -1503,27 +1460,11 @@ func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseR
 		zap.String("name", in.GetDbName()),
 		zap.Any("props", in.Properties))
 
-	t := &alterDatabaseTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Warn("failed to enqueue request to alter database",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.String("name", in.GetDbName()),
-			zap.Error(err))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := c.broadcastAlterDatabase(ctx, in); err != nil {
 		log.Warn("failed to alter database",
 			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
-			zap.String("name", in.GetDbName()),
-			zap.Uint64("ts", t.GetTs()))
+			zap.String("name", in.GetDbName()))
 
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -1531,12 +1472,11 @@ func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseR
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
+	// metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to alter database",
 		zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetDbName()),
-		zap.Uint64("ts", t.GetTs()))
+		zap.String("name", in.GetDbName()))
 	return merr.Success(), nil
 }
 
@@ -1925,49 +1865,27 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreateAlias")
-
-	log.Ctx(ctx).Info("received request to create alias",
+	logger := log.Ctx(ctx).With(
 		zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
 		zap.String("alias", in.GetAlias()),
-		zap.String("collection", in.GetCollectionName()))
+		zap.String("collectionName", in.GetCollectionName()))
+	logger.Info("received request to create alias")
 
-	t := &createAliasTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to create alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()),
-			zap.String("collection", in.GetCollectionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to create alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()),
-			zap.String("collection", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastCreateAlias(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredAlterAlias) {
+			logger.Info("create alias already set on this collection, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to create alias", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateAlias").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to create alias",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("alias", in.GetAlias()),
-		zap.String("collection", in.GetCollectionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to create alias")
 	return merr.Success(), nil
 }
 
@@ -1979,45 +1897,25 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropAlias")
-
-	log.Ctx(ctx).Info("received request to drop alias",
-		zap.String("role", typeutil.RootCoordRole),
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
 		zap.String("alias", in.GetAlias()))
+	logger.Info("received request to drop alias")
 
-	t := &dropAliasTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to drop alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to drop alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastDropAlias(ctx, in); err != nil {
+		if errors.Is(err, merr.ErrAliasNotFound) {
+			logger.Info("drop alias not found, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to drop alias", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropAlias").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to drop alias",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("alias", in.GetAlias()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to drop alias")
 	return merr.Success(), nil
 }
 
@@ -2029,49 +1927,26 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("AlterAlias")
-
-	log.Ctx(ctx).Info("received request to alter alias",
-		zap.String("role", typeutil.RootCoordRole),
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
 		zap.String("alias", in.GetAlias()),
-		zap.String("collection", in.GetCollectionName()))
+		zap.String("collectionName", in.GetCollectionName()))
+	logger.Info("received request to alter alias")
 
-	t := &alterAliasTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to alter alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()),
-			zap.String("collection", in.GetCollectionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to alter alias",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("alias", in.GetAlias()),
-			zap.String("collection", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastAlterAlias(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredAlterAlias) {
+			logger.Info("alter alias already set on this collection, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to alter alias", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterAlias").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to alter alias",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("alias", in.GetAlias()),
-		zap.String("collection", in.GetCollectionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to alter alias")
 	return merr.Success(), nil
 }
 
@@ -2193,20 +2068,14 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 		return merr.Status(err), nil
 	}
 
-	// insert to db
-	err := c.meta.AddCredential(ctx, credInfo)
-	if err != nil {
-		ctxLog.Warn("CreateCredential save credential failed", zap.Error(err))
+	if err := c.broadcastAlterUserForCreateCredential(ctx, credInfo); err != nil {
+		ctxLog.Warn("CreateCredential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		if errors.Is(err, errUserAlreadyExists) {
+			return merr.StatusWithErrorCode(errors.Errorf("user already exists: %s", credInfo.Username), commonpb.ErrorCode_CreateCredentialFailure), nil
+		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateCredentialFailure), nil
 	}
-	// update proxy's local cache
-	err = c.UpdateCredCache(ctx, credInfo)
-	if err != nil {
-		ctxLog.Warn("CreateCredential add cache failed", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-	}
-	ctxLog.Debug("CreateCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2254,21 +2123,12 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	// update data on storage
-	err := c.meta.AlterCredential(ctx, credInfo)
-	if err != nil {
-		ctxLog.Warn("UpdateCredential save credential failed", zap.Error(err))
+
+	if err := c.broadcastAlterUserForUpdateCredential(ctx, credInfo); err != nil {
+		ctxLog.Warn("UpdateCredential append message failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
 	}
-	// update proxy's local cache
-	err = c.UpdateCredCache(ctx, credInfo)
-	if err != nil {
-		ctxLog.Warn("UpdateCredential update cache failed", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
-	}
-	ctxLog.Debug("UpdateCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2285,27 +2145,25 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	var status *commonpb.Status
-	defer func() {
-		if status.Code != 0 {
-			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+
+	// user not found will not report to the client to achieve idempotent
+	if err := c.broadcastDropUserForDeleteCredential(ctx, in); err != nil {
+		if errors.Is(err, errUserNotFound) {
+			ctxLog.Info("DeleteCredential user not found, ignored")
+			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+			metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			return merr.Success(), nil
 		}
-	}()
-
-	err := executeDeleteCredentialTaskSteps(ctx, c, in.Username)
-	if err != nil {
-		errMsg := "fail to execute task when deleting the user"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		status = merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DeleteCredentialFailure)
-		return status, nil
+		ctxLog.Warn("DeleteCredential append message failed", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DeleteCredentialFailure), nil
 	}
-	ctxLog.Debug("DeleteCredential success")
 
+	ctxLog.Debug("DeleteCredential success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCredentials.Dec()
-	status = merr.Success()
-	return status, nil
+	return merr.Success(), nil
 }
 
 // ListCredUsers list all usernames
@@ -2352,12 +2210,13 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	entity := in.Entity
 
-	err := c.meta.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
-	if err != nil {
-		errMsg := "fail to create role"
-		ctxLog.Warn(errMsg, zap.Error(err))
+	if err := c.broadcastCreateRole(ctx, in); err != nil {
+		ctxLog.Warn("fail to create role", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		if errors.Is(err, errRoleAlreadyExists) {
+			return merr.StatusWithErrorCode(errors.Newf("role [%s] already exists", in.GetEntity()), commonpb.ErrorCode_CreateRoleFailure), nil
+		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateRoleFailure), nil
 	}
 
@@ -2365,7 +2224,6 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfRoles.Inc()
-
 	return merr.Success(), nil
 }
 
@@ -2386,32 +2244,13 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	for util.IsBuiltinRole(in.GetRoleName()) {
-		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
-		return merr.Status(err), nil
-	}
-	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
-	}
 
-	if !in.ForceDrop {
-		grantEntities, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-			Role:   &milvuspb.RoleEntity{Name: in.RoleName},
-			DbName: "*",
-		})
-		if len(grantEntities) != 0 {
-			errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-			ctxLog.Warn(errMsg, zap.Any("grants", grantEntities), zap.Error(err))
-			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
+	if err := c.broadcastDropRole(ctx, in); err != nil {
+		ctxLog.Warn("fail to drop role", zap.Error(err))
+		if errors.Is(err, errRoleNotExists) {
+			return merr.StatusWithErrorCode(errors.New("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_DropRoleFailure), nil
 		}
-	}
-	err := executeDropRoleTaskSteps(ctx, c, in.RoleName, in.ForceDrop)
-	if err != nil {
-		errMsg := "fail to execute task when dropping the role"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
 	ctxLog.Debug(method+" success", zap.String("role_name", in.RoleName))
@@ -2438,27 +2277,15 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 		return merr.Status(err), nil
 	}
 
-	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
-	}
-	if in.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
-			errMsg := "not found the user, maybe the user isn't existed or internal system error"
-			ctxLog.Warn(errMsg, zap.Error(err))
-			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
+	if err := c.broadcastOperateUserRole(ctx, in); err != nil {
+		ctxLog.Warn("fail to operate the user and role", zap.Error(err))
+		if errors.Is(err, errRoleNotExists) {
+			return merr.StatusWithErrorCode(errors.New("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_OperateUserRoleFailure), nil
 		}
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
 
-	err := executeOperateUserRoleTaskSteps(ctx, c, in)
-	if err != nil {
-		errMsg := "fail to execute task when operate the user and role"
-		ctxLog.Warn(errMsg, zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
-	}
-
-	ctxLog.Debug(method + " success")
+	ctxLog.Info(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Success(), nil
@@ -2558,14 +2385,14 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	}, nil
 }
 
-func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
+func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) error {
 	if entity == nil {
 		return errors.New("the role entity is nil")
 	}
 	if entity.Name == "" {
 		return errors.New("the name in the role entity is empty")
 	}
-	if _, err := c.meta.SelectRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
+	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
 		return errors.New("not found the role, maybe the role isn't existed or internal system error")
 	}
@@ -2642,36 +2469,11 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
 	ctxLog.Debug(method)
 
-	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
-		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
 	}
 
-	privName := in.Entity.Grantor.Privilege.Name
-	switch in.Version {
-	case "v2":
-		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
-			ctxLog.Error("", zap.Error(err))
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
-		}
-		if err := c.validatePrivilegeGroupParams(ctx, privName, in.Entity.DbName, in.Entity.ObjectName); err != nil {
-			ctxLog.Error("", zap.Error(err))
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
-		}
-		// set up object type for metastore, to be compatible with v1 version
-		in.Entity.Object.Name = util.GetObjectType(privName)
-	default:
-		if err := c.isValidPrivilege(ctx, privName, in.Entity.Object.Name); err != nil {
-			ctxLog.Error("", zap.Error(err))
-			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
-		}
-		// set up object name if it is global object type and not built in privilege group
-		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !util.IsBuiltinPrivilegeGroup(in.Entity.Grantor.Privilege.Name) {
-			in.Entity.ObjectName = util.AnyWord
-		}
-	}
-
-	err := executeOperatePrivilegeTaskSteps(ctx, c, in)
-	if err != nil {
+	if err := c.broadcastOperatePrivilege(ctx, in); err != nil {
 		errMsg := "fail to execute task when operating the privilege"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
@@ -2684,9 +2486,6 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 }
 
 func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return err
-	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
 		return errors.New(errMsg)
@@ -2698,7 +2497,7 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 	if err := c.isValidObject(in.Entity.Object); err != nil {
 		return errors.New("the object entity in the request is nil or invalid")
 	}
-	if err := c.isValidRole(in.Entity.Role); err != nil {
+	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {
 		return err
 	}
 	entity := in.Entity.Grantor
@@ -2798,7 +2597,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
-	if err := c.isValidRole(in.Entity.Role); err != nil {
+	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {
 		ctxLog.Warn("", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_SelectGrantFailure),
@@ -2939,8 +2738,11 @@ func (c *Core) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequ
 		return merr.Status(err), nil
 	}
 
-	err := executeRestoreRBACTaskSteps(ctx, c, in)
-	if err != nil {
+	if err := c.broadcastRestoreRBACV2(ctx, in); err != nil {
+		if errors.Is(err, errEmptyRBACMeta) {
+			ctxLog.Info("restoring rbac meta is empty, skip restore", zap.Error(err))
+			return merr.Success(), nil
+		}
 		errMsg := "fail to execute task when restore rbac meta data"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
@@ -3092,12 +2894,12 @@ func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePriv
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreatePrivilegeGroupFailure), nil
 	}
 
-	if err := c.meta.CreatePrivilegeGroup(ctx, in.GroupName); err != nil {
+	if err := c.broadcastCreatePrivilegeGroup(ctx, in); err != nil {
 		ctxLog.Warn("fail to create privilege group", zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreatePrivilegeGroupFailure), nil
 	}
 
-	ctxLog.Debug(method + " success")
+	ctxLog.Info(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfPrivilegeGroups.Inc()
@@ -3115,12 +2917,16 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
 	}
 
-	if err := c.meta.DropPrivilegeGroup(ctx, in.GroupName); err != nil {
+	if err := c.broadcastDropPrivilegeGroup(ctx, in); err != nil {
+		if errors.Is(err, errNotCustomPrivilegeGroup) {
+			ctxLog.Info("privilege group is not custom privilege group, skip drop", zap.Error(err))
+			return merr.Success(), nil
+		}
 		ctxLog.Warn("fail to drop privilege group", zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropPrivilegeGroupFailure), nil
 	}
 
-	ctxLog.Debug(method + " success")
+	ctxLog.Info(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfPrivilegeGroups.Desc()
@@ -3171,8 +2977,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 		return merr.Status(err), nil
 	}
 
-	err := executeOperatePrivilegeGroupTaskSteps(ctx, c, in)
-	if err != nil {
+	if err := c.broadcastOperatePrivilegeGroup(ctx, in); err != nil {
 		errMsg := "fail to execute task when operate privilege group"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeGroupFailure), nil

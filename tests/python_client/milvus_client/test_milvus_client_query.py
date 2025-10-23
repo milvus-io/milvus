@@ -4167,7 +4167,6 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         # 3. flush if specified
         if is_flush:
             self.flush(client, collection_name)
-        time.sleep(300)
         # 4. query when there is no json path index under all expressions
         # skip negative expression for issue 40685
         # "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"

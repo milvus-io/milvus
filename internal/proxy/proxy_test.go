@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -74,6 +75,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	_ "github.com/milvus-io/milvus/pkg/v2/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -1037,7 +1039,11 @@ func TestProxy(t *testing.T) {
 	proxy.SetMixCoordClient(rootCoordClient)
 	log.Info("Proxy set mix coordinator client")
 
-	proxy.SetQueryNodeCreator(defaultQueryNodeClientCreator)
+	mockShardMgr := shardclient.NewMockShardClientManager(t)
+	mockShardMgr.EXPECT().SetClientCreatorFunc(mock.Anything).Return().Maybe()
+	proxy.shardMgr = mockShardMgr
+
+	proxy.SetQueryNodeCreator(shardclient.DefaultQueryNodeClientCreator)
 	log.Info("Proxy set query coordinator client")
 
 	proxy.UpdateStateCode(commonpb.StateCode_Initializing)

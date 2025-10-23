@@ -56,6 +56,18 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    void
+    MoveCursor() {
+        if (segment_->type() == SegmentType::Sealed) {
+            SegmentExpr::MoveCursor();
+        }
+    }
+
  private:
     VectorPtr
     EvalForIndexSegment();

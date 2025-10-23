@@ -19,13 +19,11 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -37,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -68,11 +65,11 @@ type Cache interface {
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
-	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error)
-	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
-	DeprecateShardCache(database, collectionName string)
-	InvalidateShardLeaderCache(collections []int64)
-	ListShardLocation() map[int64]nodeInfo
+	// GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error)
+	// GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
+	// DeprecateShardCache(database, collectionName string)
+	// InvalidateShardLeaderCache(collections []int64)
+	// ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string
 
@@ -288,58 +285,6 @@ func (info *collectionInfo) isCollectionCached() bool {
 	return info != nil && info.collID != UniqueID(0) && info.schema != nil
 }
 
-// shardLeaders wraps shard leader mapping for iteration.
-type shardLeaders struct {
-	idx          *atomic.Int64
-	collectionID int64
-	shardLeaders map[string][]nodeInfo
-}
-
-func (sl *shardLeaders) Get(channel string) []nodeInfo {
-	return sl.shardLeaders[channel]
-}
-
-func (sl *shardLeaders) GetShardLeaderList() []string {
-	return lo.Keys(sl.shardLeaders)
-}
-
-type shardLeadersReader struct {
-	leaders *shardLeaders
-	idx     int64
-}
-
-// Shuffle returns the shuffled shard leader list.
-func (it shardLeadersReader) Shuffle() map[string][]nodeInfo {
-	result := make(map[string][]nodeInfo)
-	for channel, leaders := range it.leaders.shardLeaders {
-		l := len(leaders)
-		// shuffle all replica at random order
-		shuffled := make([]nodeInfo, l)
-		for i, randIndex := range rand.Perm(l) {
-			shuffled[i] = leaders[randIndex]
-		}
-
-		// make each copy has same probability to be first replica
-		for index, leader := range shuffled {
-			if leader == leaders[int(it.idx)%l] {
-				shuffled[0], shuffled[index] = shuffled[index], shuffled[0]
-			}
-		}
-
-		result[channel] = shuffled
-	}
-	return result
-}
-
-// GetReader returns shuffer reader for shard leader.
-func (sl *shardLeaders) GetReader() shardLeadersReader {
-	idx := sl.idx.Inc()
-	return shardLeadersReader{
-		leaders: sl,
-		idx:     idx,
-	}
-}
-
 // make sure MetaCache implements Cache.
 var _ Cache = (*MetaCache)(nil)
 
@@ -347,18 +292,17 @@ var _ Cache = (*MetaCache)(nil)
 type MetaCache struct {
 	mixCoord types.MixCoordClient
 
-	dbInfo         map[string]*databaseInfo              // database -> db_info
-	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	collLeader     map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
+	dbInfo   map[string]*databaseInfo              // database -> db_info
+	collInfo map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	privilegeInfos map[string]struct{}                   // privileges cache
 	userToRoles    map[string]map[string]struct{}        // user to role cache
 	mu             sync.RWMutex
 	credMut        sync.RWMutex
-	leaderMut      sync.RWMutex
-	shardMgr       shardClientMgr
-	sfGlobal       conc.Singleflight[*collectionInfo]
-	sfDB           conc.Singleflight[*databaseInfo]
+
+	sfGlobal conc.Singleflight[*collectionInfo]
+	sfDB     conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -372,9 +316,9 @@ type MetaCache struct {
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient, shardMgr shardClientMgr) error {
+func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 	var err error
-	globalMetaCache, err = NewMetaCache(mixCoord, shardMgr)
+	globalMetaCache, err = NewMetaCache(mixCoord)
 	if err != nil {
 		return err
 	}
@@ -390,14 +334,12 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient, shardMgr 
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
-func NewMetaCache(mixCoord types.MixCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
+func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	return &MetaCache{
 		mixCoord:               mixCoord,
 		dbInfo:                 map[string]*databaseInfo{},
 		collInfo:               map[string]map[string]*collectionInfo{},
-		collLeader:             map[string]map[string]*shardLeaders{},
 		credMap:                map[string]*internalpb.CredentialInfo{},
-		shardMgr:               shardMgr,
 		privilegeInfos:         map[string]struct{}{},
 		userToRoles:            map[string]map[string]struct{}{},
 		collectionCacheVersion: make(map[UniqueID]uint64),
@@ -898,192 +840,12 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 	return collNames
 }
 
-func (m *MetaCache) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error) {
-	method := "GetShard"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
-	}
-
-	return cacheShardLeaders.Get(channel), nil
-}
-
-func (m *MetaCache) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
-	method := "GetShardLeaderList"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
-	}
-
-	return cacheShardLeaders.GetShardLeaderList(), nil
-}
-
-func (m *MetaCache) getCachedShardLeaders(database, collectionName, caller string) *shardLeaders {
-	m.leaderMut.RLock()
-	var cacheShardLeaders *shardLeaders
-	db, ok := m.collLeader[database]
-	if !ok {
-		cacheShardLeaders = nil
-	} else {
-		cacheShardLeaders = db[collectionName]
-	}
-	m.leaderMut.RUnlock()
-
-	if cacheShardLeaders != nil {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheHitLabel).Inc()
-	} else {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheMissLabel).Inc()
-	}
-
-	return cacheShardLeaders
-}
-
-func (m *MetaCache) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("db", database),
-		zap.String("collectionName", collectionName),
-		zap.Int64("collectionID", collectionID))
-
-	method := "updateShardLocationCache"
-	tr := timerecord.NewTimeRecorder(method)
-	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-	req := &querypb.GetShardLeadersRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:            collectionID,
-		WithUnserviceableShards: true,
-	}
-	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
-	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
-		log.Error("failed to get shard locations",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
-		return nil, err
-	}
-
-	shards := parseShardLeaderList2QueryNode(resp.GetShards())
-
-	// convert shards map to string for logging
-	if log.Logger.Level() == zap.DebugLevel {
-		shardStr := make([]string, 0, len(shards))
-		for channel, nodes := range shards {
-			nodeStrs := make([]string, 0, len(nodes))
-			for _, node := range nodes {
-				nodeStrs = append(nodeStrs, node.String())
-			}
-			shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
-		}
-		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
-	}
-
-	newShardLeaders := &shardLeaders{
-		collectionID: collectionID,
-		shardLeaders: shards,
-		idx:          atomic.NewInt64(0),
-	}
-
-	m.leaderMut.Lock()
-	if _, ok := m.collLeader[database]; !ok {
-		m.collLeader[database] = make(map[string]*shardLeaders)
-	}
-	m.collLeader[database][collectionName] = newShardLeaders
-	m.leaderMut.Unlock()
-
-	return newShardLeaders, nil
-}
-
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]nodeInfo {
-	shard2QueryNodes := make(map[string][]nodeInfo)
-
-	for _, leaders := range shardsLeaders {
-		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
-
-		for j := range qns {
-			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
-		}
-
-		shard2QueryNodes[leaders.GetChannelName()] = qns
-	}
-
-	return shard2QueryNodes
-}
-
-// used for Garbage collection shard client
-func (m *MetaCache) ListShardLocation() map[int64]nodeInfo {
-	m.leaderMut.RLock()
-	defer m.leaderMut.RUnlock()
-	shardLeaderInfo := make(map[int64]nodeInfo)
-
-	for _, dbInfo := range m.collLeader {
-		for _, shardLeaders := range dbInfo {
-			for _, nodeInfos := range shardLeaders.shardLeaders {
-				for _, node := range nodeInfos {
-					shardLeaderInfo[node.nodeID] = node
-				}
-			}
-		}
-	}
-	return shardLeaderInfo
-}
-
-// DeprecateShardCache clear the shard leader cache of a collection
-func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
-	log.Info("deprecate shard cache for collection", zap.String("collectionName", collectionName))
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	dbInfo, ok := m.collLeader[database]
-	if ok {
-		delete(dbInfo, collectionName)
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, database)
-		}
-	}
-}
-
-// InvalidateShardLeaderCache called when Shard leader balance happened
-func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
-	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	collectionSet := typeutil.NewUniqueSet(collections...)
-	for dbName, dbInfo := range m.collLeader {
-		for collectionName, shardLeaders := range dbInfo {
-			if collectionSet.Contain(shardLeaders.collectionID) {
-				delete(dbInfo, collectionName)
-			}
-		}
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, dbName)
-		}
-	}
-}
-
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
-	m.mu.Unlock()
-
-	m.leaderMut.Lock()
-	delete(m.collLeader, database)
-	m.leaderMut.Unlock()
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {

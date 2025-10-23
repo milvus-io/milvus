@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -110,7 +112,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		key := message.NewCollectionNameResourceKey("test_collection")
 
 		// First fast lock should succeed
-		guards1, err := locker.FastLock(key)
+		guards1, err := locker.FastLock(key, key)
 		if err != nil {
 			t.Fatalf("First FastLock failed: %v", err)
 		}
@@ -129,4 +131,36 @@ func TestResourceKeyLocker(t *testing.T) {
 		}
 		guards2.Unlock()
 	})
+}
+
+func TestUniqueSortResourceKeys(t *testing.T) {
+	keys := []message.ResourceKey{
+		message.NewSharedDBNameResourceKey("test_db_1"),
+		message.NewSharedDBNameResourceKey("test_db_1"),
+		message.NewSharedDBNameResourceKey("test_db_2"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_12"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_13"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_22"),
+		message.NewSharedClusterResourceKey(),
+	}
+	for i := 0; i < 10; i++ {
+		rand.Shuffle(len(keys), func(i, j int) {
+			keys[i], keys[j] = keys[j], keys[i]
+		})
+		keys2 := uniqueSortResourceKeys(keys)
+		assert.Equal(t, keys2, []message.ResourceKey{
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_12"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_13"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_22"),
+			message.NewSharedDBNameResourceKey("test_db_1"),
+			message.NewSharedDBNameResourceKey("test_db_2"),
+			message.NewSharedClusterResourceKey(),
+		})
+	}
 }

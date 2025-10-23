@@ -22,6 +22,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -323,6 +326,12 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				DataType: schemapb.DataType_JSON,
 				Nullable: suite.hasNullable,
 			},
+			{
+				FieldID:  110,
+				Name:     "geometry",
+				DataType: schemapb.DataType_Geometry,
+				Nullable: suite.hasNullable,
+			},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
@@ -367,6 +376,7 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal any, d
 	rawContent["double"] = 6.28
 	rawContent["varchar"] = "test"
 	rawContent["json"] = map[string]any{"a": 1}
+	rawContent["geometry"] = "POINT (30.123 -10.456)"
 	rawContent["x"] = 6
 	rawContent["$meta"] = map[string]any{"dynamic": "dummy"}
 	rawContent["struct_array"] = []any{
@@ -433,6 +443,8 @@ func compareValues(t *testing.T, field *schemapb.FieldSchema, val any) {
 		case schemapb.DataType_Double:
 			assert.Equal(t, field.GetDefaultValue().GetDoubleData(), val.(float64))
 		case schemapb.DataType_VarChar:
+			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
+		case schemapb.DataType_Geometry:
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
 		default:
 		}
@@ -572,6 +584,12 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 				default:
 					continue
 				}
+			case schemapb.DataType_Geometry:
+				geomT, err := wkt.Unmarshal(rawVal.(string))
+				suite.NoError(err)
+				wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+				suite.NoError(err)
+				suite.Equal(wkbValue, val)
 			default:
 				continue
 			}

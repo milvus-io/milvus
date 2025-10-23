@@ -358,9 +358,10 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         error = {ct.err_code: 800, ct.err_msg: f"database not found[database={db_name}]"}
         self.use_database(client, db_name,
-                           check_task=CheckTasks.err_res, check_items=error)
+                          check_task=CheckTasks.err_res, check_items=error)
         self.using_database(client, db_name,
-                           check_task=CheckTasks.err_res, check_items=error)
+                            check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
     """ Test case of database interface """
