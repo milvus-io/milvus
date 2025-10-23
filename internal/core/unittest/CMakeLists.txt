@@ -61,7 +61,7 @@ endif()
 # now we always remove this file from MILVUS_TEST_FILES thus it is never compiled.
 # once done, compile this test file only if `BUILD_DISK_ANN STREQUAL "ON"`.
 # if ( BUILD_DISK_ANN STREQUAL "OFF" )
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "MinioChunkManagerTest\\.cpp$")
+    # list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "MinioChunkManagerTest\\.cpp$")
 # endif()
 
 # bitset has its own test binary
@@ -83,7 +83,7 @@ else()
 endif()
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
-list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
+# list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
 
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)

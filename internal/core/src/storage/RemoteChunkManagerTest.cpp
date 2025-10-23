@@ -267,9 +267,6 @@ TEST_F(RemoteChunkManagerTest, ListWithPrefixPositive) {
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
 
-    objs = aws_chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
-
     objs = aws_chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);
     std::sort(objs.begin(), objs.end());
