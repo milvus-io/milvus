@@ -1752,3 +1752,46 @@ func Test_validateAnalyzer(t *testing.T) {
 		assert.Len(t, infos, 0) // No analyzer_params, uses default analyzer
 	})
 }
+
+func Test_appendConsistecyLevel(t *testing.T) {
+	task := &createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			CollectionName: "test_collection",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.ConsistencyLevel, Value: "Strong"},
+			},
+		},
+	}
+	task.appendConsistecyLevel(context.Background())
+	require.Len(t, task.Req.Properties, 1)
+	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
+	ok, consistencyLevel := getConsistencyLevel(task.Req.Properties...)
+	assert.True(t, ok)
+	assert.Equal(t, commonpb.ConsistencyLevel_Strong, consistencyLevel)
+
+	task.Req.ConsistencyLevel = commonpb.ConsistencyLevel_Session
+	task.appendConsistecyLevel(context.Background())
+	require.Len(t, task.Req.Properties, 1)
+	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
+	ok, consistencyLevel = getConsistencyLevel(task.Req.Properties...)
+	assert.True(t, ok)
+	assert.Equal(t, commonpb.ConsistencyLevel_Strong, consistencyLevel)
+
+	task.Req.Properties = nil
+	task.appendConsistecyLevel()
+	require.Len(t, task.Req.Properties, 1)
+	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
+	ok, consistencyLevel = getConsistencyLevel(task.Req.Properties...)
+	assert.True(t, ok)
+	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
+
+	task.Req.Properties = []*commonpb.KeyValuePair{
+		{Key: common.ConsistencyLevel, Value: "1020203"},
+	}
+	task.appendConsistecyLevel()
+	require.Len(t, task.Req.Properties, 1)
+	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
+	ok, consistencyLevel = getConsistencyLevel(task.Req.Properties...)
+	assert.True(t, ok)
+	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
+}

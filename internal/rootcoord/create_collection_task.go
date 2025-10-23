@@ -276,6 +276,24 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 	}
 }
 
+func (t *createCollectionTask) appendConsistecyLevel() {
+	if ok, _ := getConsistencyLevel(t.Req.Properties...); ok {
+		return
+	}
+	for _, p := range t.Req.Properties {
+		if p.GetKey() == common.ConsistencyLevel {
+			// if there's already a consistency level, overwrite it.
+			p.Value = strconv.Itoa(int(t.Req.ConsistencyLevel))
+			return
+		}
+	}
+	// append consistency level into schema properties
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+		Key:   common.ConsistencyLevel,
+		Value: strconv.Itoa(int(t.Req.ConsistencyLevel)),
+	})
+}
+
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	if !Params.CommonCfg.EnableNamespace.GetAsBool() {
 		return nil
@@ -315,7 +333,7 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
 		},
 	})
-	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
 		Key:   common.PartitionKeyIsolationKey,
 		Value: "true",
 	})
@@ -355,6 +373,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if err := t.validateSchema(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
+	t.appendConsistecyLevel()
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
