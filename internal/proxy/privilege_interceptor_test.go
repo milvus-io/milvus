@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -48,7 +49,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "alice:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -79,7 +79,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = InitMetaCache(ctx, client, mgr)
+		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
 			DbName:         "db_test",
@@ -167,7 +167,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		g.Wait()
 
 		assert.Panics(t, func() {
-			getPolicyModel("foo")
+			privilege.GetPolicyModel("foo")
 		})
 	})
 }
@@ -217,7 +217,6 @@ func TestResourceGroupPrivilege(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -235,7 +234,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
+		InitMetaCache(ctx, client)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
@@ -268,12 +267,11 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadOnly to single collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -286,8 +284,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -325,12 +323,11 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadOnly to all collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -343,8 +340,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -382,12 +379,11 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadWrite to single collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -400,8 +396,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -485,12 +481,11 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("grant ReadWrite to all collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -503,8 +498,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
 			CollectionName: "coll1",
@@ -552,12 +547,11 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("Admin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
@@ -570,8 +564,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{})
 		assert.NoError(t, err)
@@ -593,12 +587,11 @@ func TestPrivilegeGroup(t *testing.T) {
 func TestBuiltinPrivilegeGroup(t *testing.T) {
 	t.Run("ClusterAdmin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-		initPrivilegeGroups()
+		privilege.InitPrivilegeGroups()
 
 		var err error
 		ctx := GetContext(context.Background(), "fooo:123456")
 		client := &MockMixCoordClientInterface{}
-		mgr := newShardClientMgr()
 
 		policies := []string{}
 		for _, priv := range Params.RbacConfig.GetDefaultPrivilegeGroup("ClusterReadOnly").Privileges {
@@ -614,8 +607,8 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, mgr)
-		defer CleanPrivilegeCache()
+		InitMetaCache(ctx, client)
+		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SelectUserRequest{})
 		assert.NoError(t, err)

@@ -1601,6 +1601,8 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
+	case schemapb.DataType_JSON:
+		return fieldSchema.GetDefaultValue().GetBytesData()
 	default:
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
