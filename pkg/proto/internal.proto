@@ -388,7 +388,7 @@ message GetImportProgressResponse {
   repeated ImportTaskProgress task_progresses = 7;
   int64 imported_rows = 8;
   int64 total_rows = 9;
-  string start_time = 10;
+  string create_time = 10;
 }
 
 message ListImportsRequestInternal {
