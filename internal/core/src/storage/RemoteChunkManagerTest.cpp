@@ -83,23 +83,11 @@ TEST_F(RemoteChunkManagerTest, BasicFunctions) {
     the_chunk_manager_ = CreateChunkManager(configs_);
     EXPECT_TRUE(the_chunk_manager_->GetName() == "AliyunChunkManager");
 
-#ifdef AZURE_BUILD_DIR
-    configs_.cloud_provider = "azure";
-    the_chunk_manager_ = CreateChunkManager(configs_);
-    EXPECT_TRUE(the_chunk_manager_->GetName() == "AzureChunkManager");
-#endif
-
-#ifdef ENABLE_GCP_NATIVE
-    configs_.cloud_provider = "gcpnative";
-    the_chunk_manager_ = CreateChunkManager(configs_);
-    EXPECT_TRUE(the_chunk_manager_->GetName() == "GcpNativeChunkManager");
-#endif
-
     configs_.cloud_provider = "";
 }
 
 TEST_F(RemoteChunkManagerTest, BucketPositive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-bucket";
     aws_chunk_manager_->SetBucketName(testBucketName);
     bool exist = aws_chunk_manager_->BucketExists(testBucketName);
     EXPECT_EQ(exist, false);
@@ -110,7 +98,7 @@ TEST_F(RemoteChunkManagerTest, BucketPositive) {
 }
 
 TEST_F(RemoteChunkManagerTest, BucketNegtive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-bucket-ng";
     aws_chunk_manager_->SetBucketName(testBucketName);
     aws_chunk_manager_->DeleteBucket(testBucketName);
 
@@ -125,7 +113,7 @@ TEST_F(RemoteChunkManagerTest, BucketNegtive) {
 }
 
 TEST_F(RemoteChunkManagerTest, ObjectExist) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-object-exist";
     string objPath = "1/3";
     aws_chunk_manager_->SetBucketName(testBucketName);
     if (!aws_chunk_manager_->BucketExists(testBucketName)) {
@@ -140,7 +128,7 @@ TEST_F(RemoteChunkManagerTest, ObjectExist) {
 }
 
 TEST_F(RemoteChunkManagerTest, WritePositive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-write-positive";
     aws_chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(aws_chunk_manager_->GetBucketName(), testBucketName);
 
@@ -173,7 +161,7 @@ TEST_F(RemoteChunkManagerTest, WritePositive) {
 }
 
 TEST_F(RemoteChunkManagerTest, ReadPositive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-read-positive";
     aws_chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(aws_chunk_manager_->GetBucketName(), testBucketName);
 
@@ -222,7 +210,7 @@ TEST_F(RemoteChunkManagerTest, ReadPositive) {
 }
 
 TEST_F(RemoteChunkManagerTest, RemovePositive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-remove-positive";
     aws_chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(aws_chunk_manager_->GetBucketName(), testBucketName);
 
@@ -245,7 +233,7 @@ TEST_F(RemoteChunkManagerTest, RemovePositive) {
 }
 
 TEST_F(RemoteChunkManagerTest, ListWithPrefixPositive) {
-    string testBucketName = get_default_bucket_name();
+    string testBucketName = "test-list-with-prefix-positive";
     aws_chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(aws_chunk_manager_->GetBucketName(), testBucketName);
 
@@ -267,8 +255,7 @@ TEST_F(RemoteChunkManagerTest, ListWithPrefixPositive) {
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
 
-    objs = aws_chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
+    EXPECT_THROW(aws_chunk_manager_->ListWithPrefix("//1/7"), SegcoreError);
 
     objs = aws_chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);

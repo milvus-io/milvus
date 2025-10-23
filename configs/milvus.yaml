@@ -115,7 +115,7 @@ minio:
   secretAccessKey: minioadmin
   useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
-    tlsCACert: /path/to/public.crt # path to your CACert file
+    tlsCACert: # path to your CACert file
   # Name of the bucket where Milvus stores data in MinIO or S3.
   # Milvus 2.0.0 does not support storing data in multiple buckets.
   # Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.
