@@ -20,6 +20,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <mutex>
+#include <sstream>
 
 #include <aws/core/Aws.h>
 #include <aws/core/http/HttpClientFactory.h>
@@ -29,7 +32,9 @@
 #include <aws/core/http/curl/CurlHttpClient.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/utils/logging/FormattedLogSystem.h>
-#include <aws/s3/S3Client.h>
+#include <aws/s3-crt/S3CrtClient.h>
+#include <aws/s3-crt/S3CrtClientConfiguration.h>
+#include <aws/s3-crt/S3CrtErrors.h>
 #include <fmt/core.h>
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
@@ -43,6 +48,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "log/Log.h"
+#include "common/Consts.h"
 
 namespace milvus::storage {
 
@@ -55,7 +61,7 @@ enum class RemoteStorageType {
 template <typename... Args>
 static std::string
 S3ErrorMessage(const std::string& func,
-               const Aws::S3::S3Error& err,
+               const Aws::S3Crt::S3CrtError& err,
                const std::string& fmt_string,
                Args&&... args) {
     std::ostringstream oss;
@@ -69,7 +75,7 @@ S3ErrorMessage(const std::string& func,
 template <typename... Args>
 static SegcoreError
 ThrowS3Error(const std::string& func,
-             const Aws::S3::S3Error& err,
+             const Aws::S3Crt::S3CrtError& err,
              const std::string& fmt_string,
              Args&&... args) {
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
@@ -78,9 +84,69 @@ ThrowS3Error(const std::string& func,
 }
 
 static bool
-IsNotFound(const Aws::S3::S3Errors& s3err) {
-    return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
-            s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);
+IsNotFound(const Aws::S3Crt::S3CrtErrors& s3err) {
+    return (s3err == Aws::S3Crt::S3CrtErrors::NO_SUCH_KEY ||
+            s3err == Aws::S3Crt::S3CrtErrors::RESOURCE_NOT_FOUND);
+}
+
+/**
+ * @brief convert std::string to Aws::String
+ * because Aws has String type internally
+ * but has a copy of string content unfortunately
+ * TODO: remove this convert
+ * @param str
+ * @return Aws::String
+ */
+inline Aws::String
+ConvertToAwsString(const std::string& str) {
+    return Aws::String(str.c_str(), str.size());
+}
+
+/**
+  * @brief convert Aws::string to std::string
+  * @param aws_str
+  * @return std::string
+  */
+inline std::string
+ConvertFromAwsString(const Aws::String& aws_str) {
+    return std::string(aws_str.c_str(), aws_str.size());
+}
+
+static Aws::S3Crt::ClientConfiguration
+generateConfig(const StorageConfig& storage_config) {
+    // The ClientConfiguration default constructor will take a long time.
+    // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
+    static Aws::S3Crt::ClientConfiguration g_config;
+    Aws::S3Crt::ClientConfiguration config = g_config;
+    config.endpointOverride = ConvertToAwsString(storage_config.address);
+
+    // Three cases:
+    // 1. no ssl, verifySSL=false
+    // 2. self-signed certificate, verifySSL=false
+    // 3. CA-signed certificate, verifySSL=true
+    if (storage_config.useSSL) {
+        config.scheme = Aws::Http::Scheme::HTTPS;
+        config.verifySSL = true;
+        if (!storage_config.sslCACert.empty()) {
+            config.caPath = ConvertToAwsString(storage_config.sslCACert);
+            config.verifySSL = false;
+        }
+    } else {
+        config.scheme = Aws::Http::Scheme::HTTP;
+        config.verifySSL = false;
+    }
+
+    if (!storage_config.region.empty()) {
+        config.region = ConvertToAwsString(storage_config.region);
+    }
+
+    config.useVirtualAddressing = storage_config.useVirtualHost;
+    config.throughputTargetGbps = 30;
+    config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
+                                  ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
+                                  : storage_config.requestTimeoutMs;
+
+    return config;
 }
 
 /**
@@ -225,23 +291,23 @@ class MinioChunkManager : public ChunkManager {
     ShutdownSDKAPI();
     void
     BuildS3Client(const StorageConfig& storage_config,
-                  const Aws::Client::ClientConfiguration& config);
+                  const Aws::S3Crt::ClientConfiguration& config);
     void
     BuildAliyunCloudClient(const StorageConfig& storage_config,
-                           const Aws::Client::ClientConfiguration& config);
+                           const Aws::S3Crt::ClientConfiguration& config);
     void
     BuildGoogleCloudClient(const StorageConfig& storage_config,
-                           const Aws::Client::ClientConfiguration& config);
+                           const Aws::S3Crt::ClientConfiguration& config);
 
  protected:
     void
     BuildAccessKeyClient(const StorageConfig& storage_config,
-                         const Aws::Client::ClientConfiguration& config);
+                         const Aws::S3Crt::ClientConfiguration& config);
 
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
-    std::shared_ptr<Aws::S3::S3Client> client_;
+    std::shared_ptr<Aws::S3Crt::S3CrtClient> client_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
 };
