@@ -248,6 +248,9 @@ MinioChunkManager::BuildAliyunCloudClient(
     // For aliyun oss, support use virtual host mode
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
+
+    Aws::S3Crt::ClientConfiguration mutable_crt_config = config;
+    mutable_crt_config.useVirtualAddressing = true;
     if (storage_config.useIAM) {
         auto aliyun_provider = Aws::MakeShared<
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
@@ -261,11 +264,11 @@ MinioChunkManager::BuildAliyunCloudClient(
                    "if use iam, token should not be empty");
         client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
             aliyun_provider,
-            config,
+            mutable_crt_config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             mutable_config.useVirtualHost);
     } else {
-        BuildAccessKeyClient(mutable_config, config);
+        BuildAccessKeyClient(mutable_config, mutable_crt_config);
     }
 }
 
