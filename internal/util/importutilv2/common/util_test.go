@@ -17,7 +17,9 @@
 package common
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 
@@ -179,5 +181,83 @@ func TestUtil_CheckValidString(t *testing.T) {
 	assert.Error(t, err)
 
 	err = CheckValidString("aaaaa", 5, fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_SafeStringForError(t *testing.T) {
+	// Test valid UTF-8 string
+	validStr := "Hello, 世界!"
+	result := SafeStringForError(validStr)
+	assert.Equal(t, validStr, result)
+
+	// Test invalid UTF-8 string
+	invalidStr := string([]byte{0xC0, 0xAF, 'a', 'b', 'c'})
+	result = SafeStringForError(invalidStr)
+	assert.Contains(t, result, "\\xc0")
+	assert.Contains(t, result, "\\xaf")
+	assert.Contains(t, result, "abc")
+
+	// Test empty string
+	result = SafeStringForError("")
+	assert.Equal(t, "", result)
+
+	// Test string with mixed valid and invalid UTF-8
+	mixedStr := "valid" + string([]byte{0xFF, 0xFE}) + "text"
+	result = SafeStringForError(mixedStr)
+	assert.Contains(t, result, "valid")
+	assert.Contains(t, result, "\\xff")
+	assert.Contains(t, result, "\\xfe")
+	assert.Contains(t, result, "text")
+}
+
+func TestUtil_SafeStringForErrorWithLimit(t *testing.T) {
+	// Test string within limit
+	shortStr := "short"
+	result := SafeStringForErrorWithLimit(shortStr, 10)
+	assert.Equal(t, shortStr, result)
+
+	// Test string exceeding limit
+	longStr := "this is a very long string that exceeds the limit"
+	result = SafeStringForErrorWithLimit(longStr, 20)
+	assert.Equal(t, 23, len(result)) // 20 chars + "..."
+	assert.True(t, strings.HasSuffix(result, "..."))
+
+	// Test invalid UTF-8 string with limit
+	invalidStr := string([]byte{0xC0, 0xAF, 0xFF, 0xFE, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'})
+	result = SafeStringForErrorWithLimit(invalidStr, 15)
+	assert.True(t, len(result) <= 18) // 15 chars + "..."
+	assert.True(t, strings.HasSuffix(result, "..."))
+}
+
+func TestUtil_CheckValidUTF8_WithSafeError(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		Name:     "test_field",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "1000",
+			},
+		},
+	}
+
+	// Test with invalid UTF-8 - should not cause gRPC serialization error
+	invalidStr := string([]byte{0xC0, 0xAF, 0xFF, 0xFE})
+	err := CheckValidUTF8(invalidStr, fieldSchema)
+	assert.Error(t, err)
+
+	// Verify the error message contains safe representation
+	errMsg := err.Error()
+	assert.Contains(t, errMsg, "test_field")
+	assert.Contains(t, errMsg, "invalid UTF-8 data")
+	assert.Contains(t, errMsg, "\\xc0") // Should contain hex representation
+	assert.Contains(t, errMsg, "\\xaf")
+
+	// Verify the error message is valid UTF-8 itself
+	assert.True(t, utf8.ValidString(errMsg), "Error message should be valid UTF-8")
+
+	// Test with valid UTF-8
+	err = CheckValidUTF8("valid string", fieldSchema)
 	assert.NoError(t, err)
 }
