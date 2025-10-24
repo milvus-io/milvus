@@ -146,6 +146,41 @@ ALL_COMPARE_OPS(DISPATCH_OP_COMPARE_COLUMN_IMPL, double)
 
 #undef DISPATCH_OP_COMPARE_COLUMN_IMPL
 
+template <typename T>
+void
+bitset_batch_set(T* data, const uint32_t* idxs, const size_t n) {
+    static constexpr size_t data_bits = sizeof(T) * 8;
+#if defined(__x86_64__)
+    if (cpu_support_avx512()) {
+        x86::avx512::bitset_batch_set_avx512<T>(data, idxs, n);
+        return;
+    }
+    if (cpu_support_avx2()) {
+        x86::avx2::bitset_batch_set_avx2<T>(data, idxs, n);
+        return;
+    }
+#endif
+#if defined(__aarch64__)
+#if defined(BITSET_ENABLE_SVE_SUPPORT)
+    if (arm::InstructionSet::GetInstance().supports_sve()) {
+        arm::sve::bitset_batch_set_sve<T>(data, idxs, n);
+        return;
+    }
+#endif
+    arm::neon::bitset_batch_set_neon<T>(data, idxs, n);
+    return;
+#endif
+    // scalar fallback
+    for (size_t i = 0; i < n; ++i) {
+        const size_t elem = (idxs[i] / data_bits);
+        const size_t bit = (idxs[i] % data_bits);
+        data[elem] |= (static_cast<T>(1) << bit);
+    }
+}
+
+template void
+bitset_batch_set<uint64_t>(uint64_t*, const uint32_t*, const size_t);
+
 }  // namespace dynamic
 
 /////////////////////////////////////////////////////////////////////////////
@@ -443,7 +478,6 @@ ALL_FORWARD_OPS(DISPATCH_FORWARD_OPS_OP_AND)
 #undef DISPATCH_FORWARD_OPS_OP_AND
 
 }  // namespace dynamic
-
 }  // namespace detail
 }  // namespace bitset
 }  // namespace milvus
