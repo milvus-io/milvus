@@ -4,6 +4,7 @@ go 1.24.6
 
 require (
 	cloud.google.com/go/storage v1.50.0
+	dario.cat/mergo v1.0.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
