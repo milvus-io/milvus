@@ -1159,8 +1159,8 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		}
 		task.Req.ShardsNum = common.DefaultShardsNum
 		err := task.Prepare(context.Background())
-		assert.Len(t, task.body.CollectionSchema.Properties, 1)
-		assert.Len(t, task.Req.Properties, 1)
+		assert.Len(t, task.body.CollectionSchema.Properties, 2)
+		assert.Len(t, task.Req.Properties, 2)
 		assert.NoError(t, err)
 	})
 }
@@ -1762,7 +1762,7 @@ func Test_appendConsistecyLevel(t *testing.T) {
 			},
 		},
 	}
-	task.appendConsistecyLevel(context.Background())
+	task.appendConsistecyLevel()
 	require.Len(t, task.Req.Properties, 1)
 	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
 	ok, consistencyLevel := getConsistencyLevel(task.Req.Properties...)
@@ -1770,7 +1770,7 @@ func Test_appendConsistecyLevel(t *testing.T) {
 	assert.Equal(t, commonpb.ConsistencyLevel_Strong, consistencyLevel)
 
 	task.Req.ConsistencyLevel = commonpb.ConsistencyLevel_Session
-	task.appendConsistecyLevel(context.Background())
+	task.appendConsistecyLevel()
 	require.Len(t, task.Req.Properties, 1)
 	assert.Equal(t, common.ConsistencyLevel, task.Req.Properties[0].Key)
 	ok, consistencyLevel = getConsistencyLevel(task.Req.Properties...)
@@ -1794,4 +1794,8 @@ func Test_appendConsistecyLevel(t *testing.T) {
 	ok, consistencyLevel = getConsistencyLevel(task.Req.Properties...)
 	assert.True(t, ok)
 	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
+
+	consistencyLevel, properties := mustConsumeConsistencyLevel(task.Req.Properties)
+	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
+	assert.Len(t, properties, 0)
 }
