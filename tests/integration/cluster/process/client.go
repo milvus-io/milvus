@@ -95,6 +95,10 @@ func (c *dataNodeClient) CreateJobV2(ctx context.Context, in *workerpb.CreateJob
 	return c.IndexNodeClient.CreateJobV2(ctx, in, opts...)
 }
 
+func (c *dataNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	return c.DataNodeClient.GetMetrics(ctx, in, opts...)
+}
+
 func (c *dataNodeClient) Close() error {
 	return c.conn.Close()
 }
