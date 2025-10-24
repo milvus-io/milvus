@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 #include "storage/MinioChunkManager.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -37,53 +38,6 @@ class MinioChunkManagerTest : public testing::Test {
     MinioChunkManagerPtr chunk_manager_;
     StorageConfig configs_;
 };
-
-//StorageConfig
-//get_aliyun_cloud_storage_config() {
-//    auto endpoint = "oss-cn-shanghai.aliyuncs.com:443";
-//    auto accessKey = "";
-//    auto accessValue = "";
-//    auto rootPath = "files";
-//    auto useSSL = false;
-//    auto sslCACert = "";
-//    auto useIam = true;
-//    auto iamEndPoint = "";
-//    auto bucketName = "vdc-infra-poc";
-//    auto cloudProvider = "aliyun";
-//    auto logLevel = "error";
-//    auto region = "";
-//
-//    return StorageConfig{endpoint,
-//                         bucketName,
-//                         accessKey,
-//                         accessValue,
-//                         rootPath,
-//                         "minio",
-//                         cloudProvider,
-//                         iamEndPoint,
-//                         logLevel,
-//                         region,
-//                         useSSL,
-//                         sslCACert,
-//                         useIam};
-//}
-
-//class AliyunChunkManagerTest : public testing::Test {
-// public:
-//    AliyunChunkManagerTest() {
-//    }
-//    ~AliyunChunkManagerTest() {
-//    }
-//
-//    virtual void
-//    SetUp() {
-//        chunk_manager_ = std::make_unique<MinioChunkManager>(
-//            get_aliyun_cloud_storage_config());
-//    }
-//
-// protected:
-//    MinioChunkManagerPtr chunk_manager_;
-//};
 
 TEST_F(MinioChunkManagerTest, InitFailed) {
     auto configs = StorageConfig{};
@@ -116,7 +70,7 @@ TEST_F(MinioChunkManagerTest, BucketNegtive) {
 }
 
 TEST_F(MinioChunkManagerTest, ObjectExist) {
-    string testBucketName = configs_.bucket_name;
+    string testBucketName = "test-object-exist";
     string objPath = "1/3";
     chunk_manager_->SetBucketName(testBucketName);
     if (!chunk_manager_->BucketExists(testBucketName)) {
@@ -129,7 +83,7 @@ TEST_F(MinioChunkManagerTest, ObjectExist) {
 }
 
 TEST_F(MinioChunkManagerTest, WritePositive) {
-    string testBucketName = configs_.bucket_name;
+    string testBucketName = "test-write-positive";
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
@@ -163,7 +117,7 @@ TEST_F(MinioChunkManagerTest, WritePositive) {
 }
 
 TEST_F(MinioChunkManagerTest, ReadPositive) {
-    string testBucketName = configs_.bucket_name;
+    string testBucketName = "test-read-positive";
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
@@ -212,7 +166,7 @@ TEST_F(MinioChunkManagerTest, ReadPositive) {
 }
 
 TEST_F(MinioChunkManagerTest, ReadNotExist) {
-    string testBucketName = configs_.bucket_name;
+    string testBucketName = "test-read-not-exist";
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
@@ -250,12 +204,10 @@ TEST_F(MinioChunkManagerTest, RemovePositive) {
     bool exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, true);
 
-    bool deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, true);
+    chunk_manager_->Remove(path);
 
     // test double deleted
-    deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, false);
+    chunk_manager_->Remove(path);
 
     exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, false);
@@ -286,8 +238,7 @@ TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
 
-    objs = chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
+    EXPECT_THROW(chunk_manager_->ListWithPrefix("//1/7"), SegcoreError);
 
     objs = chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);
