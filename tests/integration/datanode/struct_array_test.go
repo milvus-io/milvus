@@ -28,11 +28,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -170,7 +170,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	log.Info("=========================Index created for float vector=========================")
 	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.FloatVecField)
 
-	subFieldName := proxy.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
+	subFieldName := typeutil.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
 	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -317,7 +317,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	topk := 10
 	roundDecimal := -1
 
-	subFieldName := proxy.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
+	subFieldName := typeutil.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
 	params := integration.GetSearchParams(integration.IndexHNSW, metric.MaxSim)
 	searchReq := integration.ConstructEmbeddingListSearchRequest("", collectionName, expr,
 		subFieldName, schemapb.DataType_FloatVector, []string{integration.StructArrayField}, metric.MaxSim, params, nq, s.dim, topk, roundDecimal)

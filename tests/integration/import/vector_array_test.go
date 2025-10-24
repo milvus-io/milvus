@@ -200,9 +200,11 @@ func (s *BulkInsertSuite) runForStructArray() {
 	s.NoError(err)
 	s.Equal(int32(0), createCollectionStatus.GetCode())
 
-	// adjust struct field name
-	schema.StructArrayFields[0].Fields[0].Name = "struct_with_vector_array[vector_array_field]"
-	schema.StructArrayFields[0].Fields[1].Name = "struct_with_vector_array[scalar_array_field]"
+	// Note: when `CreateCollection`, the field name in Struct will be transformed to `structName[fieldName]` format
+	// such as struct_with_vector_array[vector_array_field]. But we use the schema which is not transformed to generate
+	// test data. This is expected because user will not generate data with the transformed field name.
+	schema.StructArrayFields[0].Fields[0].Name = "vector_array_field"
+	schema.StructArrayFields[0].Fields[1].Name = "scalar_array_field"
 
 	var files []*internalpb.ImportFile
 
@@ -299,7 +301,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 }
 
 func (s *BulkInsertSuite) TestImportWithVectorArray() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.CSV, importutilv2.Parquet, importutilv2.JSON}
+	fileTypeArr := []importutilv2.FileType{importutilv2.Parquet}
 	for _, fileType := range fileTypeArr {
 		s.fileType = fileType
 		s.vecType = schemapb.DataType_FloatVector

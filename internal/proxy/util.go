@@ -84,10 +84,6 @@ const (
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
-func ConcatStructFieldName(structName string, fieldName string) string {
-	return fmt.Sprintf("%s[%s]", structName, fieldName)
-}
-
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
 func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
@@ -95,7 +91,7 @@ func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
 		structName := structArrayField.Name
 		for _, field := range structArrayField.Fields {
 			// Create transformed name: structName[fieldName]
-			newName := ConcatStructFieldName(structName, field.Name)
+			newName := typeutil.ConcatStructFieldName(structName, field.Name)
 			field.Name = newName
 		}
 	}
@@ -1941,7 +1937,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 
-			transformedFieldName := ConcatStructFieldName(structName, subField.FieldName)
+			transformedFieldName := typeutil.ConcatStructFieldName(structName, subField.FieldName)
 			subFieldCopy := &schemapb.FieldData{
 				FieldName: transformedFieldName,
 				FieldId:   subField.FieldId,
