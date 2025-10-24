@@ -47,6 +47,9 @@ type FieldReader struct {
 	dim            int
 	field          *schemapb.FieldSchema
 	sparseIsString bool
+
+	// structReader is non-nil when Struct Array field exists
+	structReader *StructFieldReader
 }
 
 func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
@@ -81,6 +84,11 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 }
 
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	// Check if this FieldReader wraps a StructFieldReader
+	if c.structReader != nil {
+		return c.structReader.Next(count)
+	}
+
 	switch c.field.GetDataType() {
 	case schemapb.DataType_Bool:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
