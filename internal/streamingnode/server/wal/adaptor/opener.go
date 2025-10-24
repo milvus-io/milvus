@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -88,18 +89,31 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
 	})
+	cpProto, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(ctx, opt.Channel.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get checkpoint from catalog")
+	}
+	cp := utility.NewWALCheckpointFromProto(cpProto)
 
 	// recover the wal state.
-	param, err := buildInterceptorParams(ctx, l)
+	param, err := buildInterceptorParams(ctx, l, cp)
 	if err != nil {
 		roWAL.Close()
 		return nil, errors.Wrap(err, "when building interceptor params")
 	}
-	rs, snapshot, err := recovery.RecoverRecoveryStorage(ctx, newRecoveryStreamBuilder(roWAL), param.LastTimeTickMessage)
+	rs, snapshot, err := recovery.RecoverRecoveryStorage(ctx, newRecoveryStreamBuilder(roWAL), cp, param.LastTimeTickMessage)
 	if err != nil {
 		param.Clear()
 		roWAL.Close()
 		return nil, errors.Wrap(err, "when recovering recovery storage")
+	}
+	param.LastConfirmedMessageID = param.LastTimeTickMessage.MessageID()
+	if cp.MessageID != nil {
+		for _, builder := range snapshot.TxnBuffer.GetUncommittedMessageBuilder() {
+			if builder.LastConfirmedMessageID().LT(param.LastConfirmedMessageID) {
+				param.LastConfirmedMessageID = builder.LastConfirmedMessageID()
+			}
+		}
 	}
 	param.InitialRecoverSnapshot = snapshot
 	param.TxnManager = txn.NewTxnManager(param.ChannelInfo, snapshot.TxnBuffer.GetUncommittedMessageBuilder())

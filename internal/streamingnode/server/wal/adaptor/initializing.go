@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -21,8 +22,12 @@ import (
 )
 
 // buildInterceptorParams builds the interceptor params for the walimpls.
-func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WALImpls) (*interceptors.InterceptorBuildParam, error) {
-	msg, err := sendFirstTimeTick(ctx, underlyingWALImpls)
+func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WALImpls, cp *utility.WALCheckpoint) (*interceptors.InterceptorBuildParam, error) {
+	var lastConfirmedMessageID message.MessageID
+	if cp != nil {
+		lastConfirmedMessageID = cp.MessageID
+	}
+	msg, err := sendFirstTimeTick(ctx, underlyingWALImpls, lastConfirmedMessageID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +53,12 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 
 // sendFirstTimeTick sends the first timetick message to walimpls.
 // It is used to make a fence operation with the underlying walimpls and get the timetick and last message id to recover the wal state.
-func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls) (msg message.ImmutableMessage, err error) {
+func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls, lastConfirmedMessageID message.MessageID) (msg message.ImmutableMessage, err error) {
 	logger := resource.Resource().Logger().With(zap.String("channel", underlyingWALImpls.Channel().String()))
+	if lastConfirmedMessageID != nil {
+		logger = logger.With(zap.Stringer("lastConfirmedMessageID", lastConfirmedMessageID))
+	}
+
 	logger.Info("start to sync first time tick")
 	defer func() {
 		if err != nil {
@@ -100,7 +109,7 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 			lastErr = errors.Wrap(err, "allocate timestamp failed")
 			continue
 		}
-		msg := timetick.NewTimeTickMsg(ts, nil, sourceID, true)
+		msg := timetick.NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, true)
 		msgID, err := underlyingWALImpls.Append(ctx, msg)
 		if err != nil {
 			lastErr = errors.Wrap(err, "send first timestamp message failed")
