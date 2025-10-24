@@ -370,8 +370,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with COSINE
-        range_search_params = {"metric_type": "COSINE",
-                               "radius": -1, "range_filter": 1}
+        range_search_params = {"metric_type": "COSINE", "radius": -1, "range_filter": 1}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
