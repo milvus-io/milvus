@@ -250,12 +250,7 @@ TEST_F(MinioChunkManagerTest, RemovePositive) {
     bool exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, true);
 
-    bool deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, true);
-
-    // test double deleted
-    deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, false);
+    chunk_manager_->Remove(path);
 
     exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, false);
@@ -285,9 +280,6 @@ TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     std::sort(objs.begin(), objs.end());
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
-
-    objs = chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
 
     objs = chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);

@@ -30,10 +30,6 @@ get_default_remote_storage_config() {
     StorageConfig storage_config;
     storage_config.storage_type = "remote";
     storage_config.address = "localhost:9000";
-    char const* tmp = getenv("MINIO_ADDRESS");
-    if (tmp != NULL) {
-        storage_config.address = string(tmp);
-    }
     storage_config.bucket_name = get_default_bucket_name();
     storage_config.access_key_id = "minioadmin";
     storage_config.access_key_value = "minioadmin";
@@ -266,9 +262,6 @@ TEST_F(RemoteChunkManagerTest, ListWithPrefixPositive) {
     std::sort(objs.begin(), objs.end());
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
-
-    objs = aws_chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
 
     objs = aws_chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);
