@@ -845,6 +845,26 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     analyzer_params = {
         "tokenizer": "standard",
     }
+    fields = [
+        gen_int64_field(),
+        gen_float_field(nullable=nullable),
+        gen_string_field(nullable=nullable),
+        gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
+        gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
+                         analyzer_params=analyzer_params),
+        gen_json_field(nullable=nullable),
+        gen_geometry_field(nullable=nullable),
+        gen_timestamptz_field(nullable=nullable),
+        gen_array_field(name="array_int", element_type=DataType.INT64),
+        gen_array_field(name="array_float", element_type=DataType.FLOAT),
+        gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
+        gen_array_field(name="array_bool", element_type=DataType.BOOL),
+        gen_float_vec_field(dim=dim),
+        gen_int8_vec_field(name="image_emb", dim=dim),
+        gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
+        gen_float_vec_field(name="voice_emb", dim=dim),
+        # gen_timestamptz_field(name="timestamptz", nullable=nullable),
+    ]
 
     # Create schema using MilvusClient
     schema = MilvusClient.create_schema(
@@ -2057,6 +2077,15 @@ def get_json_field_name_list(schema=None):
             json_fields.append(field.name)
     return json_fields
 
+def get_geometry_field_name_list(schema=None):
+    geometry_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.GEOMETRY:
+            geometry_fields.append(field.name)
+    return geometry_fields
 
 def get_binary_vec_field_name(schema=None):
     if schema is None:
@@ -2330,6 +2359,17 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         else:
             # gen 20% none data for nullable field
             return [None if i % 2 == 0 and random.random() < 0.4 else {"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
+    elif data_type == DataType.GEOMETRY:
+        if nb is None:
+            lon = random.uniform(-180, 180)
+            lat = random.uniform(-90, 90)
+            return f"POINT({lon} {lat})" if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for i in range(nb)]
+
     elif data_type in ct.all_vector_types:
         if isinstance(field, dict):
             dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.get('params')['dim']

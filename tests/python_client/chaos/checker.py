@@ -229,6 +229,7 @@ class Op(Enum):
     text_match = 'text_match'
     phrase_match = 'phrase_match'
     json_query = 'json_query'
+    geo_query = 'geo_query'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
     compact = 'compact'
@@ -408,6 +409,7 @@ class Checker:
             )
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
+        self.geometry_field_names = cf.get_geometry_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
         self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
