@@ -231,6 +231,7 @@ class Op(Enum):
     text_match = 'text_match'
     phrase_match = 'phrase_match'
     json_query = 'json_query'
+    geo_query = 'geo_query'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
     compact = 'compact'
@@ -386,6 +387,7 @@ class Checker:
                                     enable_traceback=enable_traceback)
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
+        self.geometry_field_names = cf.get_geometry_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
         self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
@@ -424,6 +426,15 @@ class Checker:
                                     timeout=timeout,
                                     enable_traceback=enable_traceback,
                                     check_task=CheckTasks.check_nothing)   
+        # create index for geometry fields
+        for f in self.geometry_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                     {"index_type": "RTREE"},
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
         # create index for float vector fields
         for f in self.float_vector_field_names:
             if f in indexed_fields:
@@ -1711,6 +1722,45 @@ class JsonQueryChecker(Checker):
     def run_task(self):
         self.term_expr = self.get_term_expr()
         res, result = self.json_query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+class GeoQueryChecker(Checker):
+    """check geometry query operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("GeoQueryChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        self.insert_data()
+        self.term_expr = self.get_term_expr()
+
+    def get_term_expr(self):
+        geometry_field_name = random.choice(self.geometry_field_names)
+        query_polygon = "POLYGON ((-180 -90, 180 -90, 180 90, -180 90, -180 -90))"
+        return f"ST_WITHIN({geometry_field_name}, '{query_polygon}')"
+        
+
+    @trace()
+    def geo_query(self):
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                        check_task=CheckTasks.check_query_not_empty)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        self.term_expr = self.get_term_expr()
+        res, result = self.geo_query()
         return res, result
 
     def keep_running(self):
