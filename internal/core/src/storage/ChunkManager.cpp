@@ -19,14 +19,8 @@
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/core/utils/logging/ConsoleLogSystem.h>
-#include <aws/s3/model/CreateBucketRequest.h>
-#include <aws/s3/model/DeleteBucketRequest.h>
-#include <aws/s3/model/DeleteObjectRequest.h>
-#include <aws/s3/model/GetObjectRequest.h>
-#include <aws/s3/model/HeadBucketRequest.h>
-#include <aws/s3/model/HeadObjectRequest.h>
-#include <aws/s3/model/ListObjectsRequest.h>
-#include <aws/s3/model/PutObjectRequest.h>
+#include <aws/s3-crt/S3CrtClient.h>
+#include <aws/s3-crt/S3CrtClientConfiguration.h>
 
 #include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
@@ -40,53 +34,13 @@
 
 namespace milvus::storage {
 
-Aws::String
-ConvertToAwsString(const std::string& str) {
-    return Aws::String(str.c_str(), str.size());
-}
-
-Aws::Client::ClientConfiguration
-generateConfig(const StorageConfig& storage_config) {
-    // The ClientConfiguration default constructor will take a long time.
-    // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
-    static Aws::Client::ClientConfiguration g_config;
-    Aws::Client::ClientConfiguration config = g_config;
-    config.endpointOverride = ConvertToAwsString(storage_config.address);
-
-    // Three cases:
-    // 1. no ssl, verifySSL=false
-    // 2. self-signed certificate, verifySSL=false
-    // 3. CA-signed certificate, verifySSL=true
-    if (storage_config.useSSL) {
-        config.scheme = Aws::Http::Scheme::HTTPS;
-        config.verifySSL = true;
-        if (!storage_config.sslCACert.empty()) {
-            config.caPath = ConvertToAwsString(storage_config.sslCACert);
-            config.verifySSL = false;
-        }
-    } else {
-        config.scheme = Aws::Http::Scheme::HTTP;
-        config.verifySSL = false;
-    }
-
-    if (!storage_config.region.empty()) {
-        config.region = ConvertToAwsString(storage_config.region);
-    }
-
-    config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
-                                  ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
-                                  : storage_config.requestTimeoutMs;
-
-    return config;
-}
-
 AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
 
     InitSDKAPIDefault(storage_config.log_level);
 
-    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    Aws::S3Crt::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
         auto provider =
             std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
@@ -98,7 +52,7 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
         AssertInfo(!aws_credentials.GetSessionToken().empty(),
                    "if use iam, token should not be empty");
 
-        client_ = std::make_shared<Aws::S3::S3Client>(
+        client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
             provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
@@ -134,10 +88,10 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
 
     InitSDKAPIDefault(storage_config.log_level);
 
-    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    Aws::S3Crt::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
         // Using S3 client instead of google client because of compatible protocol
-        client_ = std::make_shared<Aws::S3::S3Client>(
+        client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
@@ -162,11 +116,12 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
 
     InitSDKAPIDefault(storage_config.log_level);
 
-    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
-
     // For aliyun oss, support use virtual host mode
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
+
+    Aws::S3Crt::ClientConfiguration config = generateConfig(mutable_config);
+
     if (storage_config.useIAM) {
         auto aliyun_provider = Aws::MakeShared<
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
@@ -178,7 +133,7 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
                    "if use iam, secret key should not be empty");
         AssertInfo(!aliyun_credentials.GetSessionToken().empty(),
                    "if use iam, token should not be empty");
-        client_ = std::make_shared<Aws::S3::S3Client>(
+        client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
             aliyun_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
@@ -205,10 +160,10 @@ TencentCloudChunkManager::TencentCloudChunkManager(
 
     InitSDKAPIDefault(storage_config.log_level);
 
-    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
-
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
+    Aws::S3Crt::ClientConfiguration config = generateConfig(mutable_config);
+
     if (storage_config.useIAM) {
         auto tencent_cloud_provider = Aws::MakeShared<
             Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>(
@@ -221,7 +176,7 @@ TencentCloudChunkManager::TencentCloudChunkManager(
                    "if use iam, secret key should not be empty");
         AssertInfo(!tencent_cloud_credentials.GetSessionToken().empty(),
                    "if use iam, token should not be empty");
-        client_ = std::make_shared<Aws::S3::S3Client>(
+        client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
             tencent_cloud_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
