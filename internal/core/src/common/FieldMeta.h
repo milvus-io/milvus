@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -250,6 +251,9 @@ class FieldMeta {
     default_value() const {
         return default_value_;
     }
+
+    milvus::proto::schema::FieldSchema
+    ToProto() const;
 
     size_t
     get_sizeof() const {
