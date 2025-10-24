@@ -1815,10 +1815,18 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             }
         }
     };
+
+    auto skip_index_func =
+        [op_type, arith_type, value, right_operand](
+            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            return skip_index.CanSkipBinaryArithRange<T>(
+                field_id, chunk_id, op_type, arith_type, value, right_operand);
+        };
+
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 std::nullptr_t{},
+                                                 skip_index_func,
                                                  input,
                                                  res,
                                                  valid_res,
@@ -1826,7 +1834,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                  right_operand);
     } else {
         processed_size = ProcessDataChunks<T>(execute_sub_batch,
-                                              std::nullptr_t{},
+                                              skip_index_func,
                                               res,
                                               valid_res,
                                               value,

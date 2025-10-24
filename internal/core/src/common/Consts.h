@@ -104,6 +104,10 @@ const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;
 
+// skipindex stats related
+const double DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE = 0.01;
+const int64_t DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH = 3;
+
 // index config related
 const std::string SEGMENT_INSERT_FILES_KEY = "segment_insert_files";
 const std::string INSERT_FILES_KEY = "insert_files";
