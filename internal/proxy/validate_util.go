@@ -528,12 +528,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
-			geomT, err := wkt.Unmarshal(defaultValue)
-			if err != nil {
-				log.Warn("invalid default value for geometry field", zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
-			}
-			defaultValueWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
+			defaultValueWkbBytes, err := common.ConvertWKTToWKB(defaultValue)
 			if err != nil {
 				log.Warn("invalid default value for geometry field", zap.Error(err))
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
