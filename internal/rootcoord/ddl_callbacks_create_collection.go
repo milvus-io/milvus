@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -175,7 +176,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 			State:                     etcdpb.PartitionState_PartitionCreated,
 		})
 	}
-	_, consistencyLevel := getConsistencyLevel(body.CollectionSchema.Properties...)
+	consistencyLevel, properties := mustConsumeConsistencyLevel(body.CollectionSchema.Properties)
 	return &model.Collection{
 		CollectionID:         header.CollectionId,
 		DBID:                 header.DbId,
@@ -193,8 +194,25 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		CreateTime:           ts,
 		State:                etcdpb.CollectionState_CollectionCreated,
 		Partitions:           partitions,
-		Properties:           body.CollectionSchema.Properties,
+		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		UpdateTimestamp:      ts,
 	}
+}
+
+// mustConsumeConsistencyLevel consumes the consistency level from the properties and returns the new properties.
+// it panics if the consistency level is not found in the properties, because the consistency level is required.
+func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.ConsistencyLevel, []*commonpb.KeyValuePair) {
+	ok, consistencyLevel := getConsistencyLevel(properties...)
+	if !ok {
+		panic(fmt.Errorf("consistency level not found in properties"))
+	}
+	newProperties := make([]*commonpb.KeyValuePair, 0, len(properties)-1)
+	for _, property := range properties {
+		if property.Key == common.ConsistencyLevel {
+			continue
+		}
+		newProperties = append(newProperties, property)
+	}
+	return consistencyLevel, newProperties
 }
