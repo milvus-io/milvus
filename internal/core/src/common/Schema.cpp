@@ -111,6 +111,29 @@ Schema::ConvertToArrowSchema() const {
     return arrow::schema(arrow_fields);
 }
 
+proto::schema::CollectionSchema
+Schema::ToProto() const {
+    proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_enable_dynamic_field(dynamic_field_id_opt_.has_value());
+
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        auto* field_proto = schema_proto.add_fields();
+        *field_proto = meta.ToProto();
+
+        if (primary_field_id_opt_.has_value() &&
+            field_id == primary_field_id_opt_.value()) {
+            field_proto->set_is_primary_key(true);
+        }
+        if (dynamic_field_id_opt_.has_value() &&
+            field_id == dynamic_field_id_opt_.value()) {
+            field_proto->set_is_dynamic(true);
+        }
+    }
+
+    return schema_proto;
+}
+
 std::unique_ptr<std::vector<FieldMeta>>
 Schema::AbsentFields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
