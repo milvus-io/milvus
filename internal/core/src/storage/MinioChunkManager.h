@@ -142,6 +142,7 @@ generateConfig(const StorageConfig& storage_config) {
 
     config.useVirtualAddressing = storage_config.useVirtualHost;
     config.throughputTargetGbps = 30;
+    config.partSize = 8 * 1024 * 1024;  // 8MB
     config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
                                   ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
                                   : storage_config.requestTimeoutMs;
