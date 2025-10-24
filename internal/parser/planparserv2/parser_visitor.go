@@ -710,7 +710,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	}
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getChildColumnInfo(identifier, jsonChild, structChild antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -719,7 +719,15 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode)
 		return toColumnInfo(childExpr), nil
 	}
 
-	return v.getColumnInfoFromJSONIdentifier(child.GetText())
+	if jsonChild != nil {
+		return v.getColumnInfoFromJSONIdentifier(jsonChild.GetText())
+	}
+
+	if structChild != nil {
+		return v.getColumnInfoFromStructIdentifier(structChild.GetText())
+	}
+
+	return nil, errors.New("no valid field identifier provided")
 }
 
 // VisitCall parses the expr to call plan.
@@ -749,7 +757,7 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructIdentifier())
 	if err != nil {
 		return err
 	}
@@ -830,7 +838,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructIdentifier())
 	if err != nil {
 		return err
 	}
@@ -1153,6 +1161,76 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 	NestedPath: []string{"user"},
 }, nil
 */
+
+// getColumnInfoFromStructIdentifier parses STRUCT field identifiers with bare identifiers
+// input: struct_array[sub_str] or struct_array[sub_str][n]
+// output: finds field named "struct_array[sub_str]" in schema
+// and returns ColumnInfo with NestedPath if containing [n]
+// Note: STRUCT fields can only be arrays, so only numeric indices are allowed after the sub-field name
+func (v *ParserVisitor) getColumnInfoFromStructIdentifier(identifier string) (*planpb.ColumnInfo, error) {
+	identifier = decodeUnicode(identifier)
+
+	// Parse: struct_array[sub_str][n] or struct_array[sub_str]
+	// Extract base name and first bracket content
+	parts := strings.SplitN(identifier, "[", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("structIdentifier parse error: invalid struct identifier: %s", identifier)
+	}
+
+	baseName := parts[0]  // "struct_array"
+	remaining := parts[1] // "sub_str][n]" or "sub_str]"
+
+	// Extract first bare identifier from brackets
+	bracketParts := strings.SplitN(remaining, "]", 2)
+	if len(bracketParts) < 1 {
+		return nil, fmt.Errorf("structIdentifier parse error: invalid struct identifier: %s", identifier)
+	}
+
+	subFieldName := bracketParts[0] // "sub_str"
+
+	// Construct full field name for struct array field
+	fullFieldName := baseName + "[" + subFieldName + "]"
+
+	// Look up the field in schema
+	field, err := v.schema.GetFieldFromName(fullFieldName)
+	if err != nil {
+		return nil, fmt.Errorf("structIdentifier parse error: field %s not found: %w", fullFieldName, err)
+	}
+
+	// STRUCT sub-fields must be arrays
+	if !typeutil.IsArrayType(field.DataType) {
+		return nil, fmt.Errorf("structIdentifier parse error: struct sub-field %s must be an array type, got: %s", fullFieldName, field.DataType)
+	}
+
+	// Process optional array index (e.g., [0])
+	// Note: STRUCT arrays can have at most one index level
+	nestedPath := make([]string, 0)
+	if len(bracketParts) > 1 && len(bracketParts[1]) > 0 {
+		remainingIndices := bracketParts[1] // "[n]"
+		if strings.HasPrefix(remainingIndices, "[") && strings.HasSuffix(remainingIndices, "]") {
+			index := strings.Trim(remainingIndices, "[]")
+			if index == "" {
+				return nil, fmt.Errorf("structIdentifier parse error: invalid identifier: %s", identifier)
+			}
+
+			// Must be a valid integer (array index)
+			if _, err := strconv.ParseInt(index, 10, 64); err != nil {
+				return nil, fmt.Errorf("structIdentifier parse error: struct array index must be an integer: \"%s\"", index)
+			}
+			nestedPath = append(nestedPath, index)
+		} else {
+			return nil, fmt.Errorf("structIdentifier parse error: invalid array index format: %s", remainingIndices)
+		}
+	}
+
+	return &planpb.ColumnInfo{
+		FieldId:     field.FieldID,
+		DataType:    field.DataType,
+		NestedPath:  nestedPath,
+		ElementType: field.GetElementType(),
+	}, nil
+}
+
 // More tests refer to plan_parser_v2_test.go::Test_JSONExpr
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
 	identifier = decodeUnicode(identifier)
@@ -1202,6 +1280,32 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 
 func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) interface{} {
 	field, err := v.getColumnInfoFromJSONIdentifier(ctx.JSONIdentifier().GetText())
+	if err != nil {
+		return err
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:     field.GetFieldId(),
+						DataType:    field.GetDataType(),
+						NestedPath:  field.GetNestedPath(),
+						ElementType: field.GetElementType(),
+					},
+				},
+			},
+		},
+		dataType:      field.GetDataType(),
+		nodeDependent: true,
+	}
+}
+
+// VisitStructIdentifier handles STRUCT field access with bare identifiers
+// Example: struct_array[sub_str][0]
+func (v *ParserVisitor) VisitStructIdentifier(ctx *parser.StructIdentifierContext) interface{} {
+	identifier := ctx.StructIdentifier().GetText()
+	field, err := v.getColumnInfoFromStructIdentifier(identifier)
 	if err != nil {
 		return err
 	}
@@ -1330,7 +1434,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructIdentifier())
 	if err != nil {
 		return err
 	}
@@ -1370,7 +1474,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructIdentifier())
 	if err != nil {
 		return err
 	}
@@ -1573,7 +1677,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 }
 
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructIdentifier())
 	if err != nil {
 		return err
 	}
