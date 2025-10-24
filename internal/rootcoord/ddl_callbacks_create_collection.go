@@ -48,9 +48,11 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		req.ShardsNum = common.DefaultShardsNum
 	}
 	if _, err := typeutil.GetPartitionKeyFieldSchema(schema); err == nil {
-		req.NumPartitions = common.DefaultPartitionsWithPartitionKey
-	}
-	if req.GetNumPartitions() == 0 {
+		if req.GetNumPartitions() <= 0 {
+			req.NumPartitions = common.DefaultPartitionsWithPartitionKey
+		}
+	} else {
+		// we only support to create one partition when partition key is not enabled.
 		req.NumPartitions = int64(1)
 	}
 
