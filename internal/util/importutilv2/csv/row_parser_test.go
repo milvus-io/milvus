@@ -75,7 +75,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:     111,
-				Name:        "sub_float_vector",
+				Name:        "struct_array[sub_float_vector]",
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -91,7 +91,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:     112,
-				Name:        "sub_str",
+				Name:        "struct_array[sub_str]",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -649,19 +649,21 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 
 			// For each sub-field in the struct array
 			for _, subField := range structArray.GetFields() {
+				subFieldName := subField.GetName()
+				originalSubFieldName := subFieldName[len(structArray.GetName())+1 : len(subFieldName)-1]
 				val, ok := row[subField.GetFieldID()]
-				suite.True(ok, "Sub-field %s should exist in row", subField.GetName())
+				suite.True(ok, "Sub-field %s should exist in row", subFieldName)
 
 				// Validate based on sub-field type
 				switch subField.GetDataType() {
 				case schemapb.DataType_ArrayOfVector:
 					vf, ok := val.(*schemapb.VectorField)
-					suite.True(ok, "Sub-field %s should be a VectorField", subField.GetName())
+					suite.True(ok, "Sub-field %s should be a VectorField", subFieldName)
 
 					// Extract expected vectors from struct array data
 					var expectedVectors [][]float32
 					for _, elem := range structArrayData {
-						if vecStr, ok := elem[subField.GetName()].(string); ok {
+						if vecStr, ok := elem[originalSubFieldName].(string); ok {
 							var vec []float32
 							err := json.Unmarshal([]byte(vecStr), &vec)
 							suite.NoError(err)
@@ -678,12 +680,12 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 
 				case schemapb.DataType_Array:
 					sf, ok := val.(*schemapb.ScalarField)
-					suite.True(ok, "Sub-field %s should be a ScalarField", subField.GetName())
+					suite.True(ok, "Sub-field %s should be a ScalarField", subFieldName)
 
 					// Extract expected values from struct array data
 					var expectedValues []string
 					for _, elem := range structArrayData {
-						if v, ok := elem[subField.GetName()].(string); ok {
+						if v, ok := elem[originalSubFieldName].(string); ok {
 							expectedValues = append(expectedValues, v)
 						}
 					}

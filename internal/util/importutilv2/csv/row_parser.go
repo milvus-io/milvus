@@ -159,7 +159,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 // we reconstruct it to be handled by handleField as:
 //
 //	{"sub-field1": "[1, 2]", "sub-field2": "[[1.0, 2.0], [3.0, 4.0]]"}
-func (r *rowParser) reconstructArrayForStructArray(subFieldsMap map[string]*schemapb.FieldSchema, raw string) (map[string]string, error) {
+func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsMap map[string]*schemapb.FieldSchema, raw string) (map[string]string, error) {
 	// Parse the JSON array string
 	var rows []any
 	dec := json.NewDecoder(strings.NewReader(raw))
@@ -175,20 +175,21 @@ func (r *rowParser) reconstructArrayForStructArray(subFieldsMap map[string]*sche
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
 		}
 		for key, value := range row {
-			field, ok := subFieldsMap[key]
+			fieldName := typeutil.ConcatStructFieldName(structName, key)
+			field, ok := subFieldsMap[fieldName]
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", key))
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", fieldName))
 			}
 			strVal, ok := value.(string)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid value type for field %s, expect string but got %T", key, value))
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid value type for field %s, expect string but got %T", fieldName, value))
 			}
 
 			data, err := r.parseEntity(field, strVal, true)
 			if err != nil {
 				return nil, err
 			}
-			buf[key] = append(buf[key], data)
+			buf[fieldName] = append(buf[fieldName], data)
 		}
 	}
 
@@ -215,7 +216,7 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 	// read values from csv file
 	for index, value := range strArr {
 		if subFieldsMap, ok := r.structArrays[r.header[index]]; ok {
-			values, err := r.reconstructArrayForStructArray(subFieldsMap, value)
+			values, err := r.reconstructArrayForStructArray(r.header[index], subFieldsMap, value)
 			if err != nil {
 				return nil, err
 			}

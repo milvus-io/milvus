@@ -2456,3 +2456,9 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 	}
 	return false
 }
+
+// ConcatStructFieldName transforms struct field names to structName[fieldName] format
+// This ensures global uniqueness while allowing same field names across different structs
+func ConcatStructFieldName(structName string, fieldName string) string {
+	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
