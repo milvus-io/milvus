@@ -1,12 +1,16 @@
 package etcdkv
 
 import (
+	"context"
 	"fmt"
 	"path"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -39,4 +43,19 @@ func parsePredicateType(pt predicates.PredicateType) (string, error) {
 	default:
 		return "", merr.WrapErrParameterInvalid("valid predicate type", fmt.Sprintf("%d", pt))
 	}
+}
+
+// getContextWithTimeout returns a context with timeout
+func getContextWithTimeout(ctx context.Context, timeoutDuration time.Duration) (context.Context, context.CancelFunc) {
+	// Use original ctx as base to preserve context values,
+	// but remove RBAC auth info to avoid auth contamination in etcd requests
+	newCtx := ctx
+
+	// Extract a metadata copy from incoming context and remove auth-related keys
+	if mdCopy, ok := metadata.FromIncomingContext(ctx); ok {
+		mdCopy.Delete(util.HeaderAuthorize)
+		mdCopy.Delete(util.HeaderToken)
+		newCtx = metadata.NewIncomingContext(ctx, mdCopy)
+	}
+	return context.WithTimeout(newCtx, timeoutDuration)
 }
