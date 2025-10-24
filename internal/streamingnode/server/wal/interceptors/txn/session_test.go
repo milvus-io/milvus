@@ -229,7 +229,7 @@ func TestManagerFromReplcateMessage(t *testing.T) {
 			Keepalive: 10 * time.Millisecond,
 		}).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
-	replicateMsg := message.NewReplicateMessage("test2", immutableMsg.IntoImmutableMessageProto()).WithTimeTick(2)
+	replicateMsg := message.MustNewReplicateMessage("test2", immutableMsg.IntoImmutableMessageProto()).WithTimeTick(2)
 
 	session, err := manager.BeginNewTxn(context.Background(), message.MustAsMutableBeginTxnMessageV2(replicateMsg))
 	assert.NoError(t, err)
