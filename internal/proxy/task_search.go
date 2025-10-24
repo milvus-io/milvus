@@ -459,7 +459,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
-		if err := t.addHighlightTask(subReq.GetSearchParams(), internalSubReq.GetMetricType(), internalSubReq.FieldId, subReq.GetPlaceholderGroup(), internalSubReq.GetAnalyzerName()); err != nil {
+		if err := t.addHighlightTask(t.request.GetHighlighter(), internalSubReq.GetMetricType(), internalSubReq.FieldId, subReq.GetPlaceholderGroup(), internalSubReq.GetAnalyzerName()); err != nil {
 			return err
 		}
 
@@ -566,84 +566,83 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	return texts, nil
 }
 
-func (t *searchTask) addHighlightTask(params []*commonpb.KeyValuePair, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
-	// appen highlight fields
-	if value, err := funcutil.GetAttrByKeyFromRepeatedKV(HighlightKey, params); err == nil {
-		params := map[string]any{}
-		if err := json.Unmarshal([]byte(value), &params); err == nil {
-			task := &highlightTask{
-				HighlightTask: &querypb.HighlightTask{},
-			}
-
-			if htype, ok := params[highlightTypeKey]; ok {
-				switch htype {
-				case "BM25":
-					if metricType != metric.BM25 {
-						return merr.WrapErrParameterInvalidMsg(`BM25 highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
-					}
-					function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
-					if !ok {
-						return merr.WrapErrServiceInternal(`Search with highlight failed, input field of BM25 annsField not found`)
-					}
-					task.FieldId = function.InputFieldIds[0]
-					task.FieldName = function.InputFieldNames[0]
-				default:
-					return merr.WrapErrParameterInvalidMsg(`Search with highlight failed, unknown highlight type: %s`, htype)
-				}
-			} else {
-				return merr.WrapErrParameterInvalidMsg(`Search with highlight failed, no highlight type`)
-			}
-
-			if preTags, ok := params[PreTagsKey]; ok {
-				tags, ok := preTags.([]any)
-				if !ok {
-					return merr.WrapErrParameterInvalidMsg("pre_tags should be string list")
-				}
-
-				task.preTags = make([][]byte, len(tags))
-				for i, tag := range tags {
-					if s, ok := tag.(string); ok {
-						task.preTags[i] = []byte(s)
-					} else {
-						return merr.WrapErrParameterInvalidMsg("pre_tags item should be string")
-					}
-				}
-			} else {
-				task.preTags = [][]byte{[]byte(DefaultPreTag)}
-			}
-
-			if postTags, ok := params[PostTagsKey]; ok {
-				tags, ok := postTags.([]any)
-				if !ok {
-					return merr.WrapErrParameterInvalidMsg("post_tags should be string list")
-				}
-
-				task.postTags = make([][]byte, len(tags))
-				for i, tag := range tags {
-					if s, ok := tag.(string); ok {
-						task.postTags[i] = []byte(s)
-					} else {
-						return merr.WrapErrParameterInvalidMsg("post_tags item should be string")
-					}
-				}
-			} else {
-				task.postTags = [][]byte{[]byte(DefaultPostTag)}
-			}
-
-			texts, err := t.getBM25SearchTexts(placeholder)
-			if err != nil {
-				return err
-			}
-
-			task.TargetTexts = texts
-			if analyzerName != "" {
-				task.TargetAnalyzers = []string{analyzerName}
-			}
-
-			t.highlightTasks = append(t.highlightTasks, task)
-		}
+func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	task := &highlightTask{
+		HighlightTask: &querypb.HighlightTask{},
 	}
+
+	params := funcutil.KeyValuePair2Map(highlighter.GetParams())
+
+	if metricType != metric.BM25 {
+		return merr.WrapErrParameterInvalidMsg(`BM25 highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
+	}
+	function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
+	if !ok {
+		return merr.WrapErrServiceInternal(`Search with highlight failed, input field of BM25 annsField not found`)
+	}
+	task.FieldId = function.InputFieldIds[0]
+	task.FieldName = function.InputFieldNames[0]
+
+	// set pre_tags and post_tags
+	if value, ok := params[PreTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal pre_tags as string list failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return merr.WrapErrParameterInvalidMsg("pre_tags cannot be empty list")
+		}
+
+		task.preTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			task.preTags[i] = []byte(tag)
+		}
+	} else {
+		task.preTags = [][]byte{[]byte(DefaultPreTag)}
+	}
+
+	if value, ok := params[PostTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal post_tags as string list failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return merr.WrapErrParameterInvalidMsg("post_tags cannot be empty list")
+		}
+		task.postTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			task.postTags[i] = []byte(tag)
+		}
+	} else {
+		task.postTags = [][]byte{[]byte(DefaultPostTag)}
+	}
+
+	// set bm25 search text as query texts
+	texts, err := t.getBM25SearchTexts(placeholder)
+	if err != nil {
+		return err
+	}
+
+	task.TargetTexts = texts
+	if analyzerName != "" {
+		task.TargetAnalyzers = []string{analyzerName}
+	}
+
+	t.highlightTasks = append(t.highlightTasks, task)
 	return nil
+}
+
+func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	if highlighter == nil {
+		return nil
+	}
+
+	switch highlighter.GetType() {
+	case commonpb.HighlightType_Lexical:
+		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
+	}
 }
 
 func (t *searchTask) initSearchRequest(ctx context.Context) error {
@@ -728,7 +727,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			t.SearchRequest.AnalyzerName = analyzer
 		}
 	}
-	if err := t.addHighlightTask(t.request.GetSearchParams(), t.SearchRequest.MetricType, t.SearchRequest.FieldId, t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+	if err := t.addHighlightTask(t.request.GetHighlighter(), t.SearchRequest.MetricType, t.SearchRequest.FieldId, t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
 		return err
 	}
 

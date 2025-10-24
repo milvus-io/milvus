@@ -63,7 +63,6 @@ const (
 	StrictCastKey        = "strict_cast"
 	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
-	HighlightKey         = "highlight"
 	AnalyzerKey          = "analyzer_name"
 	TopKKey              = "topk"
 	NQKey                = "nq"

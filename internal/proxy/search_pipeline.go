@@ -698,18 +698,21 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 	}
 
 	rowNum := len(result.Results.GetScores())
-	rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
-		return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
-	})
-
-	HighlightResult := []*commonpb.HighlightResult{}
-	for i, task := range req.GetTasks() {
-		HighlightResult = append(HighlightResult, &commonpb.HighlightResult{
-			FieldName: task.GetFieldName(),
-			Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
+	HighlightResults := []*commonpb.HighlightResult{}
+	if rowNum != 0 {
+		rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
+			return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
 		})
+
+		for i, task := range req.GetTasks() {
+			HighlightResults = append(HighlightResults, &commonpb.HighlightResult{
+				FieldName: task.GetFieldName(),
+				Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
+			})
+		}
 	}
-	result.Results.HighlightResults = HighlightResult
+
+	result.Results.HighlightResults = HighlightResults
 	return []any{result}, nil
 }
 
