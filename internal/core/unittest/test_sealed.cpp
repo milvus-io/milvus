@@ -1948,7 +1948,19 @@ TEST(Sealed, SkipIndexSkipStringMatch) {
     auto segment = CreateSealedSegment(schema);
 
     std::vector<std::string> strings = {
-        "apple", "application", "banana", "band", "candy"};
+        "张华考上了北京大学；李萍进了中等技术学校；我在百货公司当售货员：我们都"
+        "有光明的前途",
+        "張華は北京大学に入学し、李平は中等技術学校に入学し、私はデパートの販売"
+        "員として働き、私たち全員に明るい未来が約束されていました。",
+        "Zhang Hua a été admis à l'Université de Pékin ; Li Ping est entré "
+        "dans une école secondaire technique ; j'ai travaillé comme vendeur "
+        "dans un grand magasin : nous avions tous un brillant avenir.",
+        "Zhang Hua was admitted to Peking University; Li Ping entered a "
+        "secondary technical school; I worked as a salesperson in a department "
+        "store: we all had bright futures.",
+        "Zhang Hua wurde an der Peking-Universität aufgenommen, Li Ping "
+        "besuchte eine technische Sekundarschule, ich arbeitete als Verkäufer "
+        "in einem Kaufhaus: Wir alle hatten eine glänzende Zukunft."};
     auto string_field_data = storage::CreateFieldData(
         DataType::VARCHAR, DataType::NONE, false, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
@@ -1965,33 +1977,48 @@ TEST(Sealed, SkipIndexSkipStringMatch) {
 
     // PrefixMatch tests
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "ap"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "app"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "ba"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "ban"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "dy"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "zz"));
+        string_fid, 0, OpType::PrefixMatch, "李萍进了中等技术学校"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "xyz"));
+        string_fid, 0, OpType::PrefixMatch, "黄金时代"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PrefixMatch, "dog"));
+        string_fid, 0, OpType::PrefixMatch, "测试中文分词效果"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "私はデパートの販売員として働き"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "未来が約束されていました"));
+    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PrefixMatch, "北京大学"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid,
+        0,
+        OpType::PrefixMatch,
+        "日本語の単語分割の効果をテストする"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid,
+        0,
+        OpType::PrefixMatch,
+        "Ingenious Film Partners, Twentiesth Century Fox"));
 
     // InnerMatch tests
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::InnerMatch, "ap"));
+        string_fid,
+        0,
+        OpType::InnerMatch,
+        "Ping besuchte eine technische Sekundarschule"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::InnerMatch, "pp"));
+        string_fid, 0, OpType::InnerMatch, "張華は北京大学に入学し"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::InnerMatch, "ana"));
+        string_fid,
+        0,
+        OpType::InnerMatch,
+        " der Peking-Universität aufgenommen"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::InnerMatch, "an"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::InnerMatch, "and"));
+        string_fid,
+        0,
+        OpType::InnerMatch,
+        "Li Ping est entré dans une école secondaire technique "));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::InnerMatch, "swimming, football"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
         string_fid, 0, OpType::InnerMatch, "dog"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
@@ -1999,23 +2026,29 @@ TEST(Sealed, SkipIndexSkipStringMatch) {
 
     // PostfixMatch tests
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "ana"));
+        string_fid,
+        0,
+        OpType::PostfixMatch,
+        "Li Ping entered a secondary technical school;"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "on"));
+        string_fid,
+        0,
+        OpType::PostfixMatch,
+        "nous avions tous un brillant avenir."));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "na"));
+        string_fid, 0, OpType::PostfixMatch, "j'ai "));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "lic"));
+        string_fid, 0, OpType::PostfixMatch, "j'ai travaillé"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "nd"));
+        string_fid, 0, OpType::PostfixMatch, "Li Ping entered a secondary"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "milvus"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "dy"));
+        string_fid, 0, OpType::PostfixMatch, "後藤一里"));
+    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
+        string_fid, 0, OpType::PostfixMatch, "ルフィ"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
         string_fid, 0, OpType::PostfixMatch, "zzz"));
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::PostfixMatch, "xyz"));
+        string_fid, 0, OpType::PostfixMatch, "Guillotine"));
 }
 
 TEST(Sealed, SkipIndexSkipStringMatchNullable) {
