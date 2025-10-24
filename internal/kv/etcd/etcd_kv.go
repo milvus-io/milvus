@@ -90,8 +90,8 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 
 	key := prefix
 	for {
-		ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
-		resp, err := kv.getEtcdMeta(ctx, key, opts...)
+		ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+		resp, err := kv.getEtcdMeta(ctx1, key, opts...)
 		if err != nil {
 			cancel()
 			return err
@@ -113,7 +113,7 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 		cancel()
 	}
 
-	CheckElapseAndWarn(start, "Slow etcd operation(WalkWithPagination)", zap.String("prefix", prefix))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation(WalkWithPagination)", zap.String("prefix", prefix))
 	return nil
 }
 
@@ -121,9 +121,9 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
@@ -134,37 +134,37 @@ func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []s
 		keys = append(keys, string(kv.Key))
 		values = append(values, string(kv.Value))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load with prefix", zap.Strings("keys", keys))
 	return keys, values, nil
 }
 
 func (kv *etcdKV) Has(ctx context.Context, key string) (bool, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	resp, err := kv.getEtcdMeta(ctx, key, clientv3.WithCountOnly())
+	resp, err := kv.getEtcdMeta(ctx1, key, clientv3.WithCountOnly())
 	if err != nil {
 		return false, err
 	}
 
-	CheckElapseAndWarn(start, "Slow etcd operation has", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation has", zap.String("key", key))
 	return resp.Count != 0, nil
 }
 
 func (kv *etcdKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	resp, err := kv.getEtcdMeta(ctx, prefix, clientv3.WithPrefix(), clientv3.WithLimit(1), clientv3.WithCountOnly())
+	resp, err := kv.getEtcdMeta(ctx1, prefix, clientv3.WithPrefix(), clientv3.WithLimit(1), clientv3.WithCountOnly())
 	if err != nil {
 		return false, err
 	}
 
-	CheckElapseAndWarn(start, "Slow etcd operation has", zap.String("prefix", prefix))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation has", zap.String("prefix", prefix))
 	return resp.Count != 0, nil
 }
 
@@ -172,9 +172,9 @@ func (kv *etcdKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 func (kv *etcdKV) LoadBytesWithPrefix(ctx context.Context, key string) ([]string, [][]byte, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
@@ -185,7 +185,7 @@ func (kv *etcdKV) LoadBytesWithPrefix(ctx context.Context, key string) ([]string
 		keys = append(keys, string(kv.Key))
 		values = append(values, kv.Value)
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load with prefix", zap.Strings("keys", keys))
 	return keys, values, nil
 }
 
@@ -193,9 +193,9 @@ func (kv *etcdKV) LoadBytesWithPrefix(ctx context.Context, key string) ([]string
 func (kv *etcdKV) LoadBytesWithPrefix2(ctx context.Context, key string) ([]string, [][]byte, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, nil, err
@@ -208,7 +208,7 @@ func (kv *etcdKV) LoadBytesWithPrefix2(ctx context.Context, key string) ([]strin
 		values = append(values, kv.Value)
 		versions = append(versions, kv.Version)
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
 	return keys, values, versions, nil
 }
 
@@ -216,16 +216,16 @@ func (kv *etcdKV) LoadBytesWithPrefix2(ctx context.Context, key string) ([]strin
 func (kv *etcdKV) Load(ctx context.Context, key string) (string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key)
+	resp, err := kv.getEtcdMeta(ctx1, key)
 	if err != nil {
 		return "", err
 	}
 	if resp.Count <= 0 {
 		return "", merr.WrapErrIoKeyNotFound(key)
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load", zap.String("key", key))
 	return string(resp.Kvs[0].Value), nil
 }
 
@@ -233,16 +233,16 @@ func (kv *etcdKV) Load(ctx context.Context, key string) (string, error) {
 func (kv *etcdKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key)
+	resp, err := kv.getEtcdMeta(ctx1, key)
 	if err != nil {
 		return nil, err
 	}
 	if resp.Count <= 0 {
 		return nil, merr.WrapErrIoKeyNotFound(key)
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load", zap.String("key", key))
 	return resp.Kvs[0].Value, nil
 }
 
@@ -254,9 +254,9 @@ func (kv *etcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, error
 		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		return []string{}, err
 	}
@@ -273,11 +273,11 @@ func (kv *etcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, error
 		}
 	}
 	if len(invalid) != 0 {
-		log.Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
+		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
 		err = fmt.Errorf("there are invalid keys: %s", invalid)
 		return result, err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi load", zap.Any("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Any("keys", keys))
 	return result, nil
 }
 
@@ -289,9 +289,9 @@ func (kv *etcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, 
 		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		return [][]byte{}, err
 	}
@@ -308,11 +308,11 @@ func (kv *etcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, 
 		}
 	}
 	if len(invalid) != 0 {
-		log.Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
+		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
 		err = fmt.Errorf("there are invalid keys: %s", invalid)
 		return result, err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi load", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Strings("keys", keys))
 	return result, nil
 }
 
@@ -320,9 +320,9 @@ func (kv *etcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, 
 func (kv *etcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([]string, [][]byte, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.getEtcdMeta(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, 0, err
@@ -333,7 +333,7 @@ func (kv *etcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([]stri
 		keys = append(keys, string(kv.Key))
 		values = append(values, kv.Value)
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with revision", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load with revision", zap.Strings("keys", keys))
 	return keys, values, resp.Header.Revision, nil
 }
 
@@ -341,11 +341,11 @@ func (kv *etcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([]stri
 func (kv *etcdKV) Save(ctx context.Context, key, value string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.putEtcdMeta(ctx, key, value)
-	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
+	CheckValueSizeAndWarn(ctx, key, value)
+	_, err := kv.putEtcdMeta(ctx1, key, value)
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation save", zap.String("key", key))
 	return err
 }
 
@@ -353,11 +353,11 @@ func (kv *etcdKV) Save(ctx context.Context, key, value string) error {
 func (kv *etcdKV) SaveBytes(ctx context.Context, key string, value []byte) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.putEtcdMeta(ctx, key, string(value))
-	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
+	CheckValueSizeAndWarn(ctx, key, value)
+	_, err := kv.putEtcdMeta(ctx1, key, string(value))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation save", zap.String("key", key))
 	return err
 }
 
@@ -365,11 +365,11 @@ func (kv *etcdKV) SaveBytes(ctx context.Context, key string, value []byte) error
 func (kv *etcdKV) SaveBytesWithLease(ctx context.Context, key string, value []byte, id clientv3.LeaseID) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.putEtcdMeta(ctx, key, string(value), clientv3.WithLease(id))
-	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
+	CheckValueSizeAndWarn(ctx, key, value)
+	_, err := kv.putEtcdMeta(ctx1, key, string(value), clientv3.WithLease(id))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
 
@@ -383,15 +383,15 @@ func (kv *etcdKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	CheckTnxStringValueSizeAndWarn(kvs)
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	CheckTnxStringValueSizeAndWarn(ctx, kvs)
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+		log.Ctx(ctx).Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
 }
 
@@ -405,15 +405,15 @@ func (kv *etcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) err
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	CheckTnxBytesValueSizeAndWarn(kvs)
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	CheckTnxBytesValueSizeAndWarn(ctx, kvs)
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSaveBytes err", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+		log.Ctx(ctx).Warn("Etcd MultiSaveBytes err", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
 }
 
@@ -421,11 +421,11 @@ func (kv *etcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) err
 func (kv *etcdKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	start := time.Now()
 	key := path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	_, err := kv.removeEtcdMeta(ctx, key, clientv3.WithPrefix())
-	CheckElapseAndWarn(start, "Slow etcd operation remove with prefix", zap.String("prefix", prefix))
+	_, err := kv.removeEtcdMeta(ctx1, key, clientv3.WithPrefix())
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation remove with prefix", zap.String("prefix", prefix))
 	return err
 }
 
@@ -433,11 +433,11 @@ func (kv *etcdKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 func (kv *etcdKV) Remove(ctx context.Context, key string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	_, err := kv.removeEtcdMeta(ctx, key)
-	CheckElapseAndWarn(start, "Slow etcd operation remove", zap.String("key", key))
+	_, err := kv.removeEtcdMeta(ctx1, key)
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation remove", zap.String("key", key))
 	return err
 }
 
@@ -449,14 +449,14 @@ func (kv *etcdKV) MultiRemove(ctx context.Context, keys []string) error {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key)))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiRemove error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
+		log.Ctx(ctx).Warn("Etcd MultiRemove error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi remove", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi remove", zap.Strings("keys", keys))
 	return err
 }
 
@@ -483,12 +483,12 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx, cmps...), ops...)
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSaveAndRemove error",
+		log.Ctx(ctx).Warn("Etcd MultiSaveAndRemove error",
 			zap.Any("saves", saves),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
@@ -496,7 +496,7 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 			zap.Error(err))
 		return err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
 	if !resp.Succeeded {
 		log.Warn("failed to executeTxn", zap.Any("resp", resp))
 		return merr.WrapErrIoFailedReason("failed to execute transaction")
@@ -518,19 +518,19 @@ func (kv *etcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[string]
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSaveBytesAndRemove error",
+		log.Ctx(ctx).Warn("Etcd MultiSaveBytesAndRemove error",
 			zap.Any("saves", saves),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
 			zap.Error(err))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
 	return err
 }
 
@@ -539,7 +539,7 @@ func (kv *etcdKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
-	CheckElapseAndWarn(start, "Slow etcd operation watch", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation watch", zap.String("key", key))
 	return rch
 }
 
@@ -548,7 +548,7 @@ func (kv *etcdKV) WatchWithPrefix(ctx context.Context, key string) clientv3.Watc
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
-	CheckElapseAndWarn(start, "Slow etcd operation watch with prefix", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation watch with prefix", zap.String("key", key))
 	return rch
 }
 
@@ -557,7 +557,7 @@ func (kv *etcdKV) WatchWithRevision(ctx context.Context, key string, revision in
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
-	CheckElapseAndWarn(start, "Slow etcd operation watch with revision", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation watch with revision", zap.String("key", key))
 	return rch
 }
 
@@ -580,12 +580,12 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx, cmps...), ops...)
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSaveAndRemoveWithPrefix error",
+		log.Ctx(ctx).Warn("Etcd MultiSaveAndRemoveWithPrefix error",
 			zap.Any("saves", saves),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
@@ -593,7 +593,7 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 			zap.Error(err))
 		return err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
 	if !resp.Succeeded {
 		return merr.WrapErrIoFailedReason("failed to execute transaction")
 	}
@@ -614,19 +614,19 @@ func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves m
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
-	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSaveBytesAndRemoveWithPrefix error",
+		log.Ctx(ctx).Warn("Etcd MultiSaveBytesAndRemoveWithPrefix error",
 			zap.Any("saves", saves),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
 			zap.Error(err))
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
 	return err
 }
 
@@ -634,15 +634,15 @@ func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves m
 // they are equal, the target is stored in etcd.
 func (kv *etcdKV) CompareVersionAndSwap(ctx context.Context, key string, source int64, target string) (bool, error) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1,
 		clientv3.Compare(clientv3.Version(path.Join(kv.rootPath, key)), "=", source)),
 		clientv3.OpPut(path.Join(kv.rootPath, key), target))
 	if err != nil {
 		return false, err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation compare version and swap", zap.String("key", key))
 	return resp.Succeeded, nil
 }
 
@@ -650,54 +650,54 @@ func (kv *etcdKV) CompareVersionAndSwap(ctx context.Context, key string, source 
 // they are equal, the target is stored in etcd.
 func (kv *etcdKV) CompareVersionAndSwapBytes(ctx context.Context, key string, source int64, target []byte, opts ...clientv3.OpOption) (bool, error) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
-	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1,
 		clientv3.Compare(clientv3.Version(path.Join(kv.rootPath, key)), "=", source)),
 		clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...))
 	if err != nil {
 		return false, err
 	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap", zap.String("key", key))
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation compare version and swap", zap.String("key", key))
 	return resp.Succeeded, nil
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
-func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bool {
+func CheckElapseAndWarn(ctx context.Context, start time.Time, message string, fields ...zap.Field) bool {
 	elapsed := time.Since(start)
 	if elapsed.Milliseconds() > 2000 {
-		log.Warn(message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
+		log.Ctx(ctx).Warn(message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
 		return true
 	}
 	return false
 }
 
-func CheckValueSizeAndWarn(key string, value interface{}) bool {
+func CheckValueSizeAndWarn(ctx context.Context, key string, value interface{}) bool {
 	size := binary.Size(value)
 	if size > 102400 {
-		log.Warn("value size large than 100kb", zap.String("key", key), zap.Int("value_size(kb)", size/1024))
+		log.Ctx(ctx).Warn("value size large than 100kb", zap.String("key", key), zap.Int("value_size(kb)", size/1024))
 		return true
 	}
 	return false
 }
 
-func CheckTnxBytesValueSizeAndWarn(kvs map[string][]byte) bool {
+func CheckTnxBytesValueSizeAndWarn(ctx context.Context, kvs map[string][]byte) bool {
 	var hasWarn bool
 	for key, value := range kvs {
-		if CheckValueSizeAndWarn(key, value) {
+		if CheckValueSizeAndWarn(ctx, key, value) {
 			hasWarn = true
 		}
 	}
 	return hasWarn
 }
 
-func CheckTnxStringValueSizeAndWarn(kvs map[string]string) bool {
+func CheckTnxStringValueSizeAndWarn(ctx context.Context, kvs map[string]string) bool {
 	newKvs := make(map[string][]byte, len(kvs))
 	for key, value := range kvs {
 		newKvs[key] = []byte(value)
 	}
 
-	return CheckTnxBytesValueSizeAndWarn(newKvs)
+	return CheckTnxBytesValueSizeAndWarn(ctx, newKvs)
 }
 
 func (kv *etcdKV) getEtcdMeta(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
