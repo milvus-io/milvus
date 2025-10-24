@@ -141,7 +141,7 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.LocalResourcePath.Init(base.mgr)
 
 	p.LinderaDownloadUrls = ParamGroup{
-		KeyPrefix: "function.analyzer.lindera.download_urls",
+		KeyPrefix: "function.analyzer.lindera.download_urls.",
 		Version:   "2.5.16",
 	}
 	p.LinderaDownloadUrls.Init(base.mgr)
