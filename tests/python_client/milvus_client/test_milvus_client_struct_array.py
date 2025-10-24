@@ -2915,7 +2915,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "JSON is not supported for fields in struct",
+            ct.err_msg: "element type JSON is not supported",
         }
         self.create_collection(
             client,
