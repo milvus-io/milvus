@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -352,6 +353,23 @@ template <>
 std::string
 from_i32(const int32_t i) {
     return std::to_string(i);
+}
+
+// the code throws if max_v < t.size()
+template <typename T>
+void
+FillRandomUnique(std::vector<T>& t,
+                 std::default_random_engine& rng,
+                 const size_t max_v) {
+    ASSERT_GE(max_v, t.size());
+
+    std::vector<T> tmp(max_v);
+    std::iota(tmp.begin(), tmp.end(), 0);
+
+    // a suboptimal code, but this piece in not critical
+    std::shuffle(tmp.begin(), tmp.end(), rng);
+
+    std::copy(tmp.begin(), tmp.begin() + t.size(), t.begin());
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -2894,6 +2912,227 @@ REGISTER_TYPED_TEST_SUITE_P(
     FillSuite, BitWise, ElementWise, Avx2, Avx512, Neon, Sve, Dynamic, VecRef);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(FillTest, FillSuite, Ttypes0);
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+//
+template <typename BitsetT>
+void
+TestSetIndicesImpl(BitsetT& bitset,
+                   const size_t n_indices,
+                   const bool unique_indices,
+                   const bool sorted) {
+    const size_t n = bitset.size();
+
+    // rng
+    std::default_random_engine rng(123);
+
+    // generate a collection of indices
+    std::vector<uint32_t> indices(n_indices, 0);
+    if (unique_indices) {
+        FillRandomUnique(indices, rng, n);
+    } else {
+        FillRandom(indices, rng, n);
+    }
+
+    if (sorted) {
+        std::sort(indices.begin(), indices.end());
+    }
+
+    // a reference implementation here
+    std::vector<bool> ref(n, false);
+    for (const uint32_t idx : indices) {
+        ref[idx] = true;
+    }
+
+    // populate indices
+    bitset.reset();
+
+    StopWatch sw;
+    bitset.set_indices(indices.data(), indices.size());
+
+    if (print_timing) {
+        printf("elapsed %f\n", sw.elapsed());
+    }
+
+    // validate
+    for (size_t i = 0; i < n; i++) {
+        ASSERT_EQ(ref[i], bitset[i])
+            << "Failed set_indices() at position " << i;
+    }
+}
+
+template <typename BitsetT>
+void
+TestSetIndicesImpl() {
+    for (const size_t n : typical_sizes) {
+        for (const bool is_unique_indices : {true, false}) {
+            for (const bool is_sorted : {true, false}) {
+                for (const size_t percentage :
+                     {0, 1, 5, 10, 20, 50, 90, 95, 99, 100}) {
+                    BitsetT bitset(n);
+                    bitset.reset();
+
+                    const size_t n_indices =
+                        (percentage == 100)
+                            ? bitset.size()
+                            : size_t(bitset.size() * percentage / 100);
+                    if (n_indices > bitset.size()) {
+                        continue;
+                    }
+
+                    if (print_log) {
+                        printf(
+                            "Testing bitset, n=%zd, n_indices=%zd, "
+                            "percentage=%zd, unique_indices=%zd, sorted=%zd\n",
+                            n,
+                            n_indices,
+                            percentage,
+                            size_t(is_unique_indices),
+                            size_t(is_sorted));
+                    }
+
+                    TestSetIndicesImpl(
+                        bitset, n_indices, is_unique_indices, is_sorted);
+
+                    for (const size_t offset : typical_offsets) {
+                        if (offset >= n) {
+                            continue;
+                        }
+
+                        bitset.reset();
+                        auto view = bitset.view(offset);
+
+                        const size_t n_indices_view =
+                            (percentage == 100)
+                                ? view.size()
+                                : size_t(view.size() * percentage / 100);
+                        if (n_indices_view > view.size()) {
+                            continue;
+                        }
+
+                        if (print_log) {
+                            printf(
+                                "Testing bitset view, n=%zd, offset=%zd, "
+                                "n_indices=%zd, percentage=%zd, "
+                                "unique_indices=%zd, sorted=%zd\n",
+                                n,
+                                offset,
+                                n_indices_view,
+                                percentage,
+                                size_t(is_unique_indices),
+                                size_t(is_sorted));
+                        }
+
+                        TestSetIndicesImpl(
+                            view, n_indices_view, is_unique_indices, is_sorted);
+                    }
+                }
+            }
+        }
+    }
+}
+
+//
+template <typename T>
+class SetIndicesSuite : public ::testing::Test {};
+
+TYPED_TEST_SUITE_P(SetIndicesSuite);
+
+//
+TYPED_TEST_P(SetIndicesSuite, BitWise) {
+    using impl_traits = RefImplTraits<std::tuple_element_t<0, TypeParam>,
+                                      std::tuple_element_t<1, TypeParam>>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+}
+
+TYPED_TEST_P(SetIndicesSuite, ElementWise) {
+    using impl_traits = ElementImplTraits<std::tuple_element_t<0, TypeParam>,
+                                          std::tuple_element_t<1, TypeParam>>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+}
+
+TYPED_TEST_P(SetIndicesSuite, Avx2) {
+#if defined(__x86_64__)
+    using namespace milvus::bitset::detail::x86;
+
+    if (cpu_support_avx2()) {
+        using impl_traits =
+            VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                                 std::tuple_element_t<1, TypeParam>,
+                                 milvus::bitset::detail::x86::VectorizedAvx2>;
+        TestSetIndicesImpl<typename impl_traits::bitset_type>();
+    }
+#endif
+}
+
+TYPED_TEST_P(SetIndicesSuite, Avx512) {
+#if defined(__x86_64__)
+    using namespace milvus::bitset::detail::x86;
+
+    if (cpu_support_avx512()) {
+        using impl_traits =
+            VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                                 std::tuple_element_t<1, TypeParam>,
+                                 milvus::bitset::detail::x86::VectorizedAvx512>;
+        TestSetIndicesImpl<typename impl_traits::bitset_type>();
+    }
+#endif
+}
+
+TYPED_TEST_P(SetIndicesSuite, Neon) {
+#if defined(__aarch64__)
+    using namespace milvus::bitset::detail::arm;
+
+    using impl_traits =
+        VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                             std::tuple_element_t<1, TypeParam>,
+                             milvus::bitset::detail::arm::VectorizedNeon>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+#endif
+}
+
+TYPED_TEST_P(SetIndicesSuite, Sve) {
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SVE) && \
+    defined(BITSET_ENABLE_SVE_SUPPORT)
+    using namespace milvus::bitset::detail::arm;
+
+    using impl_traits =
+        VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                             std::tuple_element_t<1, TypeParam>,
+                             milvus::bitset::detail::arm::VectorizedSve>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+#endif
+}
+
+TYPED_TEST_P(SetIndicesSuite, Dynamic) {
+    using impl_traits =
+        VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                             std::tuple_element_t<1, TypeParam>,
+                             milvus::bitset::detail::VectorizedDynamic>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+}
+
+TYPED_TEST_P(SetIndicesSuite, VecRef) {
+    using impl_traits =
+        VectorizedImplTraits<std::tuple_element_t<0, TypeParam>,
+                             std::tuple_element_t<1, TypeParam>,
+                             milvus::bitset::detail::VectorizedRef>;
+    TestSetIndicesImpl<typename impl_traits::bitset_type>();
+}
+
+//
+REGISTER_TYPED_TEST_SUITE_P(SetIndicesSuite,
+                            BitWise,
+                            ElementWise,
+                            Avx2,
+                            Avx512,
+                            Neon,
+                            Sve,
+                            Dynamic,
+                            VecRef);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(SetIndicesTest, SetIndicesSuite, Ttypes0);
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
