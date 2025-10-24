@@ -244,6 +244,24 @@ func calculateSegmentLogSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
 	return segmentSize
 }
 
+func calculateSegmentMemorySize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
+	segmentSize := int64(0)
+
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		segmentSize += getBinlogDataMemorySize(fieldBinlog)
+	}
+
+	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
+		segmentSize += getBinlogDataMemorySize(fieldBinlog)
+	}
+
+	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
+		segmentSize += getBinlogDataMemorySize(fieldBinlog)
+	}
+
+	return segmentSize
+}
+
 func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
 	fieldSize := int64(0)
 	for _, binlog := range fieldBinlog.Binlogs {

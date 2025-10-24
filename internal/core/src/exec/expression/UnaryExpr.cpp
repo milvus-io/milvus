@@ -860,7 +860,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         offset = (offsets) ? offsets[i] : i;
                     }
                     if (valid_data != nullptr && !valid_data[offset]) {
-                        res[i] = valid_res[i] = false;
+                        valid_res[i] = false;
+                        res[i] = true;
                         continue;
                     }
                     if (has_bitmap_input &&
@@ -992,7 +993,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                                  : std::stoi(pointerpair.second);
 
         ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
-        auto op_type = expr_->op_type_;
+        // for NotEqual: compute Equal and flip the result
+        // this avoids handling NULL values differently in multiple places
+        auto op_type = (expr_->op_type_ == proto::plan::OpType::NotEqual)
+                           ? proto::plan::OpType::Equal
+                           : expr_->op_type_;
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
@@ -1265,6 +1270,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
             }
         }
 
+        // for NotEqual: flip the result
+        if (expr_->op_type_ == proto::plan::OpType::NotEqual) {
+            cached_index_chunk_res_->flip();
+        }
         cached_index_chunk_id_ = 0;
     }
 

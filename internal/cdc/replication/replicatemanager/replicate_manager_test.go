@@ -24,8 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
-	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -39,13 +38,6 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 		Return(nil, assert.AnError).Maybe()
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil).Maybe()
 
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil).Maybe()
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
 	manager := NewReplicateManager()
 
 	// Test creating first replicator
@@ -56,13 +48,18 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 			ClusterId: "test-cluster-1",
 		},
 	}
+	key := "test-replicate-key-1"
+	replicateMeta := &meta.ReplicateChannel{
+		Key:         key,
+		Value:       replicateInfo,
+		ModRevision: 0,
+	}
 
-	manager.CreateReplicator(replicateInfo)
+	manager.CreateReplicator(replicateMeta)
 
 	// Verify replicator was created
 	assert.Equal(t, 1, len(manager.replicators))
-	key := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo)
-	replicator, exists := manager.replicators[key]
+	replicator, exists := manager.replicators[buildReplicatorKey(key, 0)]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator)
 
@@ -74,18 +71,23 @@ func TestReplicateManager_CreateReplicator(t *testing.T) {
 			ClusterId: "test-cluster-2",
 		},
 	}
+	key2 := "test-replicate-key-2"
+	replicateMeta2 := &meta.ReplicateChannel{
+		Key:         key2,
+		Value:       replicateInfo2,
+		ModRevision: 0,
+	}
 
-	manager.CreateReplicator(replicateInfo2)
+	manager.CreateReplicator(replicateMeta2)
 
 	// Verify second replicator was created
 	assert.Equal(t, 2, len(manager.replicators))
-	key2 := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo2)
-	replicator2, exists := manager.replicators[key2]
+	replicator2, exists := manager.replicators[buildReplicatorKey(key2, 0)]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator2)
 
 	// Verify first replicator still exists
-	replicator1, exists := manager.replicators[key]
+	replicator1, exists := manager.replicators[buildReplicatorKey(key, 0)]
 	assert.True(t, exists)
 	assert.NotNil(t, replicator1)
 }

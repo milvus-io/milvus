@@ -21,6 +21,9 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -551,6 +554,22 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		} else {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
+	case schemapb.DataType_Geometry:
+		wktValue, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+
+		geomT, err := wkt.Unmarshal(wktValue)
+		if err != nil {
+			return nil, r.wrapTypeError(wktValue, fieldID)
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, r.wrapTypeError(wktValue, fieldID)
+		}
+
+		return wkbValue, nil
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
 		if !ok {

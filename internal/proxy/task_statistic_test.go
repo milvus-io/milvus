@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -43,7 +44,8 @@ type StatisticTaskSuite struct {
 	mixc types.MixCoordClient
 	qn   *mocks.MockQueryNodeClient
 
-	lb LBPolicy
+	lb  shardclient.LBPolicy
+	mgr shardclient.ShardClientMgr
 
 	collectionName string
 	collectionID   int64
@@ -82,11 +84,17 @@ func (s *StatisticTaskSuite) SetupTest() {
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
 
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	mgr := NewMockShardClientManager(s.T())
+	mgr := shardclient.NewMockShardClientManager(s.T())
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
-	s.lb = NewLBPolicyImpl(mgr)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]string{"mock_qn"}, nil).Maybe()
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
+		{NodeID: 1, Address: "mock_qn", Serviceable: true},
+	}, nil).Maybe()
+	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	s.mgr = mgr
+	s.lb = shardclient.NewLBPolicyImpl(mgr)
 
-	err := InitMetaCache(context.Background(), s.mixc, mgr)
+	err := InitMetaCache(context.Background(), s.mixc)
 	s.NoError(err)
 
 	s.collectionName = "test_statistics_task"
@@ -178,8 +186,9 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 			},
 			CollectionName: s.collectionName,
 		},
-		mixc: s.mixc,
-		lb:   s.lb,
+		mixc:           s.mixc,
+		lb:             s.lb,
+		shardclientMgr: s.mgr,
 	}
 }
 

@@ -32,7 +32,7 @@
 namespace milvus {
 
 using std::string;
-
+const std::string namespace_field_name = "$namespace_id";
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
@@ -57,6 +57,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             AssertInfo(!schema->get_dynamic_field_id().has_value(),
                        "repetitive dynamic field");
             schema->set_dynamic_field_id(field_id);
+        }
+        if (child.name() == namespace_field_name) {
+            schema->set_namespace_field_id(field_id);
         }
     };
 

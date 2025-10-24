@@ -40,8 +40,7 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 	// normal metadata
 	mix := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, mix, mgr)
+	err := InitMetaCache(ctx, mix)
 	assert.NoError(t, err)
 	res = validAuth(ctx, []string{crypto.Base64Encode("mockUser:mockPass")})
 	assert.True(t, res)
@@ -72,8 +71,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// mock metacache
 	queryCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, queryCoord, mgr)
+	err = InitMetaCache(ctx, queryCoord)
 	assert.NoError(t, err)
 	// with invalid metadata
 	md := metadata.Pairs("xxx", "yyy")

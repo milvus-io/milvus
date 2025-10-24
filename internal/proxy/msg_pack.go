@@ -75,7 +75,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 		}
 
 		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
-		if requestSize+curRowMessageSize >= threshold {
+		if requestSize+curRowMessageSize >= threshold && msg.NumRows > 0 {
 			repackedMsgs = append(repackedMsgs, msg)
 			msg = createInsertMsg(segmentID, channelName)
 			requestSize = 0
@@ -88,7 +88,9 @@ func genInsertMsgsByPartition(ctx context.Context,
 		msg.NumRows++
 		requestSize += curRowMessageSize
 	}
-	repackedMsgs = append(repackedMsgs, msg)
+	if msg.NumRows > 0 {
+		repackedMsgs = append(repackedMsgs, msg)
+	}
 
 	return repackedMsgs, nil
 }

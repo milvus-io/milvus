@@ -301,7 +301,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 }
 
 func (s *BulkInsertSuite) TestImportWithVectorArray() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.Parquet}
+	fileTypeArr := []importutilv2.FileType{importutilv2.CSV, importutilv2.JSON, importutilv2.Parquet}
 	for _, fileType := range fileTypeArr {
 		s.fileType = fileType
 		s.vecType = schemapb.DataType_FloatVector

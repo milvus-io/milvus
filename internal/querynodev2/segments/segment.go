@@ -312,6 +312,7 @@ type LocalSegment struct {
 
 	// cached results, to avoid too many CGO calls
 	memSize     *atomic.Int64
+	binlogSize  *atomic.Int64
 	rowNum      *atomic.Int64
 	insertCount *atomic.Int64
 
@@ -389,6 +390,7 @@ func NewSegment(ctx context.Context,
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
 		memSize:     atomic.NewInt64(-1),
+		binlogSize:  atomic.NewInt64(0),
 		rowNum:      atomic.NewInt64(-1),
 		insertCount: atomic.NewInt64(0),
 	}
@@ -1352,10 +1354,17 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 }
 
 func (s *LocalSegment) FinishLoad() error {
+	err := s.csegment.FinishLoad()
+	if err != nil {
+		return err
+	}
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.AddLogicalResource(usage)
-	return s.csegment.FinishLoad()
+	binlogSize := calculateSegmentMemorySize(s.LoadInfo())
+	s.manager.AddLoadedBinlogSize(binlogSize)
+	s.binlogSize.Store(binlogSize)
+	return nil
 }
 
 type ReleaseScope int
@@ -1423,6 +1432,13 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.SubLogicalResource(usage)
+
+	binlogSize := s.binlogSize.Load()
+	if binlogSize > 0 {
+		// no concurrent change to s.binlogSize, so the subtraction is safe
+		s.manager.SubLoadedBinlogSize(binlogSize)
+		s.binlogSize.Store(0)
+	}
 
 	log.Info("delete segment from memory")
 }

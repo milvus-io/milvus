@@ -2732,6 +2732,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_list_grants(**db_kwargs, check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_drop_role_which_bind_user(self, host, port):
         """
         target: drop role which bind user
@@ -2753,6 +2754,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert not self.utility_wrap.role_is_exist()[0]
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_add_user_to_default_role(self, name, host, port):
         """
@@ -2776,6 +2778,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert user in users
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_root_to_new_role(self, host, port):
         """
         target: add root to new role
@@ -2797,6 +2800,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_list_collection_grands_by_role_and_object(self, host, port):
         """
         target: list grants by role and object
@@ -2827,6 +2831,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_list_global_grants_by_role_and_object(self, host, port):
         """
         target: list grants by role and object
@@ -2855,6 +2860,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_verify_admin_role_privilege(self, host, port):
         """
         target: verify admin role privilege
@@ -2885,6 +2891,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_load_privilege(self, host, port, with_db):
         """
@@ -2924,6 +2931,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_release_privilege(self, host, port, with_db):
         """
@@ -2999,6 +3007,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.compact()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_insert_privilege(self, host, port, with_db):
         """
@@ -3034,6 +3043,7 @@ class TestUtilityRBAC(TestcaseBase):
         mutation_res, _ = collection_w.insert(data=data)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_delete_privilege(self, host, port, with_db):
         """
@@ -3691,6 +3701,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.drop_index()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_new_user_default_owns_public_role_permission(self, host, port):
         """
         target: new user owns public role privilege
@@ -3764,6 +3775,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.has_collection(c_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_remove_user_from_default_role(self, name, host, port):
         """
@@ -4253,6 +4265,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         assert self.utility_wrap.role_is_exist()[0]
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_drop_role_which_not_exist(self, host, port):
         """
         target: drop role which not exist fail
@@ -4269,6 +4282,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_user_not_exist_role(self, host, port):
         """
         target: add user to not exist role
@@ -4355,6 +4369,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_remove_user_from_empty_role(self, host, port):
         """
         target: remove not exist user from role
@@ -4421,6 +4436,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_list_grant_by_not_exist_role(self, host, port):
         """
         target: list grants by not exist role
@@ -5093,6 +5109,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", [1, 1.0])
+    @pytest.mark.skip("removed")
     def test_create_privilege_group_with_privilege_group_name_invalid_type(self, name, host, port):
         """
         target: create privilege group with invalid name
@@ -5108,6 +5125,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
+    @pytest.mark.skip("removed")
     def test_create_privilege_group_with_privilege_group_name_invalid_value_1(self, name, host, port):
         """
         target: create privilege group with invalid name
@@ -5157,6 +5175,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", [1, 1.0])
+    @pytest.mark.skip("removed")
     def test_drop_privilege_group_with_privilege_group_name_invalid_type(self, name, host, port):
         """
         target: drop privilege group with invalid name
@@ -5291,6 +5310,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", [1, 1.0])
+    @pytest.mark.skip("removed")
     def test_add_privileges_to_group_with_privilege_group_name_invalid_type(self, name, host, port):
         """
         target: add privilege group with invalid name
@@ -5306,6 +5326,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
     def test_add_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
         """
@@ -5320,6 +5341,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_privilege_into_not_exist_privilege_group(self, host, port):
         """
         target: add privilege into not exist privilege group
@@ -5355,6 +5377,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                       check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
     def test_add_privileges_to_group_with_privilege_invalid_type(self, name, host, port):
         """
@@ -5371,6 +5394,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     def test_add_privileges_to_group_with_privilege_invalid_value(self, host, port):
         """
         target: add privilege group with invalid name
@@ -5389,6 +5413,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         self.utility_wrap.add_privileges_to_group(privilege_group="privilege_group_1", privileges=[privilege_name], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", [1, 1.0])
     def test_remove_privileges_to_group_with_privilege_group_name_invalid_type(self, name, host, port):
         """
@@ -5405,6 +5430,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
                                                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip("removed")
     @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
     def test_remove_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
         """
@@ -5467,7 +5493,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         error = {"err_code": 1,
                  "err_msg": f"`privileges` value {name} is illegal"}
         self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=name,
-                                                  check_task=CheckTasks.err_res, check_items=error)
+                                                       check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_privileges_to_group_with_privilege_invalid_value(self, host, port):

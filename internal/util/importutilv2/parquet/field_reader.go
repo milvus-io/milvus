@@ -25,6 +25,9 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -674,15 +677,23 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 	if data == nil {
 		return nil, nil, nil
 	}
-	byteArr := make([][]byte, 0)
-	for i, str := range data.([]string) {
+	wkbValues := make([][]byte, 0)
+	for i, wktValue := range data.([]string) {
 		if !validData[i] {
-			byteArr = append(byteArr, []byte(nil))
+			wkbValues = append(wkbValues, []byte(nil))
 			continue
 		}
-		byteArr = append(byteArr, []byte(str))
+		geomT, err := wkt.Unmarshal(wktValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, nil, err
+		}
+		wkbValues = append(wkbValues, wkbValue)
 	}
-	return byteArr, validData, nil
+	return wkbValues, validData, nil
 }
 
 func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
@@ -694,11 +705,20 @@ func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
 	if data == nil {
 		return nil, nil
 	}
-	byteArr := make([][]byte, 0)
-	for _, str := range data.([]string) {
-		byteArr = append(byteArr, []byte(str))
+
+	wkbValues := make([][]byte, 0)
+	for _, wktValue := range data.([]string) {
+		geomT, err := wkt.Unmarshal(wktValue)
+		if err != nil {
+			return nil, err
+		}
+		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		if err != nil {
+			return nil, err
+		}
+		wkbValues = append(wkbValues, wkbValue)
 	}
-	return byteArr, nil
+	return wkbValues, nil
 }
 
 func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {

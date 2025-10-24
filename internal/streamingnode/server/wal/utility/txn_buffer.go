@@ -75,12 +75,14 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 		return
 	}
 	if _, ok := b.builders[beginMsg.TxnContext().TxnID]; ok {
+		// Because the wal on secondary node may replicate the same txn message, so we need to reset the txn from buffer to avoid
+		// the txn body repeated.
 		b.logger.Warn(
-			"txn id already exist, so ignore the repeated begin txn message",
+			"txn id already exist, rollback the txn from buffer",
 			zap.Int64("txnID", int64(beginMsg.TxnContext().TxnID)),
 			zap.Any("messageID", beginMsg.MessageID()),
 		)
-		return
+		b.rollbackTxn(beginMsg.TxnContext().TxnID)
 	}
 	b.builders[beginMsg.TxnContext().TxnID] = message.NewImmutableTxnMessageBuilder(beginMsg)
 	b.bytes += beginMsg.EstimateSize()
@@ -145,9 +147,13 @@ func (b *TxnBuffer) handleRollbackTxn(msg message.ImmutableMessage) {
 		zap.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
 		zap.Any("messageID", rollbackMsg.MessageID()),
 	)
-	if builder, ok := b.builders[rollbackMsg.TxnContext().TxnID]; ok {
+	b.rollbackTxn(rollbackMsg.TxnContext().TxnID)
+}
+
+func (b *TxnBuffer) rollbackTxn(txnID message.TxnID) {
+	if builder, ok := b.builders[txnID]; ok {
 		// just drop the txn from buffer.
-		delete(b.builders, rollbackMsg.TxnContext().TxnID)
+		delete(b.builders, txnID)
 		b.bytes -= builder.EstimateSize()
 		b.metrics.ObserveTxn(message.TxnStateRollbacked)
 	}

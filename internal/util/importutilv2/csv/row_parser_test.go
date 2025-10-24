@@ -23,6 +23,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -332,6 +335,12 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				DataType: schemapb.DataType_JSON,
 				Nullable: suite.hasNullable,
 			},
+			{
+				FieldID:  110,
+				Name:     "geometry",
+				DataType: schemapb.DataType_Geometry,
+				Nullable: suite.hasNullable,
+			},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
@@ -380,7 +389,7 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal string
 	rawContent["$meta"] = "{\"dynamic\": \"dummy\"}"
 	rawContent["struct_array"] = "[{\"sub_float_vector\": \"[0.1, 0.2]\", \"sub_str\": \"hello1\"}, " +
 		"{\"sub_float_vector\": \"[0.3, 0.4]\", \"sub_str\": \"hello2\"}]"
-
+	rawContent["geometry"] = "POINT (30.123 -10.456)"
 	rawContent[resetKey] = resetVal // reset a value
 	for _, deleteKey := range deleteKeys {
 		delete(rawContent, deleteKey) // delete a key
@@ -445,6 +454,8 @@ func compareValues(t *testing.T, field *schemapb.FieldSchema, val any) {
 		case schemapb.DataType_Double:
 			assert.Equal(t, field.GetDefaultValue().GetDoubleData(), val.(float64))
 		case schemapb.DataType_VarChar:
+			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
+		case schemapb.DataType_Geometry:
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
 		default:
 		}
@@ -614,6 +625,12 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 
 				suite.Equal(expectedFlat, vf.GetFloatVector().GetData())
 			}
+		case schemapb.DataType_Geometry:
+			geomT, err := wkt.Unmarshal(rawVal)
+			suite.NoError(err)
+			wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+			suite.NoError(err)
+			suite.Equal(wkbValue, val)
 		default:
 			continue
 		}

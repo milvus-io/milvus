@@ -950,6 +950,54 @@ func (_c *MockMutableMessage_WithOldVersion_Call) RunAndReturn(run func() messag
 	return _c
 }
 
+// WithReplicateHeader provides a mock function with given fields: rh
+func (_m *MockMutableMessage) WithReplicateHeader(rh *message.ReplicateHeader) message.MutableMessage {
+	ret := _m.Called(rh)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithReplicateHeader")
+	}
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func(*message.ReplicateHeader) message.MutableMessage); ok {
+		r0 = rf(rh)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithReplicateHeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithReplicateHeader'
+type MockMutableMessage_WithReplicateHeader_Call struct {
+	*mock.Call
+}
+
+// WithReplicateHeader is a helper method to define mock.On call
+//   - rh *message.ReplicateHeader
+func (_e *MockMutableMessage_Expecter) WithReplicateHeader(rh interface{}) *MockMutableMessage_WithReplicateHeader_Call {
+	return &MockMutableMessage_WithReplicateHeader_Call{Call: _e.mock.On("WithReplicateHeader", rh)}
+}
+
+func (_c *MockMutableMessage_WithReplicateHeader_Call) Run(run func(rh *message.ReplicateHeader)) *MockMutableMessage_WithReplicateHeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*message.ReplicateHeader))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithReplicateHeader_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithReplicateHeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithReplicateHeader_Call) RunAndReturn(run func(*message.ReplicateHeader) message.MutableMessage) *MockMutableMessage_WithReplicateHeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithTimeTick provides a mock function with given fields: tt
 func (_m *MockMutableMessage) WithTimeTick(tt uint64) message.MutableMessage {
 	ret := _m.Called(tt)
