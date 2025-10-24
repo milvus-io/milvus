@@ -108,6 +108,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("err"))
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
 
@@ -134,6 +135,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(&model.Collection{CollectionID: int64(1)}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -170,6 +172,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(&model.Collection{CollectionID: int64(1)}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -350,6 +353,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
 		}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -573,6 +577,7 @@ func Test_alterCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 
 		req := &milvuspb.AlterCollectionFieldRequest{
@@ -609,6 +614,7 @@ func Test_alterCollectionFieldTask_Execute(t *testing.T) {
 			}},
 		}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,

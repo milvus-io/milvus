@@ -1031,14 +1031,14 @@ func TestCatalog_AlterCollection(t *testing.T) {
 	t.Run("add", func(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
-		err := kc.AlterCollection(ctx, nil, nil, metastore.ADD, 0, false)
+		err := kc.AlterCollection(ctx, nil, nil, metastore.ADD, 0, false, false)
 		assert.Error(t, err)
 	})
 
 	t.Run("delete", func(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
-		err := kc.AlterCollection(ctx, nil, nil, metastore.DELETE, 0, false)
+		err := kc.AlterCollection(ctx, nil, nil, metastore.DELETE, 0, false, false)
 		assert.Error(t, err)
 	})
 
@@ -1060,7 +1060,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		var collectionID int64 = 1
 		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true, false)
 		assert.NoError(t, err)
 		key := BuildCollectionKey(0, collectionID)
 		value, ok := kvs[key]
@@ -1079,7 +1079,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		var collectionID int64 = 1
 		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
 		newC := &model.Collection{TenantID: "2", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true, false)
 		assert.Error(t, err)
 	})
 
@@ -1091,7 +1091,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		ctx := context.Background()
 		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{DBID: 1, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true, false)
 		assert.Error(t, err)
 	})
 
@@ -1114,7 +1114,30 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		}
 		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
 		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("modify function", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := kv.NewMockSnapshotKV()
+		snapshot.MultiSaveFunc = func(ctx context.Context, saves map[string]string, ts typeutil.Timestamp) error {
+			assert.LessOrEqual(t, len(saves), 64)
+			return nil
+		}
+
+		kc := NewCatalog(nil, snapshot).(*Catalog)
+		ctx := context.Background()
+
+		functions := []*model.Function{
+			{
+				Name: "test_function",
+			},
+		}
+
+		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
+		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Functions: functions}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true, true)
 		assert.NoError(t, err)
 	})
 }
