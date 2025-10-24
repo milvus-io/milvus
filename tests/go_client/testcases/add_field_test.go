@@ -245,10 +245,9 @@ func TestIndexAddedField(t *testing.T) {
 			createIndex: index.NewInvertedIndex,
 		},
 		{
-			name:          "SortedIndex",
-			indexType:     "STL_SORT",
-			createIndex:   index.NewSortedIndex,
-			expectedError: "STL_SORT are only supported on numeric field",
+			name:        "SortedIndex",
+			indexType:   "STL_SORT",
+			createIndex: index.NewSortedIndex,
 		},
 		{
 			name:        "TrieIndex",
