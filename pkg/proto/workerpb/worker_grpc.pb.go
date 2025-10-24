@@ -9,6 +9,7 @@ package workerpb
 import (
 	context "context"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -27,6 +28,7 @@ const (
 	IndexNode_CreateJobV2_FullMethodName = "/milvus.proto.index.IndexNode/CreateJobV2"
 	IndexNode_QueryJobsV2_FullMethodName = "/milvus.proto.index.IndexNode/QueryJobsV2"
 	IndexNode_DropJobsV2_FullMethodName  = "/milvus.proto.index.IndexNode/DropJobsV2"
+	IndexNode_GetMetrics_FullMethodName  = "/milvus.proto.index.IndexNode/GetMetrics"
 	IndexNode_CreateTask_FullMethodName  = "/milvus.proto.index.IndexNode/CreateTask"
 	IndexNode_QueryTask_FullMethodName   = "/milvus.proto.index.IndexNode/QueryTask"
 	IndexNode_DropTask_FullMethodName    = "/milvus.proto.index.IndexNode/DropTask"
@@ -50,6 +52,8 @@ type IndexNodeClient interface {
 	QueryJobsV2(ctx context.Context, in *QueryJobsV2Request, opts ...grpc.CallOption) (*QueryJobsV2Response, error)
 	// Deprecated
 	DropJobsV2(ctx context.Context, in *DropJobsV2Request, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	QueryTask(ctx context.Context, in *QueryTaskRequest, opts ...grpc.CallOption) (*QueryTaskResponse, error)
 	DropTask(ctx context.Context, in *DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -126,6 +130,15 @@ func (c *indexNodeClient) DropJobsV2(ctx context.Context, in *DropJobsV2Request,
 	return out, nil
 }
 
+func (c *indexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	out := new(milvuspb.GetMetricsResponse)
+	err := c.cc.Invoke(ctx, IndexNode_GetMetrics_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *indexNodeClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, IndexNode_CreateTask_FullMethodName, in, out, opts...)
@@ -171,6 +184,8 @@ type IndexNodeServer interface {
 	QueryJobsV2(context.Context, *QueryJobsV2Request) (*QueryJobsV2Response, error)
 	// Deprecated
 	DropJobsV2(context.Context, *DropJobsV2Request) (*commonpb.Status, error)
+	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	CreateTask(context.Context, *CreateTaskRequest) (*commonpb.Status, error)
 	QueryTask(context.Context, *QueryTaskRequest) (*QueryTaskResponse, error)
 	DropTask(context.Context, *DropTaskRequest) (*commonpb.Status, error)
@@ -200,6 +215,9 @@ func (UnimplementedIndexNodeServer) QueryJobsV2(context.Context, *QueryJobsV2Req
 }
 func (UnimplementedIndexNodeServer) DropJobsV2(context.Context, *DropJobsV2Request) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropJobsV2 not implemented")
+}
+func (UnimplementedIndexNodeServer) GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMetrics not implemented")
 }
 func (UnimplementedIndexNodeServer) CreateTask(context.Context, *CreateTaskRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -348,6 +366,24 @@ func _IndexNode_DropJobsV2_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IndexNode_GetMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.GetMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).GetMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexNode_GetMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).GetMetrics(ctx, req.(*milvuspb.GetMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IndexNode_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTaskRequest)
 	if err := dec(in); err != nil {
@@ -436,6 +472,10 @@ var IndexNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropJobsV2",
 			Handler:    _IndexNode_DropJobsV2_Handler,
+		},
+		{
+			MethodName: "GetMetrics",
+			Handler:    _IndexNode_GetMetrics_Handler,
 		},
 		{
 			MethodName: "CreateTask",
