@@ -23,6 +23,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -42,6 +45,7 @@ type CreateCSegmentRequest struct {
 	SegmentID   int64
 	SegmentType SegmentType
 	IsSorted    bool
+	LoadInfo    *querypb.SegmentLoadInfo
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -60,7 +64,17 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 // CreateCSegment creates a segment from a CreateCSegmentRequest.
 func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
-	status := C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
+	var status C.CStatus
+	if req.LoadInfo != nil {
+		loadInfoBlob, err := proto.Marshal(req.LoadInfo)
+		if err != nil {
+			return nil, err
+		}
+
+		status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+	} else {
+		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
@@ -316,4 +330,161 @@ func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedP
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
+}
+
+// ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
+// This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
+// depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
+func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.SegmentLoadInfo {
+	if src == nil {
+		return nil
+	}
+
+	return &segcorepb.SegmentLoadInfo{
+		SegmentID:        src.GetSegmentID(),
+		PartitionID:      src.GetPartitionID(),
+		CollectionID:     src.GetCollectionID(),
+		DbID:             src.GetDbID(),
+		FlushTime:        src.GetFlushTime(),
+		BinlogPaths:      convertFieldBinlogs(src.GetBinlogPaths()),
+		NumOfRows:        src.GetNumOfRows(),
+		Statslogs:        convertFieldBinlogs(src.GetStatslogs()),
+		Deltalogs:        convertFieldBinlogs(src.GetDeltalogs()),
+		CompactionFrom:   src.GetCompactionFrom(),
+		IndexInfos:       convertFieldIndexInfos(src.GetIndexInfos()),
+		SegmentSize:      src.GetSegmentSize(),
+		InsertChannel:    src.GetInsertChannel(),
+		ReadableVersion:  src.GetReadableVersion(),
+		StorageVersion:   src.GetStorageVersion(),
+		IsSorted:         src.GetIsSorted(),
+		TextStatsLogs:    convertTextIndexStats(src.GetTextStatsLogs()),
+		Bm25Logs:         convertFieldBinlogs(src.GetBm25Logs()),
+		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
+		Priority:         src.GetPriority(),
+	}
+}
+
+// convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.
+func convertFieldBinlogs(src []*datapb.FieldBinlog) []*segcorepb.FieldBinlog {
+	if src == nil {
+		return nil
+	}
+
+	result := make([]*segcorepb.FieldBinlog, 0, len(src))
+	for _, fb := range src {
+		if fb == nil {
+			continue
+		}
+
+		result = append(result, &segcorepb.FieldBinlog{
+			FieldID:     fb.GetFieldID(),
+			Binlogs:     convertBinlogs(fb.GetBinlogs()),
+			ChildFields: fb.GetChildFields(),
+		})
+	}
+	return result
+}
+
+// convertBinlogs converts datapb.Binlog to segcorepb.Binlog.
+func convertBinlogs(src []*datapb.Binlog) []*segcorepb.Binlog {
+	if src == nil {
+		return nil
+	}
+
+	result := make([]*segcorepb.Binlog, 0, len(src))
+	for _, b := range src {
+		if b == nil {
+			continue
+		}
+
+		result = append(result, &segcorepb.Binlog{
+			EntriesNum:    b.GetEntriesNum(),
+			TimestampFrom: b.GetTimestampFrom(),
+			TimestampTo:   b.GetTimestampTo(),
+			LogPath:       b.GetLogPath(),
+			LogSize:       b.GetLogSize(),
+			LogID:         b.GetLogID(),
+			MemorySize:    b.GetMemorySize(),
+		})
+	}
+	return result
+}
+
+// convertFieldIndexInfos converts querypb.FieldIndexInfo to segcorepb.FieldIndexInfo.
+func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldIndexInfo {
+	if src == nil {
+		return nil
+	}
+
+	result := make([]*segcorepb.FieldIndexInfo, 0, len(src))
+	for _, fii := range src {
+		if fii == nil {
+			continue
+		}
+
+		result = append(result, &segcorepb.FieldIndexInfo{
+			FieldID:             fii.GetFieldID(),
+			EnableIndex:         fii.GetEnableIndex(),
+			IndexName:           fii.GetIndexName(),
+			IndexID:             fii.GetIndexID(),
+			BuildID:             fii.GetBuildID(),
+			IndexParams:         fii.GetIndexParams(),
+			IndexFilePaths:      fii.GetIndexFilePaths(),
+			IndexSize:           fii.GetIndexSize(),
+			IndexVersion:        fii.GetIndexVersion(),
+			NumRows:             fii.GetNumRows(),
+			CurrentIndexVersion: fii.GetCurrentIndexVersion(),
+			IndexStoreVersion:   fii.GetIndexStoreVersion(),
+		})
+	}
+	return result
+}
+
+// convertTextIndexStats converts datapb.TextIndexStats to segcorepb.TextIndexStats.
+func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segcorepb.TextIndexStats {
+	if src == nil {
+		return nil
+	}
+
+	result := make(map[int64]*segcorepb.TextIndexStats, len(src))
+	for k, v := range src {
+		if v == nil {
+			continue
+		}
+
+		result[k] = &segcorepb.TextIndexStats{
+			FieldID:    v.GetFieldID(),
+			Version:    v.GetVersion(),
+			Files:      v.GetFiles(),
+			LogSize:    v.GetLogSize(),
+			MemorySize: v.GetMemorySize(),
+			BuildID:    v.GetBuildID(),
+		}
+	}
+	return result
+}
+
+// convertJSONKeyStats converts datapb.JsonKeyStats to segcorepb.JsonKeyStats.
+func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorepb.JsonKeyStats {
+	if src == nil {
+		return nil
+	}
+
+	result := make(map[int64]*segcorepb.JsonKeyStats, len(src))
+	for k, v := range src {
+		if v == nil {
+			continue
+		}
+
+		result[k] = &segcorepb.JsonKeyStats{
+			FieldID:                v.GetFieldID(),
+			Version:                v.GetVersion(),
+			Files:                  v.GetFiles(),
+			LogSize:                v.GetLogSize(),
+			MemorySize:             v.GetMemorySize(),
+			BuildID:                v.GetBuildID(),
+			JsonKeyStatsDataFormat: v.GetJsonKeyStatsDataFormat(),
+		}
+	}
+	return result
 }
