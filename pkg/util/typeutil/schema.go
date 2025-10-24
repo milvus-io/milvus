@@ -2464,11 +2464,13 @@ func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
 }
 
-// ExtractStructFieldName extracts fieldName from structName[fieldName] format
 func ExtractStructFieldName(fieldName string) (string, error) {
 	parts := strings.Split(fieldName, "[")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid struct field name: %s", fieldName)
+	if len(parts) == 1 {
+		return fieldName, nil
+	} else if len(parts) == 2 {
+		return parts[1][:len(parts[1])-1], nil
+	} else {
+		return "", fmt.Errorf("invalid struct field name: %s, more than one [ found", fieldName)
 	}
-	return parts[1][:len(parts[1])-1], nil
 }
