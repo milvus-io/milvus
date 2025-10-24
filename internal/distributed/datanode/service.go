@@ -81,6 +81,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 func (s *Server) Prepare() error {
 	listener, err := netutil.NewListener(
+		netutil.OptPreferIPv6Address(paramtable.Get().CommonCfg.PreferIPv6Address.GetAsBool()),
 		netutil.OptIP(paramtable.Get().DataNodeGrpcServerCfg.IP),
 		netutil.OptHighPriorityToUsePort(paramtable.Get().DataNodeGrpcServerCfg.Port.GetAsInt()),
 	)

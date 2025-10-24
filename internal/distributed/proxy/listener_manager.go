@@ -42,6 +42,7 @@ func newListenerManager(ctx context.Context) (l *listenerManager, err error) {
 
 	log := log.Ctx(ctx)
 	externalGrpcListener, err := netutil.NewListener(
+		netutil.OptPreferIPv6Address(paramtable.Get().CommonCfg.PreferIPv6Address.GetAsBool()),
 		netutil.OptIP(paramtable.Get().ProxyGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().ProxyGrpcServerCfg.Port.GetAsInt()),
 	)
@@ -52,6 +53,7 @@ func newListenerManager(ctx context.Context) (l *listenerManager, err error) {
 	log.Info("Proxy listen on external grpc listener", zap.String("address", externalGrpcListener.Address()), zap.Int("port", externalGrpcListener.Port()))
 
 	internalGrpcListener, err := netutil.NewListener(
+		netutil.OptPreferIPv6Address(paramtable.Get().CommonCfg.PreferIPv6Address.GetAsBool()),
 		netutil.OptIP(paramtable.Get().ProxyGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().ProxyGrpcServerCfg.InternalPort.GetAsInt()),
 	)
@@ -147,7 +149,9 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 
 	var err error
 	l.portShareMode = false
-	l.httpListener, err = netutil.NewListener(netutil.OptIP(Params.IP), netutil.OptPort(httpPort), netutil.OptTLS(tlsConf))
+	l.httpListener, err = netutil.NewListener(
+		netutil.OptPreferIPv6Address(paramtable.Get().CommonCfg.PreferIPv6Address.GetAsBool()),
+		netutil.OptIP(Params.IP), netutil.OptPort(httpPort), netutil.OptTLS(tlsConf))
 	if err != nil {
 		log.Warn("Proxy server(http) failed to listen on", zap.Error(err))
 		return err
