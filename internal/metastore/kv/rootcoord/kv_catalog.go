@@ -171,8 +171,8 @@ func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]
 }
 
 func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	if coll.State != pb.CollectionState_CollectionCreating {
-		return fmt.Errorf("cannot create collection with state: %s, collection: %s", coll.State.String(), coll.Name)
+	if coll.State != pb.CollectionState_CollectionCreated {
+		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
 	k1 := BuildCollectionKey(coll.DBID, coll.CollectionID)

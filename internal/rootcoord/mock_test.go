@@ -31,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -407,9 +409,14 @@ func newMockProxy() *mockProxy {
 }
 
 func newTestCore(opts ...Opt) *Core {
+	tombstoneSweeper := mock_tombstone.NewMockTombstoneSweeper(common.NewEmptyMockT())
+	tombstoneSweeper.EXPECT().AddTombstone(mock.Anything).Return()
+	tombstoneSweeper.EXPECT().Close().Return()
+
 	c := &Core{
-		metricsRequest: metricsinfo.NewMetricsRequest(),
-		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		metricsRequest:   metricsinfo.NewMetricsRequest(),
+		session:          &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		tombstoneSweeper: tombstoneSweeper,
 	}
 	executor := newMockStepExecutor()
 	executor.AddStepsFunc = func(s *stepStack) {
@@ -737,6 +744,11 @@ func withValidMixCoord() Opt {
 			Status: merr.Success(),
 		}, nil,
 	)
+	mixc.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(
+		&datapb.DropVirtualChannelResponse{
+			Status: merr.Success(),
+		}, nil,
+	)
 
 	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(
 		&datapb.FlushResponse{
@@ -750,7 +762,7 @@ func withValidMixCoord() Opt {
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
-
+	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	return withMixCoord(mixc)
 }
 
@@ -908,6 +920,23 @@ type mockBroker struct {
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
 }
 
+func newValidMockBroker() *mockBroker {
+	broker := newMockBroker()
+	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	broker.ReleasePartitionsFunc = func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+		return nil
+	}
+	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	return broker
+}
+
 func newMockBroker() *mockBroker {
 	return &mockBroker{}
 }
@@ -951,12 +980,6 @@ func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID Uni
 func withBroker(b Broker) Opt {
 	return func(c *Core) {
 		c.broker = b
-	}
-}
-
-func withGarbageCollector(gc GarbageCollector) Opt {
-	return func(c *Core) {
-		c.garbageCollector = gc
 	}
 }
 

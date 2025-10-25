@@ -24,18 +24,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
 
 type stepPriority int
@@ -63,132 +60,6 @@ func (s baseStep) Desc() string {
 
 func (s baseStep) Weight() stepPriority {
 	return stepPriorityLow
-}
-
-type addCollectionMetaStep struct {
-	baseStep
-	coll *model.Collection
-}
-
-func (s *addCollectionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.AddCollection(ctx, s.coll)
-	return nil, err
-}
-
-func (s *addCollectionMetaStep) Desc() string {
-	return fmt.Sprintf("add collection to meta table, name: %s, id: %d, ts: %d", s.coll.Name, s.coll.CollectionID, s.coll.CreateTime)
-}
-
-type deleteCollectionMetaStep struct {
-	baseStep
-	collectionID UniqueID
-	ts           Timestamp
-}
-
-func (s *deleteCollectionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.RemoveCollection(ctx, s.collectionID, s.ts)
-	return nil, err
-}
-
-func (s *deleteCollectionMetaStep) Desc() string {
-	return fmt.Sprintf("delete collection from meta table, id: %d, ts: %d", s.collectionID, s.ts)
-}
-
-func (s *deleteCollectionMetaStep) Weight() stepPriority {
-	return stepPriorityNormal
-}
-
-type deleteDatabaseMetaStep struct {
-	baseStep
-	databaseName string
-	ts           Timestamp
-}
-
-func (s *deleteDatabaseMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.DropDatabase(ctx, s.databaseName, s.ts)
-	return nil, err
-}
-
-func (s *deleteDatabaseMetaStep) Desc() string {
-	return fmt.Sprintf("delete database from meta table, name: %s, ts: %d", s.databaseName, s.ts)
-}
-
-type removeDmlChannelsStep struct {
-	baseStep
-	pChannels []string
-}
-
-func (s *removeDmlChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	s.core.chanTimeTick.removeDmlChannels(s.pChannels...)
-	return nil, nil
-}
-
-func (s *removeDmlChannelsStep) Desc() string {
-	// this shouldn't be called.
-	return fmt.Sprintf("remove dml channels: %v", s.pChannels)
-}
-
-func (s *removeDmlChannelsStep) Weight() stepPriority {
-	// avoid too frequent tt.
-	return stepPriorityUrgent
-}
-
-type watchChannelsStep struct {
-	baseStep
-	info *watchInfo
-}
-
-func (s *watchChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.WatchChannels(ctx, s.info)
-	return nil, err
-}
-
-func (s *watchChannelsStep) Desc() string {
-	return fmt.Sprintf("watch channels, ts: %d, collection: %d, partition: %d, vChannels: %v",
-		s.info.ts, s.info.collectionID, s.info.partitionID, s.info.vChannels)
-}
-
-type unwatchChannelsStep struct {
-	baseStep
-	collectionID UniqueID
-	channels     collectionChannels
-
-	isSkip bool
-}
-
-func (s *unwatchChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	unwatchByDropMsg := &deleteCollectionDataStep{
-		baseStep: baseStep{core: s.core},
-		coll:     &model.Collection{CollectionID: s.collectionID, PhysicalChannelNames: s.channels.physicalChannels},
-		isSkip:   s.isSkip,
-	}
-	return unwatchByDropMsg.Execute(ctx)
-}
-
-func (s *unwatchChannelsStep) Desc() string {
-	return fmt.Sprintf("unwatch channels, collection: %d, pChannels: %v, vChannels: %v",
-		s.collectionID, s.channels.physicalChannels, s.channels.virtualChannels)
-}
-
-func (s *unwatchChannelsStep) Weight() stepPriority {
-	return stepPriorityNormal
-}
-
-type changeCollectionStateStep struct {
-	baseStep
-	collectionID UniqueID
-	state        pb.CollectionState
-	ts           Timestamp
-}
-
-func (s *changeCollectionStateStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.ChangeCollectionState(ctx, s.collectionID, s.state, s.ts)
-	return nil, err
-}
-
-func (s *changeCollectionStateStep) Desc() string {
-	return fmt.Sprintf("change collection state, collection: %d, ts: %d, state: %s",
-		s.collectionID, s.ts, s.state.String())
 }
 
 type cleanupMetricsStep struct {
@@ -225,56 +96,6 @@ func (s *expireCacheStep) Execute(ctx context.Context) ([]nestedStep, error) {
 func (s *expireCacheStep) Desc() string {
 	return fmt.Sprintf("expire cache, collection id: %d, collection names: %s, ts: %d",
 		s.collectionID, s.collectionNames, s.ts)
-}
-
-type deleteCollectionDataStep struct {
-	baseStep
-	coll *model.Collection
-
-	isSkip bool
-}
-
-func (s *deleteCollectionDataStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	if s.isSkip {
-		return nil, nil
-	}
-	if _, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (s *deleteCollectionDataStep) Desc() string {
-	return fmt.Sprintf("delete collection data, collection: %d", s.coll.CollectionID)
-}
-
-func (s *deleteCollectionDataStep) Weight() stepPriority {
-	return stepPriorityImportant
-}
-
-type deletePartitionDataStep struct {
-	baseStep
-	pchans    []string
-	vchans    []string
-	partition *model.Partition
-
-	isSkip bool
-}
-
-func (s *deletePartitionDataStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	if s.isSkip {
-		return nil, nil
-	}
-	_, err := s.core.garbageCollector.GcPartitionData(ctx, s.pchans, s.vchans, s.partition)
-	return nil, err
-}
-
-func (s *deletePartitionDataStep) Desc() string {
-	return fmt.Sprintf("delete partition data, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
-}
-
-func (s *deletePartitionDataStep) Weight() stepPriority {
-	return stepPriorityImportant
 }
 
 type releaseCollectionStep struct {
@@ -331,104 +152,6 @@ func (s *dropIndexStep) Desc() string {
 }
 
 func (s *dropIndexStep) Weight() stepPriority {
-	return stepPriorityNormal
-}
-
-type addPartitionMetaStep struct {
-	baseStep
-	partition *model.Partition
-}
-
-func (s *addPartitionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.AddPartition(ctx, s.partition)
-	return nil, err
-}
-
-func (s *addPartitionMetaStep) Desc() string {
-	return fmt.Sprintf("add partition to meta table, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
-}
-
-type broadcastCreatePartitionMsgStep struct {
-	baseStep
-	vchannels []string
-	partition *model.Partition
-	ts        Timestamp
-}
-
-func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	req := &msgpb.CreatePartitionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
-			commonpbutil.WithTimeStamp(0), // ts is given by streamingnode.
-		),
-		PartitionName: s.partition.PartitionName,
-		CollectionID:  s.partition.CollectionID,
-		PartitionID:   s.partition.PartitionID,
-	}
-
-	msgs := make([]message.MutableMessage, 0, len(s.vchannels))
-	for _, vchannel := range s.vchannels {
-		msg, err := message.NewCreatePartitionMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&message.CreatePartitionMessageHeader{
-				CollectionId: s.partition.CollectionID,
-				PartitionId:  s.partition.PartitionID,
-			}).
-			WithBody(req).
-			BuildMutable()
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, msg)
-	}
-	if err := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
-		BarrierTimeTick: s.ts,
-	}, msgs...).UnwrapFirstError(); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (s *broadcastCreatePartitionMsgStep) Desc() string {
-	return fmt.Sprintf("broadcast create partition message to mq, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
-}
-
-type changePartitionStateStep struct {
-	baseStep
-	collectionID UniqueID
-	partitionID  UniqueID
-	state        pb.PartitionState
-	ts           Timestamp
-}
-
-func (s *changePartitionStateStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.ChangePartitionState(ctx, s.collectionID, s.partitionID, s.state, s.ts)
-	return nil, err
-}
-
-func (s *changePartitionStateStep) Desc() string {
-	return fmt.Sprintf("change partition step, collection: %d, partition: %d, state: %s, ts: %d",
-		s.collectionID, s.partitionID, s.state.String(), s.ts)
-}
-
-type removePartitionMetaStep struct {
-	baseStep
-	dbID         UniqueID
-	collectionID UniqueID
-	partitionID  UniqueID
-	ts           Timestamp
-}
-
-func (s *removePartitionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.RemovePartition(ctx, s.dbID, s.collectionID, s.partitionID, s.ts)
-	return nil, err
-}
-
-func (s *removePartitionMetaStep) Desc() string {
-	return fmt.Sprintf("remove partition meta, collection: %d, partition: %d, ts: %d", s.collectionID, s.partitionID, s.ts)
-}
-
-func (s *removePartitionMetaStep) Weight() stepPriority {
 	return stepPriorityNormal
 }
 
@@ -574,7 +297,7 @@ func (s *renameCollectionStep) Desc() string {
 
 var (
 	confirmGCInterval          = time.Minute * 20
-	allPartition      UniqueID = -1
+	allPartition      UniqueID = common.AllPartitionsID
 )
 
 type confirmGCStep struct {

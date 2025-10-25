@@ -265,13 +265,25 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		IsAutoIndex:     false,
 		UserIndexParams: userIndexParams,
 	}
+	indexModel := &model.Index{
+		CollectionID:    req.CollectionID,
+		FieldID:         req.FieldID,
+		IndexID:         indexID,
+		IndexName:       req.IndexName,
+		IsDeleted:       false,
+		CreateTime:      req.Timestamp,
+		TypeParams:      req.TypeParams,
+		IndexParams:     req.IndexParams,
+		IsAutoIndex:     req.IsAutoIndex,
+		UserIndexParams: userIndexParams,
+	}
 
 	t.Run("can create index", func(t *testing.T) {
 		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
-		indexID, err = m.CreateIndex(context.TODO(), req, indexID, false)
+		err = m.CreateIndex(context.TODO(), indexModel)
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req, false)
@@ -465,8 +477,18 @@ func TestMeta_CreateIndex(t *testing.T) {
 		IsAutoIndex:     false,
 		UserIndexParams: indexParams,
 	}
-
 	allocatedID := UniqueID(3)
+	indexModel := &model.Index{
+		CollectionID:    req.CollectionID,
+		FieldID:         req.FieldID,
+		IndexID:         allocatedID,
+		IndexName:       req.IndexName,
+		TypeParams:      req.TypeParams,
+		IndexParams:     req.IndexParams,
+		CreateTime:      req.Timestamp,
+		IsAutoIndex:     req.IsAutoIndex,
+		UserIndexParams: req.UserIndexParams,
+	}
 
 	t.Run("success", func(t *testing.T) {
 		sc := catalogmocks.NewDataCoordCatalog(t)
@@ -476,7 +498,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(nil)
 
 		m := newSegmentIndexMeta(sc)
-		_, err := m.CreateIndex(context.TODO(), req, allocatedID, false)
+		err := m.CreateIndex(context.TODO(), indexModel)
 		assert.NoError(t, err)
 	})
 
@@ -488,7 +510,8 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(errors.New("fail"))
 
 		m := newSegmentIndexMeta(ec)
-		_, err := m.CreateIndex(context.TODO(), req, 4, false)
+		indexModel.IndexID = 4
+		err := m.CreateIndex(context.TODO(), indexModel)
 		assert.Error(t, err)
 	})
 }

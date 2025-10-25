@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -99,7 +100,6 @@ type Core struct {
 	scheduler        IScheduler
 	broker           Broker
 	ddlTsLockManager DdlTsLockManager
-	garbageCollector GarbageCollector
 	stepExecutor     StepExecutor
 
 	metaKVCreator metaKVCreator
@@ -129,6 +129,8 @@ type Core struct {
 	activateFunc func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	tombstoneSweeper tombstone.TombstoneSweeper
 }
 
 // --------------------- function --------------------------
@@ -439,7 +441,6 @@ func (c *Core) initInternal() error {
 
 	c.broker = newServerBroker(c)
 	c.ddlTsLockManager = newDdlTsLockManager(c.tsoAllocator)
-	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
@@ -490,7 +491,6 @@ func (c *Core) Init() error {
 		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
-
 	return initError
 }
 
@@ -607,33 +607,23 @@ func (c *Core) restore(ctx context.Context) error {
 		return err
 	}
 
+	c.tombstoneSweeper = tombstone.NewTombstoneSweeper()
 	for _, db := range dbs {
 		colls, err := c.meta.ListCollections(ctx, db.Name, typeutil.MaxTimestamp, false)
 		if err != nil {
 			return err
 		}
+		// restore the tombstone into the tombstone sweeper.
 		for _, coll := range colls {
-			ts, err := c.tsoAllocator.GenerateTSO(1)
-			if err != nil {
-				return err
+			// CollectionCreating is a deprecated status,
+			// we cannot promise the coordinator handle it correctly, so just treat it as a tombstone.
+			if coll.State == pb.CollectionState_CollectionDropping || coll.State == pb.CollectionState_CollectionCreating {
+				c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, coll.CollectionID))
+				continue
 			}
-			if coll.Available() {
-				for _, part := range coll.Partitions {
-					switch part.State {
-					case pb.PartitionState_PartitionDropping:
-						go c.garbageCollector.ReDropPartition(coll.DBID, coll.PhysicalChannelNames, coll.VirtualChannelNames, part.Clone(), ts)
-					case pb.PartitionState_PartitionCreating:
-						go c.garbageCollector.RemoveCreatingPartition(coll.DBID, part.Clone(), ts)
-					default:
-					}
-				}
-			} else {
-				switch coll.State {
-				case pb.CollectionState_CollectionDropping:
-					go c.garbageCollector.ReDropCollection(coll.Clone(), ts)
-				case pb.CollectionState_CollectionCreating:
-					go c.garbageCollector.RemoveCreatingCollection(coll.Clone())
-				default:
+			for _, part := range coll.Partitions {
+				if part.State == pb.PartitionState_PartitionDropping || part.State == pb.PartitionState_PartitionCreating {
+					c.tombstoneSweeper.AddTombstone(newPartitionTombstone(c.meta, c.broker, coll.CollectionID, part.PartitionID))
 				}
 			}
 		}
@@ -733,6 +723,9 @@ func (c *Core) GracefulStop() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if c.tombstoneSweeper != nil {
+		c.tombstoneSweeper.Close()
+	}
 	c.stopExecutor()
 	c.stopScheduler()
 
@@ -903,49 +896,28 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreateCollection")
 
-	log.Ctx(ctx).Info("received request to create collection",
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()),
-		zap.String("name", in.GetCollectionName()),
-		zap.String("role", typeutil.RootCoordRole))
+		zap.String("collectionName", in.GetCollectionName()))
+	logger.Info("received request to create collection")
 
-	t := &createCollectionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to create collection",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to create collection",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastCreateCollectionV1(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredCreateCollection) {
+			logger.Info("create existed collection with same schema, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to create collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to create collection",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetCollectionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to create collection")
 	return merr.Success(), nil
 }
 
@@ -1005,46 +977,28 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropCollection")
 
-	log.Ctx(ctx).Info("received request to drop collection",
-		zap.String("role", typeutil.RootCoordRole),
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()),
 		zap.String("name", in.GetCollectionName()))
+	logger.Info("received request to drop collection")
 
-	t := &dropCollectionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to drop collection", zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to drop collection", zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("name", in.GetCollectionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastDropCollectionV1(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredDropCollection) {
+			logger.Info("drop collection that not found, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to drop collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetCollectionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to drop collection")
 	return merr.Success(), nil
 }
 
@@ -1485,52 +1439,29 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreatePartition")
 
-	log.Ctx(ctx).Info("received request to create partition",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("collection", in.GetCollectionName()),
-		zap.String("partition", in.GetPartitionName()))
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+		zap.String("partitionName", in.GetPartitionName()))
+	logger.Info("received request to create partition")
 
-	t := &createPartitionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to create partition",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("collection", in.GetCollectionName()),
-			zap.String("partition", in.GetPartitionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to create partition",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("collection", in.GetCollectionName()),
-			zap.String("partition", in.GetPartitionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastCreatePartition(ctx, in); err != nil {
+		if errors.Is(err, errIgnoerdCreatePartition) {
+			logger.Info("create partition that already exists, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Info("failed to create partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreatePartition").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to create partition",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("collection", in.GetCollectionName()),
-		zap.String("partition", in.GetPartitionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to create partition")
 	return merr.Success(), nil
 }
 
@@ -1542,48 +1473,26 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropPartition")
-
-	log.Ctx(ctx).Info("received request to drop partition",
-		zap.String("role", typeutil.RootCoordRole),
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
 		zap.String("collection", in.GetCollectionName()),
 		zap.String("partition", in.GetPartitionName()))
+	logger.Info("received request to drop partition")
 
-	t := &dropPartitionTask{
-		baseTask: newBaseTask(ctx, c),
-		Req:      in,
-	}
-
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Ctx(ctx).Info("failed to enqueue request to drop partition",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("collection", in.GetCollectionName()),
-			zap.String("partition", in.GetPartitionName()))
-
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	if err := t.WaitToFinish(); err != nil {
-		log.Ctx(ctx).Info("failed to drop partition",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err),
-			zap.String("collection", in.GetCollectionName()),
-			zap.String("partition", in.GetPartitionName()),
-			zap.Uint64("ts", t.GetTs()))
-
+	if err := c.broadcastDropPartition(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredDropPartition) {
+			logger.Info("drop partition that not found, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Warn("failed to drop partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropPartition").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Ctx(ctx).Info("done to drop partition",
-		zap.String("role", typeutil.RootCoordRole),
-		zap.String("collection", in.GetCollectionName()),
-		zap.String("partition", in.GetPartitionName()),
-		zap.Uint64("ts", t.GetTs()))
+	logger.Info("done to drop partition")
 	return merr.Success(), nil
 }
 

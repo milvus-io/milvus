@@ -157,6 +157,15 @@ func toKeyDataPairs(m map[string][]byte) []*commonpb.KeyDataPair {
 	return ret
 }
 
+// toMap converts []*commonpb.KeyDataPair to map[string][]byte.
+func toMap(pairs []*commonpb.KeyDataPair) map[string][]byte {
+	m := make(map[string][]byte, len(pairs))
+	for _, pair := range pairs {
+		m[pair.Key] = pair.Data
+	}
+	return m
+}
+
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
 	log.Ctx(ctx).Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
 

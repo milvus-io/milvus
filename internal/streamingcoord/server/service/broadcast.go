@@ -28,6 +28,8 @@ func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.Br
 	if err != nil {
 		return nil, err
 	}
+	defer api.Close()
+
 	results, err := api.Broadcast(ctx, msg)
 	if err != nil {
 		return nil, err
