@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"regexp"
 	"testing"
 	"time"
 
@@ -240,6 +241,10 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 	}
 
 	schemaOpt.Fields = fields
+	if schemaOpt.CollectionName == "" {
+		testName := regexp.MustCompile("[^a-zA-Z0-9]").ReplaceAllString(t.Name(), "_")
+		schemaOpt.CollectionName = common.GenRandomString(testName, 6)
+	}
 	schema := GenSchema(schemaOpt)
 
 	createCollectionOption := mergeOptions(schema, opts...)

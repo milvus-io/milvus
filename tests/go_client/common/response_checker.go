@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,16 +21,31 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
+func trace() string {
+	traceStrings := []string{}
+	pcs := make([]uintptr, 10)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		traceStrings = append(traceStrings, fmt.Sprintf("%s:%d %s", frame.File, frame.Line, frame.Function))
+		if !more {
+			break
+		}
+	}
+	return strings.Join(traceStrings, "|")
+}
+
 func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...string) {
 	if expErrNil {
-		require.NoError(t, actualErr)
+		require.NoError(t, actualErr, trace())
 	} else {
-		require.Error(t, actualErr)
+		require.Error(t, actualErr, trace())
 		switch len(expErrorMsg) {
 		case 0:
-			log.Fatal("expect error message should not be empty")
+			log.Fatal("expect error message should not be empty", zap.String("trace", trace()))
 		case 1:
-			require.ErrorContains(t, actualErr, expErrorMsg[0])
+			require.ErrorContains(t, actualErr, expErrorMsg[0], trace())
 		default:
 			contains := false
 			for i := 0; i < len(expErrorMsg); i++ {
@@ -38,7 +54,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 				}
 			}
 			if !contains {
-				t.Fatalf("CheckErr failed, actualErr doesn't contains any expErrorMsg, actual msg:%s", actualErr)
+				t.Fatalf("CheckErr failed, actualErr doesn't contains any expErrorMsg, actual msg:%s, trace:%s", actualErr, trace())
 			}
 		}
 	}
