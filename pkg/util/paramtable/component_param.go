@@ -6335,8 +6335,8 @@ it also determine the depth of depth first search method that is used to find th
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
 		Version:      "2.5.4",
-		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
-		DefaultValue: "1",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.`,
+		DefaultValue: "4",
 		Export:       true,
 	}
 	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
