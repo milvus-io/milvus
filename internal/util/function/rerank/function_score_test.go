@@ -435,3 +435,29 @@ func (s *FunctionScoreSuite) TestFunctionUtil() {
 	_, err = groupScore(g1, avgScorer)
 	s.ErrorContains(err, "input group for score must have at least one id, must be sth wrong within code")
 }
+
+func TestIsQueryNodeRanker(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []*commonpb.KeyValuePair
+		want   bool
+	}{
+		{"expr", []*commonpb.KeyValuePair{{Key: reranker, Value: ExprName}}, true},
+		{"wasm", []*commonpb.KeyValuePair{{Key: reranker, Value: WasmName}}, true},
+		{"decay", []*commonpb.KeyValuePair{{Key: reranker, Value: DecayFunctionName}}, false},
+		{"model", []*commonpb.KeyValuePair{{Key: reranker, Value: ModelFunctionName}}, false},
+		{"rrf", []*commonpb.KeyValuePair{{Key: reranker, Value: RRFName}}, false},
+		{"weighted", []*commonpb.KeyValuePair{{Key: reranker, Value: WeightedName}}, false},
+		{"missing", []*commonpb.KeyValuePair{}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := &schemapb.FunctionSchema{Params: tc.params}
+			got := IsQueryNodeRanker(fs)
+			if got != tc.want {
+				t.Fatalf("IsQueryNodeRanker() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

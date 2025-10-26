@@ -913,6 +913,17 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
+
+	// Add query node reranker to be executed at QueryNode level
+	if t.functionScore != nil && t.request.FunctionScore != nil && len(t.request.FunctionScore.Functions) > 0 {
+		for _, funcSchema := range t.request.FunctionScore.Functions {
+			if rerank.IsQueryNodeRanker(funcSchema) {
+				searchReq.RerankFunction = funcSchema
+				break // Only one reranker supported
+			}
+		}
+	}
+
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
 		DmlChannels:     []string{channel},

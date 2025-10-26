@@ -127,6 +127,19 @@ type FunctionScore struct {
 	reranker Reranker
 }
 
+// IsQueryNodeRanker returns true if the reranker should run at QueryNode level
+func IsQueryNodeRanker(funcSchema *schemapb.FunctionSchema) bool {
+	rerankerName := GetRerankName(funcSchema)
+	switch rerankerName {
+	case ExprName, WasmName:
+		return true
+	case DecayFunctionName, ModelFunctionName, RRFName, WeightedName:
+		return false
+	default:
+		return false
+	}
+}
+
 func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
 	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
 		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
@@ -163,6 +176,10 @@ func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *sc
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
+		// Skip expression-based rerankers as they are handled at QueryNode level
+		if IsQueryNodeRanker(function) {
+			continue
+		}
 		reranker, err := createFunction(collSchema, function)
 		if err != nil {
 			return nil, err
