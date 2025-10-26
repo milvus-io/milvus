@@ -156,7 +156,7 @@ TextMatchIndex::Load(const Config& config) {
         auto index_data =
             mem_file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
-        AssembleIndexData(index_data, binary_set);
+        AssembleIndexDatas(index_data, binary_set);
         // clear index_data to free memory early
         index_data.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
