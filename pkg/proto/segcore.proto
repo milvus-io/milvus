@@ -9,7 +9,7 @@ message Binlog {
   int64 entries_num = 1;
   uint64 timestamp_from = 2;
   uint64 timestamp_to = 3;
-  string log_path = 4 [deprecated = true];
+  string log_path = 4;
   int64 log_size = 5;
   int64 logID = 6;
   int64 memory_size = 7;
@@ -98,8 +98,6 @@ message FieldIndexInfo {
 }
 
 message SegmentLoadInfo {
-  reserved 14, 15, 17;  // Removed: start_position, delta_position, level
-
   int64 segmentID = 1;
   int64 partitionID = 2;
   int64 collectionID = 3;
@@ -113,11 +111,11 @@ message SegmentLoadInfo {
   repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12 [deprecated = true];
   string insert_channel = 13;
-  int64 readableVersion = 16;
-  int64 storageVersion = 18;
-  bool is_sorted = 19;
-  map<int64, TextIndexStats> textStatsLogs = 20;
-  repeated FieldBinlog bm25logs = 21;
-  map<int64, JsonKeyStats> jsonKeyStatsLogs = 22;
-  common.LoadPriority priority = 23;
+  int64 readableVersion = 14;
+  int64 storageVersion = 15;
+  bool is_sorted = 16;
+  map<int64, TextIndexStats> textStatsLogs = 17;
+  repeated FieldBinlog bm25logs = 18;
+  map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
+  common.LoadPriority priority = 20;
 }
