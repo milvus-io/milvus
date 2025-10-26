@@ -41,6 +41,9 @@ const (
 
 	MaxDegreeKey         = "max_degree"
 	SearchListSizeKey    = "search_list_size"
+	NcsEnableKey         = "ncs_enable"
+	NcsKindKey           = "ncs_kind"
+	NcsExtrasKey         = "ncs_extras"
 	PQCodeBudgetKey      = "pq_code_budget_gb"
 	BuildDramBudgetKey   = "build_dram_budget_gb"
 	NumBuildThreadKey    = "num_build_thread"
@@ -202,6 +205,10 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
+	//TODO: add ncs params to auto index config?
+	indexParams[NcsEnableKey] = params.CommonCfg.NcsEnable.GetValue()
+	indexParams[NcsKindKey] = params.CommonCfg.NcsKind.GetValue()
+	indexParams[NcsExtrasKey] = params.CommonCfg.NcsExtras.GetValue()
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio

@@ -311,6 +311,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install ncs
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/ncs/
+        DESTINATION include/ncs
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # Install clustering
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/clustering/
         DESTINATION include/clustering

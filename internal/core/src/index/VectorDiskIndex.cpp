@@ -95,16 +95,20 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         auto read_scope =
             milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
         auto index_files =
-            GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+            GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
         AssertInfo(index_files.has_value(),
-                   "index file paths is empty when load disk ann index data");
+                    "index file paths is empty when load disk ann index data");
+        auto ncs_enabled =
+            GetValueFromConfig<bool>(config, NCS_ENABLE).value();
+        auto filtered_index_files = filterIndexFiles(index_files.value(), ncs_enabled);
+
         // If index is loaded with stream, we don't need to cache index to disk
         if (!index_.LoadIndexWithStream()) {
             auto load_priority =
                 GetValueFromConfig<milvus::proto::common::LoadPriority>(
                     config, milvus::LOAD_PRIORITY)
                     .value_or(milvus::proto::common::LoadPriority::HIGH);
-            file_manager_->CacheIndexToDisk(index_files.value(), load_priority);
+            file_manager_->CacheIndexToDisk(filtered_index_files, load_priority);
         }
         read_file_span->End();
     }
@@ -155,6 +159,57 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalFileSize(),
                                       remote_paths_to_size);
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::ncsUpload(const Config& config){
+    
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+    
+    auto ncs_kind = GetValueFromConfig<string>(config, NCS_KIND).value();
+    auto ncs_extras = GetValueFromConfig<Config>(config, NCS_EXTRAS).value();    
+    auto ncs_descriptor = std::make_unique<NcsDescriptor>(ncs_kind, segment_id, ncs_extras);
+
+    // Prepare config with descriptor embedded
+    knowhere::Json upload_config;
+    upload_config.update(config);
+    upload_config[NCS_DESCRIPTOR] = *ncs_descriptor;
+    upload_config.erase(NCS_KIND);
+    upload_config.erase(NCS_EXTRAS);
+
+    auto status = index_.NcsUpload(upload_config);
+    if (status != knowhere::Status::success){
+        ThrowInfo(ErrorCode::NcsUploadError,
+                  "failed to upload vector index data to NCS");
+    }
+}
+
+template <typename T>
+std::vector<std::string>
+VectorDiskAnnIndex<T>::filterIndexFiles(const std::vector<std::string>& index_files,
+                                        bool ncs_enabled) {
+    if(ncs_enabled){
+        auto filter_out_patterns = index_.ListFilesForNcsUpload();
+
+        auto needed_file_predicate = [filter_out_patterns](const std::string& file_name) {
+            return !std::any_of(filter_out_patterns.begin(), filter_out_patterns.end(),
+                                [&file_name](const std::string& pattern) {
+                                    return file_name.find(pattern) != std::string::npos;
+                                });
+        };
+
+        std::vector<std::string> filtered_index_files;
+        std::copy_if(index_files.begin(), 
+                    index_files.end(),
+                    std::back_inserter(filtered_index_files),
+                    needed_file_predicate);
+        return filtered_index_files;
+    }
+    else {
+        return index_files;
+    }
+    
 }
 
 template <typename T>
@@ -226,6 +281,11 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
+
+    if (GetValueFromConfig<bool>(config, NCS_ENABLE).value()) {
+        ncsUpload(build_config);
+    }
+    
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
         local_chunk_manager, segment_id, field_id));
@@ -333,6 +393,11 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         local_chunk_manager->Write(
             valid_data_path, sizeof(size_t), packed_data.data(), byte_size);
         file_manager_->AddFile(valid_data_path);
+    }
+
+    
+    if (GetValueFromConfig<bool>(config, NCS_ENABLE).value()) {
+        ncsUpload(build_config);
     }
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
@@ -511,6 +576,19 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     if (config.contains(MMAP_FILE_PATH)) {
         load_config.erase(MMAP_FILE_PATH);
         load_config[ENABLE_MMAP] = true;
+    }
+
+    auto ncs_enabled =
+        GetValueFromConfig<bool>(config, NCS_ENABLE).value();
+        
+    if (ncs_enabled){
+        auto ncs_kind = GetValueFromConfig<string>(config, NCS_KIND).value();
+        auto ncs_extras = GetValueFromConfig<Config>(config, NCS_EXTRAS).value();    
+        auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+        auto ncs_descriptor = std::make_unique<NcsDescriptor>(ncs_kind, segment_id, ncs_extras);
+        load_config[NCS_DESCRIPTOR] = *ncs_descriptor;
+        load_config.erase(NCS_KIND);
+        load_config.erase(NCS_EXTRAS);
     }
 
     return load_config;

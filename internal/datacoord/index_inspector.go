@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/ncscgowrapper"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -171,10 +173,6 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
 	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
-	buildID, err := i.allocator.AllocID(context.Background())
-	if err != nil {
-		return err
-	}
 
 	indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, indexID)
 	indexType := GetIndexType(indexParams)
@@ -195,6 +193,21 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	if newIndexType != "" && newIndexType != indexType {
 		log.Info("override index type", zap.String("indexType", indexType), zap.String("newIndexType", newIndexType))
 		indexType = newIndexType
+	}
+
+	// Create NCS bucket for segment if NCS is enabled
+	if paramtable.Get().CommonCfg.NcsEnable.GetAsBool() && indexparamcheck.IsDiskIndex(indexType) {
+		log.Info("NCS enabled, creating bucket for segment", zap.Int64("segmentID", segment.ID))
+		if err := ncscgowrapper.CreateBucket(uint64(segment.ID)); err != nil {
+			log.Warn("failed to create NCS bucket for segment", zap.Int64("segmentID", segment.ID), zap.Error(err))
+			return err
+		}
+		log.Info("Successfully created NCS bucket for segment", zap.Int64("segmentID", segment.ID))
+	}
+
+	buildID, err := i.allocator.AllocID(context.Background())
+	if err != nil {
+		return err
 	}
 
 	segIndex := &model.SegmentIndex{

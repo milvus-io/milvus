@@ -931,6 +931,19 @@ common:
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
+
+    NcsEnable: true
+    NcsKind: "in_memory" #in_memory, redis
+    NcsExtras: '{}'
+
+    # Example for redis NCS:
+    # NcsKind: "redis"
+    # NcsExtras: '{"redis_host": "localhost", "redis_port": 6379}'
+
+    # Example for in_memory NCS:
+    # NcsKind: "in_memory"
+    # NcsExtras: '{}'
+
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   namespace:

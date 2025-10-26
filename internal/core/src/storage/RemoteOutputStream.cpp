@@ -12,11 +12,18 @@ RemoteOutputStream::RemoteOutputStream(
 }
 
 RemoteOutputStream::~RemoteOutputStream() {
-    // temp solution, will expose `Close` method in OutputStream later
-    auto status = output_stream_->Close();
-    AssertInfo(status.ok(),
-               "Failed to close output stream, error: {}",
-               status.ToString());
+    Close();
+}
+
+void
+RemoteOutputStream::Close() {
+    if (output_stream_) {
+        auto status = output_stream_->Close();
+        AssertInfo(status.ok(),
+                   "Failed to close output stream, error: {}",
+                   status.ToString());
+        output_stream_ = nullptr;
+    }
 }
 
 size_t

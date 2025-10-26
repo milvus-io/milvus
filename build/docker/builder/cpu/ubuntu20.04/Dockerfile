@@ -13,15 +13,18 @@ FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
+RUN apt-get update && apt-get install -y --no-install-recommends ssh wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
-    pkg-config uuid-dev libaio-dev libopenblas-dev && \
+    pkg-config uuid-dev libaio-dev libopenblas-dev libpci3 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /root/.ssh && ssh-keyscan bitbucket.org >> /root/.ssh/known_hosts
+
 
 RUN pip3 install conan==1.64.1
 

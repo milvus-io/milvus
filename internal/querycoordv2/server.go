@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -262,6 +263,15 @@ func (s *Server) initQueryCoord() error {
 	log := log.Ctx(s.ctx)
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
+
+	// Initialize NCS singleton
+	ncsKind := paramtable.Get().CommonCfg.NcsKind.GetValue()
+	ncsExtras := paramtable.Get().CommonCfg.NcsExtras.GetValue()
+	if err := initcore.InitNcsSingleton(ncsKind, ncsExtras); err != nil {
+		log.Error("QueryCoord init NCS singleton failed", zap.Error(err))
+		return err
+	}
+
 	// Init KV and ID allocator
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	var idAllocatorKV kv.TxnKV

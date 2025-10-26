@@ -35,6 +35,8 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/ncscgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -246,6 +248,32 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	// NOTE: for balance segment task, expected load and release execution on the same shard leader
 	if GetTaskType(task) == TaskTypeMove {
 		task.SetShardLeaderID(view.Node)
+	}
+
+	// Verify NCS bucket exists before loading segment (if NCS is enabled)
+	if Params.CommonCfg.NcsEnable.GetAsBool() {
+		isDiskANN := false
+		for _, indexInfo := range loadInfo.IndexInfos {
+			params := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+			if indexparamcheck.IsDiskIndex(params[common.IndexTypeKey]) {
+				isDiskANN = true
+				break
+			}
+		}
+
+		if isDiskANN {
+			segmentID := action.SegmentID
+			exists, checkErr := ncscgowrapper.IsBucketExist(uint64(segmentID))
+			if checkErr != nil {
+				log.Warn("failed to verify NCS bucket existence", zap.Error(checkErr))
+				return checkErr
+			}
+			if !exists {
+				err = merr.WrapErrServiceInternal(fmt.Sprintf("NCS bucket does not exist for segment %d", segmentID))
+				log.Warn("NCS bucket does not exist for segment", zap.Error(err))
+				return err
+			}
+		}
 	}
 
 	startTs := time.Now()

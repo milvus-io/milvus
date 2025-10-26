@@ -16,6 +16,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Parse command line arguments
+USE_GDB=false
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--gdb)
+			USE_GDB=true
+			shift
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: $0 [--gdb]"
+			exit 1
+			;;
+	esac
+done
+
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 	LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
 	if test -f "$LIBJEMALLOC"; then
@@ -28,5 +44,14 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 	export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
 fi
 
-echo "Starting standalone..."
-nohup ./bin/milvus run standalone --run-with-subprocess >/tmp/standalone.log 2>&1 &
+if [ "$USE_GDB" = true ]; then
+	echo "Starting standalone with gdb..."
+	echo "Program output will be logged to /tmp/standalone.log"
+	gdb -ex "set exec-wrapper sh -c 'exec \"\$@\" >/tmp/standalone.log 2>&1' dummy" \
+	    -ex "catch throw" \
+	    -ex "run" \
+	    --args ./bin/milvus run standalone
+else
+	echo "Starting standalone..."
+	nohup ./bin/milvus run standalone --run-with-subprocess >/tmp/standalone.log 2>&1 &
+fi

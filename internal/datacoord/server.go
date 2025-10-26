@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -266,6 +267,14 @@ func (s *Server) initDataCoord() error {
 
 	log.Info("DataCoord try to wait for MixCoord ready")
 	if err := s.initMixCoord(); err != nil {
+		return err
+	}
+
+	// Initialize NCS singleton
+	ncsKind := paramtable.Get().CommonCfg.NcsKind.GetValue()
+	ncsExtras := paramtable.Get().CommonCfg.NcsExtras.GetValue()
+	if err := initcore.InitNcsSingleton(ncsKind, ncsExtras); err != nil {
+		log.Error("DataCoord init NCS singleton failed", zap.Error(err))
 		return err
 	}
 

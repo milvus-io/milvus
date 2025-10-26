@@ -237,6 +237,9 @@ type commonConfig struct {
 	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
 	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
+	NcsEnable                           ParamItem `refreshable:"false"`
+	NcsKind                             ParamItem `refreshable:"false"`
+	NcsExtras                           ParamItem `refreshable:"false"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 	EnableNamespace                     ParamItem `refreshable:"false"`
@@ -570,6 +573,33 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.SearchListSize.Init(base.mgr)
+
+	p.NcsEnable = ParamItem{
+		Key:          "common.DiskIndex.NcsEnable",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Enable NCS for disk based indexes",
+	}
+	p.NcsEnable.Init(base.mgr)
+
+	p.NcsKind = ParamItem{
+		Key:          "common.DiskIndex.NcsKind",
+		Version:      "2.5.0",
+		DefaultValue: "in_memory",
+		Export:       true,
+		Doc:          "NCS kind for disk based indexes",
+	}
+	p.NcsKind.Init(base.mgr)
+
+	p.NcsExtras = ParamItem{
+		Key:          "common.DiskIndex.NcsExtras",
+		Version:      "2.5.0",
+		DefaultValue: "{}",
+		Export:       true,
+		Doc:          "NCS extra params, in JSON string format",
+	}
+	p.NcsExtras.Init(base.mgr)
 
 	p.PQCodeBudgetGBRatio = ParamItem{
 		Key:          "common.DiskIndex.PQCodeBudgetGBRatio",

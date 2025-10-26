@@ -37,6 +37,8 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/Timer.h"
 #include "storage/Util.h"
+#include "ncs/ncs.h"
+#include "ncs/InMemoryNcs.h"
 #include <boost/filesystem.hpp>
 
 using namespace milvus;
@@ -804,6 +806,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
         {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
         {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::NCS_ENABLE, false},
     };
 
     // build disk ann index
@@ -851,7 +854,19 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         std::runtime_error);
 }
 
-TEST(Indexing, SearchDiskAnnWithFloat16) {
+class SearchDiskAnnTest : public ::testing::TestWithParam<bool> {
+protected:
+    void SetUp() override {
+        if (ncs_enable()) {
+            milvus::NcsSingleton::initNcs(milvus::InMemoryNcsFactory::KIND);
+        }
+    }
+
+    bool ncs_enable() const { return GetParam(); }
+};
+
+TEST_P(SearchDiskAnnTest, Float16) {
+    bool ncs_enable = GetParam();
     int64_t NB = 1000;
     int64_t NQ = 2;
     int64_t K = 4;
@@ -891,7 +906,14 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
         {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
         {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::NCS_ENABLE, ncs_enable},
+        {milvus::index::NCS_KIND, "in_memory"},
+        {milvus::index::NCS_EXTRAS, json{{"note", "unit test"}}},
     };
+
+    if(ncs_enable){
+        NcsSingleton::Instance()->createBucket(segment_id);
+    }
 
     // build disk ann index
     auto dataset =
@@ -914,7 +936,7 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
+    auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB, ncs_enable);
     load_conf["index_files"] = index_files;
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
@@ -938,7 +960,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 
-TEST(Indexing, SearchDiskAnnWithBFloat16) {
+TEST_P(SearchDiskAnnTest, BFloat16) {
+    bool ncs_enable = GetParam();
     int64_t NB = 1000;
     int64_t NQ = 2;
     int64_t K = 4;
@@ -978,7 +1001,14 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
         {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
         {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
         {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::NCS_ENABLE, ncs_enable},
+        {milvus::index::NCS_KIND, "in_memory"},
+        {milvus::index::NCS_EXTRAS, json{{"note", "unit test"}}},
     };
+
+    if(ncs_enable){
+        NcsSingleton::Instance()->createBucket(segment_id);
+    }
 
     // build disk ann index
     auto dataset =
@@ -1001,7 +1031,7 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    auto load_conf = generate_load_conf<bfloat16>(index_type, metric_type, NB);
+    auto load_conf = generate_load_conf<bfloat16>(index_type, metric_type, NB, ncs_enable);
     load_conf["index_files"] = index_files;
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
@@ -1024,6 +1054,12 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     EXPECT_NO_THROW(
         vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    NCSParameters,
+    SearchDiskAnnTest,
+    ::testing::Values(false, true));
+
 #endif
 
 TEST(Indexing, IndexStats) {

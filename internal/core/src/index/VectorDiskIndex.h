@@ -99,6 +99,13 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::Json
     update_load_json(const Config& config);
 
+    void
+    ncsUpload(const Config& config);
+
+    std::vector<std::string>
+    filterIndexFiles(const std::vector<std::string>& index_files,
+                     bool ncs_enabled);
+
  private:
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
