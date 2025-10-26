@@ -690,8 +690,7 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
             }
             if (ngram_bloom_filter_) {
                 auto ngram_bf_data = ngram_bloom_filter_->ToJson();
-                j["ngram_bloom_filter"] =
-                    nlohmann::json::binary(ngram_bf_data);
+                j["ngram_bloom_filter"] = nlohmann::json::binary(ngram_bf_data);
             }
         }
 
@@ -1100,7 +1099,8 @@ class SkipIndexStatsBuilder {
         }
         if (disable_bloom_filter_) {
             if constexpr (std::is_same_v<T, std::string>) {
-                return std::make_unique<StringFieldChunkMetrics>(min, max, nullptr, nullptr);
+                return std::make_unique<StringFieldChunkMetrics>(
+                    min, max, nullptr, nullptr);
             }
             return std::make_unique<IntFieldChunkMetrics<T>>(min, max, nullptr);
         }
