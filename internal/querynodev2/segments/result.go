@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -105,6 +106,15 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	if err != nil {
 		log.Warn("shard leader reduce errors", zap.Error(err))
 		return nil, err
+	}
+	// Apply in-reducer rerank if provided and supported
+	if info.GetRerankFunction() != nil && info.GetCollectionSchema() != nil {
+		reranked, rerr := rerank.ApplyRerankOnSearchResultData(ctx, reducedResultData, info.GetCollectionSchema(), info.GetRerankFunction(), info.GetMetricType(), info.GetNq(), info.GetTopK())
+		if rerr != nil {
+			log.Warn("failed to apply segment-level reranking in reducer", zap.Error(rerr))
+		} else {
+			reducedResultData = reranked
+		}
 	}
 	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.GetNq(), info.GetTopK(), info.GetMetricType())
 	if err != nil {

@@ -431,10 +431,22 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		req.GetSegmentIDs(),
 	))
 
-	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
-		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
-			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
-			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
+	// prepare reduce info and pass rerank context so reducer can apply rerank on reduced data
+	reduceInfo := reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(), req.GetReq().GetTopk()).
+		WithMetricType(req.GetReq().GetMetricType()).
+		WithGroupByField(req.GetReq().GetGroupByFieldId()).
+		WithGroupSize(req.GetReq().GetGroupSize()).
+		WithAdvance(req.GetReq().GetIsAdvanced())
+	if req.GetReq().GetRerankFunction() != nil {
+		if node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+			coll := node.manager.Collection.Get(req.Req.GetCollectionID())
+			if coll != nil {
+				reduceInfo = reduceInfo.WithRerank(coll.Schema(), req.GetReq().GetRerankFunction())
+			}
+			node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+		}
+	}
+	resp, err := segments.ReduceSearchOnQueryNode(ctx, results, reduceInfo)
 	if err != nil {
 		return nil, err
 	}

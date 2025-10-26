@@ -134,6 +134,8 @@ message SearchRequest {
   bool is_iterator = 28;
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
+  // reranker function at QueryNode
+  schema.FunctionSchema rerank_function = 31;
 }
 
 message SubSearchResults {

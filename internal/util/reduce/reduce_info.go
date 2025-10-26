@@ -13,6 +13,9 @@ type ResultInfo struct {
 	groupByFieldId int64
 	groupSize      int64
 	isAdvance      bool
+	// rerank context: when set, reducer will apply rerank on reduced data
+	rerankFunction   *schemapb.FunctionSchema
+	collectionSchema *schemapb.CollectionSchema
 }
 
 func NewReduceSearchResultInfo(
@@ -55,6 +58,13 @@ func (r *ResultInfo) WithAdvance(advance bool) *ResultInfo {
 	return r
 }
 
+// WithRerank sets rerank context to be used by reducers that support it
+func (r *ResultInfo) WithRerank(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) *ResultInfo {
+	r.collectionSchema = collSchema
+	r.rerankFunction = funcSchema
+	return r
+}
+
 func (r *ResultInfo) GetNq() int64 {
 	return r.nq
 }
@@ -89,6 +99,14 @@ func (r *ResultInfo) GetIsAdvance() bool {
 
 func (r *ResultInfo) SetMetricType(metricType string) {
 	r.metricType = metricType
+}
+
+func (r *ResultInfo) GetRerankFunction() *schemapb.FunctionSchema {
+	return r.rerankFunction
+}
+
+func (r *ResultInfo) GetCollectionSchema() *schemapb.CollectionSchema {
+	return r.collectionSchema
 }
 
 type IReduceType int32

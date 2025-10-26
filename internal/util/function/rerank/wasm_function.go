@@ -79,25 +79,21 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 		entryPoint = "rerank" // default
 	}
 
-	// Compile/instantiate WASM module
 	store, instance, err := compileWasmModule(wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile WASM module: %w", err)
 	}
 
-	// Get and cache the entry point function
 	entryFunc := instance.GetFunc(store, entryPoint)
 	if entryFunc == nil {
 		return nil, fmt.Errorf("entry point '%s' not found in WASM module", entryPoint)
 	}
 
-	// Calculate max argument count: score + rank + max input fields
 	maxArgs := 2 + len(base.GetInputFieldNames()) // score, rank, + field values
 	if maxArgs < 8 {                              // Minimum reasonable buffer size
 		maxArgs = 8
 	}
 
-	// Preallocate field arrays buffer
 	maxFields := len(base.GetInputFieldNames())
 	if maxFields == 0 {
 		maxFields = 1 // At least one slot
@@ -149,7 +145,6 @@ func compileWasmModule(wasmBytes []byte) (*wasmtime.Store, *wasmtime.Instance, e
 		return nil, nil, fmt.Errorf("failed to compile WASM module: %w", err)
 	}
 
-	// Create instance with empty imports
 	instance, err := wasmtime.NewInstance(store, module, []wasmtime.AsExtern{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to instantiate WASM module: %w", err)
@@ -158,7 +153,6 @@ func compileWasmModule(wasmBytes []byte) (*wasmtime.Store, *wasmtime.Instance, e
 	return store, instance, nil
 }
 
-// Process reranks search results using the WASM function with field data support
 func (wf *WasmFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
 	outputs := newRerankOutputs(inputs, searchParams)
 
@@ -179,7 +173,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 		return newIDScores[T](map[T]float32{}, map[T]IDLoc{}, searchParams, true), nil
 	}
 
-	// Use cached WASM function pointer (no lookup needed)
 	rerankFunc := wf.rerankFunc
 
 	col := cols[0]
@@ -191,11 +184,9 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 	scores := col.scores
 	// resultCount := len(ids)
 
-	// Get pooled maps (zero allocations)
 	rerankedScores := wf.scoreMapPool.Get().(map[T]float32)
 	idLocations := wf.locMapPool.Get().(map[T]IDLoc)
 
-	// Clear maps for reuse
 	for k := range rerankedScores {
 		delete(rerankedScores, k)
 	}
@@ -203,16 +194,13 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 		delete(idLocations, k)
 	}
 
-	// Get input field types for field data access
 	inputFieldTypes := wf.GetInputFieldTypes()
 
-	// Fast path: No input fields (most common case) - inline everything
+	// Fast path: No input fields -the most common case - inline everything
 	if len(inputFieldTypes) == 0 {
-		// Inline simple rerank calls for maximum performance
 		for j, id := range ids {
 			originalScore := scores[j]
 
-			// Direct WASM call - interface{} boxing unavoidable due to wasmtime-go API
 			result, err := rerankFunc.Call(wf.store, originalScore, int32(j))
 			if err != nil {
 				// Return maps to pool before error
@@ -226,8 +214,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			rerankedScores[id] = newScore
 		}
 	} else {
-		// Complex path: With input fields
-		// Precompute/cast field arrays once per rerank call (major optimization)
 		wf.precomputeFieldArrays(col, inputFieldTypes)
 
 		for j, id := range ids {
@@ -237,7 +223,7 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			var err error
 
 			if len(inputFieldTypes) == 1 {
-				fieldValue := wf.getPrecomputedFieldValue(j, 0) // Use precomputed array
+				fieldValue := wf.getPrecomputedFieldValue(j, 0)
 				result, err := rerankFunc.Call(wf.store, originalScore, int32(j), fieldValue)
 				if err == nil {
 					newScore = result.(float32) // Fixed ABI: guaranteed f32
@@ -247,7 +233,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			}
 
 			if err != nil {
-				// Return maps to pool before error
 				wf.scoreMapPool.Put(rerankedScores)
 				wf.locMapPool.Put(idLocations)
 				return nil, fmt.Errorf("failed to call WASM rerank function: %w", err)
@@ -273,7 +258,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 	return result, err
 }
 
-// Call WASM with multiple fields - fixed f32 return ABI with preallocated buffer
 func (wf *WasmFunction[T]) callWasmWithMultipleFields(
 	rerankFunc *wasmtime.Func,
 	score float32,
@@ -281,7 +265,7 @@ func (wf *WasmFunction[T]) callWasmWithMultipleFields(
 	docIndex int,
 	fieldTypes []schemapb.DataType,
 ) (float32, error) {
-	args := wf.argBuffer[:2+len(fieldTypes)] // Slice to exact size needed
+	args := wf.argBuffer[:2+len(fieldTypes)]
 	args[0] = score
 	args[1] = rank
 
@@ -377,9 +361,7 @@ func (wf *WasmFunction[T]) precomputeFieldArrays(col *columns, fieldTypes []sche
 	}
 }
 
-// getPrecomputedFieldValue retrieves field value from precomputed arrays (no casting, minimal checks)
 func (wf *WasmFunction[T]) getPrecomputedFieldValue(docIndex, fieldIndex int) interface{} {
-	// Assume valid indices (caller responsibility) - remove redundant bounds checks
 	arr := wf.fieldArrays[fieldIndex]
 	if arr == nil {
 		return nil

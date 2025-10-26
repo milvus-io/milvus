@@ -109,7 +109,6 @@ func TestWasmFunction_WithSingleFloatField(t *testing.T) {
 	topk := int64(5)
 	data := embedding.GenSearchResultData(nq, topk, schemapb.DataType_Int64, "popularity", 101)
 	// overwrite popularity values to a known pattern to ensure boosting happens
-	// Note: GenSearchResultData already populates fields; we keep it simple and rely on the WASM boosting logic
 	search := &milvuspb.SearchResults{Results: data}
 
 	ret, err := f.Process(context.Background(), NewSearchParams(nq, topk, 0, -1, -1, 1, false, "", []string{"COSINE"}), []*milvuspb.SearchResults{search})
