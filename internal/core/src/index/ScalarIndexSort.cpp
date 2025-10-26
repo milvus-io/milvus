@@ -412,8 +412,8 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
     size_t total_count = Count();
 
     if (hit_count > total_count / 2) {
-        // Most elements are in range, initialize with true and set non-matching to false
-        TargetBitmap bitset(total_count, true);
+        // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
+        TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
         for (auto it = begin(); it < lb; ++it) {
             bitset[it->idx_] = false;
@@ -471,8 +471,8 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
     size_t total_count = Count();
 
     if (hit_count > total_count / 2) {
-        // Most elements are in range, initialize with true and set non-matching to false
-        TargetBitmap bitset(total_count, true);
+        // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
+        TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
         for (auto it = begin(); it < lb; ++it) {
             bitset[it->idx_] = false;
