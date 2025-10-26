@@ -30,28 +30,28 @@ SkipIndexStatsBuilder::Build(
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int8_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int8_t>>(
-                info.min_, info.max_);
+                info.min_, info.max_, nullptr);
             break;
         }
         case milvus::DataType::INT16: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int16_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int16_t>>(
-                info.min_, info.max_);
+                info.min_, info.max_, nullptr);
             break;
         }
         case milvus::DataType::INT32: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int32_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int32_t>>(
-                info.min_, info.max_);
+                info.min_, info.max_, nullptr);
             break;
         }
         case milvus::DataType::INT64: {
             auto info =
                 ProcessFieldMetrics<parquet::Int64Type, int64_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int64_t>>(
-                info.min_, info.max_);
+                info.min_, info.max_, nullptr);
             break;
         }
         case milvus::DataType::FLOAT: {
@@ -73,7 +73,7 @@ SkipIndexStatsBuilder::Build(
                 ProcessFieldMetrics<parquet::ByteArrayType, std::string>(
                     statistic);
             chunk_metrics = std::make_unique<StringFieldChunkMetrics>(
-                std::string(info.min_), std::string(info.max_));
+                std::string(info.min_), std::string(info.max_), nullptr);
             break;
         }
         default: {

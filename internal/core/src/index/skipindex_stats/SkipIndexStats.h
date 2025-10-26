@@ -410,10 +410,6 @@ template <typename T>
 class IntFieldChunkMetrics : public FieldChunkMetrics {
  public:
     IntFieldChunkMetrics() = default;
-    IntFieldChunkMetrics(T min, T max) : min_(min), max_(max) {
-        bloom_filter_ = g_always_true_bf;
-        this->has_value_ = true;
-    }
     IntFieldChunkMetrics(T min, T max, BloomFilterPtr bloom_filter)
         : min_(min), max_(max), bloom_filter_(bloom_filter) {
         this->has_value_ = true;
@@ -513,9 +509,13 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         nlohmann::json j;
         j["type"] = FieldChunkMetricsTypeToString(GetMetricsType());
 
-        if (this->has_value_ && bloom_filter_) {
-            auto bf_data = bloom_filter_->ToJson();
-            j["bloom_filter"] = nlohmann::json::binary(bf_data);
+        if (this->has_value_) {
+            j["min"] = min_;
+            j["max"] = max_;
+            if (bloom_filter_) {
+                auto bf_data = bloom_filter_->ToJson();
+                j["bloom_filter"] = nlohmann::json::binary(bf_data);
+            }
         }
 
         return j;
@@ -524,17 +524,12 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
  private:
     T min_;
     T max_;
-    BloomFilterPtr bloom_filter_;
+    BloomFilterPtr bloom_filter_{nullptr};
 };
 
 class StringFieldChunkMetrics : public FieldChunkMetrics {
  public:
     StringFieldChunkMetrics() = default;
-    StringFieldChunkMetrics(std::string min, std::string max)
-        : min_(min), max_(max) {
-        bloom_filter_ = g_always_true_bf;
-        this->has_value_ = true;
-    }
     StringFieldChunkMetrics(std::string min,
                             std::string max,
                             BloomFilterPtr bloom_filter)
@@ -559,7 +554,7 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
             return std::make_unique<NoneFieldChunkMetrics>();
         }
         return std::make_unique<StringFieldChunkMetrics>(
-            min_, max_, bloom_filter_);
+            min_, max_, bloom_filter_, ngram_bloom_filter_);
     }
 
     FieldChunkMetricsType
@@ -686,9 +681,18 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
         nlohmann::json j;
         j["type"] = FieldChunkMetricsTypeToString(GetMetricsType());
 
-        if (this->has_value_ && bloom_filter_) {
-            auto bf_data = bloom_filter_->ToJson();
-            j["bloom_filter"] = nlohmann::json::binary(bf_data);
+        if (this->has_value_) {
+            j["min"] = min_;
+            j["max"] = max_;
+            if (bloom_filter_) {
+                auto bf_data = bloom_filter_->ToJson();
+                j["bloom_filter"] = nlohmann::json::binary(bf_data);
+            }
+            if (ngram_bloom_filter_) {
+                auto ngram_bf_data = ngram_bloom_filter_->ToJson();
+                j["ngram_bloom_filter"] =
+                    nlohmann::json::binary(ngram_bf_data);
+            }
         }
 
         return j;
@@ -707,8 +711,8 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
  private:
     std::string min_;
     std::string max_;
-    BloomFilterPtr bloom_filter_;
-    BloomFilterPtr ngram_bloom_filter_;
+    BloomFilterPtr bloom_filter_{nullptr};
+    BloomFilterPtr ngram_bloom_filter_{nullptr};
 };
 
 template <typename T>
@@ -740,29 +744,35 @@ NewFieldMetrics(const nlohmann::json& data) {
             return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
         }
         case FieldChunkMetricsType::INT: {
-            if (!data.contains("min") || !data.contains("max") ||
-                !data.contains("bloom_filter")) {
+            if (!data.contains("min") || !data.contains("max")) {
                 return none_metrics;
             }
             T min = data["min"].get<T>();
             T max = data["max"].get<T>();
-            BloomFilterPtr bloom_filter =
-                BloomFilterFromJson(data["bloom_filter"]);
+            BloomFilterPtr bloom_filter = nullptr;
+            if (data.contains("bloom_filter")) {
+                bloom_filter = BloomFilterFromJson(data["bloom_filter"]);
+            }
             return std::make_unique<IntFieldChunkMetrics<T>>(
                 min, max, bloom_filter);
         }
 
         case FieldChunkMetricsType::STRING: {
-            if (!data.contains("min") || !data.contains("max") ||
-                !data.contains("bloom_filter")) {
+            if (!data.contains("min") || !data.contains("max")) {
                 return none_metrics;
             }
             std::string min = data["min"].get<std::string>();
             std::string max = data["max"].get<std::string>();
-            BloomFilterPtr bloom_filter =
-                BloomFilterFromJson(data["bloom_filter"]);
+            BloomFilterPtr bloom_filter = nullptr;
+            if (data.contains("bloom_filter")) {
+                bloom_filter = BloomFilterFromJson(data["bloom_filter"]);
+            }
+            BloomFilterPtr ngram_filter = nullptr;
+            if (data.contains("ngram_bloom_filter")) {
+                ngram_filter = BloomFilterFromJson(data["ngram_bloom_filter"]);
+            }
             return std::make_unique<StringFieldChunkMetrics>(
-                min, max, bloom_filter);
+                min, max, bloom_filter, ngram_filter);
         }
         default:
             return none_metrics;
@@ -1090,9 +1100,9 @@ class SkipIndexStatsBuilder {
         }
         if (disable_bloom_filter_) {
             if constexpr (std::is_same_v<T, std::string>) {
-                return std::make_unique<StringFieldChunkMetrics>(min, max);
+                return std::make_unique<StringFieldChunkMetrics>(min, max, nullptr, nullptr);
             }
-            return std::make_unique<IntFieldChunkMetrics<T>>(min, max);
+            return std::make_unique<IntFieldChunkMetrics<T>>(min, max, nullptr);
         }
         BloomFilterPtr bloom_filter =
             NewBloomFilterWithType(info.unique_values_.size(),
@@ -1104,7 +1114,7 @@ class SkipIndexStatsBuilder {
             }
             if (info.ngram_values_.empty()) {
                 return std::make_unique<StringFieldChunkMetrics>(
-                    min, max, std::move(bloom_filter));
+                    min, max, std::move(bloom_filter), nullptr);
             }
             BloomFilterPtr ngram_bloom_filter =
                 NewBloomFilterWithType(info.ngram_values_.size(),
