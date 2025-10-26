@@ -153,12 +153,12 @@ TextMatchIndex::Load(const Config& config) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas =
+        auto index_data =
             mem_file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
-        index_datas.clear();
+        AssembleIndexData(index_data, binary_set);
+        // clear index_data to free memory early
+        index_data.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
         memcpy(null_offset_.data(),
@@ -226,18 +226,18 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
+    const std::vector<FieldDataPtr>& field_data, bool nullable) {
     int64_t offset = 0;
     if (nullable) {
         int64_t total = 0;
-        for (const auto& data : field_datas) {
+        for (const auto& data : field_data) {
             total += data->get_null_count();
         }
         {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
             null_offset_.reserve(total);
         }
-        for (const auto& data : field_datas) {
+        for (const auto& data : field_data) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
@@ -251,7 +251,7 @@ TextMatchIndex::BuildIndexFromFieldData(
             }
         }
     } else {
-        for (const auto& data : field_datas) {
+        for (const auto& data : field_data) {
             auto n = data->get_num_rows();
             wrapper_->add_data(
                 static_cast<const std::string*>(data->Data()), n, offset);
@@ -302,17 +302,22 @@ TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
 }
 
 TargetBitmap
-TextMatchIndex::MatchQuery(const std::string& query) {
+TextMatchIndex::MatchQuery(const std::string& query,
+                           uint32_t min_should_match) {
     if (shouldTriggerCommit()) {
         Commit();
         Reload();
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count opeartion of tantivy may be get older cnt if the index is committed with new tantivy segment.
+    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    wrapper_->match_query(query, &bitset);
+    if (min_should_match > 1) {
+        wrapper_->match_query_with_minimum(query, min_should_match, &bitset);
+    } else {
+        wrapper_->match_query(query, &bitset);
+    }
     return bitset;
 }
 
@@ -324,7 +329,7 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count opeartion of tantivy may be get older cnt if the index is committed with new tantivy segment.
+    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
     wrapper_->phrase_match_query(query, slop, &bitset);

@@ -286,6 +286,11 @@ build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
+build-wasm:
+	@echo "Building Milvus wasm library for tests ... "
+	@cd tests/reranker_wasm/rust_reranker && cargo build --target wasm32-unknown-unknown --release
+	@cd tests/reranker_wasm/rust_reranker_with_fields && cargo build --target wasm32-unknown-unknown --release
+
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
 
@@ -373,7 +378,7 @@ test-cdc:
 	@echo "Running cdc unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t cdc)
 
-test-go: build-cpp-with-unittest
+test-go: build-cpp-with-unittest build-wasm
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 

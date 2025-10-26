@@ -403,3 +403,91 @@ func ExampleClient_HybridSearch() {
 		log.Println("Scores: ", resultSet.Scores)
 	}
 }
+
+func ExampleClient_Search_textMatch() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collectionName := "text_min_match"
+	titleField := "title"
+	textField := "document_text"
+	titleSparse := "title_sparse_vector"
+	textSparse := "text_sparse_vector"
+	milvusAddr := "127.0.0.1:19530"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+	defer cli.Close(ctx)
+
+	_ = cli.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
+
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+		WithField(entity.NewField().WithName(titleField).WithDataType(entity.FieldTypeVarChar).WithMaxLength(512).WithEnableAnalyzer(true).WithEnableMatch(true)).
+		WithField(entity.NewField().WithName(textField).WithDataType(entity.FieldTypeVarChar).WithMaxLength(2048).WithEnableAnalyzer(true).WithEnableMatch(true)).
+		WithField(entity.NewField().WithName(titleSparse).WithDataType(entity.FieldTypeSparseVector)).
+		WithField(entity.NewField().WithName(textSparse).WithDataType(entity.FieldTypeSparseVector)).
+		WithFunction(entity.NewFunction().WithName("title_bm25_func").WithType(entity.FunctionTypeBM25).WithInputFields(titleField).WithOutputFields(titleSparse)).
+		WithFunction(entity.NewFunction().WithName("text_bm25_func").WithType(entity.FunctionTypeBM25).WithInputFields(textField).WithOutputFields(textSparse))
+
+	idxOpts := []milvusclient.CreateIndexOption{
+		milvusclient.NewCreateIndexOption(collectionName, titleField, index.NewInvertedIndex()),
+		milvusclient.NewCreateIndexOption(collectionName, textField, index.NewInvertedIndex()),
+		milvusclient.NewCreateIndexOption(collectionName, titleSparse, index.NewSparseInvertedIndex(entity.BM25, 0.2)),
+		milvusclient.NewCreateIndexOption(collectionName, textSparse, index.NewSparseInvertedIndex(entity.BM25, 0.2)),
+	}
+
+	err = cli.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(collectionName, schema).WithIndexOptions(idxOpts...))
+	if err != nil {
+		log.Fatal("failed to create collection: ", err.Error())
+	}
+
+	_, err = cli.Insert(ctx, milvusclient.NewColumnBasedInsertOption(collectionName).
+		WithVarcharColumn(titleField, []string{
+			"History of AI",
+			"Alan Turing Biography",
+			"Machine Learning Overview",
+		}).
+		WithVarcharColumn(textField, []string{
+			"Artificial intelligence was founded in 1956 by computer scientists.",
+			"Alan Turing proposed early concepts of AI and machine learning.",
+			"Machine learning is a subset of artificial intelligence.",
+		}))
+	if err != nil {
+		log.Fatal("failed to insert data: ", err.Error())
+	}
+
+	task, err := cli.LoadCollection(ctx, milvusclient.NewLoadCollectionOption(collectionName))
+	if err != nil {
+		log.Fatal("failed to load collection: ", err.Error())
+	}
+	_ = task.Await(ctx)
+
+	q := "artificial intelligence"
+	expr := "text_match(" + titleField + ", \"" + q + "\", minimum_should_match=2) OR text_match(" + textField + ", \"" + q + "\", minimum_should_match=2)"
+
+	boost := entity.NewFunction().
+		WithName("title_boost").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("filter", "text_match("+titleField+", \""+q+"\", minimum_should_match=2)").
+		WithParam("weight", "2.0")
+
+	vectors := []entity.Vector{entity.Text(q)}
+	rs, err := cli.Search(ctx, milvusclient.NewSearchOption(collectionName, 5, vectors).
+		WithANNSField(textSparse).
+		WithFilter(expr).
+		WithOutputFields("id", titleField, textField).
+		WithFunctionReranker(boost))
+	if err != nil {
+		log.Fatal("failed to search: ", err.Error())
+	}
+
+	for _, r := range rs {
+		_ = r.ResultCount
+	}
+}
