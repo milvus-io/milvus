@@ -3149,7 +3149,7 @@ type HighlightTask struct {
 	collectionName string
 	collectionID   typeutil.UniqueID
 	dbName         string
-	lb             LBPolicy
+	lb             shardclient.LBPolicy
 
 	result *querypb.GetHighlightResponse
 }
@@ -3214,12 +3214,12 @@ func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID in
 }
 
 func (t *HighlightTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, CollectionWorkLoad{
-		db:             t.dbName,
-		collectionName: t.collectionName,
-		collectionID:   t.collectionID,
-		nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
-		exec:           t.getHighlightOnShardleader,
+	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.dbName,
+		CollectionName: t.collectionName,
+		CollectionID:   t.collectionID,
+		Nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
+		Exec:           t.getHighlightOnShardleader,
 	})
 
 	return err
