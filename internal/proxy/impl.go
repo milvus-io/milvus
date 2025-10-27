@@ -4601,7 +4601,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	var createTs int64
-	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetStartTime())
+	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetCreateTime())
 	if err == nil {
 		createTs = createTime.Unix()
 	}
