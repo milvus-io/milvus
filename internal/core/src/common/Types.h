@@ -359,7 +359,7 @@ IsVectorDataType(DataType data_type) {
 inline bool
 IsVariableDataType(DataType data_type) {
     return IsStringDataType(data_type) || IsBinaryDataType(data_type) ||
-           IsSparseFloatVectorDataType(data_type);
+           IsSparseFloatVectorDataType(data_type) || IsGeometryType(data_type);
 }
 
 // NOTE: dependent type

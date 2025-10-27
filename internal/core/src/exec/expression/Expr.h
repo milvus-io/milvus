@@ -1026,7 +1026,6 @@ class SegmentExpr : public Expr {
         auto batch_size = input.size();
         TargetBitmap valid_result(batch_size);
         valid_result.set();
-
         if (use_index) {
             // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
             // NOT ScalarIndex<ArrayView>
@@ -1064,10 +1063,6 @@ class SegmentExpr : public Expr {
                     }
                     case DataType::STRING:
                     case DataType::VARCHAR: {
-                        return ProcessChunksForValidByOffsets<std::string>(
-                            use_index, input);
-                    }
-                    case DataType::GEOMETRY: {
                         return ProcessChunksForValidByOffsets<std::string>(
                             use_index, input);
                     }
@@ -1184,6 +1179,11 @@ class SegmentExpr : public Expr {
         auto size = std::min(
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
             int64_t(chunk_valid_res.size()));
+        size =
+            (field_type_ == DataType::GEOMETRY && segment_->type() == Growing)
+                ? std::min(batch_size_ - processed_rows,
+                           int64_t(chunk_valid_res.size()) - data_pos)
+                : size;
 
         valid_result.append(chunk_valid_res, data_pos, size);
         return size;
