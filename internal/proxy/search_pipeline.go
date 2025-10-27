@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -614,7 +615,7 @@ type highlightTask struct {
 type highlightOperator struct {
 	tasks        []*highlightTask
 	fieldSchemas []*schemapb.FieldSchema
-	lbPolicy     LBPolicy
+	lbPolicy     shardclient.LBPolicy
 	scheduler    *taskScheduler
 
 	collectionName string
