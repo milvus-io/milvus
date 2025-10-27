@@ -384,10 +384,10 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::Range(const T value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(Count());
     auto lb = begin();
     auto ub = end();
     if (ShouldSkip(value, value, op)) {
+        TargetBitmap bitset(Count());
         return bitset;
     }
     switch (op) {
@@ -407,10 +407,30 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
             ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
     }
-    for (; lb < ub; ++lb) {
-        bitset[lb->idx_] = true;
+
+    size_t hit_count = ub - lb;
+    size_t total_count = Count();
+
+    if (hit_count > total_count / 2) {
+        // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
+        TargetBitmap bitset = valid_bitset_.clone();
+        // Set elements before lb to false
+        for (auto it = begin(); it < lb; ++it) {
+            bitset[it->idx_] = false;
+        }
+        // Set elements after ub to false
+        for (auto it = ub; it < end(); ++it) {
+            bitset[it->idx_] = false;
+        }
+        return bitset;
+    } else {
+        // Fewer elements are in range, initialize with false and set matching to true
+        TargetBitmap bitset(total_count);
+        for (; lb < ub; ++lb) {
+            bitset[lb->idx_] = true;
+        }
+        return bitset;
     }
-    return bitset;
 }
 
 template <typename T>
@@ -420,13 +440,14 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
                           T upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(Count());
     if (lower_bound_value > upper_bound_value ||
         (lower_bound_value == upper_bound_value &&
          !(lb_inclusive && ub_inclusive))) {
+        TargetBitmap bitset(Count());
         return bitset;
     }
     if (ShouldSkip(lower_bound_value, upper_bound_value, OpType::Range)) {
+        TargetBitmap bitset(Count());
         return bitset;
     }
     auto lb = begin();
@@ -445,10 +466,30 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
         ub = std::lower_bound(
             begin(), end(), IndexStructure<T>(upper_bound_value));
     }
-    for (; lb < ub; ++lb) {
-        bitset[lb->idx_] = true;
+
+    size_t hit_count = ub - lb;
+    size_t total_count = Count();
+
+    if (hit_count > total_count / 2) {
+        // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
+        TargetBitmap bitset = valid_bitset_.clone();
+        // Set elements before lb to false
+        for (auto it = begin(); it < lb; ++it) {
+            bitset[it->idx_] = false;
+        }
+        // Set elements after ub to false
+        for (auto it = ub; it < end(); ++it) {
+            bitset[it->idx_] = false;
+        }
+        return bitset;
+    } else {
+        // Fewer elements are in range, initialize with false and set matching to true
+        TargetBitmap bitset(total_count);
+        for (; lb < ub; ++lb) {
+            bitset[lb->idx_] = true;
+        }
+        return bitset;
     }
-    return bitset;
 }
 
 template <typename T>
