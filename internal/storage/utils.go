@@ -1584,6 +1584,11 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
 	case schemapb.DataType_JSON:
 		return fieldSchema.GetDefaultValue().GetBytesData()
+	case schemapb.DataType_Geometry:
+		// ignore err because the default value has been checked when create collection.
+		wkbValue, _ := common.ConvertWKTToWKB(fieldSchema.GetDefaultValue().GetStringData())
+		return wkbValue
+
 	default:
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
