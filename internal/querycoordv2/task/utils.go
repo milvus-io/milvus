@@ -145,7 +145,6 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 
-	// todo(SpadeA): consider struct fields
 	schema = applyCollectionMmapSetting(schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
@@ -283,6 +282,17 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 				Key:   common.MmapEnabledKey,
 				Value: strconv.FormatBool(collectionMmapEnabled),
 			})
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if exist &&
+				!common.FieldHasMmapKey(schema, field.GetFieldID()) {
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+					Key:   common.MmapEnabledKey,
+					Value: strconv.FormatBool(collectionMmapEnabled),
+				})
+			}
 		}
 	}
 	return schema

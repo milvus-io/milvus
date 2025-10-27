@@ -66,7 +66,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:     111,
-				Name:        "sub_float_vector",
+				Name:        "struct_array[sub_float_vector]",
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -82,7 +82,7 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:     112,
-				Name:        "sub_str",
+				Name:        "struct_array[sub_str]",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{

@@ -43,6 +43,8 @@ const (
 	TriggerTypeClustering
 	TriggerTypeSingle
 	TriggerTypeSort
+	TriggerTypePartitionKeySort
+	TriggerTypeClusteringPartitionKeySort
 )
 
 func (t CompactionTriggerType) String() string {
@@ -61,6 +63,10 @@ func (t CompactionTriggerType) String() string {
 		return "Single"
 	case TriggerTypeSort:
 		return "Sort"
+	case TriggerTypePartitionKeySort:
+		return "PartitionKeySort"
+	case TriggerTypeClusteringPartitionKeySort:
+		return "ClusteringPartitionKeySort"
 	default:
 		return ""
 	}
@@ -289,7 +295,17 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 				log.Warn("segment no need to do sort compaction", zap.Int64("segmentID", segID))
 				continue
 			}
-			m.notify(ctx, TriggerTypeSort, []CompactionView{view})
+			segment := m.meta.GetSegment(ctx, segID)
+			if segment == nil {
+				log.Warn("segment not found", zap.Int64("segmentID", segID))
+				continue
+			}
+			collection := m.meta.GetCollection(segment.GetCollectionID())
+			if !IsPartitionKeySortCompactionEnabled(collection.Properties) {
+				m.notify(ctx, TriggerTypeSort, []CompactionView{view})
+			} else {
+				m.notify(ctx, TriggerTypePartitionKeySort, []CompactionView{view})
+			}
 		}
 	}
 }
@@ -358,6 +374,10 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
 				case TriggerTypeSort:
 					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
+				case TriggerTypePartitionKeySort:
+					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_PartitionKeySortCompaction)
+				case TriggerTypeClusteringPartitionKeySort:
+					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_ClusteringPartitionKeySortCompaction)
 				}
 			}
 		}
@@ -527,13 +547,17 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))
 		return
 	}
+	typ := datapb.CompactionType_ClusteringCompaction
+	if IsPartitionKeySortCompactionEnabled(collection.Properties) {
+		typ = datapb.CompactionType_MixCompaction
+	}
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
-		Type:               datapb.CompactionType_ClusteringCompaction,
+		Type:               typ,
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,

@@ -793,42 +793,42 @@ func Test_WalkWithPagination(t *testing.T) {
 
 func TestElapse(t *testing.T) {
 	start := time.Now()
-	isElapse := CheckElapseAndWarn(start, "err message")
+	isElapse := CheckElapseAndWarn(context.TODO(), start, "err message")
 	assert.Equal(t, isElapse, false)
 
 	time.Sleep(2001 * time.Millisecond)
-	isElapse = CheckElapseAndWarn(start, "err message")
+	isElapse = CheckElapseAndWarn(context.TODO(), start, "err message")
 	assert.Equal(t, isElapse, true)
 }
 
 func TestCheckValueSizeAndWarn(t *testing.T) {
-	ret := CheckValueSizeAndWarn("k", "v")
+	ret := CheckValueSizeAndWarn(context.TODO(), "k", "v")
 	assert.False(t, ret)
 
 	v := make([]byte, 1024000)
-	ret = CheckValueSizeAndWarn("k", v)
+	ret = CheckValueSizeAndWarn(context.TODO(), "k", v)
 	assert.True(t, ret)
 }
 
 func TestCheckTnxBytesValueSizeAndWarn(t *testing.T) {
 	kvs := make(map[string][]byte, 0)
 	kvs["k"] = []byte("v")
-	ret := CheckTnxBytesValueSizeAndWarn(kvs)
+	ret := CheckTnxBytesValueSizeAndWarn(context.TODO(), kvs)
 	assert.False(t, ret)
 
 	kvs["k"] = make([]byte, 1024000)
-	ret = CheckTnxBytesValueSizeAndWarn(kvs)
+	ret = CheckTnxBytesValueSizeAndWarn(context.TODO(), kvs)
 	assert.True(t, ret)
 }
 
 func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 	kvs := make(map[string]string, 0)
 	kvs["k"] = "v"
-	ret := CheckTnxStringValueSizeAndWarn(kvs)
+	ret := CheckTnxStringValueSizeAndWarn(context.TODO(), kvs)
 	assert.False(t, ret)
 
 	kvs["k1"] = funcutil.RandomString(1024000)
-	ret = CheckTnxStringValueSizeAndWarn(kvs)
+	ret = CheckTnxStringValueSizeAndWarn(context.TODO(), kvs)
 	assert.True(t, ret)
 }
 

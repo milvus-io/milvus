@@ -80,7 +80,7 @@ StorageV2FSCache::Get(const Key& key) {
             return nullptr;
         }
 
-        auto fs = result.value();
+        auto fs = result.ValueOrDie();
         iter->second.first.set_value(fs);
         return fs;
     } catch (...) {

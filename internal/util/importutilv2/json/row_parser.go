@@ -178,8 +178,20 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	row := make(Row)
 	dynamicValues := make(map[string]any)
 
-	handleField := func(key string, value any) error {
-		if fieldID, ok := r.name2FieldID[key]; ok {
+	handleField := func(structName string, key string, value any) error {
+		var fieldID int64
+		var found bool
+
+		if structName != "" {
+			// Transform to structName[fieldName] format
+			transformedKey := typeutil.ConcatStructFieldName(structName, key)
+			fieldID, found = r.name2FieldID[transformedKey]
+		} else {
+			// For regular fields, lookup directly
+			fieldID, found = r.name2FieldID[key]
+		}
+
+		if found {
 			data, err := r.parseEntity(fieldID, value)
 			if err != nil {
 				return err
@@ -215,12 +227,14 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			}
 
 			for subKey, subValue := range values {
-				if err := handleField(subKey, subValue); err != nil {
+				// Pass struct name for sub-fields
+				if err := handleField(key, subKey, subValue); err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			if err := handleField(key, value); err != nil {
+			// Pass empty string for regular fields
+			if err := handleField("", key, value); err != nil {
 				return nil, err
 			}
 		}

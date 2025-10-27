@@ -40,9 +40,6 @@
 #include "common/TypeTraits.h"
 
 namespace milvus {
-
-using DataType = milvus::DataType;
-
 class FieldDataBase {
  public:
     explicit FieldDataBase(DataType data_type, bool nullable)

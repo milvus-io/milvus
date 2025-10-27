@@ -197,7 +197,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*milvuspb.GetMetricsResponse, error) {
-		return client.GetMetrics(ctx, req)
+		return client.DataNodeClient.GetMetrics(ctx, req)
 	})
 }
 
