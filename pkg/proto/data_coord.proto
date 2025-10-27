@@ -1126,5 +1126,4 @@ message FileResourceInfo {
   string name = 1;
   string path = 2;
   int64 resource_id = 3;
-  common.FileResourceType type = 4;
 }

@@ -1809,7 +1809,6 @@ func TestServer_AddFileResource(t *testing.T) {
 			Base: &commonpb.MsgBase{},
 			Name: "test_resource",
 			Path: "/path/to/resource",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.MatchedBy(func(resource *model.FileResource) bool {
@@ -1894,7 +1893,6 @@ func TestServer_AddFileResource(t *testing.T) {
 			ID:   1,
 			Name: "test_resource",
 			Path: "/existing/path",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		server := &Server{
@@ -1928,7 +1926,6 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			ID:   1,
 			Name: "test_resource",
 			Path: "/path/to/resource",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		server := &Server{
@@ -1993,7 +1990,6 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			ID:   1,
 			Name: "test_resource",
 			Path: "/path/to/resource",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		server := &Server{
@@ -2048,13 +2044,11 @@ func TestServer_ListFileResources(t *testing.T) {
 			ID:   1,
 			Name: "resource1",
 			Path: "/path/to/resource1",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 		resource2 := &model.FileResource{
 			ID:   2,
 			Name: "resource2",
 			Path: "/path/to/resource2",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		server := &Server{
