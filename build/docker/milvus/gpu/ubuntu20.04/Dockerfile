@@ -26,5 +26,5 @@ ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
 # Change user to milvus
-RUN groupadd milvus && useradd -m -g milvus milvus && chown -R milvus:milvus /milvus
+RUN groupadd -r milvus && useradd -r -g milvus milvus && chown -R milvus:milvus /milvus
 USER milvus
