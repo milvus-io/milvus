@@ -177,6 +177,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveJsonStatsFiles();
 
     void
+    RemoveJsonStatsSharedIndexFiles();
+
+    void
     CacheJsonStatsSharedIndexToDisk(
         const std::vector<std::string>& remote_files,
         milvus::proto::common::LoadPriority priority);
