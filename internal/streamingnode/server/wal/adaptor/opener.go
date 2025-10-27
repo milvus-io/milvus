@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -107,14 +108,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		roWAL.Close()
 		return nil, errors.Wrap(err, "when recovering recovery storage")
 	}
-	param.LastConfirmedMessageID = param.LastTimeTickMessage.MessageID()
-	if cp.MessageID != nil {
-		for _, builder := range snapshot.TxnBuffer.GetUncommittedMessageBuilder() {
-			if builder.LastConfirmedMessageID().LT(param.LastConfirmedMessageID) {
-				param.LastConfirmedMessageID = builder.LastConfirmedMessageID()
-			}
-		}
-	}
+	param.LastConfirmedMessageID = determineLastConfirmedMessageID(param.LastTimeTickMessage.MessageID(), snapshot.TxnBuffer)
 	param.InitialRecoverSnapshot = snapshot
 	param.TxnManager = txn.NewTxnManager(param.ChannelInfo, snapshot.TxnBuffer.GetUncommittedMessageBuilder())
 	param.ShardManager = shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
@@ -146,6 +140,20 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
 	o.walInstances.Insert(id, wal)
 	return wal, nil
+}
+
+// determineLastConfirmedMessageID determines the last confirmed message id after recovery.
+// The last confirmed message id is the minimum last confirmed message id of all uncommitted txn messages.
+func determineLastConfirmedMessageID(lastTimeTickMessageID message.MessageID, txnBuffer *utility.TxnBuffer) message.MessageID {
+	// From here, we can read all messages which timetick is greater than timetick of LastTimeTickMessage sent at these term.
+	lastConfirmedMessageID := lastTimeTickMessageID
+	for _, builder := range txnBuffer.GetUncommittedMessageBuilder() {
+		if builder.LastConfirmedMessageID().LT(lastConfirmedMessageID) {
+			// use the minimum last confirmed message id of all uncommitted txn messages to protect the `LastConfirmedMessageID` promise.
+			lastConfirmedMessageID = builder.LastConfirmedMessageID()
+		}
+	}
+	return lastConfirmedMessageID
 }
 
 // openROWAL opens a read only wal instance for the channel.
