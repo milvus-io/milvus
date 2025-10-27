@@ -75,6 +75,8 @@ type SyncTask struct {
 	bm25Binlogs   map[int64]*datapb.FieldBinlog
 	deltaBinlog   *datapb.FieldBinlog
 
+	manifestPath string
+
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
@@ -134,6 +136,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
+		// TODO change to return manifest after integrated
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)

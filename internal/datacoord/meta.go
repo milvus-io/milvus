@@ -1177,6 +1177,23 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 	}
 }
 
+func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		// skip empty manifest update and same manifest
+		if manifestPath == "" || segment.ManifestPath == manifestPath {
+			return false
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
