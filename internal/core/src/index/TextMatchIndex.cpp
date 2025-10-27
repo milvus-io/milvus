@@ -314,11 +314,7 @@ TextMatchIndex::MatchQuery(const std::string& query,
     // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    if (min_should_match > 1) {
-        wrapper_->match_query_with_minimum(query, min_should_match, &bitset);
-    } else {
-        wrapper_->match_query(query, &bitset);
-    }
+    wrapper_->match_query(query, min_should_match, &bitset);
     return bitset;
 }
 
