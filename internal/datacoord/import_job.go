@@ -118,7 +118,7 @@ type ImportJob interface {
 	GetState() internalpb.ImportJobState
 	GetReason() string
 	GetRequestedDiskSize() int64
-	GetStartTime() string
+	GetCreateTime() string
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
