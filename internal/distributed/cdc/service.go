@@ -103,12 +103,8 @@ func (s *Server) stop() {
 	// Stop CDC service.
 	s.cdcServer.Stop()
 
-	// Stop etcd
-	if s.etcdCli != nil {
-		if err := s.etcdCli.Close(); err != nil {
-			log.Warn("cdc stop etcd client failed", zap.Error(err))
-		}
-	}
+	// Don't close s.etcdCli here because it's a shared instance from kvfactory.
+	// The kvfactory.CloseEtcdClient() will be called in roles.go to close it properly.
 
 	// Stop tikv
 	if s.tikvCli != nil {
