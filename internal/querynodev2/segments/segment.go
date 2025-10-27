@@ -370,6 +370,7 @@ func NewSegment(ctx context.Context,
 			SegmentID:   loadInfo.GetSegmentID(),
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),
+			LoadInfo:    loadInfo,
 		})
 		return nil, err
 	}).Await(); err != nil {

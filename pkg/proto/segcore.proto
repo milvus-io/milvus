@@ -5,6 +5,41 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb";
 import "schema.proto";
 import "common.proto";
 
+message Binlog {
+  int64 entries_num = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string log_path = 4;
+  int64 log_size = 5;
+  int64 logID = 6;
+  int64 memory_size = 7;
+}
+
+message FieldBinlog {
+  int64 fieldID = 1;
+  repeated Binlog binlogs = 2;
+  repeated int64 child_fields = 3;
+}
+
+message TextIndexStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+}
+
+message JsonKeyStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+  int64 json_key_stats_data_format = 7;
+}
+
 message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;
@@ -45,4 +80,42 @@ message FieldIndexMeta {
 message CollectionIndexMeta {
   int64 maxIndexRowCount = 1;
   repeated FieldIndexMeta index_metas = 2;
+}
+
+message FieldIndexInfo {
+  int64 fieldID = 1;
+  bool enable_index = 2 [deprecated = true];
+  string index_name = 3;
+  int64 indexID = 4;
+  int64 buildID = 5;
+  repeated common.KeyValuePair index_params = 6;
+  repeated string index_file_paths = 7;
+  int64 index_size = 8;
+  int64 index_version = 9;
+  int64 num_rows = 10;
+  int32 current_index_version = 11;
+  int64 index_store_version = 12;
+}
+
+message SegmentLoadInfo {
+  int64 segmentID = 1;
+  int64 partitionID = 2;
+  int64 collectionID = 3;
+  int64 dbID = 4;
+  int64 flush_time = 5;
+  repeated FieldBinlog binlog_paths = 6;
+  int64 num_of_rows = 7;
+  repeated FieldBinlog statslogs = 8;
+  repeated FieldBinlog deltalogs = 9;
+  repeated int64 compactionFrom = 10;  // segmentIDs compacted from
+  repeated FieldIndexInfo index_infos = 11;
+  int64 segment_size = 12 [deprecated = true];
+  string insert_channel = 13;
+  int64 readableVersion = 14;
+  int64 storageVersion = 15;
+  bool is_sorted = 16;
+  map<int64, TextIndexStats> textStatsLogs = 17;
+  repeated FieldBinlog bm25logs = 18;
+  map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
+  common.LoadPriority priority = 20;
 }
