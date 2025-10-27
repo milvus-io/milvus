@@ -5041,5 +5041,4 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
 		assert.Error(t, err)
 	})
-
 }
