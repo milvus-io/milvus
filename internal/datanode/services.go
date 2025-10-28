@@ -267,7 +267,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			[]int64{partitionkey.GetFieldID(), pk.GetFieldID()},
 		)
 	case datapb.CompactionType_ClusteringPartitionKeySortCompaction:
-		//TODO
+		// TODO
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
