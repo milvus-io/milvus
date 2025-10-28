@@ -29,13 +29,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -212,7 +209,7 @@ func newCompositeBinlogRecordReader(
 	rrs := make([]array.RecordReader, len(allFields))
 	brs := make([]*BinlogReader, len(allFields))
 	for _, b := range blobs {
-		reader, err := NewBinlogReader(b.Value, opts...)
+		reader, err := NewBinlogReader(b.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -249,7 +246,7 @@ func newIterativeCompositeBinlogRecordReader(
 			if err != nil {
 				return nil, err
 			}
-			return newCompositeBinlogRecordReader(schema, neededFields, blobs, opts...)
+			return newCompositeBinlogRecordReader(schema, neededFields, blobs)
 		},
 	}
 }
@@ -385,16 +382,16 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 	// eh.NextPosition = eh.EventLength + w.Offset()
 
 	// Write event header
-	if err := eh.Write(b); err != nil {
+	if err := eh.Write(&b); err != nil {
 		return nil, err
 	}
 
 	// Write event data, which ic startTs and endTs for insert event data
-	if err := ev.WriteEventData(b); err != nil {
+	if err := ev.WriteEventData(&b); err != nil {
 		return nil, err
 	}
 
-	if err := binary.Write(b, common.Endian, bsw.buf.Bytes()); err != nil {
+	if err := binary.Write(&b, common.Endian, bsw.buf.Bytes()); err != nil {
 		return nil, err
 	}
 
@@ -599,7 +596,7 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 
 func (c *CompositeBinlogRecordWriter) initWriters() error {
 	if c.rw == nil {
-		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema, c.options...)
+		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema)
 		rws := make(map[FieldID]RecordWriter, len(c.fieldWriters))
 		for fid, w := range c.fieldWriters {
 			rw, err := w.GetRecordWriter()
