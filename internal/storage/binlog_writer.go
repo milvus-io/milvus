@@ -245,7 +245,6 @@ func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEvent
 // NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
 func NewInsertBinlogWriter(
 	dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64, nullable bool,
-	opts ...BinlogWriterOptions,
 ) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -264,10 +263,6 @@ func NewInsertBinlogWriter(
 		buffer:          nil,
 	}
 
-	for _, opt := range opts {
-		opt(&baseWriter)
-	}
-
 	w := &InsertBinlogWriter{
 		baseBinlogWriter: baseWriter,
 	}
@@ -277,7 +272,6 @@ func NewInsertBinlogWriter(
 // NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
 func NewDeleteBinlogWriter(
 	dataType schemapb.DataType, collectionID, partitionID, segmentID int64,
-	opts ...BinlogWriterOptions,
 ) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -293,21 +287,8 @@ func NewDeleteBinlogWriter(
 		buffer:          nil,
 	}
 
-	for _, opt := range opts {
-		opt(&baseWriter)
-	}
 	w := &DeleteBinlogWriter{
 		baseBinlogWriter: baseWriter,
 	}
 	return w
-}
-
-type BinlogWriterOptions func(base *baseBinlogWriter)
-
-func WithWriterEncryptionContext(ezID int64, edek []byte, encryptor hook.Encryptor) BinlogWriterOptions {
-	return func(base *baseBinlogWriter) {
-		base.AddExtra(edekKey, string(edek))
-		base.AddExtra(ezIDKey, ezID)
-		base.encryptor = encryptor
-	}
 }

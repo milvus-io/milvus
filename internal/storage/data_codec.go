@@ -256,17 +256,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 	}
 
-	binlogWriterOpts := []BinlogWriterOptions{}
-	if hookutil.IsClusterEncyptionEnabled() {
-		if ez := hookutil.GetEzByCollProperties(insertCodec.Schema.GetSchema().GetProperties(), insertCodec.Schema.ID); ez != nil {
-			encryptor, safeKey, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
-			if err != nil {
-				return nil, err
-			}
-			binlogWriterOpts = append(binlogWriterOpts, WithWriterEncryptionContext(ez.EzID, safeKey, encryptor))
-		}
-	}
-
 	serializeField := func(field *schemapb.FieldSchema) error {
 		// check insert data contain this field
 		// must be all missing or all exists
@@ -292,7 +281,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 
 		// encode fields
-		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable(), binlogWriterOpts...)
+		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
 
 		// get payload writing configs, including nullable and fallback encoding method
 		payloadWriterOpts := []PayloadWriterOptions{WithNullable(field.GetNullable()), WithWriterProps(getFieldWriterProps(field))}
