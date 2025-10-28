@@ -454,6 +454,9 @@ func TestExpr_TextMatch_MinShouldMatch_InvalidValueTypes(t *testing.T) {
 	assert.NoError(t, err)
 
 	invalid := []string{
+		`text_match(VarCharField, "q", minimum_should_match=10*10)`,
+		`text_match(VarCharField, "q", minimum_should_match=nil)`,
+		`text_match(VarCharField, "q", minimum_should_match=)`,
 		`text_match(VarCharField, "q", minimum_should_match="10")`,
 		`text_match(VarCharField, "q", minimum_should_match=true)`,
 		`text_match(VarCharField, "q", minimum_should_match=a)`,

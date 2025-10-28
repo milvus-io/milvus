@@ -536,8 +536,11 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		}
 		if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
 			valueExpr := getValueExpr(minShouldMatchValue)
-			if valueExpr == nil || valueExpr.GetValue() == nil {
+			if valueExpr == nil || valueExpr.GetValue() == nil { // coverage-ignore: 100%
+				// we never reach here because the grammar rejects placeholder before visitor; accept either parse error or visitor error
+				// coverage-ignore-start
 				return fmt.Errorf("minimum_should_match should be a const integer expression")
+				// coverage-ignore-end
 			}
 			minShouldMatch := valueExpr.GetValue().GetInt64Val()
 			if minShouldMatch < 1 {
