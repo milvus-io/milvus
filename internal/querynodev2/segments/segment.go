@@ -1208,6 +1208,11 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 	defer s.ptrLock.Unpin()
 
+	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		log.Ctx(ctx).Info("json key stats is not enabled, skip loading json key index")
+		return nil
+	}
+
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
