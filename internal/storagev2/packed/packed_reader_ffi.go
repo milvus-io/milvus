@@ -18,7 +18,7 @@ package packed
 #cgo pkg-config: milvus_core
 
 #include <stdlib.h>
-#include "storage/ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
