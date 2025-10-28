@@ -20,21 +20,41 @@ import (
 	"context"
 	"sort"
 
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
+
+var ErrIgnoredAlterLoadConfig = errors.New("ignored alter load config")
 
 type AlterLoadConfigRequest struct {
 	Meta           *meta.Meta
 	CollectionInfo *milvuspb.DescribeCollectionResponse
 	Expected       ExpectedLoadConfig
 	Current        CurrentLoadConfig
+}
+
+// CheckIfLoadPartitionsExecutable checks if the load partitions is executable.
+func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
+	if req.Current.Collection == nil {
+		return nil
+	}
+	expectedReplicaNumber := 0
+	for _, num := range req.Expected.ExpectedReplicaNumber {
+		expectedReplicaNumber += num
+	}
+	if len(req.Current.Replicas) != expectedReplicaNumber {
+		return merr.WrapErrParameterInvalid(len(req.Current.Replicas), expectedReplicaNumber, "can't change the replica number for loaded partitions")
+	}
+	return nil
 }
 
 type ExpectedLoadConfig struct {
@@ -148,7 +168,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	}
 	// check if the load configuration is changed
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {
-		return nil, ErrNoChanged
+		return nil, ErrIgnoredAlterLoadConfig
 	}
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).

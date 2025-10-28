@@ -61,11 +61,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -122,7 +124,9 @@ func initStreamingSystem() {
 				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
 			}
 		}
-		registry.CallMessageAckCallback(context.Background(), msg, results)
+		retry.Do(context.Background(), func() error {
+			return registry.CallMessageAckCallback(context.Background(), msg, results)
+		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil
 	})
 	bapi.EXPECT().Close().Return()
@@ -279,7 +283,27 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
-
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		for _, collection := range suite.collections {
+			if collection == collectionID {
+				return &milvuspb.DescribeCollectionResponse{
+					DbName:       util.DefaultDBName,
+					DbId:         1,
+					CollectionID: collectionID,
+				}, nil
+			}
+		}
+		return &milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.ErrCollectionNotFound),
+		}, nil
+	}).Maybe()
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) ([]int64, error) {
+		partitionIDs, ok := suite.partitions[collectionID]
+		if !ok {
+			return nil, merr.WrapErrCollectionNotFound(collectionID)
+		}
+		return partitionIDs, nil
+	}).Maybe()
 	registry.ResetRegistration()
 	RegisterDDLCallbacks(suite.server)
 }
@@ -447,7 +471,6 @@ func (suite *ServiceSuite) TestLoadCollectionWithUserSpecifiedReplicaMode() {
 		collectionID := suite.collections[0]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
@@ -473,7 +496,6 @@ func (suite *ServiceSuite) TestLoadCollectionWithoutUserSpecifiedReplicaMode() {
 		collectionID := suite.collections[0]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
@@ -1076,7 +1098,6 @@ func (suite *ServiceSuite) TestLoadPartitionsWithUserSpecifiedReplicaMode() {
 		partitionIDs := suite.partitions[collectionID]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
@@ -1104,7 +1125,6 @@ func (suite *ServiceSuite) TestLoadPartitionsWithoutUserSpecifiedReplicaMode() {
 		partitionIDs := suite.partitions[collectionID]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
@@ -1954,21 +1974,8 @@ func (suite *ServiceSuite) loadAll() {
 				CollectionID:  collection,
 				ReplicaNumber: suite.replicaNumber[collection],
 			}
-			job := job.NewLoadCollectionJob(
-				ctx,
-				req,
-				suite.dist,
-				suite.meta,
-				suite.broker,
-				suite.targetMgr,
-				suite.targetObserver,
-				suite.collectionObserver,
-				suite.nodeMgr,
-				false,
-			)
-			suite.jobScheduler.Add(job)
-			err := job.Wait()
-			suite.NoError(err)
+			resp, err := suite.server.LoadCollection(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
 			suite.True(suite.meta.Exist(ctx, collection))
 			suite.NotNil(suite.meta.GetCollection(ctx, collection))
@@ -1979,21 +1986,8 @@ func (suite *ServiceSuite) loadAll() {
 				PartitionIDs:  suite.partitions[collection],
 				ReplicaNumber: suite.replicaNumber[collection],
 			}
-			job := job.NewLoadPartitionJob(
-				ctx,
-				req,
-				suite.dist,
-				suite.meta,
-				suite.broker,
-				suite.targetMgr,
-				suite.targetObserver,
-				suite.collectionObserver,
-				suite.nodeMgr,
-				false,
-			)
-			suite.jobScheduler.Add(job)
-			err := job.Wait()
-			suite.NoError(err)
+			resp, err := suite.server.LoadPartitions(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
 			suite.True(suite.meta.Exist(ctx, collection))
 			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))

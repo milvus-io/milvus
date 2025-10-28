@@ -195,142 +195,169 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	logger := log.Ctx(ctx).With(
+		zap.Int64("dbID", req.GetDbID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int32("replicaNumber", req.GetReplicaNumber()),
 		zap.Strings("resourceGroups", req.GetResourceGroups()),
 		zap.Bool("refreshMode", req.GetRefresh()),
 	)
 
-	log.Info("load collection request received",
+	logger.Info("load collection request received",
 		zap.Any("schema", req.Schema),
 		zap.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load collection"
-		log.Warn(msg, zap.Error(err))
+		logger.Warn("failed to load collection", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(err), nil
 	}
 	// If refresh mode is ON.
 	if req.GetRefresh() {
 		err := s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to refresh collection", zap.Error(err))
+			logger.Warn("failed to refresh collection", zap.Error(err))
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
+		logger.Info("refresh collection done")
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 		return merr.Success(), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
+		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
+			logger.Info("load collection ignored, collection is already loaded")
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Warn("failed to load collection", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
+	logger.Info("load collection done")
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-	)
+	logger := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
 
-	log.Info("release collection request received")
+	logger.Info("release collection request received")
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to release collection"
-		log.Warn(msg, zap.Error(err))
+		logger.Warn("failed to release collection", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, req); err != nil {
 		if errors.Is(err, errReleaseCollectionNotLoaded) {
+			logger.Info("release collection ignored, collection is not loaded")
+			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
+		logger.Warn("failed to release collection", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+	job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID())
+	logger.Info("release collection done")
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Success(), nil
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	logger := log.Ctx(ctx).With(
+		zap.Int64("dbID", req.GetDbID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int32("replicaNumber", req.GetReplicaNumber()),
+		zap.Int64s("partitions", req.GetPartitionIDs()),
 		zap.Strings("resourceGroups", req.GetResourceGroups()),
 		zap.Bool("refreshMode", req.GetRefresh()),
 	)
 
-	log.Info("received load partitions request",
-		zap.Any("schema", req.Schema),
-		zap.Int64s("partitions", req.GetPartitionIDs()))
+	logger.Info("received load partitions request",
+		zap.Any("schema", req.Schema))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load partitions"
-		log.Warn(msg, zap.Error(err))
+		logger.Warn("failed to load partitions", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(err), nil
 	}
 
 	// If refresh mode is ON.
 	if req.GetRefresh() {
 		err := s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to refresh partitions", zap.Error(err))
+			logger.Warn("failed to refresh partitions", zap.Error(err))
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
 		}
-		return merr.Status(err), nil
+		logger.Info("refresh partitions done")
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+		return merr.Success(), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, req); err != nil {
-		msg := "failed to load partitions"
-		log.Warn(msg, zap.Error(err))
+		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
+			logger.Info("load partitions ignored, partitions are already loaded")
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Warn("failed to load partitions", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(err), nil
 	}
+	logger.Info("load partitions done")
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	logger := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 
-	log.Info("release partitions", zap.Int64s("partitions", req.GetPartitionIDs()))
+	logger.Info("release partitions")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to release partitions"
-		log.Warn(msg, zap.Error(err))
+		logger.Warn("failed to release partitions", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(err), nil
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
 		err := merr.WrapErrParameterInvalid("any partition", "empty partition list")
-		log.Warn("no partition to release", zap.Error(err))
+		logger.Warn("no partition to release", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, req); err != nil {
+		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
+			logger.Info("release partitions ignored, partitions are already released")
+			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		logger.Warn("failed to release partitions", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	job.WaitCurrentTargetUpdated(ctx, s.targetObserver, req.GetCollectionID())
 	job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID(), req.GetPartitionIDs()...)
-
+	logger.Info("release partitions done")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
-	// metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
-
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 	return merr.Success(), nil
 }

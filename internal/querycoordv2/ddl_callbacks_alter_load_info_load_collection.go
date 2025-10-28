@@ -4,37 +4,26 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
 func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) error {
-	// just get the collection name and db name.
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
-	if err != nil {
-		return err
-	}
-
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
-	)
+	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	if coll, err = s.broker.DescribeCollection(ctx, req.GetCollectionID()); err != nil {
+	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	if err != nil {
 		return err
 	}
 
@@ -69,9 +58,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
-		if errors.Is(err, job.ErrNoChanged) {
-			return nil
-		}
 		return err
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)

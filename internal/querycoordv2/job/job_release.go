@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -106,9 +105,5 @@ func (job *ReleaseCollectionJob) Execute() error {
 	job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 		CollectionIDs: []int64{collectionID},
 	})
-
-	WaitCollectionReleased(job.dist, job.checkerController, collectionID)
-	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
-	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
 }

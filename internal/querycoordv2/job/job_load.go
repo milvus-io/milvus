@@ -39,8 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var ErrNoChanged = errors.New("no changed")
-
 type LoadCollectionJob struct {
 	*BaseJob
 

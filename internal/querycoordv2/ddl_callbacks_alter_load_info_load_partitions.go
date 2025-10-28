@@ -3,34 +3,22 @@ package querycoordv2
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) error {
-	// just get the collection name and db name.
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
-	if err != nil {
-		return err
-	}
-
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
-	)
+	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	if coll, err = s.broker.DescribeCollection(ctx, req.GetCollectionID()); err != nil {
+	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	if err != nil {
 		return err
 	}
 
@@ -46,7 +34,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
-	partitionIDsSet := typeutil.NewSet[int64](currentLoadConfig.GetPartitionIDs()...)
+	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	// add new incoming partitionIDs.
 	for _, partition := range req.PartitionIDs {
 		partitionIDsSet.Insert(partition)
@@ -64,11 +52,11 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
 	}
+	if err := alterLoadConfigReq.CheckIfLoadPartitionsExecutable(); err != nil {
+		return err
+	}
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
-		if errors.Is(err, job.ErrNoChanged) {
-			return nil
-		}
 		return err
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)

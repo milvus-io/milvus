@@ -3,35 +3,24 @@ package querycoordv2
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) error {
-	// just get the collection name and db name.
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
-	if err != nil {
-		return err
-	}
-
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
-	)
+	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	if coll, err = s.broker.DescribeCollection(ctx, req.GetCollectionID()); err != nil {
+	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	if err != nil {
 		return err
 	}
 
@@ -42,7 +31,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 	}
 
 	// remove the partitions that should be released.
-	partitionIDsSet := typeutil.NewSet[int64](currentLoadConfig.GetPartitionIDs()...)
+	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	previousLength := len(partitionIDsSet)
 	for _, partitionID := range req.PartitionIDs {
 		partitionIDsSet.Remove(partitionID)
@@ -50,7 +39,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 
 	// no partition to be released, return success directly.
 	if len(partitionIDsSet) == previousLength {
-		return nil
+		return job.ErrIgnoredAlterLoadConfig
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -80,9 +69,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 			},
 		}
 		if msg, err = job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq); err != nil {
-			if errors.Is(err, job.ErrNoChanged) {
-				return nil
-			}
 			return err
 		}
 	}
