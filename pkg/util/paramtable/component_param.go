@@ -1220,7 +1220,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
 		Export:       true,
 	}
