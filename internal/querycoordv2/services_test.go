@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -295,6 +296,13 @@ func (suite *ServiceSuite) SetupTest() {
 					DbId:           1,
 					CollectionID:   collectionID,
 					CollectionName: fmt.Sprintf("collection_%d", collectionID),
+					Schema: &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{
+							{FieldID: 100},
+							{FieldID: 101},
+							{FieldID: 102},
+						},
+					},
 				}, nil
 			}
 		}
@@ -2059,8 +2067,6 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 
 func (suite *ServiceSuite) expectGetRecoverInfoForAllCollections() {
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
 	}
 }
@@ -2126,6 +2132,7 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 	segments := lo.Flatten(lo.Values(suite.segments[collection]))
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	targetVersion := suite.targetMgr.GetCollectionTargetVersion(ctx, collection, meta.CurrentTargetFirst)
 	for _, replica := range replicas {
 		i := 0
 		for _, node := range suite.sortInt64(replica.GetNodes()) {
@@ -2145,6 +2152,7 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 							Version: time.Now().Unix(),
 						}
 					}),
+					TargetVersion: targetVersion,
 					Status: &querypb.LeaderViewStatus{
 						Serviceable: true,
 					},
@@ -2225,6 +2233,8 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
+	suite.collectionObserver.Stop()
+	suite.jobScheduler.Stop()
 }
 
 func TestService(t *testing.T) {
