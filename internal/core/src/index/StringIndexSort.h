@@ -410,6 +410,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
  private:
     char* mmap_data_ = nullptr;
     size_t mmap_size_ = 0;
+    size_t data_size_ = 0;  // Actual data size without padding
     std::string mmap_filepath_;
     size_t unique_count_ = 0;
 
