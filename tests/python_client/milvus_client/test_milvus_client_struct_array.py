@@ -830,7 +830,6 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         assert res["insert_count"] == default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/44540")
     def test_insert_struct_array_empty(self):
         """
         target: test insert struct array with empty arrays
@@ -860,9 +859,39 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Insert data
         res, check = self.insert(client, collection_name, data)
-        print(res)
-        print(check)
-        assert not check
+        assert check
+        assert res["insert_count"] == 10
+        # verify data
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding2]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id", "clips"], limit=10)
+        assert check
+        assert len(results) == 10
+        for result in results:
+            assert "clips" in result
+            assert len(result["clips"]) == 0
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_struct_array_different_lengths(self):
