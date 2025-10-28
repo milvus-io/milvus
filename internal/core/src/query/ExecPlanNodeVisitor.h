@@ -92,10 +92,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
-    void
-    VectorVisitorImpl(VectorPlanNode& node);
-
- private:
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     Timestamp collection_ttl_timestamp_;
