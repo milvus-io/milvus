@@ -26,6 +26,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -2461,4 +2462,15 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 // This ensures global uniqueness while allowing same field names across different structs
 func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
+func ExtractStructFieldName(fieldName string) (string, error) {
+	parts := strings.Split(fieldName, "[")
+	if len(parts) == 1 {
+		return fieldName, nil
+	} else if len(parts) == 2 {
+		return parts[1][:len(parts[1])-1], nil
+	} else {
+		return "", fmt.Errorf("invalid struct field name: %s, more than one [ found", fieldName)
+	}
 }

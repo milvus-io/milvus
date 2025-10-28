@@ -2737,6 +2737,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		response := resp.(*internalpb.GetImportProgressResponse)
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
+		returnData["createTime"] = response.GetCreateTime()
 		returnData["collectionName"] = response.GetCollectionName()
 		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()

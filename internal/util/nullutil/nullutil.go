@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -57,6 +58,8 @@ func GetDefaultValue(field *schemapb.FieldSchema) (any, error) {
 			return field.GetDefaultValue().GetTimestamptzData(), nil
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			return field.GetDefaultValue().GetStringData(), nil
+		case schemapb.DataType_Geometry:
+			return common.ConvertWKTToWKB(field.GetDefaultValue().GetStringData())
 		default:
 			msg := fmt.Sprintf("type (%s) not support default_value", field.GetDataType().String())
 			return nil, merr.WrapErrParameterInvalidMsg(msg)

@@ -687,8 +687,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
-	// save binlogs, start positions and checkpoints
+	// save manifest, start positions and checkpoints
 	operators = append(operators,
+		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
@@ -1898,7 +1899,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	if jobID == 0 {
 		jobID = idStart
 	}
-	startTime := time.Now()
+	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          jobID,
@@ -1912,7 +1913,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			State:          internalpb.ImportJobState_Pending,
 			Files:          files,
 			Options:        in.GetOptions(),
-			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
+			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
 			ReadyVchannels: in.GetChannelNames(),
 			DataTs:         in.GetDataTimestamp(),
 		},
@@ -1961,7 +1962,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.Reason = reason
 	resp.Progress = progress
 	resp.CollectionName = job.GetCollectionName()
-	resp.StartTime = job.GetStartTime()
+	resp.CreateTime = job.GetCreateTime()
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows

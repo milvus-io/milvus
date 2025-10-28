@@ -56,8 +56,13 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
     memcpy(&result.unique_count, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
 
+    // Handle all-null case where unique_count is 0
     if (result.unique_count == 0) {
-        ThrowInfo(DataFormatBroken, "Unique count is 0");
+        result.string_offsets = nullptr;
+        result.string_data_start = ptr;
+        result.post_list_offsets = nullptr;
+        result.post_list_data_start = ptr;
+        return result;
     }
 
     // Read string offsets
@@ -87,6 +92,10 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
 }
 
 const std::string STRING_INDEX_SORT_FILE = "string_index_sort";
+
+constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+
+const uint64_t MMAP_INDEX_PADDING = 1;
 
 StringIndexSort::StringIndexSort(
     const storage::FileManagerContext& file_manager_context)
@@ -867,9 +876,19 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
+    auto aligned_size =
+        ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
     {
         auto file_writer = storage::FileWriter(mmap_filepath_);
         file_writer.Write(index_data->data.get(), index_data->size);
+
+        if (aligned_size > index_data->size) {
+            std::vector<uint8_t> padding(aligned_size - index_data->size, 0);
+            file_writer.Write(padding.data(), padding.size());
+        }
+        // write padding in case of all null values
+        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
 
@@ -878,7 +897,8 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
         ThrowInfo(DataFormatBroken, "Failed to open mmap file");
     }
 
-    mmap_size_ = index_data->size;
+    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    data_size_ = index_data->size;
     mmap_data_ = static_cast<char*>(
         mmap(nullptr, mmap_size_, PROT_READ, MAP_PRIVATE, fd, 0));
     close(fd);
@@ -889,7 +909,7 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
 
     const uint8_t* data_start = reinterpret_cast<const uint8_t*>(mmap_data_);
 
-    auto parsed = ParseBinaryData(data_start, mmap_size_);
+    auto parsed = ParseBinaryData(data_start, data_size_);
     unique_count_ = parsed.unique_count;
     string_offsets_ = parsed.string_offsets;
     string_data_start_ = parsed.string_data_start;

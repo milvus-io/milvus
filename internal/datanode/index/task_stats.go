@@ -337,6 +337,13 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return nil
 		}
 
+		// for compatibility, we only support json data format version 2 and above after 2.6
+		// for old version, we skip creating json key index
+		if st.req.GetJsonKeyStatsDataFormat() < 2 {
+			log.Ctx(ctx).Info("json data format version is too old, skip creating json key index", zap.Int64("data format", st.req.GetJsonKeyStatsDataFormat()))
+			return nil
+		}
+
 		err = st.createJSONKeyStats(ctx,
 			st.req.GetStorageConfig(),
 			st.req.GetCollectionID(),

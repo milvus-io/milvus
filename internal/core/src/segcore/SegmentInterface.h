@@ -197,6 +197,9 @@ class SegmentInterface {
     // currently it's used to sync field data list with updated schema.
     virtual void
     FinishLoad() = 0;
+
+    virtual void
+    SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
 };
 
 // internal API for DSL calculation
@@ -380,6 +383,12 @@ class SegmentInternalInterface : public SegmentInterface {
     GetNgramIndexForJson(milvus::OpContext* op_ctx,
                          FieldId field_id,
                          const std::string& nested_path) const override;
+
+    virtual void
+    SetLoadInfo(
+        const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
+        load_info_ = load_info;
+    }
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
@@ -598,6 +607,8 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
+
+    milvus::proto::segcore::SegmentLoadInfo load_info_;
 
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>

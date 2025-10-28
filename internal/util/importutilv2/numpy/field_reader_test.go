@@ -296,6 +296,14 @@ func TestNumpyFieldReaderError(t *testing.T) {
 				DataType: schemapb.DataType_JSON,
 			},
 		},
+		{
+			name: "read geometry error",
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "geometry",
+				DataType: schemapb.DataType_Geometry,
+			},
+		},
 	}
 
 	for _, tt := range tests {
