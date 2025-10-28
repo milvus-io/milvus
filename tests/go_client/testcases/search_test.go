@@ -702,7 +702,6 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 
 	for _, dynamicField := range []bool{false, true} {
 		// create collection
-
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(dynamicField))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -712,13 +711,15 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 
 		// search with jsonField expr key datatype and json data type mismatch
 		for _, expr := range exprs {
-			log.Debug("TestSearchJsonFieldExpr", zap.String("expr", expr))
-			vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-			searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-				WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, common.DefaultJSONFieldName))
-			common.CheckErr(t, errSearch, true)
-			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}, searchRes[0].Fields)
-			common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+			t.Run(fmt.Sprintf("expr=%s_dynamic-%t", expr, dynamicField), func(t *testing.T) {
+				log.Debug("TestSearchJsonFieldExpr", zap.String("expr", expr))
+				vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+				searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+					WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, common.DefaultJSONFieldName))
+				common.CheckErr(t, errSearch, true)
+				common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}, searchRes[0].Fields)
+				common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+			})
 		}
 	}
 }
