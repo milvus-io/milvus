@@ -17,3 +17,7 @@ func NewAnalyzer(param string) (Analyzer, error) {
 func ValidateAnalyzer(param string) error {
 	return canalyzer.ValidateAnalyzer(param)
 }
+
+func InitOptions() {
+	canalyzer.InitOptions()
+}
