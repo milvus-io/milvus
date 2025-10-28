@@ -42,6 +42,11 @@ type AlterLoadConfigRequest struct {
 	Current        CurrentLoadConfig
 }
 
+// CheckIfLoadCollectionExecutable checks if the load collection is executable.
+func (req *AlterLoadConfigRequest) CheckIfLoadCollectionExecutable() error {
+	return req.CheckIfLoadPartitionsExecutable()
+}
+
 // CheckIfLoadPartitionsExecutable checks if the load partitions is executable.
 func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
 	if req.Current.Collection == nil {

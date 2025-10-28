@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -147,8 +148,8 @@ func (suite *ServiceSuite) SetupSuite() {
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{
-		1000: {100, 101},
-		1001: {102, 103},
+		1000: {100, 101, 102},
+		1001: {103, 104, 105},
 	}
 	suite.channels = map[int64][]string{
 		1000: {"1000-dmc0", "1000-dmc1"},
@@ -158,16 +159,19 @@ func (suite *ServiceSuite) SetupSuite() {
 		1000: {
 			100: {1, 2},
 			101: {3, 4},
+			102: {5, 6},
 		},
 		1001: {
-			102: {5, 6},
 			103: {7, 8},
+			104: {9, 10},
+			105: {11, 12},
 		},
 	}
 	suite.loadTypes = map[int64]querypb.LoadType{
 		1000: querypb.LoadType_LoadCollection,
 		1001: querypb.LoadType_LoadPartition,
 	}
+
 	suite.replicaNumber = map[int64]int32{
 		1000: 1,
 		1001: 3,
@@ -287,9 +291,10 @@ func (suite *ServiceSuite) SetupTest() {
 		for _, collection := range suite.collections {
 			if collection == collectionID {
 				return &milvuspb.DescribeCollectionResponse{
-					DbName:       util.DefaultDBName,
-					DbId:         1,
-					CollectionID: collectionID,
+					DbName:         util.DefaultDBName,
+					DbId:           1,
+					CollectionID:   collectionID,
+					CollectionName: fmt.Sprintf("collection_%d", collectionID),
 				}, nil
 			}
 		}
@@ -2050,6 +2055,14 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 	}
 
 	return true
+}
+
+func (suite *ServiceSuite) expectGetRecoverInfoForAllCollections() {
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(nil, nil)
+		suite.expectGetRecoverInfo(collection)
+	}
 }
 
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
