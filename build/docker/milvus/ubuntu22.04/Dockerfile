@@ -45,7 +45,7 @@ RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
     chown -R milvus:milvus /milvus /var/lib/milvus
 ENV ASAN_OPTIONS=detect_leaks=1
-USER milvus
+USER milvus:milvus
 
 ENTRYPOINT ["/tini", "--"]
 

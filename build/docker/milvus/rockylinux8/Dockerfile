@@ -42,7 +42,7 @@ ENV MALLOC_CONF=background_thread:true
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
     chown -R milvus:milvus /milvus /var/lib/milvus
-USER milvus
+USER milvus:milvus
 
 ENTRYPOINT ["/tini", "--"]
 
